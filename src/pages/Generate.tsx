@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Send, Sparkles, Loader2 } from 'lucide-react'
-import { airtableCreate } from '../lib/airtable'
+import { supabase } from '../lib/supabase'
 
 type AgentName = 'Strategist' | 'Writer' | 'Brand Guard' | 'Publisher'
 
@@ -103,18 +103,19 @@ async function runAgentPipeline(
     onChunk('Publisher', publisherText.slice(0, i + 3), i + 3 >= publisherText.length)
   }
 
-  // Save to Airtable
+  // Save to Supabase
   try {
-    await airtableCreate('Posts', {
-      'Post Title': 'Stop hiring SDRs. Start hiring a manager.',
-      'Platform': 'LinkedIn',
-      'Content Type': 'Thought Leadership',
-      'Copy': `I was about to hire my first SDR.\n\nThen I ran the math.\n\nAn SDR costs €60–80k/year. 3 months to ramp. Another 2 months before they're hitting quota. And you're still spending 10 hours a week managing them.\n\nInstead, I deployed SAM.\n\n12 autonomous agents. Running 24/7. Handling prospecting, outreach, reply classification, and follow-up sequencing — while I focus on closing.\n\nHe doesn't call in sick. He doesn't need onboarding. He doesn't ask for a raise.\n\nFirst week: 340 personalised messages sent. 23 positive replies. 4 demo calls booked.\n\nStop buying tools. Start hiring a manager.\n\nWant to see what a week of SAM looks like? Drop a comment or DM me.`,
-      'Hashtags': '#AIinSales #B2BSales #SalesAutomation #AgenticAI',
-      'Status': 'Draft',
+    await supabase.from('content_posts').insert({
+      title: 'Stop hiring SDRs. Start hiring a manager.',
+      channel: 'LinkedIn',
+      format: 'Thought Leadership',
+      copy: `I was about to hire my first SDR.\n\nThen I ran the math.\n\nAn SDR costs €60–80k/year. 3 months to ramp. Another 2 months before they're hitting quota. And you're still spending 10 hours a week managing them.\n\nInstead, I deployed SAM.\n\n12 autonomous agents. Running 24/7. Handling prospecting, outreach, reply classification, and follow-up sequencing — while I focus on closing.\n\nHe doesn't call in sick. He doesn't need onboarding. He doesn't ask for a raise.\n\nFirst week: 340 personalised messages sent. 23 positive replies. 4 demo calls booked.\n\nStop buying tools. Start hiring a manager.\n\nWant to see what a week of SAM looks like? Drop a comment or DM me.`,
+      hashtags: ['#AIinSales', '#B2BSales', '#SalesAutomation', '#AgenticAI'],
+      status: 'Draft',
+      model_used: 'demo',
     })
   } catch (e) {
-    console.warn('Airtable save failed (API key not set):', e)
+    console.warn('Supabase save failed:', e)
   }
 }
 
