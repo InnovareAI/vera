@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, Calendar, Sparkles, CheckSquare,
-  BookOpen, Layers, Zap, LogOut, Settings, Building2, ChevronDown, Check
+  BookOpen, Layers, Zap, LogOut, Settings, Building2, ChevronDown, Check, Sun, Moon
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
+import { useTheme } from '../lib/theme'
 
 const statusColors: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-700',
@@ -100,6 +101,7 @@ function OrgSwitcher() {
 export default function Layout() {
   const { user, signOut } = useAuth()
   const { activeOrg, activeRole } = useOrg()
+  const { theme, toggle } = useTheme()
   const navigate = useNavigate()
 
   async function handleSignOut() {
@@ -167,7 +169,18 @@ export default function Layout() {
 
         {/* Settings + User */}
         <div className="px-2 pb-2 border-t border-gray-100 pt-2 space-y-0.5">
-          <NavItem to="/settings" icon={Settings} label="Settings" />
+          <div className="flex items-center gap-1">
+            <div className="flex-1">
+              <NavItem to="/settings" icon={Settings} label="Settings" />
+            </div>
+            <button
+              onClick={toggle}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors flex-shrink-0"
+            >
+              {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
+          </div>
           <div className="flex items-center gap-2 px-3 py-1.5 group">
             <div className="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center text-[10px] font-bold text-violet-700 flex-shrink-0">
               {initials}

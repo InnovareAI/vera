@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { OrgProvider } from './lib/orgContext'
+import { ThemeProvider } from './lib/theme'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -16,6 +17,7 @@ import Agency from './pages/Agency'
 
 export default function App() {
   return (
+    <ThemeProvider>
     <AuthProvider>
       <OrgProvider>
         <Routes>
@@ -36,6 +38,7 @@ export default function App() {
         </Routes>
       </OrgProvider>
     </AuthProvider>
+    </ThemeProvider>
   )
 }
 
