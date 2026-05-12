@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { Send, Sparkles, Loader2 } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+
+const ORCHESTRATOR_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kai-orchestrator`
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 type AgentName = 'Strategist' | 'Writer' | 'Brand Guard' | 'Publisher'
 
@@ -35,7 +37,7 @@ function AgentBubble({ message }: { message: Message }) {
       </div>
       <div className="flex-1 max-w-2xl">
         <p className={`text-[11px] font-semibold mb-1 ${agentColors[agent].split(' ')[1]}`}>{agent}</p>
-        <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-700 leading-relaxed shadow-sm">
+        <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-700 leading-relaxed shadow-sm whitespace-pre-wrap">
           {message.isStreaming ? (
             <span>{message.content}<span className="inline-block w-1 h-4 bg-gray-400 ml-0.5 animate-pulse rounded" /></span>
           ) : message.content}
@@ -62,60 +64,54 @@ const WELCOME: Message = {
   content: "Hi! I'm your content team. Tell me what you need — a post, a thread, a Quora answer — and we'll create it together. Just describe what you want and I'll brief the team.",
 }
 
-// Simulate agentic pipeline
 async function runAgentPipeline(
-  _prompt: string,
+  prompt: string,
   onChunk: (agent: AgentName, chunk: string, done: boolean) => void
 ) {
-  const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
+  const response = await fetch(ORCHESTRATOR_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify({ prompt }),
+  })
 
-  // Strategist
-  const strategistText = `Got it. Breaking this down: we're writing for the **Solo Founder Outbounder** persona — someone who's wearing all hats and hasn't hired an SDR yet. Platform: LinkedIn. Angle: "I ran the math on hiring vs. deploying SAM." Handing to Writer.`
-  for (let i = 0; i < strategistText.length; i += 3) {
-    await delay(25)
-    onChunk('Strategist', strategistText.slice(0, i + 3), i + 3 >= strategistText.length)
+  if (!response.ok) {
+    throw new Error(`Orchestrator error: ${response.status} ${response.statusText}`)
   }
 
-  await delay(400)
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
 
-  // Writer
-  const writerText = `Here's the draft:\n\n---\nI was about to hire my first SDR.\n\nThen I ran the math.\n\nAn SDR costs €60–80k/year. 3 months to ramp. Another 2 months before they're hitting quota. And you're still spending 10 hours a week managing them.\n\nInstead, I deployed SAM.\n\n12 autonomous agents. Running 24/7. Handling prospecting, outreach, reply classification, and follow-up sequencing — while I focus on closing.\n\nHe doesn't call in sick. He doesn't need onboarding.\nHe doesn't ask for a raise.\n\nFirst week: 340 personalised messages sent. 23 positive replies. 4 demo calls booked.\n\nStop buying tools. Start hiring a manager.\n\nWant to see what a week of SAM looks like? Drop a comment or DM me.\n---`
-  for (let i = 0; i < writerText.length; i += 4) {
-    await delay(18)
-    onChunk('Writer', writerText.slice(0, i + 4), i + 4 >= writerText.length)
-  }
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
 
-  await delay(400)
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
 
-  // Brand Guard
-  const brandText = `Brand check ✓\n\n• SAM referred to as "he" ✓\n• Positioning as "AI Sales Manager" not "AI SDR" ✓\n• "Stop buying tools, start hiring a manager" line used ✓\n• No client names disclosed ✓\n• Tone: direct, no fluff, short paragraphs ✓\n\nOne suggestion: opening line punches harder without the setup. Consider leading with "I ran the math on hiring my first SDR." — but current version is approved.`
-  for (let i = 0; i < brandText.length; i += 3) {
-    await delay(22)
-    onChunk('Brand Guard', brandText.slice(0, i + 3), i + 3 >= brandText.length)
-  }
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const raw = line.slice(6).trim()
+      if (!raw) continue
 
-  await delay(400)
-
-  // Publisher
-  const publisherText = `Saving to Airtable as a Draft Post linked to the "The Agentic Edge: Q2 Thought Leadership" campaign.\n\n📋 Platform: LinkedIn\n📅 Suggested schedule: Tomorrow morning, 08:00–09:00 CET (peak engagement for B2B)\n#️⃣ Hashtags: #AIinSales #B2BSales #SalesAutomation #AgenticAI\n\nHead to Review to approve and schedule.`
-  for (let i = 0; i < publisherText.length; i += 3) {
-    await delay(22)
-    onChunk('Publisher', publisherText.slice(0, i + 3), i + 3 >= publisherText.length)
-  }
-
-  // Save to Supabase
-  try {
-    await supabase.from('content_posts').insert({
-      title: 'Stop hiring SDRs. Start hiring a manager.',
-      channel: 'LinkedIn',
-      format: 'Thought Leadership',
-      copy: `I was about to hire my first SDR.\n\nThen I ran the math.\n\nAn SDR costs €60–80k/year. 3 months to ramp. Another 2 months before they're hitting quota. And you're still spending 10 hours a week managing them.\n\nInstead, I deployed SAM.\n\n12 autonomous agents. Running 24/7. Handling prospecting, outreach, reply classification, and follow-up sequencing — while I focus on closing.\n\nHe doesn't call in sick. He doesn't need onboarding. He doesn't ask for a raise.\n\nFirst week: 340 personalised messages sent. 23 positive replies. 4 demo calls booked.\n\nStop buying tools. Start hiring a manager.\n\nWant to see what a week of SAM looks like? Drop a comment or DM me.`,
-      hashtags: ['#AIinSales', '#B2BSales', '#SalesAutomation', '#AgenticAI'],
-      status: 'Draft',
-      model_used: 'demo',
-    })
-  } catch (e) {
-    console.warn('Supabase save failed:', e)
+      try {
+        const event = JSON.parse(raw)
+        if (event.error) {
+          console.error('Pipeline error:', event.error)
+          onChunk('Strategist', `Error: ${event.error}`, true)
+          return
+        }
+        if (event.agent && event.chunk !== undefined) {
+          onChunk(event.agent as AgentName, event.chunk, event.done ?? false)
+        }
+      } catch {
+        // ignore malformed SSE lines
+      }
+    }
   }
 }
 
@@ -141,23 +137,33 @@ export default function Generate() {
     let currentAgent: AgentName | null = null
     let currentId: string | null = null
 
-    await runAgentPipeline(input, (agent, chunk, done) => {
-      if (agent !== currentAgent) {
-        currentAgent = agent
-        currentId = Date.now().toString() + agent
-        setMessages(prev => [...prev, {
-          id: currentId!,
-          role: 'agent',
-          agent,
-          content: chunk,
-          isStreaming: !done,
-        }])
-      } else {
-        setMessages(prev => prev.map(m =>
-          m.id === currentId ? { ...m, content: chunk, isStreaming: !done } : m
-        ))
-      }
-    })
+    try {
+      await runAgentPipeline(input, (agent, chunk, done) => {
+        if (agent !== currentAgent) {
+          currentAgent = agent
+          currentId = Date.now().toString() + agent
+          setMessages(prev => [...prev, {
+            id: currentId!,
+            role: 'agent',
+            agent,
+            content: chunk,
+            isStreaming: !done,
+          }])
+        } else {
+          setMessages(prev => prev.map(m =>
+            m.id === currentId ? { ...m, content: chunk, isStreaming: !done } : m
+          ))
+        }
+      })
+    } catch (err) {
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        role: 'agent',
+        agent: 'Strategist',
+        content: `Something went wrong: ${err instanceof Error ? err.message : String(err)}`,
+        isStreaming: false,
+      }])
+    }
 
     setIsRunning(false)
   }
@@ -218,7 +224,7 @@ export default function Generate() {
             <Send size={15} />
           </button>
         </form>
-        <p className="text-[11px] text-gray-400 mt-2 text-center">Generated content is saved to Airtable as a Draft and routed to Review for approval.</p>
+        <p className="text-[11px] text-gray-400 mt-2 text-center">Generated content is saved as a Draft and routed to Review for approval.</p>
       </div>
     </div>
   )
