@@ -1,5 +1,6 @@
-import { NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Users, Calendar, Sparkles, CheckSquare, BookOpen, Layers } from 'lucide-react'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { LayoutDashboard, Users, Calendar, Sparkles, CheckSquare, BookOpen, Layers, Zap, LogOut } from 'lucide-react'
+import { useAuth } from '../lib/auth'
 
 const statusColors: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-700',
@@ -44,6 +45,18 @@ function NavItem({ to, icon: Icon, label, badge }: {
 }
 
 export default function Layout() {
+  const { user, signOut } = useAuth()
+  const navigate = useNavigate()
+
+  async function handleSignOut() {
+    await signOut()
+    navigate('/login')
+  }
+
+  const initials = user?.email
+    ? user.email.slice(0, 2).toUpperCase()
+    : 'KAI'
+
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
       {/* Sidebar */}
@@ -51,11 +64,11 @@ export default function Layout() {
         {/* Brand */}
         <div className="px-4 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-gray-900 rounded flex items-center justify-center">
-              <Layers size={13} className="text-white" />
+            <div className="w-6 h-6 bg-violet-600 rounded flex items-center justify-center">
+              <Sparkles size={12} className="text-white" />
             </div>
             <div>
-              <div className="text-sm font-semibold text-gray-900 leading-tight">Content Studio</div>
+              <div className="text-sm font-semibold text-gray-900 leading-tight">KAI</div>
               <div className="text-[10px] text-gray-400 leading-tight">by InnovareAI</div>
             </div>
           </div>
@@ -83,18 +96,32 @@ export default function Layout() {
             <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Setup</p>
             <div className="space-y-0.5">
               <NavItem to="/templates" icon={Layers} label="Templates" />
+              <NavItem to="/skills" icon={Zap} label="Skills" />
             </div>
           </div>
         </nav>
 
         {/* User */}
         <div className="px-3 py-3 border-t border-gray-100">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-xs font-medium text-gray-600">TL</div>
+          <div className="flex items-center gap-2 group">
+            <div className="w-6 h-6 rounded-full bg-violet-100 flex items-center justify-center text-[10px] font-bold text-violet-700 flex-shrink-0">
+              {initials}
+            </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-gray-700 truncate">Thorsten L.</div>
+              <div className="text-xs font-medium text-gray-700 truncate">
+                {user?.email ?? 'Guest'}
+              </div>
               <div className="text-[10px] text-gray-400 truncate">InnovareAI</div>
             </div>
+            {user && (
+              <button
+                onClick={handleSignOut}
+                title="Sign out"
+                className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-gray-600 transition-all"
+              >
+                <LogOut size={12} />
+              </button>
+            )}
           </div>
         </div>
       </aside>
