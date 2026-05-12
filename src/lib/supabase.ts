@@ -128,6 +128,7 @@ export interface PlatformConfig {
   content_types?: string[]
   model_override?: string
   tone_override?: string
+  access_token?: string
   created_at: string
   updated_at: string
 }

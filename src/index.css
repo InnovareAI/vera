@@ -2,3 +2,25 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif; background: #f8f8f7; }
+
+/* Reusable input utility */
+.input {
+  width: 100%;
+  font-size: 0.8125rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  padding: 0.375rem 0.625rem;
+  background: #f9fafb;
+  color: #111827;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.input:focus {
+  border-color: #a78bfa;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.15);
+  background: #fff;
+}
+.input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
