@@ -6,6 +6,32 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// DB-safe label maps
+const PLATFORM_LABELS: Record<string, string> = {
+  linkedin: 'LinkedIn', twitter: 'Twitter', instagram: 'Instagram',
+  facebook: 'Facebook', quora: 'Quora', blog: 'Blog', email: 'Email',
+}
+const FORMAT_LABELS: Record<string, string> = {
+  thought_leadership: 'Thought Leadership', thread: 'Thread',
+  cold_outreach: 'Cold Outreach', product_launch: 'Product Launch',
+  case_study: 'Case Study', post: 'Post', article: 'Article', newsletter: 'Newsletter',
+}
+
+async function braveSearch(query: string): Promise<string> {
+  const apiKey = Deno.env.get('BRAVE_SEARCH_API_KEY')
+  if (!apiKey) return '(Brave Search not configured — skipping research)'
+
+  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5`
+  const res = await fetch(url, {
+    headers: { 'Accept': 'application/json', 'X-Subscription-Token': apiKey },
+  })
+  if (!res.ok) return `(Brave Search error: ${res.status})`
+
+  const data = await res.json()
+  const results = (data?.web?.results ?? []) as Array<{ title: string; description: string; url: string }>
+  return results.map((r, i) => `[${i + 1}] ${r.title}\n${r.description}\n${r.url}`).join('\n\n')
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -39,7 +65,7 @@ Deno.serve(async (req) => {
       const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
 
       try {
-        // ── STEP 1: Fetch org skills from Supabase ────────────────────────────
+        // ── STEP 1: Fetch org skills ──────────────────────────────────────────
         const skillsQuery = supabase
           .from('skills')
           .select('*')
@@ -56,9 +82,7 @@ Deno.serve(async (req) => {
 
         // ── STEP 2: STRATEGIST ────────────────────────────────────────────────
         const strategistSkills = skills?.filter(s => s.injected_into === 'strategist') ?? []
-        const skillList = strategistSkills
-          .map(s => `- "${s.name}": ${s.description}`)
-          .join('\n')
+        const skillList = strategistSkills.map(s => `- "${s.name}": ${s.description}`).join('\n')
 
         let strategyRaw = ''
 
@@ -77,9 +101,19 @@ Output exactly this JSON structure:
   "content_type": "thought_leadership|thread|cold_outreach|product_launch|case_study|post",
   "angle": "specific hook or angle",
   "tone": "professional|casual|authoritative|conversational",
-  "selected_skill_names": ["exact skill name 1", "exact skill name 2"],
-  "brief_for_writer": "detailed brief for the writer including angle, tone, key points, CTA"
-}`,
+  "selected_skill_names": ["exact skill name 1"],
+  "brief_for_writer": "detailed brief including angle, tone, key points, CTA",
+  "run_researcher": true,
+  "research_query": "specific web search query to find supporting data/evidence",
+  "run_seo": false,
+  "target_keywords": ["keyword1", "keyword2"],
+  "run_persona_adapter": false,
+  "persona_detail": "detailed description of the specific persona's pain points and goals"
+}
+
+Set run_researcher to true when data, stats, recent news, or supporting evidence would strengthen the content.
+Set run_seo to true only for blog posts or long-form content where SEO matters.
+Set run_persona_adapter to true when the brief specifies a very specific persona (e.g. a named job title, industry, or company type).`,
           messages: [{ role: 'user', content: prompt }],
         })
 
@@ -98,21 +132,51 @@ Output exactly this JSON structure:
           if (match) strategy = JSON.parse(match[0])
         } catch {
           strategy = {
-            platform: 'linkedin',
-            content_type: 'post',
-            tone: 'professional',
-            brief_for_writer: prompt,
-            selected_skill_names: [],
+            platform: 'linkedin', content_type: 'post', tone: 'professional',
+            brief_for_writer: prompt, selected_skill_names: [],
+            run_researcher: false, run_seo: false, run_persona_adapter: false,
           }
         }
 
         await delay(300)
 
-        // ── STEP 3: Resolve writer skill prompt modules ───────────────────────
-        const selectedNames: string[] = (strategy.selected_skill_names as string[]) ?? []
         const platform = (strategy.platform as string) ?? 'linkedin'
         const contentType = (strategy.content_type as string) ?? 'post'
+        const platformLabel = PLATFORM_LABELS[platform] ?? 'LinkedIn'
+        const formatLabel = FORMAT_LABELS[contentType] ?? 'Post'
 
+        // ── STEP 3: RESEARCHER (conditional) ─────────────────────────────────
+        let researchFindings = ''
+        const agentsRun: Record<string, boolean> = {
+          researcher: false, seo: false, persona_adapter: false,
+        }
+
+        if (strategy.run_researcher && strategy.research_query) {
+          send('Researcher', 'Searching the web…', false)
+          const rawResults = await braveSearch(strategy.research_query as string)
+
+          let researchText = ''
+          const researchStream = anthropic.messages.stream({
+            model: 'claude-haiku-4-5',
+            max_tokens: 512,
+            system: `You are a research assistant. Synthesise the following web search results into 3-5 concise bullet points of key facts, stats, or insights that would strengthen a piece of content. Be specific — include numbers, dates, and source context where available. Output only the bullet points.`,
+            messages: [{ role: 'user', content: `Search query: ${strategy.research_query}\n\nResults:\n${rawResults}` }],
+          })
+
+          for await (const event of researchStream) {
+            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+              researchText += event.delta.text
+              send('Researcher', researchText, false)
+            }
+          }
+          send('Researcher', researchText, true)
+          researchFindings = researchText
+          agentsRun.researcher = true
+          await delay(300)
+        }
+
+        // ── STEP 4: Resolve writer skill modules ──────────────────────────────
+        const selectedNames: string[] = (strategy.selected_skill_names as string[]) ?? []
         const writerSkills = skills?.filter(s =>
           s.injected_into === 'writer' && (
             selectedNames.includes(s.name) ||
@@ -120,10 +184,9 @@ Output exactly this JSON structure:
             s.trigger_when?.content_type === contentType
           )
         ) ?? []
-
         const skillBlocks = writerSkills.map(s => s.prompt_module).join('\n\n---\n\n')
 
-        // ── STEP 4: WRITER ────────────────────────────────────────────────────
+        // ── STEP 5: WRITER ────────────────────────────────────────────────────
         let writerText = ''
 
         const writerStream = anthropic.messages.stream({
@@ -132,6 +195,7 @@ Output exactly this JSON structure:
           system: `You are KAI's Writer. Write the content based on the strategy brief below.
 
 ${skillBlocks ? `Apply these platform and content guidelines:\n\n${skillBlocks}\n\n---` : ''}
+${researchFindings ? `\nSupporting research to weave in naturally:\n${researchFindings}\n\n---` : ''}
 
 Write only the final content — no preamble, no explanation, no labels. Just the post.`,
           messages: [{
@@ -147,12 +211,77 @@ Write only the final content — no preamble, no explanation, no labels. Just th
           }
         }
         send('Writer', writerText, true)
-
         await delay(300)
 
-        // ── STEP 5: BRAND GUARD ───────────────────────────────────────────────
-        let brandRules = ''
+        let currentCopy = writerText
 
+        // ── STEP 6: SEO AGENT (conditional) ──────────────────────────────────
+        let seoNotes = ''
+        if (strategy.run_seo && strategy.target_keywords) {
+          let seoText = ''
+          const seoStream = anthropic.messages.stream({
+            model: 'claude-haiku-4-5',
+            max_tokens: 1024,
+            system: `You are KAI's SEO Agent. Optimise the given content for search engines while preserving its voice and quality.
+
+Target keywords: ${(strategy.target_keywords as string[]).join(', ')}
+
+Output your response in exactly two sections:
+OPTIMISED COPY:
+[the rewritten content with keywords naturally integrated]
+
+SEO NOTES:
+[2-3 bullet points explaining the optimisation changes made]`,
+            messages: [{ role: 'user', content: currentCopy }],
+          })
+
+          for await (const event of seoStream) {
+            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+              seoText += event.delta.text
+              send('SEO Agent', seoText, false)
+            }
+          }
+          send('SEO Agent', seoText, true)
+
+          // Extract optimised copy
+          const copyMatch = seoText.match(/OPTIMISED COPY:\s*([\s\S]*?)(?=SEO NOTES:|$)/i)
+          const notesMatch = seoText.match(/SEO NOTES:\s*([\s\S]*?)$/i)
+          if (copyMatch?.[1]?.trim()) currentCopy = copyMatch[1].trim()
+          if (notesMatch?.[1]?.trim()) seoNotes = notesMatch[1].trim()
+          agentsRun.seo = true
+          await delay(300)
+        }
+
+        // ── STEP 7: PERSONA ADAPTER (conditional) ─────────────────────────────
+        let personaAdapterNotes = ''
+        if (strategy.run_persona_adapter && strategy.persona_detail) {
+          let personaText = ''
+          const personaStream = anthropic.messages.stream({
+            model: 'claude-haiku-4-5',
+            max_tokens: 1024,
+            system: `You are KAI's Persona Adapter. Rewrite the given content to resonate specifically with the target persona described below. Adjust language, examples, pain points, and benefits to match their world — while keeping the core message and length.
+
+Target persona: ${strategy.persona_detail}
+
+Output the rewritten content only — no labels, no explanation.`,
+            messages: [{ role: 'user', content: currentCopy }],
+          })
+
+          for await (const event of personaStream) {
+            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+              personaText += event.delta.text
+              send('Persona Adapter', personaText, false)
+            }
+          }
+          send('Persona Adapter', personaText, true)
+          if (personaText.trim()) currentCopy = personaText.trim()
+          personaAdapterNotes = `Adapted for: ${strategy.persona_detail}`
+          agentsRun.persona_adapter = true
+          await delay(300)
+        }
+
+        // ── STEP 8: BRAND GUARD ───────────────────────────────────────────────
+        let brandRules = ''
         if (org_id) {
           const { data: bv } = await supabase
             .from('brand_voice')
@@ -162,24 +291,20 @@ Write only the final content — no preamble, no explanation, no labels. Just th
 
           if (bv) {
             const parts = [
-              bv.tone?.length        ? `Tone: ${bv.tone.join(', ')}` : '',
+              bv.tone?.length ? `Tone: ${bv.tone.join(', ')}` : '',
               bv.forbidden_phrases?.length ? `Forbidden phrases: ${bv.forbidden_phrases.join(', ')}` : '',
-              bv.required_phrases?.length  ? `Required phrases: ${bv.required_phrases.join(', ')}` : '',
-              bv.writing_rules?.length     ? `Writing rules:\n${bv.writing_rules.map((r: string) => `• ${r}`).join('\n')}` : '',
+              bv.required_phrases?.length ? `Required phrases: ${bv.required_phrases.join(', ')}` : '',
+              bv.writing_rules?.length ? `Writing rules:\n${bv.writing_rules.map((r: string) => `• ${r}`).join('\n')}` : '',
               bv.system_prompt || '',
             ]
             brandRules = parts.filter(Boolean).join('\n\n')
           }
         }
 
-        // Also inject any brand-type skills
         const brandSkills = skills?.filter(s => s.type === 'brand' && s.injected_into === 'brand_guard') ?? []
-        if (brandSkills.length) {
-          brandRules += '\n\n' + brandSkills.map(s => s.prompt_module).join('\n\n')
-        }
+        if (brandSkills.length) brandRules += '\n\n' + brandSkills.map(s => s.prompt_module).join('\n\n')
 
         let brandText = ''
-
         const brandStream = anthropic.messages.stream({
           model: 'claude-sonnet-4-6',
           max_tokens: 512,
@@ -193,7 +318,7 @@ Respond concisely:
 - One suggestion if applicable`,
           messages: [{
             role: 'user',
-            content: `Review this content for platform: ${platform}\n\n${writerText}`,
+            content: `Review this content for platform: ${platformLabel}\n\n${currentCopy}`,
           }],
         })
 
@@ -204,42 +329,86 @@ Respond concisely:
           }
         }
         send('Brand Guard', brandText, true)
-
         await delay(300)
 
-        // ── STEP 6: PUBLISHER ─────────────────────────────────────────────────
-        const hashtags = (writerText.match(/#\w+/g) ?? []).slice(0, 5)
-        const approved = !brandText.includes('✗')
+        // ── STEP 9: COMPLIANCE CHECKER (always) ───────────────────────────────
+        let complianceText = ''
+        const complianceStream = anthropic.messages.stream({
+          model: 'claude-haiku-4-5',
+          max_tokens: 512,
+          system: `You are KAI's Compliance Checker. Review the content for the following compliance issues:
 
-        const platformLabel = platform.charAt(0).toUpperCase() + platform.slice(1)
-        const formatLabel = contentType
-          .split('_')
-          .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(' ')
+1. FALSE CLAIMS — any unverified statistics, guarantees, or factual claims that could mislead
+2. COMPETITOR ATTACKS — negative comparisons, disparaging language, or unfair competitor references
+3. FTC/DISCLOSURE — sponsored content, affiliate links, or paid partnerships that require disclosure
+4. INDUSTRY-SPECIFIC — regulated industries (finance, health, legal) require disclaimers
+
+For each category output:
+[PASS] or [FLAG] followed by a brief note.
+
+End with either:
+COMPLIANCE: APPROVED
+or
+COMPLIANCE: CHANGES REQUESTED
+followed by a summary of what must be fixed.`,
+          messages: [{
+            role: 'user',
+            content: `Platform: ${platformLabel}\nContent type: ${formatLabel}\n\n${currentCopy}`,
+          }],
+        })
+
+        for await (const event of complianceStream) {
+          if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+            complianceText += event.delta.text
+            send('Compliance', complianceText, false)
+          }
+        }
+        send('Compliance', complianceText, true)
+        await delay(300)
+
+        // ── STEP 10: PUBLISHER ────────────────────────────────────────────────
+        const hashtags = (currentCopy.match(/#\w+/g) ?? []).slice(0, 5)
+        const brandApproved = !brandText.includes('✗')
+        const complianceApproved = complianceText.includes('COMPLIANCE: APPROVED')
+        const fullyApproved = brandApproved && complianceApproved
+        const postStatus = fullyApproved ? 'pending' : 'pending' // always pending for human review
 
         let publisherText = `📋 Platform: ${platformLabel}\n📝 Format: ${formatLabel}\n#️⃣ Hashtags: ${hashtags.join(' ') || 'none'}\n📅 Suggested schedule: Tomorrow 08:00–09:00 (peak B2B engagement)\n\n`
-        publisherText += approved
-          ? `Saving to Supabase as Draft — head to Review to approve and schedule.`
-          : `Brand Guard flagged issues — saving as Draft for revision.`
+
+        if (!brandApproved) publisherText += `⚠️ Brand Guard flagged issues — review before approving.\n`
+        if (!complianceApproved) publisherText += `⚠️ Compliance issues found — changes required before publishing.\n`
+        if (fullyApproved) publisherText += `All checks passed — head to Review to approve and schedule.`
 
         send('Publisher', publisherText, false)
 
-        // Write to content_posts
+        const complianceChecks = {
+          false_claims: complianceText.includes('[FLAG]') && complianceText.includes('FALSE CLAIMS') ? 'flagged' : 'pass',
+          competitor_attacks: complianceText.includes('[FLAG]') && complianceText.includes('COMPETITOR') ? 'flagged' : 'pass',
+          ftc_disclosure: complianceText.includes('[FLAG]') && complianceText.includes('FTC') ? 'flagged' : 'pass',
+          industry_specific: complianceText.includes('[FLAG]') && complianceText.includes('INDUSTRY') ? 'flagged' : 'pass',
+        }
+
         const { data: savedPost, error: saveError } = await supabase
           .from('content_posts')
           .insert({
             org_id: org_id ?? null,
             title: prompt.slice(0, 100),
-            copy: writerText,
+            copy: currentCopy,
             channel: platformLabel,
             format: formatLabel,
             hashtags,
-            status: 'Draft',
+            status: postStatus,
             model_used: 'claude-sonnet-4-6',
+            compliance_checks: complianceChecks,
             agent_outputs: {
               strategy,
               brand_check: brandText,
-              approved,
+              brand_approved: brandApproved,
+              compliance_check: complianceText,
+              compliance_approved: complianceApproved,
+              seo_notes: seoNotes,
+              persona_adapter_notes: personaAdapterNotes,
+              agents_run: agentsRun,
             },
           })
           .select('id')
@@ -252,8 +421,8 @@ Respond concisely:
         }
 
         send('Publisher', publisherText, true)
-
         controller.close()
+
       } catch (err) {
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({ error: String(err) })}\n\n`)

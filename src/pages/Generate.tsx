@@ -1,10 +1,19 @@
 import { useState, useRef, useEffect } from 'react'
 import { Send, Sparkles, Loader2 } from 'lucide-react'
+import { useOrg } from '../lib/orgContext'
 
 const ORCHESTRATOR_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kai-orchestrator`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-type AgentName = 'Strategist' | 'Writer' | 'Brand Guard' | 'Publisher'
+type AgentName =
+  | 'Strategist'
+  | 'Researcher'
+  | 'Writer'
+  | 'SEO Agent'
+  | 'Persona Adapter'
+  | 'Brand Guard'
+  | 'Compliance'
+  | 'Publisher'
 
 interface Message {
   id: string
@@ -16,29 +25,37 @@ interface Message {
 
 const agentColors: Record<AgentName, string> = {
   Strategist: 'bg-violet-100 text-violet-700',
+  Researcher: 'bg-sky-100 text-sky-700',
   Writer: 'bg-blue-100 text-blue-700',
+  'SEO Agent': 'bg-indigo-100 text-indigo-700',
+  'Persona Adapter': 'bg-pink-100 text-pink-700',
   'Brand Guard': 'bg-amber-100 text-amber-700',
+  Compliance: 'bg-red-100 text-red-700',
   Publisher: 'bg-emerald-100 text-emerald-700',
 }
 
 const agentAvatars: Record<AgentName, string> = {
   Strategist: 'ST',
+  Researcher: 'RS',
   Writer: 'WR',
+  'SEO Agent': 'SE',
+  'Persona Adapter': 'PA',
   'Brand Guard': 'BG',
+  Compliance: 'CO',
   Publisher: 'PB',
 }
 
-// Parse Publisher final message into structured metadata + image URL
+// The always-visible pipeline agents — optional ones appear dynamically
+const CORE_AGENTS: AgentName[] = ['Strategist', 'Writer', 'Brand Guard', 'Compliance', 'Publisher']
+
 function parsePublisherMessage(content: string): {
   meta: Record<string, string>
   status: string
-  imageUrl: string | null
   postId: string | null
 } {
   const lines = content.split('\n')
   const meta: Record<string, string> = {}
   let status = ''
-  let imageUrl: string | null = null
   let postId: string | null = null
 
   for (const line of lines) {
@@ -46,19 +63,19 @@ function parsePublisherMessage(content: string): {
     if (colonIdx > 0) {
       const key = line.slice(0, colonIdx).trim()
       const val = line.slice(colonIdx + 1).trim()
-      if (['Platform', 'Format', 'Model', 'Hashtags', 'Suggested'].includes(key)) {
+      if (['Platform', 'Format', 'Hashtags', 'Suggested schedule'].some(k => key.includes(k))) {
         meta[key] = val
-      } else if (key === 'Image') {
-        imageUrl = val
-      } else if (key === 'Saved - ID') {
-        postId = val
       }
     }
-    if (line.includes('Pending') || line.includes('Changes Requested') || line.includes('Saving')) {
-      status = line.trim()
+    if (line.includes('✅ Saved')) {
+      const idMatch = line.match(/ID: ([a-f0-9-]+)/i)
+      if (idMatch) postId = idMatch[1]
+    }
+    if (line.includes('⚠️') || line.includes('All checks passed')) {
+      status += (status ? '\n' : '') + line.trim()
     }
   }
-  return { meta, status, imageUrl, postId }
+  return { meta, status, postId }
 }
 
 function PublisherBubble({ message }: { message: Message }) {
@@ -76,8 +93,8 @@ function PublisherBubble({ message }: { message: Message }) {
     )
   }
 
-  const { meta, status, imageUrl, postId } = parsePublisherMessage(message.content)
-  const approved = !status.toLowerCase().includes('changes')
+  const { meta, status, postId } = parsePublisherMessage(message.content)
+  const hasIssues = status.includes('⚠️')
 
   return (
     <div className="flex gap-3 items-start">
@@ -85,12 +102,7 @@ function PublisherBubble({ message }: { message: Message }) {
       <div className="flex-1 max-w-2xl">
         <p className="text-[11px] font-semibold mb-1 text-emerald-700">Publisher</p>
         <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-sm overflow-hidden shadow-sm">
-          {/* Generated image */}
-          {imageUrl && (
-            <img src={imageUrl} alt="Generated visual" className="w-full object-cover max-h-64" />
-          )}
           <div className="px-4 py-3 space-y-3">
-            {/* Metadata grid */}
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
               {Object.entries(meta).map(([k, v]) => (
                 <div key={k}>
@@ -99,13 +111,15 @@ function PublisherBubble({ message }: { message: Message }) {
                 </div>
               ))}
             </div>
-            {/* Status badge */}
-            <div className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${approved ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-              <span>{approved ? '✓' : '⚠'}</span>
-              <span>{status || (approved ? 'Saved as Pending' : 'Changes Requested')}</span>
-            </div>
+            {status && (
+              <div className={`text-xs font-medium px-2.5 py-1.5 rounded-lg whitespace-pre-wrap ${hasIssues ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                {status}
+              </div>
+            )}
             {postId && (
-              <p className="text-[11px] text-gray-400">Post ID: {postId} · <a href="/review" className="text-violet-500 hover:underline">Go to Review →</a></p>
+              <p className="text-[11px] text-gray-400">
+                Post ID: {postId} · <a href="/review" className="text-violet-500 hover:underline">Go to Review →</a>
+              </p>
             )}
           </div>
         </div>
@@ -116,16 +130,19 @@ function PublisherBubble({ message }: { message: Message }) {
 
 function AgentBubble({ message }: { message: Message }) {
   const agent = message.agent as AgentName
-
   if (agent === 'Publisher') return <PublisherBubble message={message} />
+
+  const colors = agentColors[agent] ?? 'bg-gray-100 text-gray-600'
+  const avatar = agentAvatars[agent] ?? agent.slice(0, 2).toUpperCase()
+  const textColor = colors.split(' ')[1]
 
   return (
     <div className="flex gap-3 items-start">
-      <div className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold ${agentColors[agent]}`}>
-        {agentAvatars[agent]}
+      <div className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold ${colors}`}>
+        {avatar}
       </div>
       <div className="flex-1 max-w-2xl">
-        <p className={`text-[11px] font-semibold mb-1 ${agentColors[agent].split(' ')[1]}`}>{agent}</p>
+        <p className={`text-[11px] font-semibold mb-1 ${textColor}`}>{agent}</p>
         <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-700 leading-relaxed shadow-sm whitespace-pre-wrap">
           {message.isStreaming ? (
             <span>{message.content}<span className="inline-block w-1 h-4 bg-gray-400 ml-0.5 animate-pulse rounded" /></span>
@@ -155,6 +172,7 @@ const WELCOME: Message = {
 
 async function runAgentPipeline(
   prompt: string,
+  orgId: string | undefined,
   onChunk: (agent: AgentName, chunk: string, done: boolean) => void
 ) {
   const response = await fetch(ORCHESTRATOR_URL, {
@@ -163,7 +181,7 @@ async function runAgentPipeline(
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
     },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, org_id: orgId }),
   })
 
   if (!response.ok) {
@@ -205,9 +223,11 @@ async function runAgentPipeline(
 }
 
 export default function Generate() {
+  const { activeOrg } = useOrg()
   const [messages, setMessages] = useState<Message[]>([WELCOME])
   const [input, setInput] = useState('')
   const [isRunning, setIsRunning] = useState(false)
+  const [activeAgents, setActiveAgents] = useState<AgentName[]>(CORE_AGENTS)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -222,12 +242,18 @@ export default function Generate() {
     setMessages(prev => [...prev, userMsg])
     setInput('')
     setIsRunning(true)
+    setActiveAgents(CORE_AGENTS)
 
     let currentAgent: AgentName | null = null
     let currentId: string | null = null
 
     try {
-      await runAgentPipeline(input, (agent, chunk, done) => {
+      await runAgentPipeline(input, activeOrg?.id, (agent, chunk, done) => {
+        // Reveal optional agents as they appear
+        if (!CORE_AGENTS.includes(agent)) {
+          setActiveAgents(prev => prev.includes(agent) ? prev : [...prev, agent])
+        }
+
         if (agent !== currentAgent) {
           currentAgent = agent
           currentId = Date.now().toString() + agent
@@ -266,13 +292,13 @@ export default function Generate() {
         </div>
         <div>
           <h1 className="text-sm font-semibold text-gray-900">Generate</h1>
-          <p className="text-xs text-gray-400">Your AI content team — Strategist · Writer · Brand Guard · Publisher</p>
+          <p className="text-xs text-gray-400">Your AI content team — Strategist · Researcher · Writer · SEO · Persona · Brand Guard · Compliance · Publisher</p>
         </div>
       </div>
 
-      {/* Agent team pills */}
-      <div className="px-8 py-3 border-b border-gray-100 bg-white flex gap-2">
-        {(['Strategist', 'Writer', 'Brand Guard', 'Publisher'] as AgentName[]).map(a => (
+      {/* Agent team pills — show core + any active optional agents */}
+      <div className="px-8 py-3 border-b border-gray-100 bg-white flex gap-2 flex-wrap">
+        {activeAgents.map(a => (
           <span key={a} className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${agentColors[a]}`}>{a}</span>
         ))}
       </div>
@@ -313,7 +339,7 @@ export default function Generate() {
             <Send size={15} />
           </button>
         </form>
-        <p className="text-[11px] text-gray-400 mt-2 text-center">Generated content is saved as a Draft and routed to Review for approval.</p>
+        <p className="text-[11px] text-gray-400 mt-2 text-center">Generated content is saved as pending and routed to Review for approval.</p>
       </div>
     </div>
   )
