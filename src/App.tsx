@@ -11,39 +11,6 @@ import Library from './pages/Library'
 import Templates from './pages/Templates'
 import Skills from './pages/Skills'
 
-function ProtectedRoutes() {
-  const { session, loading } = useAuth()
-
-  // While checking session, show nothing (avoids flash)
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="w-5 h-5 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
-      </div>
-    )
-  }
-
-  // No session — redirect to login
-  // NOTE: anon bypass policies are still active in dev, so the app works
-  // without auth for development. Remove anon policies (migration 005) when
-  // auth is fully rolled out.
-  if (!session) return <Navigate to="/login" replace />
-
-  return (
-    <Route element={<Layout />}>
-      <Route index element={<Navigate to="/dashboard" replace />} />
-      <Route path="dashboard" element={<Dashboard />} />
-      <Route path="generate" element={<Generate />} />
-      <Route path="review" element={<Review />} />
-      <Route path="clients" element={<Clients />} />
-      <Route path="calendar" element={<Calendar />} />
-      <Route path="library" element={<Library />} />
-      <Route path="templates" element={<Templates />} />
-      <Route path="skills" element={<Skills />} />
-    </Route>
-  )
-}
-
 export default function App() {
   return (
     <AuthProvider>

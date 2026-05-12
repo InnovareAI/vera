@@ -28,8 +28,97 @@ const agentAvatars: Record<AgentName, string> = {
   Publisher: 'PB',
 }
 
+// Parse Publisher final message into structured metadata + image URL
+function parsePublisherMessage(content: string): {
+  meta: Record<string, string>
+  status: string
+  imageUrl: string | null
+  postId: string | null
+} {
+  const lines = content.split('\n')
+  const meta: Record<string, string> = {}
+  let status = ''
+  let imageUrl: string | null = null
+  let postId: string | null = null
+
+  for (const line of lines) {
+    const colonIdx = line.indexOf(':')
+    if (colonIdx > 0) {
+      const key = line.slice(0, colonIdx).trim()
+      const val = line.slice(colonIdx + 1).trim()
+      if (['Platform', 'Format', 'Model', 'Hashtags', 'Suggested'].includes(key)) {
+        meta[key] = val
+      } else if (key === 'Image') {
+        imageUrl = val
+      } else if (key === 'Saved - ID') {
+        postId = val
+      }
+    }
+    if (line.includes('Pending') || line.includes('Changes Requested') || line.includes('Saving')) {
+      status = line.trim()
+    }
+  }
+  return { meta, status, imageUrl, postId }
+}
+
+function PublisherBubble({ message }: { message: Message }) {
+  if (message.isStreaming) {
+    return (
+      <div className="flex gap-3 items-start">
+        <div className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold bg-emerald-100 text-emerald-700">PB</div>
+        <div className="flex-1 max-w-2xl">
+          <p className="text-[11px] font-semibold mb-1 text-emerald-700">Publisher</p>
+          <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-700 shadow-sm whitespace-pre-wrap">
+            <span>{message.content}<span className="inline-block w-1 h-4 bg-gray-400 ml-0.5 animate-pulse rounded" /></span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const { meta, status, imageUrl, postId } = parsePublisherMessage(message.content)
+  const approved = !status.toLowerCase().includes('changes')
+
+  return (
+    <div className="flex gap-3 items-start">
+      <div className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold bg-emerald-100 text-emerald-700">PB</div>
+      <div className="flex-1 max-w-2xl">
+        <p className="text-[11px] font-semibold mb-1 text-emerald-700">Publisher</p>
+        <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-sm overflow-hidden shadow-sm">
+          {/* Generated image */}
+          {imageUrl && (
+            <img src={imageUrl} alt="Generated visual" className="w-full object-cover max-h-64" />
+          )}
+          <div className="px-4 py-3 space-y-3">
+            {/* Metadata grid */}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+              {Object.entries(meta).map(([k, v]) => (
+                <div key={k}>
+                  <span className="text-gray-400">{k}: </span>
+                  <span className="text-gray-700 font-medium">{v}</span>
+                </div>
+              ))}
+            </div>
+            {/* Status badge */}
+            <div className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${approved ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+              <span>{approved ? '✓' : '⚠'}</span>
+              <span>{status || (approved ? 'Saved as Pending' : 'Changes Requested')}</span>
+            </div>
+            {postId && (
+              <p className="text-[11px] text-gray-400">Post ID: {postId} · <a href="/review" className="text-violet-500 hover:underline">Go to Review →</a></p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AgentBubble({ message }: { message: Message }) {
   const agent = message.agent as AgentName
+
+  if (agent === 'Publisher') return <PublisherBubble message={message} />
+
   return (
     <div className="flex gap-3 items-start">
       <div className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold ${agentColors[agent]}`}>
