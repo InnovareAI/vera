@@ -7,6 +7,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Generate from './pages/Generate'
 import Review from './pages/Review'
+import ReviewDetail from './pages/ReviewDetail'
 import Clients from './pages/Clients'
 import Calendar from './pages/Calendar'
 import Library from './pages/Library'
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="dashboard"  element={<Dashboard />} />
             <Route path="generate"   element={<Generate />} />
             <Route path="review"     element={<Review />} />
+            <Route path="review/:id" element={<ReviewDetail />} />
             <Route path="clients"    element={<Clients />} />
             <Route path="calendar"   element={<Calendar />} />
             <Route path="library"    element={<Library />} />

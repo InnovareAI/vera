@@ -118,7 +118,7 @@ function PublisherBubble({ message }: { message: Message }) {
             )}
             {postId && (
               <p className="text-[11px] text-gray-400">
-                Post ID: {postId} · <a href="/review" className="text-violet-500 hover:underline">Go to Review →</a>
+                Post ID: {postId} · <a href={`/review/${postId}`} className="text-violet-500 hover:underline">Go to Review →</a>
               </p>
             )}
           </div>
