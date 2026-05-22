@@ -32,10 +32,18 @@ export default function OnboardingAudit() {
   const [fetched, setFetched] = useState<Record<string, FetchedEvent>>({})
   const [synthesisText, setSynthesisText] = useState('')
   const [result, setResult] = useState<DoneEvent | null>(null)
+  const [editedProposal, setEditedProposal] = useState<DoneEvent['proposal'] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [applying, setApplying] = useState(false)
   const [appliedAt, setAppliedAt] = useState<string | null>(null)
   const [applyError, setApplyError] = useState<string | null>(null)
+
+  // Clone the proposal into editable state once the audit completes
+  useEffect(() => {
+    if (result && !editedProposal) {
+      setEditedProposal(JSON.parse(JSON.stringify(result.proposal)))
+    }
+  }, [result, editedProposal])
   const startedRef = useRef(false)
 
   // Preflight: resolve callback params if we just came back from Unipile, load channels & org.
@@ -106,22 +114,26 @@ export default function OnboardingAudit() {
   }
 
   async function applyAudit() {
-    if (!result || !orgId) return
+    if (!result || !orgId || !editedProposal) return
     setApplying(true)
     setApplyError(null)
     try {
-      const proposal = result.proposal
+      const proposal = editedProposal
       const now = new Date().toISOString()
+
+      // Valid enum values from schema
+      const SKILL_TYPES = ['platform','content','brand','persona','enrichment','tool']
+      const SKILL_AGENTS = ['strategist','writer','brand_guard','publisher','all']
 
       // 1) brand_voice — one row per org. Upsert.
       const { data: existingBV } = await supabase.from('brand_voice').select('id').eq('org_id', orgId).maybeSingle()
       const bvPayload = {
         org_id: orgId,
-        tone:              proposal.brand_voice.tone              ?? null,
-        writing_rules:     proposal.brand_voice.writing_rules     ?? null,
-        forbidden_phrases: proposal.brand_voice.forbidden_phrases ?? null,
-        required_phrases:  proposal.brand_voice.required_phrases  ?? null,
-        system_prompt:     proposal.brand_voice.system_prompt     ?? null,
+        tone:              proposal.brand_voice.tone?.filter(s => s.trim())              ?? null,
+        writing_rules:     proposal.brand_voice.writing_rules?.filter(s => s.trim())     ?? null,
+        forbidden_phrases: proposal.brand_voice.forbidden_phrases?.filter(s => s.trim()) ?? null,
+        required_phrases:  proposal.brand_voice.required_phrases?.filter(s => s.trim())  ?? null,
+        system_prompt:     proposal.brand_voice.system_prompt                            ?? null,
         updated_at: now,
       }
       const bvResult = existingBV
@@ -130,31 +142,35 @@ export default function OnboardingAudit() {
       if (bvResult.error) throw new Error(`brand_voice: ${bvResult.error.message}`)
 
       // 2) personas — insert new rows
-      if (Array.isArray(proposal.personas) && proposal.personas.length) {
-        const personaRows = proposal.personas.map((p) => ({
-          org_id: orgId,
-          name:        (p.name as string) ?? 'Persona',
-          title:       (p.title as string) ?? null,
-          pain_points: (p.pain_points as string[]) ?? null,
-          goals:       (p.goals as string[]) ?? null,
-          is_primary:  !!(p.is_primary as boolean),
-        }))
+      const personaRows = (proposal.personas ?? []).filter(p => (p.name as string)?.trim()).map((p) => ({
+        org_id: orgId,
+        name:        (p.name as string),
+        title:       (p.title as string) ?? null,
+        pain_points: (p.pain_points as string[])?.filter(x => x.trim()) ?? null,
+        goals:       (p.goals as string[])?.filter(x => x.trim()) ?? null,
+        is_primary:  !!(p.is_primary as boolean),
+      }))
+      if (personaRows.length) {
         const personaResult = await supabase.from('personas').insert(personaRows)
         if (personaResult.error) throw new Error(`personas: ${personaResult.error.message}`)
       }
 
-      // 3) skills — insert org-scoped rows
-      if (Array.isArray(proposal.skills) && proposal.skills.length) {
-        const skillRows = proposal.skills.map((s, i) => ({
+      // 3) skills — insert org-scoped rows. Map unknown enum values to valid defaults.
+      const skillRows = (proposal.skills ?? []).filter(s => (s.name as string)?.trim()).map((s, i) => {
+        const t = (s.type as string)?.toLowerCase() ?? ''
+        const a = (s.injected_into as string)?.toLowerCase() ?? ''
+        return {
           org_id: orgId,
-          name:          (s.name as string) ?? `Skill ${i + 1}`,
+          name:          s.name as string,
           description:   (s.description as string) ?? null,
-          type:          (s.type as string) ?? 'writing_rule',
+          type:          SKILL_TYPES.includes(t) ? t : 'content',
           prompt_module: (s.prompt_module as string) ?? null,
-          injected_into: (s.injected_into as string) ?? 'writer',
+          injected_into: SKILL_AGENTS.includes(a) ? a : 'writer',
           is_active: true,
           sort_order: i,
-        }))
+        }
+      })
+      if (skillRows.length) {
         const skillResult = await supabase.from('skills').insert(skillRows)
         if (skillResult.error) throw new Error(`skills: ${skillResult.error.message}`)
       }
@@ -338,11 +354,23 @@ export default function OnboardingAudit() {
       )}
 
       {/* Result */}
-      {result && (
+      {result && editedProposal && (
         <div className="space-y-4">
-          <BrandVoiceCard bv={result.proposal.brand_voice} />
-          <PersonasCard personas={result.proposal.personas} />
-          <SkillsCard skills={result.proposal.skills} />
+          <BrandVoiceCard
+            bv={editedProposal.brand_voice}
+            readOnly={!!appliedAt}
+            onChange={(next) => setEditedProposal(p => p ? { ...p, brand_voice: next } : p)}
+          />
+          <PersonasCard
+            personas={editedProposal.personas}
+            readOnly={!!appliedAt}
+            onChange={(next) => setEditedProposal(p => p ? { ...p, personas: next } : p)}
+          />
+          <SkillsCard
+            skills={editedProposal.skills}
+            readOnly={!!appliedAt}
+            onChange={(next) => setEditedProposal(p => p ? { ...p, skills: next } : p)}
+          />
 
           {appliedAt ? (
             <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-emerald-800">
@@ -416,86 +444,169 @@ function channelLabel(c: string): string {
   } as Record<string, string>)[c] ?? c
 }
 
-function BrandVoiceCard({ bv }: { bv: DoneEvent['proposal']['brand_voice'] }) {
+type BV = DoneEvent['proposal']['brand_voice']
+type Personas = DoneEvent['proposal']['personas']
+type Skills = DoneEvent['proposal']['skills']
+
+function BrandVoiceCard({ bv, readOnly, onChange }: { bv: BV; readOnly: boolean; onChange: (next: BV) => void }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <h2 className="text-base font-bold text-gray-900 mb-3">Brand voice</h2>
-      <Field label="Tone"               items={bv.tone} />
-      <Field label="Writing rules"      items={bv.writing_rules} />
-      <Field label="Forbidden phrases"  items={bv.forbidden_phrases} />
-      <Field label="Required phrases"   items={bv.required_phrases} />
-      {bv.system_prompt && (
-        <div className="mt-3">
-          <div className="text-xs font-semibold text-gray-500 mb-1">Writer system prompt</div>
+      <h2 className="text-base font-bold text-gray-900 mb-3">Brand voice {!readOnly && <span className="text-xs font-normal text-gray-400">— click to edit</span>}</h2>
+      <TagEditor label="Tone"              items={bv.tone ?? []}              readOnly={readOnly} onChange={v => onChange({ ...bv, tone: v })} placeholder="add tone descriptor" />
+      <TagEditor label="Writing rules"     items={bv.writing_rules ?? []}     readOnly={readOnly} onChange={v => onChange({ ...bv, writing_rules: v })} placeholder="add rule" multiline />
+      <TagEditor label="Forbidden phrases" items={bv.forbidden_phrases ?? []} readOnly={readOnly} onChange={v => onChange({ ...bv, forbidden_phrases: v })} placeholder="add forbidden phrase" />
+      <TagEditor label="Required phrases"  items={bv.required_phrases ?? []}  readOnly={readOnly} onChange={v => onChange({ ...bv, required_phrases: v })} placeholder="add required phrase" />
+      <div className="mt-4">
+        <div className="text-xs font-semibold text-gray-500 mb-1">Writer system prompt</div>
+        {readOnly ? (
           <div className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3 whitespace-pre-wrap">{bv.system_prompt}</div>
-        </div>
-      )}
+        ) : (
+          <textarea value={bv.system_prompt ?? ''} onChange={e => onChange({ ...bv, system_prompt: e.target.value })}
+            className="w-full text-sm text-gray-700 bg-gray-50 rounded-lg p-3 border border-gray-200 focus:border-violet-400 focus:outline-none min-h-[100px]" />
+        )}
+      </div>
     </div>
   )
 }
 
-function PersonasCard({ personas }: { personas: DoneEvent['proposal']['personas'] }) {
-  if (!personas?.length) return null
+function PersonasCard({ personas, readOnly, onChange }: { personas: Personas; readOnly: boolean; onChange: (next: Personas) => void }) {
+  function update(i: number, patch: Partial<Personas[number]>) {
+    onChange(personas.map((p, idx) => idx === i ? { ...p, ...patch } : p))
+  }
+  function remove(i: number) { onChange(personas.filter((_, idx) => idx !== i)) }
+  function add() { onChange([...personas, { name: 'New persona', title: '', pain_points: [], goals: [], is_primary: false }]) }
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <h2 className="text-base font-bold text-gray-900 mb-3">Target personas ({personas.length})</h2>
       <div className="space-y-3">
         {personas.map((p, i) => (
           <div key={i} className="border border-gray-100 rounded-lg p-3">
-            <div className="flex items-baseline gap-2 mb-1.5">
-              <span className="font-semibold text-gray-900">{p.name ?? 'Persona'}</span>
-              {p.title && <span className="text-xs text-gray-500">{p.title}</span>}
-              {p.is_primary && <span className="text-[10px] uppercase font-semibold text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded">Primary</span>}
+            <div className="flex items-start gap-2 mb-2">
+              {readOnly ? (
+                <>
+                  <span className="font-semibold text-gray-900 flex-1">{(p.name as string) ?? 'Persona'}</span>
+                  {p.title && <span className="text-xs text-gray-500">{p.title as string}</span>}
+                </>
+              ) : (
+                <>
+                  <input value={(p.name as string) ?? ''} onChange={e => update(i, { name: e.target.value })} placeholder="Persona name"
+                    className="flex-1 text-sm font-semibold text-gray-900 border border-gray-200 rounded px-2 py-1 focus:border-violet-400 focus:outline-none" />
+                  <input value={(p.title as string) ?? ''} onChange={e => update(i, { title: e.target.value })} placeholder="Title"
+                    className="w-48 text-xs text-gray-700 border border-gray-200 rounded px-2 py-1 focus:border-violet-400 focus:outline-none" />
+                </>
+              )}
+              <label className="text-[10px] uppercase font-semibold text-gray-500 inline-flex items-center gap-1">
+                <input type="checkbox" disabled={readOnly} checked={!!p.is_primary} onChange={e => update(i, { is_primary: e.target.checked })} /> Primary
+              </label>
+              {!readOnly && (
+                <button onClick={() => remove(i)} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+              )}
             </div>
-            {p.pain_points && p.pain_points.length > 0 && (
-              <div className="mt-2">
-                <div className="text-xs font-semibold text-gray-500 mb-0.5">Pain points</div>
-                <ul className="text-sm text-gray-700 list-disc list-inside">{p.pain_points.map((x, j) => <li key={j}>{x}</li>)}</ul>
-              </div>
-            )}
-            {p.goals && p.goals.length > 0 && (
-              <div className="mt-2">
-                <div className="text-xs font-semibold text-gray-500 mb-0.5">Goals</div>
-                <ul className="text-sm text-gray-700 list-disc list-inside">{p.goals.map((x, j) => <li key={j}>{x}</li>)}</ul>
-              </div>
-            )}
+            <TagEditor label="Pain points" items={(p.pain_points as string[]) ?? []} readOnly={readOnly} onChange={v => update(i, { pain_points: v })} placeholder="add pain point" />
+            <TagEditor label="Goals"       items={(p.goals as string[])       ?? []} readOnly={readOnly} onChange={v => update(i, { goals: v })}       placeholder="add goal" />
           </div>
         ))}
       </div>
+      {!readOnly && (
+        <button onClick={add} className="mt-3 text-xs text-violet-600 hover:text-violet-700 font-medium">+ Add persona</button>
+      )}
     </div>
   )
 }
 
-function SkillsCard({ skills }: { skills: DoneEvent['proposal']['skills'] }) {
-  if (!skills?.length) return null
+const SKILL_TYPES = ['platform','content','brand','persona','enrichment','tool'] as const
+const SKILL_AGENTS = ['strategist','writer','brand_guard','publisher','all'] as const
+
+function SkillsCard({ skills, readOnly, onChange }: { skills: Skills; readOnly: boolean; onChange: (next: Skills) => void }) {
+  function update(i: number, patch: Partial<Skills[number]>) {
+    onChange(skills.map((s, idx) => idx === i ? { ...s, ...patch } : s))
+  }
+  function remove(i: number) { onChange(skills.filter((_, idx) => idx !== i)) }
+  function add() { onChange([...skills, { name: 'New skill', description: '', type: 'content', prompt_module: '', injected_into: 'writer' }]) }
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <h2 className="text-base font-bold text-gray-900 mb-3">Proposed skills ({skills.length})</h2>
       <div className="space-y-3">
-        {skills.map((s, i) => (
-          <div key={i} className="border border-gray-100 rounded-lg p-3">
-            <div className="flex items-baseline gap-2 mb-1.5">
-              <span className="font-semibold text-gray-900">{s.name ?? 'Skill'}</span>
-              {s.type && <span className="text-[10px] uppercase font-semibold text-gray-500">{s.type}</span>}
-              {s.injected_into && <span className="text-[10px] font-medium text-gray-500">→ {s.injected_into}</span>}
+        {skills.map((s, i) => {
+          const typeNorm  = SKILL_TYPES.includes((s.type as typeof SKILL_TYPES[number])) ? (s.type as string) : 'content'
+          const agentNorm = SKILL_AGENTS.includes((s.injected_into as typeof SKILL_AGENTS[number])) ? (s.injected_into as string) : 'writer'
+          return (
+            <div key={i} className="border border-gray-100 rounded-lg p-3">
+              <div className="flex items-start gap-2 mb-2">
+                {readOnly ? (
+                  <span className="font-semibold text-gray-900 flex-1">{(s.name as string) ?? 'Skill'}</span>
+                ) : (
+                  <input value={(s.name as string) ?? ''} onChange={e => update(i, { name: e.target.value })} placeholder="Skill name"
+                    className="flex-1 text-sm font-semibold text-gray-900 border border-gray-200 rounded px-2 py-1 focus:border-violet-400 focus:outline-none" />
+                )}
+                <select disabled={readOnly} value={typeNorm} onChange={e => update(i, { type: e.target.value })}
+                  className="text-[11px] uppercase font-semibold text-gray-600 border border-gray-200 rounded px-1.5 py-1 bg-white disabled:opacity-70">
+                  {SKILL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <select disabled={readOnly} value={agentNorm} onChange={e => update(i, { injected_into: e.target.value })}
+                  className="text-[11px] font-medium text-gray-600 border border-gray-200 rounded px-1.5 py-1 bg-white disabled:opacity-70">
+                  {SKILL_AGENTS.map(a => <option key={a} value={a}>→ {a}</option>)}
+                </select>
+                {!readOnly && (
+                  <button onClick={() => remove(i)} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+                )}
+              </div>
+              {readOnly ? (
+                s.description && <p className="text-sm text-gray-700 mb-2">{s.description as string}</p>
+              ) : (
+                <textarea value={(s.description as string) ?? ''} onChange={e => update(i, { description: e.target.value })} placeholder="Short description"
+                  className="w-full text-sm text-gray-700 border border-gray-200 rounded px-2 py-1 mb-2 focus:border-violet-400 focus:outline-none" rows={2} />
+              )}
+              {readOnly ? (
+                s.prompt_module && <pre className="text-xs text-gray-600 bg-gray-50 rounded p-2 whitespace-pre-wrap font-mono max-h-32 overflow-auto">{s.prompt_module as string}</pre>
+              ) : (
+                <textarea value={(s.prompt_module as string) ?? ''} onChange={e => update(i, { prompt_module: e.target.value })} placeholder="Prompt module — injected into the agent's system prompt"
+                  className="w-full text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded p-2 font-mono focus:border-violet-400 focus:outline-none" rows={4} />
+              )}
             </div>
-            {s.description && <p className="text-sm text-gray-700 mb-2">{s.description}</p>}
-            {s.prompt_module && (
-              <pre className="text-xs text-gray-600 bg-gray-50 rounded p-2 whitespace-pre-wrap font-mono max-h-32 overflow-auto">{s.prompt_module}</pre>
-            )}
-          </div>
-        ))}
+          )
+        })}
       </div>
+      {!readOnly && (
+        <button onClick={add} className="mt-3 text-xs text-violet-600 hover:text-violet-700 font-medium">+ Add skill</button>
+      )}
     </div>
   )
 }
 
-function Field({ label, items }: { label: string; items?: string[] }) {
-  if (!items?.length) return null
+function TagEditor({ label, items, readOnly, onChange, placeholder, multiline }:
+  { label: string; items: string[]; readOnly: boolean; onChange: (next: string[]) => void; placeholder: string; multiline?: boolean }
+) {
+  const [draft, setDraft] = useState('')
+  function commit() {
+    const v = draft.trim()
+    if (!v) return
+    onChange([...items, v])
+    setDraft('')
+  }
+  function remove(i: number) { onChange(items.filter((_, idx) => idx !== i)) }
   return (
-    <div className="mb-2">
-      <span className="text-xs font-semibold text-gray-500">{label}: </span>
-      <span className="text-sm text-gray-700">{items.join(' · ')}</span>
+    <div className="mt-2">
+      <div className="text-xs font-semibold text-gray-500 mb-1">{label}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((it, i) => (
+          <span key={i} className={`inline-flex items-center gap-1 text-xs rounded-full px-2.5 py-1 ${multiline ? 'bg-gray-50 border border-gray-200 text-gray-700 max-w-full' : 'bg-violet-50 text-violet-700'}`}>
+            <span className={multiline ? 'whitespace-pre-wrap break-words' : ''}>{it}</span>
+            {!readOnly && (
+              <button onClick={() => remove(i)} className="text-violet-400 hover:text-violet-700 leading-none">×</button>
+            )}
+          </span>
+        ))}
+        {!readOnly && (
+          <span className="inline-flex items-center">
+            <input value={draft} onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit() } }}
+              onBlur={() => { if (draft.trim()) commit() }}
+              placeholder={items.length ? '+ add' : placeholder}
+              className="text-xs px-2 py-1 border border-dashed border-gray-300 rounded-full focus:border-violet-400 focus:outline-none min-w-[100px]" />
+          </span>
+        )}
+      </div>
     </div>
   )
 }
