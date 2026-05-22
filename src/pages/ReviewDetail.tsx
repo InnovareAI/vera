@@ -126,6 +126,40 @@ export default function ReviewDetail() {
     setMarking(false)
   }
 
+  // Post directly to LinkedIn via Unipile. Available for the LinkedIn channel
+  // when the org has a connected unipile_account_id. Wraps unipile-post edge
+  // function which handles the API call + chains back to approval-webhook to
+  // mark the row posted + fire Slack notify.
+  async function postToLinkedIn() {
+    if (!post) return
+    if (!confirm(`Publish this post to LinkedIn via Unipile? This action is immediate and irreversible.`)) return
+    setMarking(true)
+    try {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/unipile-post`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ post_id: post.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        alert(`Unipile post failed: ${data.error ?? `HTTP ${res.status}`}`)
+        setMarking(false)
+        return
+      }
+      // unipile-post auto-marks the row posted via approval-webhook; refetch
+      // to pick up the new posted_at / posted_url.
+      const { data: refetched } = await supabase.from('content_posts').select('*').eq('id', post.id).maybeSingle()
+      if (refetched) setPost(refetched as Post)
+    } catch (e) {
+      alert(`Network error: ${e instanceof Error ? e.message : String(e)}`)
+    }
+    setMarking(false)
+  }
+
   async function copyBundle() {
     if (!post) return
     const parts = [
@@ -268,8 +302,18 @@ export default function ReviewDetail() {
 
         {isApproved && !isPosted && (
           <>
-            <p className="text-sm font-semibold text-emerald-700 mb-1">Approved — ready to post manually</p>
-            <p className="text-xs text-gray-500 mb-4">Copy the bundle, open the LinkedIn composer, paste, and publish.</p>
+            <p className="text-sm font-semibold text-emerald-700 mb-1">Approved — ready to post</p>
+            <p className="text-xs text-gray-500 mb-4">
+              {post.channel?.toLowerCase() === 'linkedin'
+                ? 'Auto-publish via Unipile, or copy + open the composer to post manually.'
+                : 'Copy the bundle, open the composer, paste, and publish.'}
+            </p>
+            {post.channel?.toLowerCase() === 'linkedin' && (
+              <button onClick={postToLinkedIn} disabled={marking}
+                className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 px-4 mb-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg text-sm font-semibold">
+                {marking ? 'Publishing…' : '🚀 Publish to LinkedIn via Unipile'}
+              </button>
+            )}
             <div className="flex gap-2">
               <button onClick={copyBundle}
                 className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 px-4 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-sm font-semibold">
@@ -286,7 +330,7 @@ export default function ReviewDetail() {
               </p>
             )}
             <div className="mt-5 pt-4 border-t border-gray-100">
-              <p className="text-xs font-semibold text-gray-700 mb-1.5">Once it's live, paste the URL here:</p>
+              <p className="text-xs font-semibold text-gray-700 mb-1.5">If you posted manually, paste the URL here:</p>
               <div className="flex gap-2">
                 <input value={postedUrl} onChange={e => setPostedUrl(e.target.value)} placeholder="https://www.linkedin.com/posts/…"
                   className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:border-violet-400 focus:outline-none" />
