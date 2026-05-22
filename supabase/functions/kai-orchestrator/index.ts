@@ -194,10 +194,13 @@ Set run_persona_adapter to true when the brief specifies a very specific persona
           max_tokens: 2048,
           system: `You are KAI's Writer. Write the content based on the strategy brief below.
 
+## Target platform: ${platformLabel}
+${platformGuide(platform)}
+
 ${skillBlocks ? `Apply these platform and content guidelines:\n\n${skillBlocks}\n\n---` : ''}
 ${researchFindings ? `\nSupporting research to weave in naturally:\n${researchFindings}\n\n---` : ''}
 
-Write only the final content — no preamble, no explanation, no labels. Just the post.`,
+Write only the final content — no preamble, no explanation, no labels, no markdown fences. Just the ${platformLabel} ${formatLabel.toLowerCase()}.`,
           messages: [{
             role: 'user',
             content: (strategy.brief_for_writer as string) || prompt,
@@ -441,3 +444,32 @@ followed by a summary of what must be fixed.`,
     },
   })
 })
+
+// Platform-specific Writer shape constraints. Each platform has a distinct
+// optimal post shape; the Writer needs to know which one it's targeting.
+function platformGuide(platform: string): string {
+  switch (platform) {
+    case 'linkedin':
+      return `Shape: ≤1,300 chars (sweet spot). The first 2-3 lines are the HOOK — they appear before "see more". Open with a sharp observation or contrarian claim, not a greeting. Use short paragraphs (1-3 lines each), generous line breaks for scannability. Plain text only — no markdown, no headings. End with an open question or a clear CTA. No hashtag stuffing (0-3 hashtags max).`
+    case 'twitter':
+      return `Shape: single tweet ≤280 chars OR a numbered thread with each tweet ≤280 chars separated by blank lines.
+- Single: punchy, complete thought, one idea. Optional 1-2 hashtags.
+- Thread: open with a hook tweet that earns the click. Each subsequent tweet is one beat — a stat, a contrast, a reframe. Number them ("1/", "2/", …). Last tweet has the CTA.
+No emoji-spam. No "🧵" — let the content do it.`
+    case 'instagram':
+      return `Shape: caption with a strong first line (≤125 chars, what appears above "more"). Use line breaks generously. End with a hashtag block of 10-20 relevant niche hashtags. Emoji are fine but sparingly. Caption can be longer than LinkedIn — up to 2,200 chars.`
+    case 'quora':
+      return `Shape: long-form answer (500-1,500 words). First sentence = direct answer to the question. Then explain with examples, data, and structure (numbered points or short sub-sections are fine — use bold via markdown). End with a concrete takeaway. Avoid "thanks for asking" preamble.`
+    case 'blog':
+      return `Shape: 800-2,000 word post. Use markdown — H2/H3 headings, lists where useful, occasional bold for emphasis. Open with a hook paragraph that frames the problem or the surprising finding. Each section advances one beat. Close with a clear takeaway and/or CTA. SEO-aware: include the target keywords naturally in the H1, opening, and one subhead.`
+    case 'email':
+      return `Shape: two parts — SUBJECT (≤55 chars, intriguing, not clickbait) on the first line, then a blank line, then the BODY. Body: ≤200 words for cold outreach / ≤500 words for newsletter. Conversational, one idea. Plain text only. Greeting then one short opening line then the substance then a clear CTA (one ask). Optional P.S. line.
+
+Format your output exactly as:
+Subject: <subject line>
+
+<body>`
+    default:
+      return `Shape: optimise for ${platform}. Be concise, lead with the value, no fluff.`
+  }
+}

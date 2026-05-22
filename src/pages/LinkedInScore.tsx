@@ -111,9 +111,24 @@ export default function LinkedInScore() {
         headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
         body: JSON.stringify({ org_id: orgId, principles: enabledPrinciples }),
       })
-      const data = await res.json() as BrewResult & { error?: string }
-      if (!data.success) throw new Error(data.error || `HTTP ${res.status}`)
-      setBrew(data)
+      if (!res.body) throw new Error('No response body')
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          let ev: { event: string; [k: string]: unknown }
+          try { ev = JSON.parse(line.slice(6).trim()) } catch { continue }
+          if (ev.event === 'done')  setBrew(ev as unknown as BrewResult)
+          if (ev.event === 'error') throw new Error((ev.message as string) ?? 'Unknown error')
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally { setBrewLoading(false) }
