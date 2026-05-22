@@ -312,7 +312,7 @@ Output the rewritten content only — no labels, no explanation.`,
                   'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
                   'apikey': Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
                 },
-                body: JSON.stringify({ prompt: strategy.image_prompt as string, model: 'seedream' }),
+                body: JSON.stringify({ prompt: strategy.image_prompt as string, model: 'nano-banana' }),
                 signal: AbortSignal.timeout(60_000),
               })
               const d = await r.json() as { images?: Array<{ url: string }>; error?: string }
@@ -457,7 +457,7 @@ followed by a summary of what must be fixed.`,
             model_used: 'claude-sonnet-4-6',
             media_url: generatedImageUrl,
             media_type: generatedImageUrl ? 'image' : null,
-            media_metadata: generatedImageUrl ? { image_prompt: strategy.image_prompt ?? null, model: 'fal-ai/bytedance/seedream/v4' } : {},
+            media_metadata: generatedImageUrl ? { image_prompt: strategy.image_prompt ?? null, model: 'fal-ai/gemini-25-flash-image' } : {},
             compliance_checks: complianceChecks,
             agent_outputs: {
               strategy,
