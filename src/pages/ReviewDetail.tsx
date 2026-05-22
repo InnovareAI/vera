@@ -4,6 +4,26 @@ import { Copy, Check, ExternalLink, ArrowLeft, ThumbsUp, MessageCircle, Repeat2,
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 
+// Per-channel composer URL + label for the HITL "Open <platform>" button.
+// Where the platform supports query-param pre-fill (Twitter), we encode the
+// first 240 chars of the post copy. Most platforms don't, so the user copies
+// via the "Copy text + hashtags" button and pastes on the new tab.
+function composerForChannel(channel: string | null | undefined, copy?: string): { url: string; label: string } {
+  const c = (channel ?? '').toLowerCase()
+  switch (c) {
+    case 'linkedin':  return { url: 'https://www.linkedin.com/feed/?shareActive=true',                       label: 'LinkedIn' }
+    case 'twitter':
+    case 'x':         return { url: `https://twitter.com/intent/tweet?text=${encodeURIComponent((copy ?? '').slice(0, 240))}`, label: 'X / Twitter' }
+    case 'medium':    return { url: 'https://medium.com/new-story',                                          label: 'Medium' }
+    case 'substack':  return { url: 'https://substack.com/home',                                             label: 'Substack' }
+    case 'reddit':    return { url: 'https://www.reddit.com/submit',                                         label: 'Reddit' }
+    case 'quora':     return { url: 'https://www.quora.com/',                                                label: 'Quora' }
+    case 'instagram': return { url: 'https://www.instagram.com/',                                            label: 'Instagram (mobile)' }
+    case 'email':     return { url: `mailto:?body=${encodeURIComponent((copy ?? '').slice(0, 1000))}`,       label: 'Email' }
+    default:          return { url: 'https://www.linkedin.com/feed/?shareActive=true',                       label: 'LinkedIn' }
+  }
+}
+
 type ActionState = 'idle' | 'saving' | 'done'
 
 export default function ReviewDetail() {
@@ -92,11 +112,11 @@ export default function ReviewDetail() {
   const isPending = statusLower === 'pending' || statusLower === 'changes_requested' || statusLower === 'draft' || post.status === 'Pending Review'
   const isApproved = statusLower === 'approved'
   const isRejected = statusLower === 'rejected'
-  const initial = (post.profile_name ?? 'T')[0]
-  const composerUrl = 'https://www.linkedin.com/feed/?shareActive=true'
-  const compliance = Array.isArray(post.compliance_checks) ? (post.compliance_checks as Array<{ pass?: boolean; label?: string }>) : []
-
   const isPosted = !!post.posted_at
+  const composerInfo = composerForChannel(post.channel, post.copy)
+  const initial = (post.profile_name ?? 'T')[0]
+  const composerUrl = composerInfo.url
+  const compliance = Array.isArray(post.compliance_checks) ? (post.compliance_checks as Array<{ pass?: boolean; label?: string }>) : []
   const statusBadge = isPosted
     ? { text: 'Posted', cls: 'bg-violet-50 text-violet-700 border-violet-200' }
     : isApproved
@@ -214,7 +234,7 @@ export default function ReviewDetail() {
               </button>
               <a href={composerUrl} target="_blank" rel="noreferrer"
                 className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold">
-                <ExternalLink className="w-4 h-4" /> Open LinkedIn
+                <ExternalLink className="w-4 h-4" /> Open {composerInfo.label}
               </a>
             </div>
             {post.media_url && (

@@ -10,7 +10,13 @@ const corsHeaders = {
 const PLATFORM_LABELS: Record<string, string> = {
   linkedin: 'LinkedIn', twitter: 'Twitter', instagram: 'Instagram',
   facebook: 'Facebook', quora: 'Quora', blog: 'Blog', email: 'Email',
+  reddit: 'Reddit', substack: 'Substack', medium: 'Medium',
 }
+
+// Platforms where the Researcher agent should default-fire because the
+// content benefits from current-state-of-the-world data + community context.
+// Strategist may still opt-out via run_researcher=false on irrelevant prompts.
+const RESEARCH_BIAS_PLATFORMS = new Set(['reddit', 'blog', 'substack', 'quora'])
 const FORMAT_LABELS: Record<string, string> = {
   thought_leadership: 'Thought Leadership', thread: 'Thread',
   cold_outreach: 'Cold Outreach', product_launch: 'Product Launch',
@@ -117,7 +123,7 @@ ${skillList || '(none configured yet)'}
 Output exactly this JSON structure:
 {
   "persona": "target audience description",
-  "platform": "linkedin|twitter|instagram|quora|blog|email",
+  "platform": "linkedin|twitter|instagram|quora|blog|email|reddit|substack|medium",
   "content_type": "thought_leadership|thread|cold_outreach|product_launch|case_study|post",
   "angle": "specific hook or angle",
   "tone": "professional|casual|authoritative|conversational",
@@ -133,7 +139,7 @@ Output exactly this JSON structure:
   "image_prompt": "concrete visual brief — composition, style, mood, palette"
 }
 
-Set run_researcher to true when data, stats, recent news, or supporting evidence would strengthen the content.
+Set run_researcher to true when data, stats, recent news, or supporting evidence would strengthen the content. ALWAYS true for Reddit posts (community context + counterpoints matter), Substack newsletters, blog posts, and Quora answers.
 Set run_seo to true only for blog posts or long-form content where SEO matters.
 Set run_persona_adapter to true when the brief specifies a very specific persona (e.g. a named job title, industry, or company type).
 Set run_image_designer to true when an image, illustration, or visual would meaningfully add to the post (default true for: Instagram, Image post, Carousel, blog hero; default false for: text-only LinkedIn, tweets, emails).
@@ -544,6 +550,31 @@ Format your output exactly as:
 Subject: <subject line>
 
 <body>`
+    case 'reddit':
+      return `Shape: native-Reddit voice. Title line (≤300 chars, hook-shaped — declarative or question, not clickbait, no all-caps) on the first line, blank line, then the BODY (400-1500 words for self-posts, depending on subreddit).
+- Plain markdown, no excessive formatting.
+- Speak peer-to-peer, NOT marketing. Redditors hate corporate voice. No "we", say "I" when sharing observations.
+- Lead with the lived experience or specific data point. Show your work. Acknowledge counterpoints.
+- Reference specific subreddit context if known (e.g. "I know this gets asked a lot in r/X but…"). Avoid being promotional — Reddit auto-flags it.
+- Close with a question that invites genuine discussion, not a CTA.
+
+Format your output exactly as:
+Title: <title line>
+
+<body>`
+    case 'substack':
+      return `Shape: newsletter issue, 800-2,500 words. Subject line + dek (subtitle) + body.
+- Conversational, first-person, opinionated.
+- Use markdown — # for the main title, ## for sections, > for callout quotes, ** for emphasis.
+- Open with a personal hook or specific anecdote. Build the argument across 3-5 sections.
+- A "TL;DR" section just under the dek is welcome for longer pieces.
+- Footer with author note + soft CTA (subscribe, reply, share) is conventional.
+
+Format your output exactly as:
+Subject: <subject line>
+Dek: <one-sentence subtitle>
+
+<body in markdown>`
     default:
       return `Shape: optimise for ${platform}. Be concise, lead with the value, no fluff.`
   }
