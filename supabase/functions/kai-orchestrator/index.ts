@@ -313,11 +313,30 @@ Output the rewritten content only — no labels, no explanation.`,
                   'apikey': Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
                 },
                 body: JSON.stringify({ prompt: strategy.image_prompt as string, model: 'nano-banana' }),
-                signal: AbortSignal.timeout(60_000),
+                signal: AbortSignal.timeout(180_000),
               })
-              const d = await r.json() as { images?: Array<{ url: string }>; error?: string }
-              if (d.error) return { url: null, error: d.error }
-              return { url: d.images?.[0]?.url ?? null }
+              if (!r.body) return { url: null, error: 'no response body' }
+              const reader = r.body.getReader()
+              const decoder = new TextDecoder()
+              let buffer = ''
+              let url: string | null = null
+              let err: string | null = null
+              while (true) {
+                const { value, done } = await reader.read()
+                if (done) break
+                buffer += decoder.decode(value, { stream: true })
+                const lines = buffer.split('\n\n')
+                buffer = lines.pop() ?? ''
+                for (const line of lines) {
+                  if (!line.startsWith('data: ')) continue
+                  try {
+                    const ev = JSON.parse(line.slice(6).trim()) as { event: string; images?: Array<{ url: string }>; message?: string }
+                    if (ev.event === 'done')  url = ev.images?.[0]?.url ?? null
+                    if (ev.event === 'error') err = ev.message ?? 'unknown error'
+                  } catch { /* skip */ }
+                }
+              }
+              return { url, error: err ?? undefined }
             } catch (e) {
               return { url: null, error: e instanceof Error ? e.message : String(e) }
             }
