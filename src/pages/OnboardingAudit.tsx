@@ -33,6 +33,9 @@ export default function OnboardingAudit() {
   const [synthesisText, setSynthesisText] = useState('')
   const [result, setResult] = useState<DoneEvent | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [applying, setApplying] = useState(false)
+  const [appliedAt, setAppliedAt] = useState<string | null>(null)
+  const [applyError, setApplyError] = useState<string | null>(null)
   const startedRef = useRef(false)
 
   // Preflight: resolve callback params if we just came back from Unipile, load channels & org.
@@ -100,6 +103,71 @@ export default function OnboardingAudit() {
 
   function skipUnipileAndAudit() {
     runAudit()
+  }
+
+  async function applyAudit() {
+    if (!result || !orgId) return
+    setApplying(true)
+    setApplyError(null)
+    try {
+      const proposal = result.proposal
+      const now = new Date().toISOString()
+
+      // 1) brand_voice — one row per org. Upsert.
+      const { data: existingBV } = await supabase.from('brand_voice').select('id').eq('org_id', orgId).maybeSingle()
+      const bvPayload = {
+        org_id: orgId,
+        tone:              proposal.brand_voice.tone              ?? null,
+        writing_rules:     proposal.brand_voice.writing_rules     ?? null,
+        forbidden_phrases: proposal.brand_voice.forbidden_phrases ?? null,
+        required_phrases:  proposal.brand_voice.required_phrases  ?? null,
+        system_prompt:     proposal.brand_voice.system_prompt     ?? null,
+        updated_at: now,
+      }
+      const bvResult = existingBV
+        ? await supabase.from('brand_voice').update(bvPayload).eq('id', existingBV.id)
+        : await supabase.from('brand_voice').insert(bvPayload)
+      if (bvResult.error) throw new Error(`brand_voice: ${bvResult.error.message}`)
+
+      // 2) personas — insert new rows
+      if (Array.isArray(proposal.personas) && proposal.personas.length) {
+        const personaRows = proposal.personas.map((p) => ({
+          org_id: orgId,
+          name:        (p.name as string) ?? 'Persona',
+          title:       (p.title as string) ?? null,
+          pain_points: (p.pain_points as string[]) ?? null,
+          goals:       (p.goals as string[]) ?? null,
+          is_primary:  !!(p.is_primary as boolean),
+        }))
+        const personaResult = await supabase.from('personas').insert(personaRows)
+        if (personaResult.error) throw new Error(`personas: ${personaResult.error.message}`)
+      }
+
+      // 3) skills — insert org-scoped rows
+      if (Array.isArray(proposal.skills) && proposal.skills.length) {
+        const skillRows = proposal.skills.map((s, i) => ({
+          org_id: orgId,
+          name:          (s.name as string) ?? `Skill ${i + 1}`,
+          description:   (s.description as string) ?? null,
+          type:          (s.type as string) ?? 'writing_rule',
+          prompt_module: (s.prompt_module as string) ?? null,
+          injected_into: (s.injected_into as string) ?? 'writer',
+          is_active: true,
+          sort_order: i,
+        }))
+        const skillResult = await supabase.from('skills').insert(skillRows)
+        if (skillResult.error) throw new Error(`skills: ${skillResult.error.message}`)
+      }
+
+      // 4) Mark audit_runs as applied
+      await supabase.from('audit_runs').update({ applied_at: now }).eq('id', result.audit_id)
+
+      setAppliedAt(now)
+    } catch (e) {
+      setApplyError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setApplying(false)
+    }
   }
 
   function runAudit() {
@@ -276,16 +344,36 @@ export default function OnboardingAudit() {
           <PersonasCard personas={result.proposal.personas} />
           <SkillsCard skills={result.proposal.skills} />
 
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-800">
-            <div className="font-semibold mb-1">Prototype: this proposal isn't applied yet.</div>
-            Audit ID <code className="text-[11px]">{result.audit_id}</code>. The Apply step (copy proposed_* into the live brand_voice / personas / skills tables) is the next build.
-          </div>
+          {appliedAt ? (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-emerald-800">
+              <div className="font-semibold mb-1 inline-flex items-center gap-1.5"><Check className="w-4 h-4" /> Applied</div>
+              Brand voice, personas, and skills are now live for this org. The next post you generate will use them.
+              <div className="text-[11px] text-emerald-700/70 mt-1">Audit ID <code>{result.audit_id}</code></div>
+            </div>
+          ) : (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-800">
+              <div className="font-semibold mb-1">Review the proposal above.</div>
+              When you hit Apply, the brand voice, personas, and skills above get written to the live tables so the writer agent uses them on every generate.
+              <div className="text-[11px] mt-1">Audit ID <code>{result.audit_id}</code></div>
+            </div>
+          )}
+
+          {applyError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">{applyError}</div>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
-            <Link to="/dashboard"
-              className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-semibold">
-              <Check className="w-4 h-4" /> Continue to dashboard
-            </Link>
+            {appliedAt ? (
+              <Link to="/dashboard"
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-semibold">
+                <Check className="w-4 h-4" /> Continue to dashboard
+              </Link>
+            ) : (
+              <button onClick={applyAudit} disabled={applying}
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white rounded-lg text-sm font-semibold">
+                {applying ? <><Loader2 className="w-4 h-4 animate-spin" /> Applying…</> : <><Check className="w-4 h-4" /> Apply audit</>}
+              </button>
+            )}
           </div>
         </div>
       )}

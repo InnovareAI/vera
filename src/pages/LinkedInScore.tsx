@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Loader2, ArrowRight, RotateCw, Check } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
 const PROFILE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/linkedin-profile-score`
 const BREW_URL    = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/brew360-audit`
@@ -57,11 +58,26 @@ export default function LinkedInScore() {
   const [brewLoading, setBrewLoading] = useState(false)
   const [profile, setProfile] = useState<ProfileResult | null>(null)
   const [brew, setBrew] = useState<BrewResult | null>(null)
+  const [profileRunAt, setProfileRunAt] = useState<string | null>(null)
+  const [brewRunAt, setBrewRunAt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // Persist toggles to localStorage (UI fallback) AND to organisations.settings
+  // (durable per-org). Org settings win on load.
   useEffect(() => {
     localStorage.setItem(TOGGLE_STORAGE, JSON.stringify(enabledPrinciples))
-  }, [enabledPrinciples])
+    if (orgId) {
+      void supabase.rpc('jsonb_set_settings_brew_principles', { p_org_id: orgId, p_principles: enabledPrinciples }).then(({ error }) => {
+        // RPC may not exist yet — fall back to direct merge
+        if (error) {
+          supabase.from('organisations').select('settings').eq('id', orgId).maybeSingle().then(({ data }) => {
+            const settings = { ...((data?.settings as Record<string, unknown>) ?? {}), brew_principles: enabledPrinciples }
+            supabase.from('organisations').update({ settings }).eq('id', orgId)
+          })
+        }
+      })
+    }
+  }, [enabledPrinciples, orgId])
 
   const togglePrinciple = (id: string) => {
     setEnabledPrinciples(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id])
@@ -103,13 +119,45 @@ export default function LinkedInScore() {
     } finally { setBrewLoading(false) }
   }, [orgId, enabledPrinciples])
 
-  // Auto-run both on first mount
+  // On first mount: load org settings (toggles) + cached results from
+  // linkedin_audits. Only fetch fresh if no cached row exists.
   useEffect(() => {
     if (!orgId) return
-    runProfile()
-    runBrew()
+    let cancelled = false
+    async function load() {
+      // 1. Load org toggle settings (if set, override localStorage)
+      const { data: org } = await supabase
+        .from('organisations')
+        .select('settings')
+        .eq('id', orgId!)
+        .maybeSingle()
+      if (cancelled) return
+      const orgPrinciples = (org?.settings as Record<string, unknown> | null)?.brew_principles as string[] | undefined
+      if (orgPrinciples?.length) setEnabledPrinciples(orgPrinciples)
+
+      // 2. Load latest cached audits (one per kind)
+      const { data: cached } = await supabase
+        .from('linkedin_audits')
+        .select('kind, result, created_at')
+        .eq('org_id', orgId!)
+        .order('created_at', { ascending: false })
+        .limit(20)
+      if (cancelled) return
+      const cachedProfile = cached?.find(c => c.kind === 'profile')
+      const cachedBrew    = cached?.find(c => c.kind === 'brew360')
+      if (cachedProfile) { setProfile(cachedProfile.result as ProfileResult); setProfileRunAt(cachedProfile.created_at) }
+      else runProfile()
+      if (cachedBrew)    { setBrew(cachedBrew.result as BrewResult);          setBrewRunAt(cachedBrew.created_at) }
+      else runBrew()
+    }
+    load()
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId])
+
+  // Update runAt when fresh results land
+  useEffect(() => { if (profile && !profileLoading) setProfileRunAt(new Date().toISOString()) }, [profile])
+  useEffect(() => { if (brew && !brewLoading) setBrewRunAt(new Date().toISOString()) }, [brew])
 
   const canContinue = !!profile && !!brew
 
@@ -171,6 +219,7 @@ export default function LinkedInScore() {
           score={profile?.score}
           grade={profile?.grade}
           subline={profile ? `${profile.profile.connections_count.toLocaleString()} connections · ${profile.profile.follower_count.toLocaleString()} followers${profile.profile.is_creator ? ' · creator mode' : ''}` : null}
+          runAt={profileRunAt}
           onRefresh={runProfile}
         >
           {profile && (
@@ -198,6 +247,7 @@ export default function LinkedInScore() {
           score={brew?.audit?.overall_score}
           grade={brew?.audit?.grade}
           subline={brew ? `${brew.posts_analyzed ?? 0} recent posts analysed` : null}
+          runAt={brewRunAt}
           onRefresh={runBrew}
         >
           {brew?.audit && (
@@ -256,9 +306,9 @@ export default function LinkedInScore() {
   )
 }
 
-function ScoreCard({ title, subtitle, loading, score, grade, subline, onRefresh, children }: {
+function ScoreCard({ title, subtitle, loading, score, grade, subline, runAt, onRefresh, children }: {
   title: string; subtitle: string; loading: boolean; score?: number; grade?: string;
-  subline: string | null; onRefresh: () => void; children?: React.ReactNode;
+  subline: string | null; runAt?: string | null; onRefresh: () => void; children?: React.ReactNode;
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -267,7 +317,8 @@ function ScoreCard({ title, subtitle, loading, score, grade, subline, onRefresh,
           <p className="text-sm font-semibold text-gray-900">{title}</p>
           <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>
         </div>
-        <button onClick={onRefresh} disabled={loading} className="text-gray-400 hover:text-gray-600 disabled:opacity-40">
+        <button onClick={onRefresh} disabled={loading} title={runAt ? `Last run ${relativeTime(runAt)}` : 'Run'}
+          className="text-gray-400 hover:text-gray-600 disabled:opacity-40">
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCw className="w-4 h-4" />}
         </button>
       </div>
@@ -275,11 +326,21 @@ function ScoreCard({ title, subtitle, loading, score, grade, subline, onRefresh,
         <span className="text-5xl font-bold text-gray-900">{loading && score === undefined ? '—' : (score ?? '—')}</span>
         {grade && <span className="text-2xl font-bold text-violet-600 mb-1">{grade}</span>}
       </div>
-      {subline && <p className="text-xs text-gray-500 mb-4">{subline}</p>}
+      {subline && <p className="text-xs text-gray-500 mb-1">{subline}</p>}
+      {runAt && <p className="text-[10px] text-gray-400 mb-4">Last run {relativeTime(runAt)}</p>}
       {loading && score === undefined && (
         <div className="text-xs text-gray-400 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Running…</div>
       )}
       {children}
     </div>
   )
+}
+
+function relativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime()
+  const m = Math.floor(diffMs / 60_000)
+  if (m < 1)   return 'just now'
+  if (m < 60)  return `${m}m ago`
+  const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24); return `${d}d ago`
 }
