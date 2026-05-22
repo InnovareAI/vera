@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { Loader2, Check, AlertCircle, Sparkles } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
-const AUDIT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/content-audit`
+const AUDIT_URL   = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/content-audit`
+const CONNECT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/unipile-connect`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+const LINKEDIN_CHANNELS = ['linkedin_personal', 'linkedin_company', 'linkedin_newsletter'] as const
 
 interface FetchedEvent { channel: string; ok: boolean; reason?: string; item_count: number }
 interface ChannelsLoaded { channels: Array<{ channel: string; url: string }> }
@@ -16,22 +20,104 @@ interface DoneEvent {
   }
 }
 
-type Phase = 'connecting' | 'fetching' | 'synthesising' | 'done' | 'error'
+type Phase = 'preflight' | 'awaiting_unipile' | 'connecting_unipile' | 'connecting' | 'fetching' | 'synthesising' | 'done' | 'error'
 
 export default function OnboardingAudit() {
   const { orgId } = useParams<{ orgId: string }>()
   const navigate = useNavigate()
-  const [phase, setPhase] = useState<Phase>('connecting')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [phase, setPhase] = useState<Phase>('preflight')
   const [channels, setChannels] = useState<ChannelsLoaded['channels']>([])
+  const [unipileConnected, setUnipileConnected] = useState(false)
   const [fetched, setFetched] = useState<Record<string, FetchedEvent>>({})
   const [synthesisText, setSynthesisText] = useState('')
   const [result, setResult] = useState<DoneEvent | null>(null)
   const [error, setError] = useState<string | null>(null)
   const startedRef = useRef(false)
 
+  // Preflight: resolve callback params if we just came back from Unipile, load channels & org.
   useEffect(() => {
-    if (!orgId || startedRef.current) return
+    if (!orgId) return
+    let cancelled = false
+
+    async function preflight() {
+      // 1. If callback from Unipile, persist the account_id
+      const unipileStatus = searchParams.get('unipile_status')
+      const accountId = searchParams.get('account_id')
+      if (unipileStatus === 'success' && accountId) {
+        await supabase.from('organisations')
+          .update({ unipile_account_id: accountId, unipile_connected_at: new Date().toISOString() })
+          .eq('id', orgId)
+        // Clean the URL so a refresh doesn't reprocess
+        setSearchParams({}, { replace: true })
+      }
+      if (unipileStatus === 'error') {
+        if (!cancelled) setError('LinkedIn connection was cancelled or failed.')
+      }
+
+      // 2. Load org + channels
+      const [{ data: org }, { data: chs }] = await Promise.all([
+        supabase.from('organisations').select('unipile_account_id').eq('id', orgId).maybeSingle(),
+        supabase.from('channel_profiles').select('channel, url').eq('org_id', orgId).eq('is_active', true),
+      ])
+      if (cancelled) return
+      const connected = !!org?.unipile_account_id
+      setUnipileConnected(connected)
+      setChannels((chs ?? []) as ChannelsLoaded['channels'])
+
+      const hasLinkedIn = (chs ?? []).some(c => (LINKEDIN_CHANNELS as readonly string[]).includes(c.channel))
+      if (hasLinkedIn && !connected) {
+        setPhase('awaiting_unipile')
+      } else {
+        runAudit()
+      }
+    }
+
+    preflight()
+    return () => { cancelled = true }
+  }, [orgId])
+
+  async function startUnipileConnect() {
+    if (!orgId) return
+    setPhase('connecting_unipile')
+    try {
+      const return_url = `${window.location.origin}/onboarding/audit/${orgId}`
+      const res = await fetch(CONNECT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ org_id: orgId, return_url }),
+      })
+      if (!res.ok) throw new Error(`Connect failed: HTTP ${res.status}`)
+      const { auth_url } = await res.json()
+      if (!auth_url) throw new Error('No auth_url returned')
+      window.location.href = auth_url
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setPhase('error')
+    }
+  }
+
+  function skipUnipileAndAudit() {
+    runAudit()
+  }
+
+  function runAudit() {
+    if (startedRef.current || !orgId) return
     startedRef.current = true
+    setPhase('connecting')
+
+    function handleEvent(ev: { event: string; [k: string]: unknown }) {
+      switch (ev.event) {
+        case 'started':         setPhase('fetching'); break
+        case 'channels_loaded': setChannels(ev.channels as ChannelsLoaded['channels']); break
+        case 'fetching':        /* no-op */ break
+        case 'fetched':         setFetched(prev => ({ ...prev, [ev.channel as string]: ev as unknown as FetchedEvent })); break
+        case 'synthesising':    setPhase('synthesising'); break
+        case 'synthesis_chunk': setSynthesisText(t => t + (ev.text as string)); break
+        case 'done':            setResult(ev as unknown as DoneEvent); setPhase('done'); break
+        case 'error':           setError((ev.message as string) ?? 'Unknown error'); setPhase('error'); break
+      }
+    }
 
     async function run() {
       try {
@@ -58,10 +144,7 @@ export default function OnboardingAudit() {
             if (!line.startsWith('data: ')) continue
             const json = line.slice(6).trim()
             if (!json) continue
-            try {
-              const ev = JSON.parse(json)
-              handleEvent(ev)
-            } catch { /* ignore parse errors */ }
+            try { handleEvent(JSON.parse(json)) } catch { /* ignore parse errors */ }
           }
         }
       } catch (e) {
@@ -70,39 +153,8 @@ export default function OnboardingAudit() {
       }
     }
 
-    function handleEvent(ev: { event: string; [k: string]: unknown }) {
-      switch (ev.event) {
-        case 'started':
-          setPhase('fetching')
-          break
-        case 'channels_loaded':
-          setChannels(ev.channels as ChannelsLoaded['channels'])
-          break
-        case 'fetching':
-          // no-op, we already show the channel list
-          break
-        case 'fetched':
-          setFetched(prev => ({ ...prev, [ev.channel as string]: ev as unknown as FetchedEvent }))
-          break
-        case 'synthesising':
-          setPhase('synthesising')
-          break
-        case 'synthesis_chunk':
-          setSynthesisText(t => t + (ev.text as string))
-          break
-        case 'done':
-          setResult(ev as unknown as DoneEvent)
-          setPhase('done')
-          break
-        case 'error':
-          setError((ev.message as string) ?? 'Unknown error')
-          setPhase('error')
-          break
-      }
-    }
-
     run()
-  }, [orgId])
+  }
 
   return (
     <div className="max-w-3xl mx-auto py-8 px-4">
@@ -115,15 +167,60 @@ export default function OnboardingAudit() {
         </div>
         <h1 className="text-2xl font-bold text-gray-900">Analysing your content</h1>
         <p className="text-sm text-gray-500 mt-1">
-          {phase === 'connecting' && 'Connecting…'}
-          {phase === 'fetching'    && 'Pulling content from each channel.'}
-          {phase === 'synthesising' && 'Extracting voice, audience, and patterns.'}
-          {phase === 'done'        && 'Done. Review the proposal below.'}
-          {phase === 'error'       && 'Hit an error.'}
+          {phase === 'preflight'         && 'Loading…'}
+          {phase === 'awaiting_unipile'  && 'Connect LinkedIn first — that’s where most of your voice lives.'}
+          {phase === 'connecting_unipile'&& 'Opening LinkedIn authentication…'}
+          {phase === 'connecting'        && 'Starting audit…'}
+          {phase === 'fetching'          && 'Pulling content from each channel.'}
+          {phase === 'synthesising'      && 'Extracting voice, audience, and patterns.'}
+          {phase === 'done'              && 'Done. Review the proposal below.'}
+          {phase === 'error'             && 'Hit an error.'}
         </p>
       </div>
 
-      {/* Channel status list */}
+      {/* Connect LinkedIn step */}
+      {phase === 'awaiting_unipile' && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+          <div className="flex items-start gap-3 mb-4">
+            <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+              <span className="text-blue-600 font-bold text-sm">in</span>
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-gray-900">Connect your LinkedIn</h2>
+              <p className="text-sm text-gray-500 mt-0.5">
+                Unipile's hosted wizard handles the login. Once connected, KAI can read your posts and engagement
+                data to extract your voice — far richer signal than public scraping.
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={startUnipileConnect}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold">
+              Connect LinkedIn →
+            </button>
+            <button onClick={skipUnipileAndAudit}
+              className="px-4 py-2.5 text-sm text-gray-600 hover:text-gray-900">
+              Skip for now (audit blog only)
+            </button>
+          </div>
+        </div>
+      )}
+
+      {phase === 'connecting_unipile' && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6 flex items-center gap-3">
+          <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
+          <span className="text-sm text-gray-700">Opening LinkedIn authentication…</span>
+        </div>
+      )}
+
+      {unipileConnected && phase !== 'awaiting_unipile' && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs text-emerald-700 mb-4 inline-flex items-center gap-1.5">
+          <Check className="w-3.5 h-3.5" /> LinkedIn connected
+        </div>
+      )}
+
+      {/* Channel status list — only shown once audit is running or done */}
+      {phase !== 'awaiting_unipile' && phase !== 'connecting_unipile' && (
       <div className="bg-white rounded-xl border border-gray-200 mb-6">
         <div className="px-4 py-3 border-b border-gray-100 text-xs font-semibold uppercase tracking-wider text-gray-500">
           Channels
@@ -156,6 +253,7 @@ export default function OnboardingAudit() {
           })}
         </div>
       </div>
+      )}
 
       {/* Synthesis */}
       {(phase === 'synthesising' || (phase === 'done' && !result)) && (
