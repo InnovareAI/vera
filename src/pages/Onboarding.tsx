@@ -149,7 +149,7 @@ export default function Onboarding() {
       .eq('id', sessionId)
 
     setSubmitting(false)
-    navigate('/dashboard')
+    navigate(`/onboarding/audit/${org.id}`)
   }
 
   return (

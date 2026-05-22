@@ -9,6 +9,7 @@ import Generate from './pages/Generate'
 import Review from './pages/Review'
 import ReviewDetail from './pages/ReviewDetail'
 import Onboarding from './pages/Onboarding'
+import OnboardingAudit from './pages/OnboardingAudit'
 import Clients from './pages/Clients'
 import Calendar from './pages/Calendar'
 import Library from './pages/Library'
@@ -25,6 +26,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginGuard />} />
           <Route path="/onboarding" element={<Onboarding />} />
+          <Route path="/onboarding/audit/:orgId" element={<OnboardingAudit />} />
           <Route path="/" element={<Layout />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard"  element={<Dashboard />} />
