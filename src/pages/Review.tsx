@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 
+const APPROVAL_WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approval-webhook`
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+
 const PLATFORM_COLORS: Record<string, string> = {
   linkedin: 'bg-blue-100 text-blue-700',
   twitter: 'bg-sky-100 text-sky-700',
@@ -38,10 +41,34 @@ export default function Review() {
 
   async function updateStatus(postId: string, newStatus: string) {
     setSaving(postId)
-    const { error } = await supabase.from('content_posts').update({ status: newStatus }).eq('id', postId)
-    if (!error) {
-      setPosts(prev => prev.map(p => p.id === postId ? { ...p, status: newStatus } : p))
-      setSelected(prev => prev?.id === postId ? { ...prev, status: newStatus } : prev)
+    // Approved/Rejected go through approval-webhook (single hub for status
+    // change + n8n forward + Slack notify). Scheduled/Published flow stays
+    // direct since those are operator-internal state and don't need notify.
+    const webhookActions: Record<string, string> = { 'Approved': 'approved', 'Rejected': 'rejected' }
+    const apiAction = webhookActions[newStatus]
+    if (apiAction) {
+      try {
+        const res = await fetch(APPROVAL_WEBHOOK_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ post_id: postId, action: apiAction }),
+        })
+        const data = await res.json()
+        if (res.ok && data.post) {
+          setPosts(prev => prev.map(p => p.id === postId ? data.post as Post : p))
+          setSelected(prev => prev?.id === postId ? data.post as Post : prev)
+        }
+      } catch { /* swallow — operator will see no state change and can retry */ }
+    } else {
+      const { error } = await supabase.from('content_posts').update({ status: newStatus }).eq('id', postId)
+      if (!error) {
+        setPosts(prev => prev.map(p => p.id === postId ? { ...p, status: newStatus } : p))
+        setSelected(prev => prev?.id === postId ? { ...prev, status: newStatus } : prev)
+      }
     }
     setSaving(null)
   }

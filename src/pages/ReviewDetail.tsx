@@ -4,6 +4,30 @@ import { Copy, Check, ExternalLink, ArrowLeft, ThumbsUp, MessageCircle, Repeat2,
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 
+const APPROVAL_WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approval-webhook`
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+// Centralised call into the approval-webhook edge function (the single hub
+// for status changes + n8n forwarding + Slack notifications).
+async function callApprovalWebhook(payload: Record<string, unknown>): Promise<{ post?: Post; error?: string }> {
+  try {
+    const res = await fetch(APPROVAL_WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify(payload),
+    })
+    const data = await res.json()
+    if (!res.ok) return { error: data.error ?? `HTTP ${res.status}` }
+    return { post: data.post as Post }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 // Per-channel composer URL + label for the HITL "Open <platform>" button.
 // Where the platform supports query-param pre-fill (Twitter), we encode the
 // first 240 chars of the post copy. Most platforms don't, so the user copies
@@ -56,18 +80,32 @@ export default function ReviewDetail() {
   async function updateStatus(newStatus: string, fb?: string) {
     if (!post) return
     setAction('saving')
-    const updates: Record<string, unknown> = {
-      status: newStatus,
-      reviewed_at: new Date().toISOString(),
+    // Map UI status labels → approval-webhook action values
+    const actionMap: Record<string, string> = {
+      'Approved': 'approved',
+      'Rejected': 'rejected',
+      'changes_requested': 'changes_requested',
     }
-    if (fb !== undefined) updates.feedback = fb
-    const { error } = await supabase.from('content_posts').update(updates).eq('id', post.id)
-    if (error) {
-      alert(`Error: ${error.message}`)
+    const apiAction = actionMap[newStatus]
+    if (!apiAction) {
+      // Statuses not handled by the webhook (Scheduled, Published) — fall back to direct write
+      const updates: Record<string, unknown> = { status: newStatus, reviewed_at: new Date().toISOString() }
+      if (fb !== undefined) updates.feedback = fb
+      const { error } = await supabase.from('content_posts').update(updates).eq('id', post.id)
+      if (error) { alert(`Error: ${error.message}`); setAction('idle'); return }
+      setPost({ ...post, ...updates } as Post)
+      setAction('done')
+      return
+    }
+    const { post: updated, error } = await callApprovalWebhook({
+      post_id: post.id, action: apiAction, ...(fb !== undefined ? { feedback: fb } : {}),
+    })
+    if (error || !updated) {
+      alert(`Error: ${error ?? 'no post returned'}`)
       setAction('idle')
       return
     }
-    setPost({ ...post, ...updates } as Post)
+    setPost(updated)
     setAction('done')
   }
 
@@ -76,10 +114,15 @@ export default function ReviewDetail() {
     const url = postedUrl.trim()
     if (!url) return
     setMarking(true)
-    const now = new Date().toISOString()
-    const { error } = await supabase.from('content_posts').update({ posted_at: now, posted_url: url }).eq('id', post.id)
-    if (error) { alert(`Error: ${error.message}`); setMarking(false); return }
-    setPost({ ...post, posted_at: now, posted_url: url } as Post)
+    const { post: updated, error } = await callApprovalWebhook({
+      post_id: post.id, action: 'posted', posted_url: url,
+    })
+    if (error || !updated) {
+      alert(`Error: ${error ?? 'no post returned'}`)
+      setMarking(false)
+      return
+    }
+    setPost(updated)
     setMarking(false)
   }
 
