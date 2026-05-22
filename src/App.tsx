@@ -10,6 +10,7 @@ import Review from './pages/Review'
 import ReviewDetail from './pages/ReviewDetail'
 import Onboarding from './pages/Onboarding'
 import OnboardingAudit from './pages/OnboardingAudit'
+import LinkedInScore from './pages/LinkedInScore'
 import Clients from './pages/Clients'
 import Calendar from './pages/Calendar'
 import Library from './pages/Library'
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="/login" element={<LoginGuard />} />
           <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/onboarding/audit/:orgId" element={<OnboardingAudit />} />
+          <Route path="/linkedin-score/:orgId" element={<LinkedInScore />} />
           <Route path="/" element={<Layout />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard"  element={<Dashboard />} />

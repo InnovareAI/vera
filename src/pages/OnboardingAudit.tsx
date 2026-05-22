@@ -25,7 +25,7 @@ type Phase = 'preflight' | 'awaiting_unipile' | 'connecting_unipile' | 'connecti
 export default function OnboardingAudit() {
   const { orgId } = useParams<{ orgId: string }>()
   const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
+  const [searchParams] = useSearchParams()
   const [phase, setPhase] = useState<Phase>('preflight')
   const [channels, setChannels] = useState<ChannelsLoaded['channels']>([])
   const [unipileConnected, setUnipileConnected] = useState(false)
@@ -41,15 +41,16 @@ export default function OnboardingAudit() {
     let cancelled = false
 
     async function preflight() {
-      // 1. If callback from Unipile, persist the account_id
+      // 1. If callback from Unipile, persist the account_id and route to the
+      //    mandatory LinkedIn-score step before the voice audit.
       const unipileStatus = searchParams.get('unipile_status')
       const accountId = searchParams.get('account_id')
       if (unipileStatus === 'success' && accountId) {
         await supabase.from('organisations')
           .update({ unipile_account_id: accountId, unipile_connected_at: new Date().toISOString() })
           .eq('id', orgId)
-        // Clean the URL so a refresh doesn't reprocess
-        setSearchParams({}, { replace: true })
+        navigate(`/linkedin-score/${orgId}`, { replace: true })
+        return
       }
       if (unipileStatus === 'error') {
         if (!cancelled) setError('LinkedIn connection was cancelled or failed.')
