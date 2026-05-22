@@ -70,15 +70,31 @@ export default function Skills() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  useEffect(() => { fetchSkills() }, [])
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null)
+  const [activeOrgName, setActiveOrgName] = useState<string | null>(null)
 
-  async function fetchSkills() {
+  useEffect(() => {
+    // Resolve the active org from the most recent audit (same convention used
+    // on the Dashboard until proper auth lands). Without an active org, new
+    // skills land as global (org_id NULL).
+    supabase.from('linkedin_audits').select('org_id, created_at').order('created_at', { ascending: false }).limit(1)
+      .then(({ data }) => {
+        const oid = (data?.[0]?.org_id as string | undefined) ?? null
+        if (!oid) { fetchSkills(null); return }
+        setActiveOrgId(oid)
+        supabase.from('organisations').select('name').eq('id', oid).maybeSingle()
+          .then(({ data: org }) => setActiveOrgName((org?.name as string) ?? null))
+        fetchSkills(oid)
+      })
+  }, [])
+
+  async function fetchSkills(orgId: string | null) {
     setLoading(true)
-    const { data } = await supabase
-      .from('skills')
-      .select('*')
-      .order('sort_order')
-      .order('name')
+    // Show global (org_id null) skills AND skills for the active org.
+    const q = supabase.from('skills').select('*').order('sort_order').order('name')
+    const { data } = orgId
+      ? await q.or(`org_id.is.null,org_id.eq.${orgId}`)
+      : await q.is('org_id', null)
     setSkills(data ?? [])
     setLoading(false)
   }
@@ -92,6 +108,7 @@ export default function Skills() {
   async function forkSkill(skill: Skill) {
     const { data } = await supabase.from('skills').insert({
       parent_id: skill.id,
+      org_id: activeOrgId,
       type: skill.type,
       name: `${skill.name} (custom)`,
       description: skill.description,
@@ -146,6 +163,7 @@ export default function Skills() {
       tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
       is_system: false,
       is_active: true,
+      org_id: editingId ? undefined : activeOrgId,  // only set org_id on insert; preserve on update
     }
 
     if (editingId) {
@@ -179,7 +197,10 @@ export default function Skills() {
           </div>
           <div>
             <h1 className="text-sm font-semibold text-gray-900">Skills</h1>
-            <p className="text-xs text-gray-400">Prompt modules injected into agents at runtime</p>
+            <p className="text-xs text-gray-400">
+              Prompt modules injected into agents at runtime
+              {activeOrgName && <span className="ml-1">· editing for <span className="font-semibold text-gray-600">{activeOrgName}</span></span>}
+            </p>
           </div>
         </div>
         <button
