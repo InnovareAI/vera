@@ -15,6 +15,8 @@ export default function ReviewDetail() {
   const [showFeedback, setShowFeedback] = useState(false)
   const [feedback, setFeedback] = useState('')
   const [copied, setCopied] = useState(false)
+  const [postedUrl, setPostedUrl] = useState('')
+  const [marking, setMarking] = useState(false)
 
   useEffect(() => {
     if (!id) {
@@ -47,6 +49,18 @@ export default function ReviewDetail() {
     }
     setPost({ ...post, ...updates } as Post)
     setAction('done')
+  }
+
+  async function markAsPosted() {
+    if (!post) return
+    const url = postedUrl.trim()
+    if (!url) return
+    setMarking(true)
+    const now = new Date().toISOString()
+    const { error } = await supabase.from('content_posts').update({ posted_at: now, posted_url: url }).eq('id', post.id)
+    if (error) { alert(`Error: ${error.message}`); setMarking(false); return }
+    setPost({ ...post, posted_at: now, posted_url: url } as Post)
+    setMarking(false)
   }
 
   async function copyBundle() {
@@ -82,7 +96,10 @@ export default function ReviewDetail() {
   const composerUrl = 'https://www.linkedin.com/feed/?shareActive=true'
   const compliance = Array.isArray(post.compliance_checks) ? (post.compliance_checks as Array<{ pass?: boolean; label?: string }>) : []
 
-  const statusBadge = isApproved
+  const isPosted = !!post.posted_at
+  const statusBadge = isPosted
+    ? { text: 'Posted', cls: 'bg-violet-50 text-violet-700 border-violet-200' }
+    : isApproved
     ? { text: 'Approved', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
     : isRejected
     ? { text: 'Rejected', cls: 'bg-red-50 text-red-700 border-red-200' }
@@ -186,7 +203,7 @@ export default function ReviewDetail() {
           </>
         )}
 
-        {isApproved && (
+        {isApproved && !isPosted && (
           <>
             <p className="text-sm font-semibold text-emerald-700 mb-1">Approved — ready to post manually</p>
             <p className="text-xs text-gray-500 mb-4">Copy the bundle, open the LinkedIn composer, paste, and publish.</p>
@@ -205,7 +222,31 @@ export default function ReviewDetail() {
                 Media to attach: <a href={post.media_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline break-all">{post.media_url}</a>
               </p>
             )}
+            <div className="mt-5 pt-4 border-t border-gray-100">
+              <p className="text-xs font-semibold text-gray-700 mb-1.5">Once it's live, paste the URL here:</p>
+              <div className="flex gap-2">
+                <input value={postedUrl} onChange={e => setPostedUrl(e.target.value)} placeholder="https://www.linkedin.com/posts/…"
+                  className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:border-violet-400 focus:outline-none" />
+                <button onClick={markAsPosted} disabled={marking || !postedUrl.trim()}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg text-sm font-semibold whitespace-nowrap">
+                  {marking ? 'Saving…' : 'Mark as posted'}
+                </button>
+              </div>
+            </div>
           </>
+        )}
+
+        {isPosted && (
+          <div className="text-sm">
+            <p className="font-semibold text-violet-700 mb-1 inline-flex items-center gap-1.5">
+              <Check className="w-4 h-4" /> Posted on {new Date(post.posted_at!).toLocaleString('en-US', { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+            </p>
+            <p className="text-xs text-gray-500">
+              <a href={post.posted_url ?? '#'} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline break-all">
+                {post.posted_url}
+              </a>
+            </p>
+          </div>
         )}
 
         {isRejected && (

@@ -49,6 +49,8 @@ export interface Post {
   feedback?: string
   compliance_checks?: Record<string, unknown>
   created_by?: string
+  posted_at?: string | null
+  posted_url?: string | null
   created_at: string
   updated_at: string
 }
