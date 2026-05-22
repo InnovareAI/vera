@@ -61,6 +61,7 @@ export default function ReviewDetail() {
   const [copied, setCopied] = useState(false)
   const [postedUrl, setPostedUrl] = useState('')
   const [marking, setMarking] = useState(false)
+  const [emailRecipients, setEmailRecipients] = useState('')
 
   useEffect(() => {
     if (!id) {
@@ -143,6 +144,49 @@ export default function ReviewDetail() {
     if (!post) return
     if (!confirm(`Commit this post to the blog repo? Netlify will rebuild the site automatically (~2 min). The slug will be derived from the title and cannot easily be changed once posted.`)) return
     await callPublishFunction('blog-publish', 'Blog publish')
+  }
+
+  // Send the email post to a recipient list via Postmark. Recipients are a
+  // comma- or newline-separated list pasted into the input above the button.
+  async function sendEmail() {
+    if (!post) return
+    const recipients = emailRecipients
+      .split(/[\s,;]+/)
+      .map(s => s.trim())
+      .filter(Boolean)
+    if (!recipients.length) {
+      alert('Add at least one recipient email address.')
+      return
+    }
+    const preview = recipients.length <= 3 ? recipients.join(', ') : `${recipients.slice(0, 3).join(', ')} +${recipients.length - 3} more`
+    if (!confirm(`Send via Postmark to ${recipients.length} recipient(s)?\n\n${preview}\n\nThis action is immediate and irreversible.`)) return
+    setMarking(true)
+    try {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/email-publish`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ post_id: post.id, recipients }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        alert(`Postmark send failed: ${data.error ?? `HTTP ${res.status}`}`)
+        setMarking(false)
+        return
+      }
+      const summary = `Sent: ${data.sent_count} · Failed: ${data.failed_count}`
+      if (data.failed_count) {
+        alert(`Partial success: ${summary}\n\nFirst failure: ${data.failures?.[0]?.error ?? 'unknown'}`)
+      }
+      const { data: refetched } = await supabase.from('content_posts').select('*').eq('id', post.id).maybeSingle()
+      if (refetched) setPost(refetched as Post)
+    } catch (e) {
+      alert(`Network error: ${e instanceof Error ? e.message : String(e)}`)
+    }
+    setMarking(false)
   }
 
   async function callPublishFunction(fn: string, label: string) {
@@ -322,7 +366,9 @@ export default function ReviewDetail() {
                 ? 'Auto-publish via Unipile, or copy + open the composer to post manually.'
                 : post.channel?.toLowerCase() === 'blog'
                   ? 'Auto-commit to the blog repo (Netlify deploys on push), or copy + post manually.'
-                  : 'Copy the bundle, open the composer, paste, and publish.'}
+                  : post.channel?.toLowerCase() === 'email'
+                    ? 'Send via Postmark to a recipient list, or copy + paste into your own email tool.'
+                    : 'Copy the bundle, open the composer, paste, and publish.'}
             </p>
             {post.channel?.toLowerCase() === 'linkedin' && (
               <button onClick={postToLinkedIn} disabled={marking}
@@ -335,6 +381,19 @@ export default function ReviewDetail() {
                 className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 px-4 mb-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg text-sm font-semibold">
                 {marking ? 'Publishing…' : '📝 Publish to blog (auto-deploys via Netlify)'}
               </button>
+            )}
+            {post.channel?.toLowerCase() === 'email' && (
+              <div className="mb-2 space-y-2">
+                <textarea value={emailRecipients} onChange={e => setEmailRecipients(e.target.value)}
+                  placeholder="recipient@example.com, another@example.com"
+                  rows={2}
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:border-violet-400 focus:outline-none resize-none" />
+                <button onClick={sendEmail} disabled={marking || !emailRecipients.trim()}
+                  className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 px-4 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg text-sm font-semibold">
+                  {marking ? 'Sending…' : '📧 Send via Postmark'}
+                </button>
+                <p className="text-xs text-gray-500">Comma-, semicolon-, or newline-separated. Max 100 per send. Subject is parsed from the first "Subject: …" line of the copy.</p>
+              </div>
             )}
             <div className="flex gap-2">
               <button onClick={copyBundle}
