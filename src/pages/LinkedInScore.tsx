@@ -166,7 +166,7 @@ export default function LinkedInScore() {
         {/* Profile score */}
         <ScoreCard
           title="Profile score"
-          subtitle="Deterministic — 10 sections checked"
+          subtitle={profile ? `Deterministic — ${profile.sections.length} sections checked` : 'Deterministic — every profile field scored'}
           loading={profileLoading}
           score={profile?.score}
           grade={profile?.grade}
