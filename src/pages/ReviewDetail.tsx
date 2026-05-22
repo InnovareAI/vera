@@ -133,9 +133,23 @@ export default function ReviewDetail() {
   async function postToLinkedIn() {
     if (!post) return
     if (!confirm(`Publish this post to LinkedIn via Unipile? This action is immediate and irreversible.`)) return
+    await callPublishFunction('unipile-post', 'Unipile post')
+  }
+
+  // Publish a blog post by committing an MDX file to InnovareAI-Website on
+  // GitHub. Netlify auto-deploys on push (~2 min). Chains back to approval-
+  // webhook with the live URL once the commit lands.
+  async function publishToBlog() {
+    if (!post) return
+    if (!confirm(`Commit this post to the blog repo? Netlify will rebuild the site automatically (~2 min). The slug will be derived from the title and cannot easily be changed once posted.`)) return
+    await callPublishFunction('blog-publish', 'Blog publish')
+  }
+
+  async function callPublishFunction(fn: string, label: string) {
+    if (!post) return
     setMarking(true)
     try {
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/unipile-post`, {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${fn}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -146,12 +160,12 @@ export default function ReviewDetail() {
       })
       const data = await res.json()
       if (!res.ok) {
-        alert(`Unipile post failed: ${data.error ?? `HTTP ${res.status}`}`)
+        alert(`${label} failed: ${data.error ?? `HTTP ${res.status}`}`)
         setMarking(false)
         return
       }
-      // unipile-post auto-marks the row posted via approval-webhook; refetch
-      // to pick up the new posted_at / posted_url.
+      // The publish functions auto-mark the row posted via approval-webhook;
+      // refetch to pick up the new posted_at / posted_url.
       const { data: refetched } = await supabase.from('content_posts').select('*').eq('id', post.id).maybeSingle()
       if (refetched) setPost(refetched as Post)
     } catch (e) {
@@ -306,12 +320,20 @@ export default function ReviewDetail() {
             <p className="text-xs text-gray-500 mb-4">
               {post.channel?.toLowerCase() === 'linkedin'
                 ? 'Auto-publish via Unipile, or copy + open the composer to post manually.'
-                : 'Copy the bundle, open the composer, paste, and publish.'}
+                : post.channel?.toLowerCase() === 'blog'
+                  ? 'Auto-commit to the blog repo (Netlify deploys on push), or copy + post manually.'
+                  : 'Copy the bundle, open the composer, paste, and publish.'}
             </p>
             {post.channel?.toLowerCase() === 'linkedin' && (
               <button onClick={postToLinkedIn} disabled={marking}
                 className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 px-4 mb-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg text-sm font-semibold">
                 {marking ? 'Publishing…' : '🚀 Publish to LinkedIn via Unipile'}
+              </button>
+            )}
+            {post.channel?.toLowerCase() === 'blog' && (
+              <button onClick={publishToBlog} disabled={marking}
+                className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 px-4 mb-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg text-sm font-semibold">
+                {marking ? 'Publishing…' : '📝 Publish to blog (auto-deploys via Netlify)'}
               </button>
             )}
             <div className="flex gap-2">
