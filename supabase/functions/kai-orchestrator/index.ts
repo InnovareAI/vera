@@ -17,19 +17,39 @@ const FORMAT_LABELS: Record<string, string> = {
   case_study: 'Case Study', post: 'Post', article: 'Article', newsletter: 'Newsletter',
 }
 
-async function braveSearch(query: string): Promise<string> {
-  const apiKey = Deno.env.get('BRAVE_SEARCH_API_KEY')
-  if (!apiKey) return '(Brave Search not configured — skipping research)'
+// Web research via Perplexity Sonar through OpenRouter: single call returns
+// search + synthesis + citations. Replaces the previous Brave+Claude two-step.
+async function perplexityResearch(query: string): Promise<{ findings: string; citations: string[] }> {
+  const key = Deno.env.get('OPENROUTER_API_KEY')
+  if (!key) return { findings: '(OPENROUTER_API_KEY not configured — skipping research)', citations: [] }
 
-  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5`
-  const res = await fetch(url, {
-    headers: { 'Accept': 'application/json', 'X-Subscription-Token': apiKey },
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${key}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://content-studio-innovareai.netlify.app',
+      'X-Title': 'KAI Researcher',
+    },
+    body: JSON.stringify({
+      model: 'perplexity/sonar',
+      messages: [{
+        role: 'user',
+        content: `Research the following for a B2B content piece. Return 3-5 concise bullet points with specific stats, dates, and source context. Cite sources inline.\n\nQuery: ${query}`,
+      }],
+    }),
+    signal: AbortSignal.timeout(30_000),
   })
-  if (!res.ok) return `(Brave Search error: ${res.status})`
-
-  const data = await res.json()
-  const results = (data?.web?.results ?? []) as Array<{ title: string; description: string; url: string }>
-  return results.map((r, i) => `[${i + 1}] ${r.title}\n${r.description}\n${r.url}`).join('\n\n')
+  if (!res.ok) {
+    const errText = await res.text()
+    return { findings: `(Sonar error ${res.status}: ${errText.slice(0, 150)})`, citations: [] }
+  }
+  const data = await res.json() as {
+    choices?: Array<{ message?: { content?: string } }>
+    citations?: string[]
+  }
+  const content = data.choices?.[0]?.message?.content ?? ''
+  return { findings: content, citations: data.citations ?? [] }
 }
 
 Deno.serve(async (req) => {
@@ -108,12 +128,16 @@ Output exactly this JSON structure:
   "run_seo": false,
   "target_keywords": ["keyword1", "keyword2"],
   "run_persona_adapter": false,
-  "persona_detail": "detailed description of the specific persona's pain points and goals"
+  "persona_detail": "detailed description of the specific persona's pain points and goals",
+  "run_image_designer": false,
+  "image_prompt": "concrete visual brief — composition, style, mood, palette"
 }
 
 Set run_researcher to true when data, stats, recent news, or supporting evidence would strengthen the content.
 Set run_seo to true only for blog posts or long-form content where SEO matters.
-Set run_persona_adapter to true when the brief specifies a very specific persona (e.g. a named job title, industry, or company type).`,
+Set run_persona_adapter to true when the brief specifies a very specific persona (e.g. a named job title, industry, or company type).
+Set run_image_designer to true when an image, illustration, or visual would meaningfully add to the post (default true for: Instagram, Image post, Carousel, blog hero; default false for: text-only LinkedIn, tweets, emails).
+When run_image_designer is true, populate image_prompt with a concrete 1-2 sentence visual brief (composition, style, mood, palette). NEVER include text or wordmarks in the image.`,
           messages: [{ role: 'user', content: prompt }],
         })
 
@@ -148,29 +172,18 @@ Set run_persona_adapter to true when the brief specifies a very specific persona
         // ── STEP 3: RESEARCHER (conditional) ─────────────────────────────────
         let researchFindings = ''
         const agentsRun: Record<string, boolean> = {
-          researcher: false, seo: false, persona_adapter: false,
+          researcher: false, seo: false, persona_adapter: false, image_designer: false,
         }
+        let generatedImageUrl: string | null = null
 
         if (strategy.run_researcher && strategy.research_query) {
-          send('Researcher', 'Searching the web…', false)
-          const rawResults = await braveSearch(strategy.research_query as string)
-
-          let researchText = ''
-          const researchStream = anthropic.messages.stream({
-            model: 'claude-haiku-4-5',
-            max_tokens: 512,
-            system: `You are a research assistant. Synthesise the following web search results into 3-5 concise bullet points of key facts, stats, or insights that would strengthen a piece of content. Be specific — include numbers, dates, and source context where available. Output only the bullet points.`,
-            messages: [{ role: 'user', content: `Search query: ${strategy.research_query}\n\nResults:\n${rawResults}` }],
-          })
-
-          for await (const event of researchStream) {
-            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-              researchText += event.delta.text
-              send('Researcher', researchText, false)
-            }
-          }
-          send('Researcher', researchText, true)
-          researchFindings = researchText
+          send('Researcher', 'Searching the web via Perplexity Sonar…', false)
+          const { findings, citations } = await perplexityResearch(strategy.research_query as string)
+          const withCitations = citations.length
+            ? `${findings}\n\nSources:\n${citations.slice(0, 5).map((c, i) => `[${i + 1}] ${c}`).join('\n')}`
+            : findings
+          send('Researcher', withCitations, true)
+          researchFindings = withCitations
           agentsRun.researcher = true
           await delay(300)
         }
@@ -283,6 +296,34 @@ Output the rewritten content only — no labels, no explanation.`,
           await delay(300)
         }
 
+        // ── STEP 7b: IMAGE DESIGNER (parallel with Brand Guard + Compliance) ─
+        // Fire-and-store: kick off image gen here, await right before Publisher.
+        // FAL Seedream takes ~10-12s; Brand Guard + Compliance together take ~20s,
+        // so image arrives "for free" without adding to the critical path.
+        let imagePromise: Promise<{ url: string | null; error?: string }> | null = null
+        if (strategy.run_image_designer && strategy.image_prompt) {
+          send('Image Designer', `Generating image via FAL Seedream V4…`, false)
+          imagePromise = (async () => {
+            try {
+              const r = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-image`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+                  'apikey': Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+                },
+                body: JSON.stringify({ prompt: strategy.image_prompt as string, model: 'seedream' }),
+                signal: AbortSignal.timeout(60_000),
+              })
+              const d = await r.json() as { images?: Array<{ url: string }>; error?: string }
+              if (d.error) return { url: null, error: d.error }
+              return { url: d.images?.[0]?.url ?? null }
+            } catch (e) {
+              return { url: null, error: e instanceof Error ? e.message : String(e) }
+            }
+          })()
+        }
+
         // ── STEP 8: BRAND GUARD ───────────────────────────────────────────────
         let brandRules = ''
         if (org_id) {
@@ -369,6 +410,18 @@ followed by a summary of what must be fixed.`,
         send('Compliance', complianceText, true)
         await delay(300)
 
+        // Await the image generation now (kicked off in parallel earlier).
+        if (imagePromise) {
+          const { url, error: imgError } = await imagePromise
+          if (url) {
+            generatedImageUrl = url
+            send('Image Designer', `Generated: ${url}\n\nPrompt: ${strategy.image_prompt}`, true)
+            agentsRun.image_designer = true
+          } else {
+            send('Image Designer', `Skipped — ${imgError ?? 'no image returned'}`, true)
+          }
+        }
+
         // ── STEP 10: PUBLISHER ────────────────────────────────────────────────
         const hashtags = (currentCopy.match(/#\w+/g) ?? []).slice(0, 5)
         const brandApproved = !brandText.includes('✗')
@@ -402,6 +455,9 @@ followed by a summary of what must be fixed.`,
             hashtags,
             status: postStatus,
             model_used: 'claude-sonnet-4-6',
+            media_url: generatedImageUrl,
+            media_type: generatedImageUrl ? 'image' : null,
+            media_metadata: generatedImageUrl ? { image_prompt: strategy.image_prompt ?? null, model: 'fal-ai/bytedance/seedream/v4' } : {},
             compliance_checks: complianceChecks,
             agent_outputs: {
               strategy,
