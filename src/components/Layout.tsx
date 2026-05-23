@@ -15,7 +15,7 @@
 // no second nav. One focused view at a time.
 
 import { useState, useEffect } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   Star, Clock, Sparkles, CheckSquare, Telescope, BookOpen, Plus,
   Calendar, Layers, Zap, Building2, Settings, LogOut, Sun, Moon,
@@ -310,6 +310,7 @@ export default function Layout() {
   const { activeOrg, activeRole } = useOrg()
   const { theme, setTheme } = useTheme()
   const navigate = useNavigate()
+  const location = useLocation()
   const [moreOpen, setMoreOpen] = useState(false)
   const [pinnedCampaigns, setPinnedCampaigns] = useState<Campaign[]>([])
   const [recentPosts, setRecentPosts] = useState<Post[]>([])
@@ -506,8 +507,10 @@ export default function Layout() {
 
       {/* Canvas — wrapped in a route-level boundary so a crash in any single  */}
       {/* page renders a compact fallback without losing the rail.            */}
+      {/* resetKey={pathname} clears the error when the operator navigates    */}
+      {/* away from the crashed page (e.g. picks a different rail item).      */}
       <main className="flex-1 overflow-y-auto" style={{ background: 'var(--paper)' }}>
-        <ErrorBoundary variant="route">
+        <ErrorBoundary variant="route" resetKey={location.pathname}>
           <Outlet />
         </ErrorBoundary>
       </main>

@@ -24,6 +24,11 @@ interface Props {
   children: ReactNode
   variant?: 'page' | 'route'  // full-page (default) vs in-canvas card
   onReset?: () => void        // optional extra callback (e.g. navigate away)
+  // External reset signal. When this value changes while the boundary is in
+  // an error state, we auto-reset. The route-level boundary passes the
+  // location pathname here so navigating to another page clears the error
+  // without the operator having to click "Try again".
+  resetKey?: string | number
 }
 
 interface State {
@@ -43,6 +48,18 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: ErrorInfo): void {
     // Surface for now — Sentry hook lands here next.
     console.error('[ErrorBoundary]', error, info.componentStack)
+  }
+
+  componentDidUpdate(prevProps: Props): void {
+    // Auto-reset when the external signal changes AND we're currently in an
+    // error state. Without the `state.error` guard this would fire on every
+    // prop change, defeating the boundary.
+    if (
+      this.state.error &&
+      prevProps.resetKey !== this.props.resetKey
+    ) {
+      this.reset()
+    }
   }
 
   reset = (): void => {
