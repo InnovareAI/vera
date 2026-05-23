@@ -1,20 +1,81 @@
+/* ─── Atelier — typography ───────────────────────────────────────────────── */
+/* Fraunces (variable serif, opsz + wght axes) for display.                  */
+/* Geist for body. Geist Mono for metadata + numerals.                       */
+/* @imports must precede all other rules per CSS spec.                       */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..900&family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&display=swap');
 @import "tailwindcss";
 
 * { box-sizing: border-box; }
 
+/* ─── Atelier — design tokens ────────────────────────────────────────────── */
+/* Light mode is the editorial paper-and-ink default. Dark mode is the warm- */
+/* inverted slate variant. All accent / surface use the same oxblood family. */
+:root {
+  /* Surfaces */
+  --paper:        #F6F2EA;        /* canvas + rail base */
+  --paper-warm:   #EFEAE0;        /* hover, soft surfaces */
+  --paper-edge:   #E4DED1;        /* hairlines, dividers */
+  --fog:          #DCD6C8;        /* tertiary surface, blocks */
+
+  /* Ink (text) */
+  --ink:          #0E0E0F;        /* primary */
+  --ink-quiet:    #4A463D;        /* secondary */
+  --ghost:        #847E6F;        /* tertiary, metadata */
+  --mist:         #B5AEA0;        /* placeholders, disabled */
+
+  /* Accent — oxblood family */
+  --oxblood:      #7A1F2B;        /* primary actions, active state */
+  --oxblood-deep: #5A1620;        /* hover */
+  --oxblood-soft: #A04050;        /* secondary accent uses */
+  --oxblood-tint: rgba(122, 31, 43, 0.08);
+  --oxblood-rule: rgba(122, 31, 43, 0.20);
+
+  /* Type */
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-body:    'Geist', system-ui, -apple-system, sans-serif;
+  --font-mono:    'Geist Mono', 'SF Mono', ui-monospace, monospace;
+}
+
+body[data-theme="dark"] {
+  --paper:        #16161A;
+  --paper-warm:   #1E1E24;
+  --paper-edge:   #2A2A30;
+  --fog:          #34343C;
+
+  --ink:          #F0ECE3;
+  --ink-quiet:    #C9C3B6;
+  --ghost:        #8A8478;
+  --mist:         #5C574E;
+
+  --oxblood:      #C24556;
+  --oxblood-deep: #D26068;
+  --oxblood-soft: #E07880;
+  --oxblood-tint: rgba(194, 69, 86, 0.14);
+  --oxblood-rule: rgba(194, 69, 86, 0.30);
+}
+
 /* ─── Base (light) ───────────────────────────────────────────────────────── */
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
-  background: #f8f8f7;
-  color: #111827;
+  font-family: var(--font-body);
+  font-feature-settings: 'tnum' 1, 'cv11' 1;  /* tabular figures, single-storey a */
+  background: var(--paper);
+  color: var(--ink);
   transition: background 0.2s, color 0.2s;
 }
 
+/* ─── Atelier — utility classes ──────────────────────────────────────────── */
+.font-display { font-family: var(--font-display); }
+.font-mono    { font-family: var(--font-mono); font-feature-settings: 'tnum' 1; }
+
+/* Hairline rule with the oxblood accent at low opacity — used as rail/canvas */
+/* boundary + section dividers inside the rail.                              */
+.rule-oxblood { background: var(--oxblood-rule); }
+
 /* ─── Dark mode — activates when <body data-theme="dark"> ────────────────── */
 body[data-theme="dark"] {
-  background: #171717;
-  color: #e5e5e5;
+  background: var(--paper);
+  color: var(--ink);
 }
 
 /* Backgrounds */

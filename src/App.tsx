@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
-import { OrgProvider } from './lib/orgContext'
+import { OrgProvider, useOrg } from './lib/orgContext'
 import { ThemeProvider } from './lib/theme'
 import Layout from './components/Layout'
 import Login from './pages/Login'
@@ -33,6 +33,7 @@ export default function App() {
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard"  element={<Dashboard />} />
             <Route path="generate"   element={<Generate />} />
+            <Route path="audit"      element={<AuditRedirect />} />
             <Route path="review"     element={<Review />} />
             <Route path="review/:id" element={<ReviewDetail />} />
             <Route path="clients"    element={<Clients />} />
@@ -56,4 +57,12 @@ function LoginGuard() {
   if (loading) return null
   if (session) return <Navigate to="/dashboard" replace />
   return <Login />
+}
+
+// /audit → /onboarding/audit/:orgId for the active workspace. Keeps the
+// rail nav stable while the audit page itself stays at its existing route.
+function AuditRedirect() {
+  const { activeOrg } = useOrg()
+  if (!activeOrg) return <Navigate to="/onboarding" replace />
+  return <Navigate to={`/onboarding/audit/${activeOrg.id}`} replace />
 }
