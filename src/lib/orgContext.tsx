@@ -44,7 +44,31 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
-    if (!user) { setOrgs([]); setLoading(false); return }
+    // Dev fallback: when there's no authenticated user (local development
+    // without GoTrue wired up), load all orgs directly so the UI can demo
+    // workspaces. Production behaviour unchanged — the dev branch only fires
+    // when running via `vite dev`.
+    if (!user) {
+      if (import.meta.env.DEV) {
+        setLoading(true)
+        supabase
+          .from('organisations')
+          .select('id, name')
+          .limit(10)
+          .then(({ data }) => {
+            const synthetic: OrgMember[] = ((data ?? []) as Array<{ id: string } & Record<string, unknown>>).map(o => ({
+              org_id: o.id,
+              role: 'dev' as const,
+              organisations: o as unknown as OrgMember['organisations'],
+            }))
+            setOrgs(synthetic)
+            setActiveOrgId(prev => prev && synthetic.find(m => m.org_id === prev) ? prev : (localStorage.getItem('activeOrgId') ?? synthetic[0]?.org_id) ?? null)
+            setLoading(false)
+          })
+        return
+      }
+      setOrgs([]); setLoading(false); return
+    }
     setLoading(true)
     supabase
       .from('org_members')
