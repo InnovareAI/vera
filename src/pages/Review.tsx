@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { LayoutList, LayoutGrid, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 
@@ -11,22 +13,68 @@ const PLATFORM_COLORS: Record<string, string> = {
   instagram: 'bg-pink-100 text-pink-700',
   quora: 'bg-red-100 text-red-700',
   facebook: 'bg-indigo-100 text-indigo-700',
+  blog: 'bg-amber-100 text-amber-700',
+  email: 'bg-emerald-100 text-emerald-700',
+  medium: 'bg-gray-100 text-gray-700',
+  reddit: 'bg-orange-100 text-orange-700',
+  substack: 'bg-pink-100 text-pink-700',
 }
 
-const STATUS_TABS = ['Pending Review', 'Approved', 'Scheduled', 'Posted', 'Rejected']
+const STATUS_TABS = ['Pending Review', 'Approved', 'Scheduled', 'Posted', 'Rejected'] as const
+type StatusTab = typeof STATUS_TABS[number]
+type View = 'list' | 'board'
+
+// Status-tab → underlying DB status value. Pending and Posted are special
+// (Pending matches a set of values; Posted is derived from posted_at).
+const TAB_DROP_ACTION: Record<StatusTab, { kind: 'webhook' | 'direct' | 'forbidden'; value?: string; action?: string }> = {
+  'Pending Review': { kind: 'direct',   value: 'Pending Review' },
+  'Approved':       { kind: 'webhook',  action: 'approved' },
+  'Scheduled':      { kind: 'direct',   value: 'Scheduled' },
+  'Posted':         { kind: 'forbidden' },                       // needs posted_url; use detail page
+  'Rejected':       { kind: 'webhook',  action: 'rejected' },
+}
+
+const isPending = (s: string) => ['Pending Review', 'Draft', 'pending', 'changes_requested'].includes(s)
+const isPosted = (p: Post) => !!p.posted_at
+
+function tabFor(post: Post): StatusTab {
+  if (isPosted(post)) return 'Posted'
+  if (post.status === 'Rejected' || post.status === 'rejected') return 'Rejected'
+  if (post.status === 'Scheduled') return 'Scheduled'
+  if (post.status === 'Approved' || post.status === 'approved') return 'Approved'
+  return 'Pending Review'
+}
+
+function relativeTime(iso?: string): string {
+  if (!iso) return ''
+  const d = new Date(iso).getTime()
+  const diff = Date.now() - d
+  const min = Math.round(diff / 60000)
+  if (min < 1) return 'now'
+  if (min < 60) return `${min}m`
+  const hr = Math.round(min / 60)
+  if (hr < 24) return `${hr}h`
+  const day = Math.round(hr / 24)
+  if (day < 7) return `${day}d`
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
 
 export default function Review() {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('Pending Review')
+  const [activeTab, setActiveTab] = useState<StatusTab>('Pending Review')
   const [selected, setSelected] = useState<Post | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
+  const [view, setView] = useState<View>(() => (localStorage.getItem('reviewView') as View) ?? 'list')
+  const [dragOverTab, setDragOverTab] = useState<StatusTab | null>(null)
+  const navigate = useNavigate()
+
+  useEffect(() => { localStorage.setItem('reviewView', view) }, [view])
 
   useEffect(() => {
     supabase.from('content_posts').select('*').order('created_at', { ascending: false }).limit(100)
       .then(({ data }) => { setPosts(data || []); setLoading(false) })
 
-    // Real-time updates
     const channel = supabase.channel('review-posts')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'content_posts' }, payload => {
         if (payload.eventType === 'UPDATE') {
@@ -39,14 +87,14 @@ export default function Review() {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  async function updateStatus(postId: string, newStatus: string) {
+  async function moveToTab(postId: string, targetTab: StatusTab) {
+    const rule = TAB_DROP_ACTION[targetTab]
+    if (rule.kind === 'forbidden') {
+      alert(`Can't drop here — "Posted" needs a live URL. Use the post detail page to mark it posted.`)
+      return
+    }
     setSaving(postId)
-    // Approved/Rejected go through approval-webhook (single hub for status
-    // change + n8n forward + Slack notify). Scheduled/Published flow stays
-    // direct since those are operator-internal state and don't need notify.
-    const webhookActions: Record<string, string> = { 'Approved': 'approved', 'Rejected': 'rejected' }
-    const apiAction = webhookActions[newStatus]
-    if (apiAction) {
+    if (rule.kind === 'webhook' && rule.action) {
       try {
         const res = await fetch(APPROVAL_WEBHOOK_URL, {
           method: 'POST',
@@ -55,65 +103,145 @@ export default function Review() {
             'apikey': SUPABASE_ANON_KEY,
             'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
           },
-          body: JSON.stringify({ post_id: postId, action: apiAction }),
+          body: JSON.stringify({ post_id: postId, action: rule.action }),
         })
         const data = await res.json()
         if (res.ok && data.post) {
           setPosts(prev => prev.map(p => p.id === postId ? data.post as Post : p))
           setSelected(prev => prev?.id === postId ? data.post as Post : prev)
         }
-      } catch { /* swallow — operator will see no state change and can retry */ }
-    } else {
-      const { error } = await supabase.from('content_posts').update({ status: newStatus }).eq('id', postId)
+      } catch { /* operator sees no movement and can retry */ }
+    } else if (rule.kind === 'direct' && rule.value) {
+      const { error } = await supabase.from('content_posts').update({ status: rule.value }).eq('id', postId)
       if (!error) {
-        setPosts(prev => prev.map(p => p.id === postId ? { ...p, status: newStatus } : p))
-        setSelected(prev => prev?.id === postId ? { ...prev, status: newStatus } : prev)
+        setPosts(prev => prev.map(p => p.id === postId ? { ...p, status: rule.value! } : p))
+        setSelected(prev => prev?.id === postId ? { ...prev, status: rule.value! } : prev)
       }
     }
     setSaving(null)
   }
 
-  // Map DB status values → UI tabs
-  const isPending = (s: string) =>
-    ['Pending Review', 'Draft', 'pending', 'changes_requested'].includes(s)
-  const isPosted = (p: Post) => !!p.posted_at
-
-  const filtered = posts.filter(p => {
-    if (activeTab === 'Pending Review') return isPending(p.status) && !isPosted(p)
-    if (activeTab === 'Approved') return (p.status === 'Approved' || p.status === 'approved') && !isPosted(p)
-    if (activeTab === 'Scheduled') return p.status === 'Scheduled' && !isPosted(p)
-    if (activeTab === 'Posted') return isPosted(p)
-    if (activeTab === 'Rejected') return p.status === 'Rejected' || p.status === 'rejected'
-    return p.status === activeTab
-  })
+  const filtered = posts.filter(p => tabFor(p) === activeTab)
 
   const tabCounts = STATUS_TABS.reduce((acc, tab) => {
-    acc[tab] = posts.filter(p => {
-      if (tab === 'Pending Review') return isPending(p.status) && !isPosted(p)
-      if (tab === 'Approved') return (p.status === 'Approved' || p.status === 'approved') && !isPosted(p)
-      if (tab === 'Scheduled') return p.status === 'Scheduled' && !isPosted(p)
-      if (tab === 'Posted') return isPosted(p)
-      if (tab === 'Rejected') return p.status === 'Rejected' || p.status === 'rejected'
-      return p.status === tab
-    }).length
+    acc[tab] = posts.filter(p => tabFor(p) === tab).length
     return acc
-  }, {} as Record<string, number>)
+  }, {} as Record<StatusTab, number>)
 
   return (
-    <div className="flex h-full gap-6">
-      <div className="flex-1 flex flex-col min-w-0">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Review Queue</h1>
-          <p className="text-sm text-gray-500 mt-1">Approve, reject, or schedule generated content</p>
+    <div className="p-6 h-full flex flex-col">
+      {/* Page header */}
+      <div className="flex items-end justify-between mb-5">
+        <div>
+          <h1 className="font-display text-[28px] leading-none tracking-tight" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 144, "wght" 500' }}>
+            Review queue
+          </h1>
+          <p className="text-[12px] uppercase tracking-wider font-mono mt-2" style={{ color: 'var(--ghost)' }}>
+            {posts.length} posts · {tabCounts['Pending Review']} awaiting approval
+          </p>
         </div>
+        {/* View switcher */}
+        <div className="inline-flex p-0.5" style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
+          <button
+            onClick={() => setView('list')}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition-all"
+            style={{
+              background: view === 'list' ? 'var(--paper)' : 'transparent',
+              color: view === 'list' ? 'var(--ink)' : 'var(--ghost)',
+              fontWeight: view === 'list' ? 500 : 400,
+              boxShadow: view === 'list' ? '0 1px 3px rgba(14,14,15,0.06)' : 'none',
+              borderRadius: '2px',
+            }}
+          >
+            <LayoutList size={13} /> List
+          </button>
+          <button
+            onClick={() => setView('board')}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition-all"
+            style={{
+              background: view === 'board' ? 'var(--paper)' : 'transparent',
+              color: view === 'board' ? 'var(--ink)' : 'var(--ghost)',
+              fontWeight: view === 'board' ? 500 : 400,
+              boxShadow: view === 'board' ? '0 1px 3px rgba(14,14,15,0.06)' : 'none',
+              borderRadius: '2px',
+            }}
+          >
+            <LayoutGrid size={13} /> Board
+          </button>
+        </div>
+      </div>
 
-        <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1">
+      {view === 'list' ? (
+        <ListView
+          posts={posts}
+          loading={loading}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          tabCounts={tabCounts}
+          filtered={filtered}
+          selected={selected}
+          setSelected={setSelected}
+          saving={saving}
+          moveToTab={moveToTab}
+        />
+      ) : (
+        <BoardView
+          posts={posts}
+          loading={loading}
+          tabCounts={tabCounts}
+          dragOverTab={dragOverTab}
+          setDragOverTab={setDragOverTab}
+          onMove={moveToTab}
+          onOpen={(p) => navigate(`/review/${p.id}`)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── List view (existing UX, refactored) ─────────────────────────────────
+function ListView({
+  loading, activeTab, setActiveTab, tabCounts, filtered, selected, setSelected, saving, moveToTab,
+}: {
+  posts: Post[]
+  loading: boolean
+  activeTab: StatusTab
+  setActiveTab: (t: StatusTab) => void
+  tabCounts: Record<StatusTab, number>
+  filtered: Post[]
+  selected: Post | null
+  setSelected: (p: Post | null) => void
+  saving: string | null
+  moveToTab: (postId: string, target: StatusTab) => void | Promise<void>
+}) {
+  return (
+    <div className="flex flex-1 gap-6 min-h-0">
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Tabs */}
+        <div className="flex gap-1 mb-4 p-0.5" style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
           {STATUS_TABS.map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${activeTab === tab ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className="flex-1 px-3 py-1.5 text-[12px] transition-all inline-flex items-center justify-center gap-1.5"
+              style={{
+                background: activeTab === tab ? 'var(--paper)' : 'transparent',
+                color: activeTab === tab ? 'var(--ink)' : 'var(--ghost)',
+                fontWeight: activeTab === tab ? 500 : 400,
+                boxShadow: activeTab === tab ? '0 1px 3px rgba(14,14,15,0.06)' : 'none',
+                borderRadius: '2px',
+              }}
+            >
               {tab}
               {tabCounts[tab] > 0 && (
-                <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${activeTab === tab ? 'bg-gray-900 text-white' : 'bg-gray-300 text-gray-600'}`}>{tabCounts[tab]}</span>
+                <span className="text-[10px] font-mono px-1.5"
+                  style={{
+                    background: activeTab === tab ? 'var(--oxblood)' : 'var(--paper-edge)',
+                    color: activeTab === tab ? 'var(--paper)' : 'var(--ink-quiet)',
+                    borderRadius: '2px',
+                  }}>
+                  {tabCounts[tab]}
+                </span>
               )}
             </button>
           ))}
@@ -121,33 +249,44 @@ export default function Review() {
 
         <div className="flex-1 overflow-auto space-y-2">
           {loading ? (
-            <div className="flex items-center justify-center h-40 text-gray-400 text-sm">Loading posts…</div>
+            <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--ghost)' }}>Loading posts…</div>
           ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-40 text-gray-400">
-              <span className="text-3xl mb-2">📭</span>
+            <div className="flex flex-col items-center justify-center h-40" style={{ color: 'var(--ghost)' }}>
+              <span className="font-display text-2xl mb-2" style={{ color: 'var(--mist)' }}>—</span>
               <p className="text-sm">No posts in this queue</p>
             </div>
           ) : filtered.map(post => (
-            <div key={post.id} onClick={() => setSelected(post)}
-              className={`bg-white rounded-xl p-4 cursor-pointer border-2 transition-all hover:border-gray-300 ${selected?.id === post.id ? 'border-violet-400 shadow-sm' : 'border-transparent'}`}>
+            <div
+              key={post.id}
+              onClick={() => setSelected(post)}
+              className="cursor-pointer p-4 transition-all"
+              style={{
+                background: 'var(--paper)',
+                border: `1px solid ${selected?.id === post.id ? 'var(--oxblood)' : 'var(--paper-edge)'}`,
+                borderRadius: '4px',
+                boxShadow: selected?.id === post.id ? '0 1px 3px rgba(122,31,43,0.10)' : 'none',
+              }}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2 mb-1.5">
                     {post.channel && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PLATFORM_COLORS[post.channel.toLowerCase()] || 'bg-gray-100 text-gray-600'}`}>
+                      <span className={`text-[10px] uppercase tracking-wider font-mono px-1.5 py-0.5 ${PLATFORM_COLORS[post.channel.toLowerCase()] || 'bg-gray-100 text-gray-600'}`} style={{ borderRadius: '2px' }}>
                         {post.channel}
                       </span>
                     )}
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                      isPosted(post) ? 'bg-emerald-100 text-emerald-700' :
-                      post.status === 'Approved' ? 'bg-green-100 text-green-700' :
-                      post.status === 'Scheduled' ? 'bg-blue-100 text-blue-700' :
-                      post.status === 'Published' ? 'bg-emerald-100 text-emerald-700' :
-                      post.status === 'Rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-                    }`}>{isPosted(post) ? 'Posted' : post.status}</span>
+                    <span className="text-[10px] uppercase tracking-wider font-mono px-1.5 py-0.5"
+                      style={{
+                        background: isPosted(post) ? 'var(--oxblood-tint)' : 'var(--paper-warm)',
+                        color: isPosted(post) ? 'var(--oxblood)' : 'var(--ink-quiet)',
+                        borderRadius: '2px',
+                      }}>
+                      {isPosted(post) ? 'Posted' : post.status}
+                    </span>
+                    <span className="text-[10px] font-mono ml-auto" style={{ color: 'var(--mist)' }}>{relativeTime(post.created_at)}</span>
                   </div>
-                  <p className="text-sm font-medium text-gray-900 truncate">{post.title || 'Untitled Post'}</p>
-                  <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{post.copy}</p>
+                  <p className="font-display text-[15px] leading-snug truncate" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 24, "wght" 500' }}>{post.title || 'Untitled post'}</p>
+                  <p className="text-[12px] mt-1 line-clamp-2" style={{ color: 'var(--ink-quiet)' }}>{post.copy}</p>
                 </div>
               </div>
             </div>
@@ -155,85 +294,258 @@ export default function Review() {
         </div>
       </div>
 
+      {/* Detail side panel */}
       <div className="w-96 flex-shrink-0">
         {selected ? (
-          <div className="bg-white rounded-2xl border border-gray-200 p-5 sticky top-0">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold text-gray-900 text-sm">Post Preview</h2>
-              <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
-            </div>
-            {selected.channel && (
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PLATFORM_COLORS[selected.channel.toLowerCase()] || 'bg-gray-100 text-gray-600'}`}>
-                {selected.channel}
-              </span>
-            )}
-            <h3 className="font-semibold text-gray-900 mt-3 mb-2">{selected.title || 'Untitled'}</h3>
-            {/* Generated image */}
-            {selected.media_url && (
-              <div className="mb-3 rounded-xl overflow-hidden border border-gray-100">
-                <img src={selected.media_url} alt="Generated visual" className="w-full object-cover max-h-48" />
-              </div>
-            )}
-            <div className="bg-gray-50 rounded-xl p-3 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap max-h-64 overflow-auto mb-4">
-              {selected.copy || 'No content'}
-            </div>
-            {selected.hashtags && selected.hashtags.length > 0 && (
-              <p className="text-xs text-blue-500 mb-4">{selected.hashtags.join(' ')}</p>
-            )}
-            {selected.model_used && (
-              <p className="text-xs text-gray-400 mb-4">Generated by {selected.model_used}</p>
-            )}
-            {isPosted(selected) && (
-              <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs">
-                <div className="font-medium text-emerald-800 mb-1">✓ Posted to {selected.channel}</div>
-                {selected.posted_at && (
-                  <div className="text-emerald-700">
-                    {new Date(selected.posted_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
-                  </div>
-                )}
-                {selected.posted_url && (
-                  <a href={selected.posted_url} target="_blank" rel="noopener noreferrer"
-                    className="mt-1 inline-block text-emerald-700 underline hover:text-emerald-900 truncate max-w-full">
-                    {selected.posted_url}
-                  </a>
-                )}
-              </div>
-            )}
-            <div className="flex flex-col gap-2">
-              {isPending(selected.status) && !isPosted(selected) && (<>
-                <button onClick={() => updateStatus(selected.id, 'Approved')} disabled={saving === selected.id}
-                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
-                  {saving === selected.id ? 'Saving…' : '✓ Approve'}
-                </button>
-                <button onClick={() => updateStatus(selected.id, 'Rejected')} disabled={saving === selected.id}
-                  className="w-full py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
-                  ✕ Reject
-                </button>
-              </>)}
-              {selected.status === 'Approved' && !isPosted(selected) && (
-                <button onClick={() => updateStatus(selected.id, 'Scheduled')} disabled={saving === selected.id}
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
-                  📅 Schedule
-                </button>
-              )}
-              {selected.status === 'Scheduled' && !isPosted(selected) && (
-                <button onClick={() => updateStatus(selected.id, 'Published')} disabled={saving === selected.id}
-                  className="w-full py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
-                  🚀 Mark Published
-                </button>
-              )}
-              <a href={`/review/${selected.id}`}
-                className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium transition-colors text-center">
-                Open detail →
-              </a>
-            </div>
-          </div>
+          <PostDetailPanel post={selected} onClose={() => setSelected(null)} saving={saving} onMove={moveToTab} />
         ) : (
-          <div className="bg-white rounded-2xl border border-gray-200 p-8 flex flex-col items-center justify-center text-center h-64">
-            <span className="text-4xl mb-3">👆</span>
-            <p className="text-sm text-gray-500">Select a post to preview and take action</p>
+          <div className="p-8 flex flex-col items-center justify-center text-center h-64"
+            style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '4px' }}>
+            <span className="font-display text-3xl mb-3" style={{ color: 'var(--mist)' }}>—</span>
+            <p className="text-sm" style={{ color: 'var(--ghost)' }}>Select a post to preview and take action</p>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Board view (Trello-style, 5 columns with HTML5 drag/drop) ───────────
+function BoardView({
+  posts, loading, tabCounts, dragOverTab, setDragOverTab, onMove, onOpen,
+}: {
+  posts: Post[]
+  loading: boolean
+  tabCounts: Record<StatusTab, number>
+  dragOverTab: StatusTab | null
+  setDragOverTab: React.Dispatch<React.SetStateAction<StatusTab | null>>
+  onMove: (postId: string, target: StatusTab) => void | Promise<void>
+  onOpen: (p: Post) => void
+}) {
+  if (loading) {
+    return <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--ghost)' }}>Loading posts…</div>
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>, tab: StatusTab) {
+    e.preventDefault()
+    setDragOverTab(null)
+    const id = e.dataTransfer.getData('text/plain')
+    if (id) onMove(id, tab)
+  }
+
+  return (
+    <div className="flex-1 overflow-x-auto overflow-y-hidden">
+      <div className="flex gap-3 h-full min-w-fit pb-2">
+        {STATUS_TABS.map(tab => {
+          const columnPosts = posts.filter(p => tabFor(p) === tab)
+          const isDragTarget = dragOverTab === tab
+          const isForbidden = TAB_DROP_ACTION[tab].kind === 'forbidden'
+          return (
+            <div
+              key={tab}
+              onDragOver={(e) => {
+                if (isForbidden) return
+                e.preventDefault()
+                setDragOverTab(tab)
+              }}
+              onDragLeave={() => setDragOverTab(curr => curr === tab ? null : curr)}
+              onDrop={(e) => handleDrop(e, tab)}
+              className="flex flex-col flex-shrink-0 w-[280px]"
+              style={{
+                background: isDragTarget ? 'var(--oxblood-tint)' : 'var(--paper-warm)',
+                border: `1px dashed ${isDragTarget ? 'var(--oxblood)' : 'var(--paper-edge)'}`,
+                borderRadius: '4px',
+                transition: 'background 0.15s, border-color 0.15s',
+              }}
+            >
+              {/* Column header */}
+              <div className="px-3 pt-3 pb-2 flex items-center justify-between"
+                style={{ borderBottom: '1px solid var(--paper-edge)' }}>
+                <div className="flex items-center gap-2">
+                  <span className="font-display text-[14px]" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 24, "wght" 500' }}>
+                    {tab}
+                  </span>
+                  <span className="text-[10px] font-mono"
+                    style={{
+                      background: 'var(--paper)',
+                      color: 'var(--ink-quiet)',
+                      padding: '0 5px',
+                      borderRadius: '2px',
+                      border: '1px solid var(--paper-edge)',
+                    }}>
+                    {tabCounts[tab]}
+                  </span>
+                </div>
+                {isForbidden && (
+                  <span className="text-[9px] uppercase tracking-wider font-mono" style={{ color: 'var(--mist)' }}>
+                    no drop
+                  </span>
+                )}
+              </div>
+
+              {/* Cards */}
+              <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                {columnPosts.length === 0 ? (
+                  <div className="text-center py-6">
+                    <span className="font-display text-xl" style={{ color: 'var(--mist)' }}>—</span>
+                  </div>
+                ) : columnPosts.map(post => (
+                  <BoardCard
+                    key={post.id}
+                    post={post}
+                    onOpen={() => onOpen(post)}
+                    draggable={!isForbidden /* Posted column items can be dragged out via detail page anyway */}
+                  />
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function BoardCard({ post, onOpen, draggable }: { post: Post; onOpen: () => void; draggable: boolean }) {
+  const [isDragging, setIsDragging] = useState(false)
+  return (
+    <div
+      draggable={draggable}
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/plain', post.id)
+        e.dataTransfer.effectAllowed = 'move'
+        setIsDragging(true)
+      }}
+      onDragEnd={() => setIsDragging(false)}
+      onClick={onOpen}
+      className="p-3 cursor-pointer group transition-all"
+      style={{
+        background: 'var(--paper)',
+        border: '1px solid var(--paper-edge)',
+        borderRadius: '3px',
+        opacity: isDragging ? 0.4 : 1,
+        cursor: draggable ? 'grab' : 'pointer',
+      }}
+    >
+      <div className="flex items-center gap-1.5 mb-1.5">
+        {post.channel && (
+          <span className={`text-[9px] uppercase tracking-wider font-mono px-1.5 py-0.5 ${PLATFORM_COLORS[post.channel.toLowerCase()] || 'bg-gray-100 text-gray-600'}`} style={{ borderRadius: '2px' }}>
+            {post.channel}
+          </span>
+        )}
+        <span className="text-[9px] font-mono ml-auto" style={{ color: 'var(--mist)' }}>{relativeTime(post.created_at)}</span>
+      </div>
+      {post.media_url && (
+        <div className="mb-2 overflow-hidden" style={{ borderRadius: '2px' }}>
+          <img src={post.media_url} alt="" className="w-full h-20 object-cover" />
+        </div>
+      )}
+      <p className="font-display text-[13px] leading-tight line-clamp-2 mb-1" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 18, "wght" 500' }}>
+        {post.title || 'Untitled post'}
+      </p>
+      <p className="text-[11px] line-clamp-2" style={{ color: 'var(--ink-quiet)' }}>
+        {post.copy?.replace(/^Subject:.+\n+/, '')}
+      </p>
+      {isPosted(post) && post.posted_url && (
+        <a
+          href={post.posted_url}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="block mt-2 text-[10px] font-mono truncate underline"
+          style={{ color: 'var(--oxblood)' }}
+        >
+          {post.posted_url}
+        </a>
+      )}
+    </div>
+  )
+}
+
+// ─── Detail side panel (kept from list view; mostly unchanged for now) ────
+function PostDetailPanel({
+  post, onClose, saving, onMove,
+}: {
+  post: Post
+  onClose: () => void
+  saving: string | null
+  onMove: (postId: string, target: StatusTab) => void | Promise<void>
+}) {
+  return (
+    <div className="sticky top-0 p-5"
+      style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '4px' }}>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-[11px] uppercase tracking-wider font-mono" style={{ color: 'var(--ghost)' }}>— preview</h2>
+        <button onClick={onClose} className="p-1 hover:bg-[var(--paper-warm)] rounded-sm" style={{ color: 'var(--ghost)' }}>
+          <X size={14} />
+        </button>
+      </div>
+      {post.channel && (
+        <span className={`text-[10px] uppercase tracking-wider font-mono px-1.5 py-0.5 ${PLATFORM_COLORS[post.channel.toLowerCase()] || 'bg-gray-100 text-gray-600'}`} style={{ borderRadius: '2px' }}>
+          {post.channel}
+        </span>
+      )}
+      <h3 className="font-display text-[18px] mt-3 mb-3 leading-snug" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 32, "wght" 500' }}>
+        {post.title || 'Untitled'}
+      </h3>
+      {post.media_url && (
+        <div className="mb-3 overflow-hidden" style={{ borderRadius: '3px', border: '1px solid var(--paper-edge)' }}>
+          <img src={post.media_url} alt="" className="w-full object-cover max-h-48" />
+        </div>
+      )}
+      <div className="p-3 text-[13px] leading-relaxed whitespace-pre-wrap max-h-64 overflow-auto mb-4"
+        style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', borderRadius: '3px' }}>
+        {post.copy || 'No content'}
+      </div>
+      {post.hashtags && post.hashtags.length > 0 && (
+        <p className="text-[11px] mb-4 font-mono" style={{ color: 'var(--oxblood-soft)' }}>{post.hashtags.join(' ')}</p>
+      )}
+      {post.model_used && (
+        <p className="text-[10px] uppercase tracking-wider font-mono mb-4" style={{ color: 'var(--mist)' }}>Generated by {post.model_used}</p>
+      )}
+      {isPosted(post) && (
+        <div className="mb-4 p-3 text-[12px]"
+          style={{ background: 'var(--oxblood-tint)', border: '1px solid var(--oxblood-rule)', borderRadius: '3px' }}>
+          <div className="font-medium mb-1" style={{ color: 'var(--oxblood)' }}>✓ Posted to {post.channel}</div>
+          {post.posted_at && (
+            <div className="text-[11px]" style={{ color: 'var(--ink-quiet)' }}>
+              {new Date(post.posted_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+            </div>
+          )}
+          {post.posted_url && (
+            <a href={post.posted_url} target="_blank" rel="noopener noreferrer"
+              className="mt-1 inline-block underline truncate max-w-full text-[11px] font-mono"
+              style={{ color: 'var(--oxblood)' }}>
+              {post.posted_url}
+            </a>
+          )}
+        </div>
+      )}
+      <div className="flex flex-col gap-2">
+        {isPending(post.status) && !isPosted(post) && (<>
+          <button onClick={() => onMove(post.id, 'Approved')} disabled={saving === post.id}
+            className="w-full py-2 text-[13px] font-medium transition-colors disabled:opacity-50"
+            style={{ background: 'var(--oxblood)', color: 'var(--paper)', borderRadius: '3px' }}>
+            {saving === post.id ? 'Saving…' : '✓ Approve'}
+          </button>
+          <button onClick={() => onMove(post.id, 'Rejected')} disabled={saving === post.id}
+            className="w-full py-2 text-[13px] transition-colors disabled:opacity-50"
+            style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
+            ✕ Reject
+          </button>
+        </>)}
+        {post.status === 'Approved' && !isPosted(post) && (
+          <button onClick={() => onMove(post.id, 'Scheduled')} disabled={saving === post.id}
+            className="w-full py-2 text-[13px] font-medium transition-colors disabled:opacity-50"
+            style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '3px' }}>
+            📅 Schedule
+          </button>
+        )}
+        <a href={`/review/${post.id}`}
+          className="w-full py-2 text-[13px] text-center transition-colors"
+          style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
+          Open detail →
+        </a>
       </div>
     </div>
   )
