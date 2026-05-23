@@ -70,9 +70,9 @@ export default function LinkedInScore() {
       void supabase.rpc('jsonb_set_settings_brew_principles', { p_org_id: orgId, p_principles: enabledPrinciples }).then(({ error }) => {
         // RPC may not exist yet — fall back to direct merge
         if (error) {
-          supabase.from('organisations').select('settings').eq('id', orgId).maybeSingle().then(({ data }) => {
+          supabase.from('organizations').select('settings').eq('id', orgId).maybeSingle().then(({ data }) => {
             const settings = { ...((data?.settings as Record<string, unknown>) ?? {}), brew_principles: enabledPrinciples }
-            supabase.from('organisations').update({ settings }).eq('id', orgId)
+            supabase.from('organizations').update({ settings }).eq('id', orgId)
           })
         }
       })
@@ -142,7 +142,7 @@ export default function LinkedInScore() {
     async function load() {
       // 1. Load org toggle settings (if set, override localStorage)
       const { data: org } = await supabase
-        .from('organisations')
+        .from('organizations')
         .select('settings')
         .eq('id', orgId!)
         .maybeSingle()

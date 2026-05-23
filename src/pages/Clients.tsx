@@ -20,7 +20,7 @@ export default function Clients() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    supabase.from('organisations').select('*').order('created_at', { ascending: false })
+    supabase.from('organizations').select('*').order('created_at', { ascending: false })
       .then(({ data }) => { setClients(data || []); setLoading(false) })
   }, [])
 
@@ -28,7 +28,7 @@ export default function Clients() {
     if (!form.name.trim()) return
     setSaving(true)
     const slug = form.slug || form.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-    const { data, error } = await supabase.from('organisations').insert({ ...form, slug, plan: 'starter' }).select().single()
+    const { data, error } = await supabase.from('organizations').insert({ ...form, slug, plan: 'starter' }).select().single()
     if (!error && data) {
       setClients(prev => [data, ...prev])
       setForm({ name: '', industry: '', website: '', slug: '' })

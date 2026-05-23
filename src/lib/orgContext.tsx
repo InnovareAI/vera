@@ -15,7 +15,7 @@ export interface OrgInfo {
 interface OrgMember {
   org_id: string
   role: string
-  organisations: OrgInfo
+  organizations: OrgInfo
 }
 
 interface OrgContextType {
@@ -52,14 +52,14 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       if (import.meta.env.DEV) {
         setLoading(true)
         supabase
-          .from('organisations')
+          .from('organizations')
           .select('id, name')
           .limit(10)
           .then(({ data }) => {
             const synthetic: OrgMember[] = ((data ?? []) as Array<{ id: string } & Record<string, unknown>>).map(o => ({
               org_id: o.id,
               role: 'dev' as const,
-              organisations: o as unknown as OrgMember['organisations'],
+              organizations: o as unknown as OrgMember['organizations'],
             }))
             setOrgs(synthetic)
             setActiveOrgId(prev => prev && synthetic.find(m => m.org_id === prev) ? prev : (localStorage.getItem('activeOrgId') ?? synthetic[0]?.org_id) ?? null)
@@ -72,7 +72,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     setLoading(true)
     supabase
       .from('org_members')
-      .select('org_id, role, organisations(id, name, slug, org_type, logo_url, plan)')
+      .select('org_id, role, organizations(id, name, slug, org_type, logo_url, plan)')
       .eq('user_id', user.id)
       .then(({ data }) => {
         const members = (data as unknown as OrgMember[]) || []
@@ -95,7 +95,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   }
 
   const activeMember = orgs.find(o => o.org_id === activeOrgId) ?? orgs[0]
-  const activeOrg = activeMember?.organisations ?? null
+  const activeOrg = activeMember?.organizations ?? null
   const activeRole = activeMember?.role ?? null
 
   return (

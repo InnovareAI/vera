@@ -34,7 +34,7 @@ function WorkspaceTab() {
 
   useEffect(() => {
     if (!activeOrg) return
-    supabase.from('organisations').select('*').eq('id', activeOrg.id).single()
+    supabase.from('organizations').select('*').eq('id', activeOrg.id).single()
       .then(({ data }) => {
         if (data) setForm({
           name:      data.name ?? '',
@@ -49,7 +49,7 @@ function WorkspaceTab() {
   async function handleSave() {
     if (!activeOrg) return
     setSaving(true)
-    await supabase.from('organisations').update(form).eq('id', activeOrg.id)
+    await supabase.from('organizations').update(form).eq('id', activeOrg.id)
     setSaving(false)
     setSaved(true)
     refetch()

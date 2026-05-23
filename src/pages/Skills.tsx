@@ -82,7 +82,7 @@ export default function Skills() {
         const oid = (data?.[0]?.org_id as string | undefined) ?? null
         if (!oid) { fetchSkills(null); return }
         setActiveOrgId(oid)
-        supabase.from('organisations').select('name').eq('id', oid).maybeSingle()
+        supabase.from('organizations').select('name').eq('id', oid).maybeSingle()
           .then(({ data: org }) => setActiveOrgName((org?.name as string) ?? null))
         fetchSkills(oid)
       })

@@ -27,7 +27,7 @@ export default function Agency() {
   useEffect(() => {
     if (!activeOrg) return
     // Fetch all client orgs that have this agency as their agency_id
-    supabase.from('organisations')
+    supabase.from('organizations')
       .select('*')
       .eq('agency_id', activeOrg.id)
       .then(({ data }) => { setClients(data || []); setLoading(false) })
@@ -39,7 +39,7 @@ export default function Agency() {
 
     const slug = newForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 
-    const { data, error } = await supabase.from('organisations').insert({
+    const { data, error } = await supabase.from('organizations').insert({
       name: newForm.name.trim(),
       slug,
       plan: 'starter',

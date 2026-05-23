@@ -38,7 +38,7 @@ export default function Dashboard() {
     const forOrg = latest.filter(r => r.org_id === orgId)
     const profile = forOrg.find(r => r.kind === 'profile')
     const brew    = forOrg.find(r => r.kind === 'brew360')
-    const { data: org } = await supabase.from('organisations').select('name').eq('id', orgId).maybeSingle()
+    const { data: org } = await supabase.from('organizations').select('name').eq('id', orgId).maybeSingle()
     const lastRun = [profile?.created_at, brew?.created_at].filter(Boolean).sort().reverse()[0] as string | undefined
     setAudit({
       org_id: orgId,

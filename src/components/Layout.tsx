@@ -53,7 +53,7 @@ function WorkspaceSwitcher() {
   const [filter, setFilter] = useState('')
 
   const matches = orgs.filter(m =>
-    m.organisations.name.toLowerCase().includes(filter.toLowerCase()),
+    m.organizations.name.toLowerCase().includes(filter.toLowerCase()),
   )
 
   return (
@@ -124,10 +124,10 @@ function WorkspaceSwitcher() {
                       borderRadius: 'var(--radius-sm)',
                     }}
                   >
-                    {m.organisations.name.slice(0, 1).toUpperCase()}
+                    {m.organizations.name.slice(0, 1).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-[13px] truncate" style={{ color: 'var(--ink)' }}>{m.organisations.name}</div>
+                    <div className="text-[13px] truncate" style={{ color: 'var(--ink)' }}>{m.organizations.name}</div>
                     <div className="text-[11px] truncate capitalize" style={{ color: 'var(--ghost)' }}>{m.role}</div>
                   </div>
                   {m.org_id === activeOrg?.id && (

@@ -117,7 +117,7 @@ export default function Onboarding() {
 
     // 1) Create the org
     const { data: org, error: orgErr } = await supabase
-      .from('organisations')
+      .from('organizations')
       .insert({ name, slug: `${slugify(name)}-${Math.random().toString(36).slice(2, 6)}`, website })
       .select('id')
       .single()

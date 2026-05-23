@@ -57,7 +57,7 @@ export default function OnboardingAudit() {
       const unipileStatus = searchParams.get('unipile_status')
       const accountId = searchParams.get('account_id')
       if (unipileStatus === 'success' && accountId) {
-        await supabase.from('organisations')
+        await supabase.from('organizations')
           .update({ unipile_account_id: accountId, unipile_connected_at: new Date().toISOString() })
           .eq('id', orgId)
         navigate(`/linkedin-score/${orgId}`, { replace: true })
@@ -69,7 +69,7 @@ export default function OnboardingAudit() {
 
       // 2. Load org + channels
       const [{ data: org }, { data: chs }] = await Promise.all([
-        supabase.from('organisations').select('unipile_account_id').eq('id', orgId).maybeSingle(),
+        supabase.from('organizations').select('unipile_account_id').eq('id', orgId).maybeSingle(),
         supabase.from('channel_profiles').select('channel, url').eq('org_id', orgId).eq('is_active', true),
       ])
       if (cancelled) return
