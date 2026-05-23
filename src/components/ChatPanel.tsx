@@ -1,16 +1,20 @@
-// VERA permanent chat — right rail across the entire app.
+// VERA chat — bottom dock. Chat is the primary control surface; everything
+// else is context above it.
 //
-// Layout: 380px expanded / 48px collapsed. Always visible on authenticated
-// pages. ⌘J focuses composer from anywhere.
+// Three modes (cycle via header buttons or ⌘\):
+//   - minimized  → 64px composer-only strip
+//   - default    → ~60vh, canvas visible above
+//   - fullscreen → takes the entire canvas area
 //
-// Backend: streams from /functions/v1/vera-chat (SSE). History is persisted
-// to chat_messages, loaded on mount for the active workspace. The frontend
-// owns the in-flight buffer; the edge function writes user+assistant turns
-// to disk as they happen so refreshes don't lose anything.
+// Backend: SSE stream from /functions/v1/vera-chat, persisted to
+// chat_messages keyed on the active workspace.
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ArrowUp, PanelRightClose, PanelRightOpen, Sparkles, Square } from 'lucide-react'
+import {
+  ArrowUp, ChevronDown, ChevronUp, Maximize2, Minimize2, Square,
+  Sparkles,
+} from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 import { useAuth } from '../lib/auth'
@@ -19,16 +23,23 @@ interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  pending?: boolean  // true while streaming
+  pending?: boolean
 }
 
+type Mode = 'minimized' | 'default' | 'fullscreen'
+
 const HISTORY_LIMIT = 50
+const MODE_HEIGHTS: Record<Mode, string> = {
+  minimized: '64px',
+  default: '60vh',
+  fullscreen: '100%',
+}
 
 export function ChatPanel() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
-  const [collapsed, setCollapsed] = useState(false)
+  const [mode, setMode] = useState<Mode>('default')
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const scrollerRef = useRef<HTMLDivElement | null>(null)
@@ -37,8 +48,7 @@ export function ChatPanel() {
   const { activeOrg } = useOrg()
   const { user } = useAuth()
 
-  // Load thread history when the workspace changes. Newest messages on the
-  // bottom, so we order ascending after fetching the latest N descending.
+  // Load thread on workspace switch
   useEffect(() => {
     if (!activeOrg?.id) {
       setMessages([])
@@ -63,29 +73,33 @@ export function ChatPanel() {
     return () => { cancelled = true }
   }, [activeOrg?.id])
 
-  // Auto-scroll on new content
+  // Auto-scroll
   useEffect(() => {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages])
 
-  // ⌘J / Ctrl+J focuses composer
+  // ⌘J focuses composer; ⌘\ cycles mode
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
+      const key = e.key.toLowerCase()
+      if ((e.metaKey || e.ctrlKey) && key === 'j') {
         e.preventDefault()
-        setCollapsed(false)
+        if (mode === 'minimized') setMode('default')
         setTimeout(() => textareaRef.current?.focus(), 50)
+      } else if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+        e.preventDefault()
+        setMode(m => m === 'minimized' ? 'default' : m === 'default' ? 'fullscreen' : 'minimized')
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [mode])
 
   // Auto-grow textarea
   useEffect(() => {
     if (!textareaRef.current) return
     textareaRef.current.style.height = 'auto'
-    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
+    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 240)}px`
   }, [input])
 
   const send = useCallback(async () => {
@@ -96,12 +110,11 @@ export function ChatPanel() {
     const assistantId = crypto.randomUUID()
     const placeholder: Message = { id: assistantId, role: 'assistant', content: '', pending: true }
 
-    // Optimistic append — both user turn and an empty assistant bubble that
-    // will fill in as SSE chunks arrive.
     const nextMessages = [...messages, userMsg]
     setMessages([...nextMessages, placeholder])
     setInput('')
     setStreaming(true)
+    if (mode === 'minimized') setMode('default')  // surface the reply
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -139,8 +152,6 @@ export function ChatPanel() {
         const { done, value } = await reader.read()
         if (done) break
         buffer += decoder.decode(value, { stream: true })
-
-        // SSE frames: lines starting with `data: ` separated by blank lines.
         let idx
         while ((idx = buffer.indexOf('\n\n')) !== -1) {
           const frame = buffer.slice(0, idx)
@@ -157,20 +168,17 @@ export function ChatPanel() {
             } else if (event.type === 'error') {
               throw new Error(event.message ?? 'stream error')
             }
-            // `done` is a signal, no extra payload needed for UI
           } catch (parseErr) {
             console.warn('vera-chat: bad SSE frame', line, parseErr)
           }
         }
       }
 
-      // Flush final state — strip the pending flag
       setMessages(prev => prev.map(m =>
         m.id === assistantId ? { ...m, pending: false } : m,
       ))
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
-        // User-initiated cancel — keep whatever streamed
         setMessages(prev => prev.map(m =>
           m.id === assistantId ? { ...m, pending: false } : m,
         ))
@@ -186,7 +194,7 @@ export function ChatPanel() {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [input, streaming, activeOrg?.id, messages, user?.id, location.pathname])
+  }, [input, streaming, activeOrg?.id, messages, user?.id, location.pathname, mode])
 
   function stop() {
     abortRef.current?.abort()
@@ -199,27 +207,204 @@ export function ChatPanel() {
     }
   }
 
-  // ─── Collapsed (48px rail) ────────────────────────────────────────────────
-  if (collapsed) {
-    return (
-      <aside
-        className="flex-shrink-0 flex flex-col items-center py-3 gap-3"
-        style={{
-          width: 48,
-          background: 'var(--paper-warm)',
-          borderLeft: '1px solid var(--paper-edge)',
-        }}
-      >
-        <button
-          onClick={() => setCollapsed(false)}
-          className="w-8 h-8 flex items-center justify-center hover:bg-[var(--fog)] transition-colors"
-          style={{ borderRadius: 'var(--radius-md)', color: 'var(--ink-quiet)' }}
-          title="Open VERA (⌘J)"
-        >
-          <PanelRightOpen size={15} strokeWidth={1.75} />
-        </button>
+  const isMin = mode === 'minimized'
+  const isFull = mode === 'fullscreen'
+
+  return (
+    <section
+      className="flex-shrink-0 flex flex-col"
+      style={{
+        height: MODE_HEIGHTS[mode],
+        minHeight: MODE_HEIGHTS[mode],
+        maxHeight: MODE_HEIGHTS[mode],
+        background: 'var(--paper-warm)',
+        borderTop: '1px solid var(--paper-edge)',
+        transition: 'height 200ms ease, min-height 200ms ease, max-height 200ms ease',
+      }}
+    >
+      {/* Header — workspace + mode toggle. Hidden in minimized mode (composer is the only thing visible). */}
+      {!isMin && (
         <div
-          className="w-7 h-7 flex items-center justify-center text-[12px] font-semibold"
+          className="px-5 py-2.5 flex items-center gap-3 flex-shrink-0"
+          style={{ borderBottom: '1px solid var(--paper-edge)' }}
+        >
+          <div
+            className="w-6 h-6 flex items-center justify-center text-[11px] font-semibold flex-shrink-0"
+            style={{
+              background: 'var(--ink)',
+              color: 'var(--paper-warm)',
+              borderRadius: 'var(--radius-sm)',
+            }}
+          >
+            V
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[13px] font-medium leading-tight" style={{ color: 'var(--ink)' }}>
+              VERA
+            </div>
+            <div className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--ghost)' }}>
+              {activeOrg?.name ? `${activeOrg.name} · your creative partner` : 'Pick a workspace to start'}
+            </div>
+          </div>
+          <div className="flex items-center gap-0.5">
+            <ModeButton
+              icon={ChevronDown}
+              title="Minimize (⌘\\)"
+              onClick={() => setMode('minimized')}
+            />
+            <ModeButton
+              icon={isFull ? Minimize2 : Maximize2}
+              title={isFull ? 'Default size (⌘\\)' : 'Fullscreen (⌘\\)'}
+              onClick={() => setMode(isFull ? 'default' : 'fullscreen')}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Messages — hidden in minimized mode */}
+      {!isMin && (
+        <div ref={scrollerRef} className="flex-1 overflow-y-auto px-5 py-5">
+          {!historyLoaded ? (
+            <div className="h-full flex items-center justify-center text-[12px]" style={{ color: 'var(--mist)' }}>
+              Loading thread…
+            </div>
+          ) : messages.length === 0 ? (
+            <EmptyState onSuggest={s => { setInput(s); textareaRef.current?.focus() }} />
+          ) : (
+            <div className="max-w-4xl mx-auto space-y-5">
+              {messages.map(m => <MessageBubble key={m.id} message={m} />)}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Composer — always visible, the constant. Larger when chat is big. */}
+      <div
+        className="px-5 py-3 flex-shrink-0"
+        style={!isMin ? { borderTop: '1px solid var(--paper-edge)' } : {}}
+      >
+        <div className="max-w-4xl mx-auto">
+          <div
+            className="flex items-end gap-3 px-4 py-3"
+            style={{
+              background: 'var(--paper)',
+              border: '1px solid var(--paper-edge)',
+              borderRadius: 'var(--radius-lg)',
+              boxShadow: isMin ? '0 -2px 12px -8px rgba(0,0,0,0.08)' : 'none',
+            }}
+          >
+            {isMin && (
+              <button
+                onClick={() => setMode('default')}
+                className="w-7 h-7 flex items-center justify-center flex-shrink-0 hover:bg-[var(--fog)] transition-colors"
+                style={{ borderRadius: 'var(--radius-sm)', color: 'var(--ghost)' }}
+                title="Open VERA (⌘J)"
+              >
+                <ChevronUp size={15} strokeWidth={1.75} />
+              </button>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={onComposerKey}
+              rows={1}
+              placeholder={
+                activeOrg
+                  ? 'Tell VERA what to do — draft a post, summarize the queue, run an audit…'
+                  : 'Pick a workspace to start'
+              }
+              disabled={!activeOrg}
+              className="flex-1 resize-none outline-none bg-transparent text-[14.5px] leading-relaxed disabled:opacity-50 py-1"
+              style={{ color: 'var(--ink)', maxHeight: 240 }}
+            />
+            {streaming ? (
+              <button
+                onClick={stop}
+                className="w-9 h-9 flex items-center justify-center flex-shrink-0 transition-opacity hover:opacity-90"
+                style={{
+                  background: 'var(--ink)',
+                  color: 'var(--paper-warm)',
+                  borderRadius: '50%',
+                }}
+                title="Stop"
+              >
+                <Square size={12} strokeWidth={2.5} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                onClick={send}
+                disabled={!input.trim() || !activeOrg}
+                className="w-9 h-9 flex items-center justify-center flex-shrink-0 transition-opacity disabled:opacity-30 hover:opacity-90"
+                style={{
+                  background: 'var(--ink)',
+                  color: 'var(--paper-warm)',
+                  borderRadius: '50%',
+                }}
+                title="Send (⌘↩)"
+              >
+                <ArrowUp size={16} strokeWidth={2.25} />
+              </button>
+            )}
+          </div>
+          <div className="mt-1.5 px-1 text-[10.5px] flex items-center justify-between" style={{ color: 'var(--mist)' }}>
+            <span>⌘↩ send · ↩ newline · ⌘\ toggle size · ⌘J focus</span>
+            {!isMin && <span className="capitalize">{mode}</span>}
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function ModeButton({
+  icon: Icon, title, onClick,
+}: { icon: React.ElementType; title: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className="w-7 h-7 flex items-center justify-center hover:bg-[var(--fog)] transition-colors"
+      style={{ borderRadius: 'var(--radius-sm)', color: 'var(--ghost)' }}
+    >
+      <Icon size={14} strokeWidth={1.75} />
+    </button>
+  )
+}
+
+// ─── Empty state — bigger, more inviting now that it's the primary surface ─
+function EmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
+  const groups: Array<{ heading: string; items: string[] }> = [
+    {
+      heading: 'Generate',
+      items: [
+        'Draft a LinkedIn post about agentic AI for B2B sales',
+        'Spin up a 5-post campaign on Q3 product launches',
+        'Write a Substack opener about why HITL beats full autonomy',
+      ],
+    },
+    {
+      heading: 'Review & manage',
+      items: [
+        "What's pending review and what should I tackle first?",
+        'Summarize last week — what shipped, what slipped',
+        'Show me the queue for this campaign',
+      ],
+    },
+    {
+      heading: 'Audit & research',
+      items: [
+        'Walk me through our latest brew360 results',
+        'What did competitors publish this week?',
+        "How's our LinkedIn profile score trending?",
+      ],
+    },
+  ]
+  return (
+    <div className="max-w-3xl mx-auto py-8">
+      <div className="text-center mb-8">
+        <div
+          className="w-12 h-12 mx-auto flex items-center justify-center text-[18px] font-semibold mb-4"
           style={{
             background: 'var(--ink)',
             color: 'var(--paper-warm)',
@@ -228,182 +413,53 @@ export function ChatPanel() {
         >
           V
         </div>
-      </aside>
-    )
-  }
-
-  // ─── Expanded panel (380px) ───────────────────────────────────────────────
-  return (
-    <aside
-      className="flex-shrink-0 flex flex-col"
-      style={{
-        width: 380,
-        background: 'var(--paper-warm)',
-        borderLeft: '1px solid var(--paper-edge)',
-      }}
-    >
-      {/* Header */}
-      <div
-        className="px-4 py-3 flex items-center gap-2.5"
-        style={{ borderBottom: '1px solid var(--paper-edge)' }}
-      >
-        <div
-          className="w-6 h-6 flex items-center justify-center text-[11px] font-semibold flex-shrink-0"
-          style={{
-            background: 'var(--ink)',
-            color: 'var(--paper-warm)',
-            borderRadius: 'var(--radius-sm)',
-          }}
-        >
-          V
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-medium leading-tight" style={{ color: 'var(--ink)' }}>
-            VERA
-          </div>
-          <div className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--ghost)' }}>
-            {activeOrg?.name ? `${activeOrg.name} · ⌘J` : 'Pick a workspace · ⌘J'}
-          </div>
-        </div>
-        <button
-          onClick={() => setCollapsed(true)}
-          className="w-7 h-7 flex items-center justify-center hover:bg-[var(--fog)] transition-colors"
-          style={{ borderRadius: 'var(--radius-sm)', color: 'var(--ghost)' }}
-          title="Collapse"
-        >
-          <PanelRightClose size={14} strokeWidth={1.75} />
-        </button>
+        <p className="text-[20px] font-semibold tracking-tight" style={{ color: 'var(--ink)' }}>
+          Hi, I'm VERA.
+        </p>
+        <p className="text-[13.5px] mt-2 max-w-md mx-auto" style={{ color: 'var(--ghost)' }}>
+          Your creative partner. Tell me what you want to write, what to review,
+          or what's worth looking into. I'll handle the rest.
+        </p>
       </div>
-
-      {/* Messages */}
-      <div ref={scrollerRef} className="flex-1 overflow-y-auto px-4 py-4">
-        {!historyLoaded ? (
-          <div className="h-full flex items-center justify-center text-[12px]" style={{ color: 'var(--mist)' }}>
-            Loading thread…
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {groups.map(g => (
+          <div key={g.heading}>
+            <p className="text-[11px] font-medium uppercase tracking-wider mb-2 px-1" style={{ color: 'var(--ghost)' }}>
+              {g.heading}
+            </p>
+            <div className="space-y-1.5">
+              {g.items.map(s => (
+                <button
+                  key={s}
+                  onClick={() => onSuggest(s)}
+                  className="w-full text-left flex items-start gap-2 px-3 py-2 text-[12.5px] leading-snug hover:bg-[var(--fog)] transition-colors"
+                  style={{
+                    background: 'var(--paper)',
+                    border: '1px solid var(--paper-edge)',
+                    borderRadius: 'var(--radius-md)',
+                    color: 'var(--ink-quiet)',
+                  }}
+                >
+                  <Sparkles size={11} strokeWidth={1.75} style={{ color: 'var(--mist)' }} className="flex-shrink-0 mt-0.5" />
+                  <span>{s}</span>
+                </button>
+              ))}
+            </div>
           </div>
-        ) : messages.length === 0 ? (
-          <EmptyState onSuggest={s => { setInput(s); textareaRef.current?.focus() }} />
-        ) : (
-          <div className="space-y-4">
-            {messages.map(m => <MessageBubble key={m.id} message={m} />)}
-          </div>
-        )}
-      </div>
-
-      {/* Composer */}
-      <div className="px-3 pb-3 pt-2" style={{ borderTop: '1px solid var(--paper-edge)' }}>
-        <div
-          className="flex items-end gap-2 px-3 py-2"
-          style={{
-            background: 'var(--paper)',
-            border: '1px solid var(--paper-edge)',
-            borderRadius: 'var(--radius-lg)',
-          }}
-        >
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={onComposerKey}
-            rows={1}
-            placeholder={activeOrg ? 'Ask VERA anything…' : 'Pick a workspace to start'}
-            disabled={!activeOrg}
-            className="flex-1 resize-none outline-none bg-transparent text-[13.5px] leading-relaxed disabled:opacity-50"
-            style={{ color: 'var(--ink)', maxHeight: 200 }}
-          />
-          {streaming ? (
-            <button
-              onClick={stop}
-              className="w-7 h-7 flex items-center justify-center flex-shrink-0 transition-opacity hover:opacity-90"
-              style={{
-                background: 'var(--ink)',
-                color: 'var(--paper-warm)',
-                borderRadius: '50%',
-              }}
-              title="Stop"
-            >
-              <Square size={11} strokeWidth={2.5} fill="currentColor" />
-            </button>
-          ) : (
-            <button
-              onClick={send}
-              disabled={!input.trim() || !activeOrg}
-              className="w-7 h-7 flex items-center justify-center flex-shrink-0 transition-opacity disabled:opacity-30 hover:opacity-90"
-              style={{
-                background: 'var(--ink)',
-                color: 'var(--paper-warm)',
-                borderRadius: '50%',
-              }}
-              title="Send (⌘↩)"
-            >
-              <ArrowUp size={14} strokeWidth={2.25} />
-            </button>
-          )}
-        </div>
-        <div className="mt-1.5 px-1 text-[10.5px]" style={{ color: 'var(--mist)' }}>
-          ⌘↩ to send · ↩ for newline
-        </div>
-      </div>
-    </aside>
-  )
-}
-
-// ─── Empty state ────────────────────────────────────────────────────────────
-function EmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
-  const suggestions = [
-    "What's pending review?",
-    'Summarize this week',
-    'Draft a LinkedIn post about agentic AI',
-  ]
-  return (
-    <div className="h-full flex flex-col items-center justify-center text-center px-4">
-      <div
-        className="w-10 h-10 flex items-center justify-center text-[15px] font-semibold mb-4"
-        style={{
-          background: 'var(--ink)',
-          color: 'var(--paper-warm)',
-          borderRadius: 'var(--radius-md)',
-        }}
-      >
-        V
-      </div>
-      <p className="text-[14px] font-medium mb-1" style={{ color: 'var(--ink)' }}>
-        Hi, I'm VERA.
-      </p>
-      <p className="text-[12.5px] leading-relaxed mb-5 max-w-[260px]" style={{ color: 'var(--ghost)' }}>
-        Your creative partner. Ask me anything about what's in the queue, what
-        to write next, or just bounce ideas.
-      </p>
-      <div className="w-full space-y-1.5">
-        {suggestions.map(s => (
-          <button
-            key={s}
-            onClick={() => onSuggest(s)}
-            className="w-full text-left flex items-center gap-2 px-3 py-2 text-[12.5px] hover:bg-[var(--fog)] transition-colors"
-            style={{
-              background: 'var(--paper)',
-              border: '1px solid var(--paper-edge)',
-              borderRadius: 'var(--radius-md)',
-              color: 'var(--ink-quiet)',
-            }}
-          >
-            <Sparkles size={12} strokeWidth={1.75} style={{ color: 'var(--mist)' }} />
-            <span>{s}</span>
-          </button>
         ))}
       </div>
     </div>
   )
 }
 
-// ─── Message bubble ─────────────────────────────────────────────────────────
+// ─── Message bubble — wider now that chat is the canvas ────────────────────
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === 'user'
   if (isUser) {
     return (
       <div className="flex justify-end">
         <div
-          className="max-w-[85%] px-3 py-2 text-[13.5px] leading-relaxed whitespace-pre-wrap"
+          className="max-w-[75%] px-4 py-2.5 text-[14.5px] leading-relaxed whitespace-pre-wrap"
           style={{
             background: 'var(--fog)',
             color: 'var(--ink)',
@@ -417,9 +473,9 @@ function MessageBubble({ message }: { message: Message }) {
     )
   }
   return (
-    <div className="flex gap-2.5">
+    <div className="flex gap-3">
       <div
-        className="w-6 h-6 flex items-center justify-center text-[11px] font-semibold flex-shrink-0 mt-0.5"
+        className="w-7 h-7 flex items-center justify-center text-[12px] font-semibold flex-shrink-0 mt-0.5"
         style={{
           background: 'var(--ink)',
           color: 'var(--paper-warm)',
@@ -429,7 +485,7 @@ function MessageBubble({ message }: { message: Message }) {
         V
       </div>
       <div
-        className="flex-1 text-[13.5px] leading-relaxed whitespace-pre-wrap"
+        className="flex-1 min-w-0 text-[14.5px] leading-relaxed whitespace-pre-wrap"
         style={{ color: 'var(--ink)' }}
       >
         {message.content || (message.pending && <PendingDots />)}
@@ -439,7 +495,6 @@ function MessageBubble({ message }: { message: Message }) {
   )
 }
 
-// Three pulsing dots while waiting for the first token
 function PendingDots() {
   return (
     <span className="inline-flex gap-1 items-center">
@@ -453,7 +508,7 @@ function PendingDots() {
 function Dot({ delay }: { delay: number }) {
   return (
     <span
-      className="inline-block w-1 h-1 rounded-full"
+      className="inline-block w-1.5 h-1.5 rounded-full"
       style={{
         background: 'var(--mist)',
         animation: 'vera-pulse 1.2s ease-in-out infinite',
@@ -463,11 +518,10 @@ function Dot({ delay }: { delay: number }) {
   )
 }
 
-// Blinking caret tail while still streaming
 function Caret() {
   return (
     <span
-      className="inline-block w-[2px] h-[14px] ml-0.5 align-text-bottom"
+      className="inline-block w-[2px] h-[15px] ml-0.5 align-text-bottom"
       style={{
         background: 'var(--ink)',
         animation: 'vera-pulse 0.9s ease-in-out infinite',

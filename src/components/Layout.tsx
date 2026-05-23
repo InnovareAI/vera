@@ -506,18 +506,17 @@ export default function Layout() {
         </div>
       </aside>
 
-      {/* Canvas — wrapped in a route-level boundary so a crash in any single  */}
-      {/* page renders a compact fallback without losing the rail.            */}
-      {/* resetKey={pathname} clears the error when the operator navigates    */}
-      {/* away from the crashed page (e.g. picks a different rail item).      */}
-      <main className="flex-1 overflow-y-auto min-w-0" style={{ background: 'var(--paper)' }}>
-        <ErrorBoundary variant="route" resetKey={location.pathname}>
-          <Outlet />
-        </ErrorBoundary>
-      </main>
-
-      {/* VERA — permanent chat rail. Always-present surface across the app. */}
-      <ChatPanel />
+      {/* Right side: canvas on top (page context), chat dock on the bottom. */}
+      {/* Chat is the primary control surface — pages above are reference    */}
+      {/* context. Vertical flex stack so chat can claim majority height.    */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        <main className="flex-1 overflow-y-auto min-h-0" style={{ background: 'var(--paper)' }}>
+          <ErrorBoundary variant="route" resetKey={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
+        </main>
+        <ChatPanel />
+      </div>
     </div>
   )
 }
