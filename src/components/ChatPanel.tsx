@@ -13,7 +13,6 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import {
   ArrowUp, ChevronDown, ChevronUp, Maximize2, Minimize2, Square,
-  Sparkles,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -39,7 +38,7 @@ export function ChatPanel() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
-  const [mode, setMode] = useState<Mode>('default')
+  const [mode, setMode] = useState<Mode>('fullscreen')
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const scrollerRef = useRef<HTMLDivElement | null>(null)
@@ -347,9 +346,8 @@ export function ChatPanel() {
               </button>
             )}
           </div>
-          <div className="mt-1.5 px-1 text-[10.5px] flex items-center justify-between" style={{ color: 'var(--mist)' }}>
-            <span>⌘↩ send · ↩ newline · ⌘\ toggle size · ⌘J focus</span>
-            {!isMin && <span className="capitalize">{mode}</span>}
+          <div className="mt-1 px-1 text-[10.5px] text-right" style={{ color: 'var(--mist)' }}>
+            ⌘↩ send · ⌘\ resize
           </div>
         </div>
       </div>
@@ -372,82 +370,23 @@ function ModeButton({
   )
 }
 
-// ─── Empty state — bigger, more inviting now that it's the primary surface ─
-function EmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
-  const groups: Array<{ heading: string; items: string[] }> = [
-    {
-      heading: 'Generate',
-      items: [
-        'Draft a LinkedIn post about agentic AI for B2B sales',
-        'Spin up a 5-post campaign on Q3 product launches',
-        'Write a Substack opener about why HITL beats full autonomy',
-      ],
-    },
-    {
-      heading: 'Review & manage',
-      items: [
-        "What's pending review and what should I tackle first?",
-        'Summarize last week — what shipped, what slipped',
-        'Show me the queue for this campaign',
-      ],
-    },
-    {
-      heading: 'Audit & research',
-      items: [
-        'Walk me through our latest brew360 results',
-        'What did competitors publish this week?',
-        "How's our LinkedIn profile score trending?",
-      ],
-    },
-  ]
+// ─── Empty state — quiet center, one line, nothing competing ───────────────
+function EmptyState({ onSuggest: _onSuggest }: { onSuggest: (text: string) => void }) {
   return (
-    <div className="max-w-3xl mx-auto py-8">
-      <div className="text-center mb-8">
-        <div
-          className="w-12 h-12 mx-auto flex items-center justify-center text-[18px] font-semibold mb-4"
-          style={{
-            background: 'var(--ink)',
-            color: 'var(--paper-warm)',
-            borderRadius: 'var(--radius-md)',
-          }}
-        >
-          V
-        </div>
-        <p className="text-[20px] font-semibold tracking-tight" style={{ color: 'var(--ink)' }}>
-          Hi, I'm VERA.
-        </p>
-        <p className="text-[13.5px] mt-2 max-w-md mx-auto" style={{ color: 'var(--ghost)' }}>
-          Your creative partner. Tell me what you want to write, what to review,
-          or what's worth looking into. I'll handle the rest.
-        </p>
+    <div className="h-full flex flex-col items-center justify-center text-center px-6">
+      <div
+        className="w-10 h-10 flex items-center justify-center text-[15px] font-semibold mb-4"
+        style={{
+          background: 'var(--ink)',
+          color: 'var(--paper-warm)',
+          borderRadius: 'var(--radius-md)',
+        }}
+      >
+        V
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {groups.map(g => (
-          <div key={g.heading}>
-            <p className="text-[11px] font-medium uppercase tracking-wider mb-2 px-1" style={{ color: 'var(--ghost)' }}>
-              {g.heading}
-            </p>
-            <div className="space-y-1.5">
-              {g.items.map(s => (
-                <button
-                  key={s}
-                  onClick={() => onSuggest(s)}
-                  className="w-full text-left flex items-start gap-2 px-3 py-2 text-[12.5px] leading-snug hover:bg-[var(--fog)] transition-colors"
-                  style={{
-                    background: 'var(--paper)',
-                    border: '1px solid var(--paper-edge)',
-                    borderRadius: 'var(--radius-md)',
-                    color: 'var(--ink-quiet)',
-                  }}
-                >
-                  <Sparkles size={11} strokeWidth={1.75} style={{ color: 'var(--mist)' }} className="flex-shrink-0 mt-0.5" />
-                  <span>{s}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+      <p className="text-[18px] font-semibold tracking-tight" style={{ color: 'var(--ink)' }}>
+        What should we work on?
+      </p>
     </div>
   )
 }

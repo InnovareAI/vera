@@ -44,30 +44,27 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
-    // Dev fallback: when there's no authenticated user (local development
-    // without GoTrue wired up), load all orgs directly so the UI can demo
-    // workspaces. Production behaviour unchanged — the dev branch only fires
-    // when running via `vite dev`.
+    // No-auth fallback: load all orgs directly so the UI works without a
+    // session. Was DEV-only before, but auth is deferred per "Internal
+    // first — external later", so production needs the same fallback
+    // until GoTrue lands. Tighten when auth wiring runs.
     if (!user) {
-      if (import.meta.env.DEV) {
-        setLoading(true)
-        supabase
-          .from('organizations')
-          .select('id, name')
-          .limit(10)
-          .then(({ data }) => {
-            const synthetic: OrgMember[] = ((data ?? []) as Array<{ id: string } & Record<string, unknown>>).map(o => ({
-              org_id: o.id,
-              role: 'dev' as const,
-              organizations: o as unknown as OrgMember['organizations'],
-            }))
-            setOrgs(synthetic)
-            setActiveOrgId(prev => prev && synthetic.find(m => m.org_id === prev) ? prev : (localStorage.getItem('activeOrgId') ?? synthetic[0]?.org_id) ?? null)
-            setLoading(false)
-          })
-        return
-      }
-      setOrgs([]); setLoading(false); return
+      setLoading(true)
+      supabase
+        .from('organizations')
+        .select('id, name')
+        .limit(10)
+        .then(({ data }) => {
+          const synthetic: OrgMember[] = ((data ?? []) as Array<{ id: string } & Record<string, unknown>>).map(o => ({
+            org_id: o.id,
+            role: 'dev' as const,
+            organizations: o as unknown as OrgMember['organizations'],
+          }))
+          setOrgs(synthetic)
+          setActiveOrgId(prev => prev && synthetic.find(m => m.org_id === prev) ? prev : (localStorage.getItem('activeOrgId') ?? synthetic[0]?.org_id) ?? null)
+          setLoading(false)
+        })
+      return
     }
     setLoading(true)
     supabase
