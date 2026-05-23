@@ -59,6 +59,7 @@ export interface Campaign {
   id: string
   org_id: string
   name: string
+  theme?: string | null               // narrative anchor, flows into the Strategist
   description?: string
   goal?: string
   status: 'draft' | 'active' | 'paused' | 'completed'
@@ -66,6 +67,8 @@ export interface Campaign {
   end_date?: string
   platforms?: string[]
   post_count: number
+  color?: string                       // 'oxblood' | ... — UI accent
+  is_pinned?: boolean                  // surfaces in the rail's Pinned section
   created_at: string
   updated_at: string
 }

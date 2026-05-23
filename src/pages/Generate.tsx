@@ -1,6 +1,17 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, Loader2 } from 'lucide-react'
+import { Send, Sparkles, Loader2, Layers } from 'lucide-react'
 import { useOrg } from '../lib/orgContext'
+import { supabase } from '../lib/supabase'
+
+interface Campaign {
+  id: string
+  name: string
+  theme: string | null
+  status: string
+  is_pinned: boolean
+  start_date: string | null
+  end_date: string | null
+}
 
 const ORCHESTRATOR_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kai-orchestrator`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -173,6 +184,7 @@ const WELCOME: Message = {
 async function runAgentPipeline(
   prompt: string,
   orgId: string | undefined,
+  campaignId: string | null,
   onChunk: (agent: AgentName, chunk: string, done: boolean) => void
 ) {
   const response = await fetch(ORCHESTRATOR_URL, {
@@ -181,7 +193,7 @@ async function runAgentPipeline(
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
     },
-    body: JSON.stringify({ prompt, org_id: orgId }),
+    body: JSON.stringify({ prompt, org_id: orgId, campaign_id: campaignId }),
   })
 
   if (!response.ok) {
@@ -230,6 +242,33 @@ export default function Generate() {
   const [activeAgents, setActiveAgents] = useState<AgentName[]>(CORE_AGENTS)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
+
+  // Load this org's campaigns. We surface active + planned ones in the picker
+  // (archived/completed are accessible from Library but rarely the target of
+  // a fresh brief).
+  useEffect(() => {
+    if (!activeOrg?.id) { setCampaigns([]); return }
+    supabase
+      .from('campaigns')
+      .select('id, name, theme, status, is_pinned, start_date, end_date')
+      .eq('org_id', activeOrg.id)
+      .in('status', ['active', 'draft', 'planned'])
+      .order('is_pinned', { ascending: false })
+      .order('start_date', { ascending: false, nullsFirst: false })
+      .then(({ data }) => setCampaigns((data as Campaign[]) ?? []))
+  }, [activeOrg?.id])
+
+  // Auto-select the pinned active campaign (the one whose date range contains
+  // today) when nothing is explicitly selected. Operators can clear it.
+  useEffect(() => {
+    if (selectedCampaignId !== null) return
+    const active = campaigns.find(c => c.is_pinned && c.status === 'active')
+    if (active) setSelectedCampaignId(active.id)
+  }, [campaigns, selectedCampaignId])
+
+  const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId) ?? null
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -249,7 +288,7 @@ export default function Generate() {
     let currentId: string | null = null
 
     try {
-      await runAgentPipeline(input, activeOrg?.id, (agent, chunk, done) => {
+      await runAgentPipeline(input, activeOrg?.id, selectedCampaignId, (agent, chunk, done) => {
         // Reveal optional agents as they appear
         if (!CORE_AGENTS.includes(agent)) {
           setActiveAgents(prev => prev.includes(agent) ? prev : [...prev, agent])
@@ -334,6 +373,43 @@ export default function Generate() {
               transition: 'border-color 0.15s, box-shadow 0.15s',
             }}
           >
+            {/* Campaign picker — sits at the top of the composer */}
+            <div className="flex items-center gap-2 px-4 py-2" style={{ borderBottom: '1px solid var(--paper-edge)' }}>
+              <Layers size={12} style={{ color: 'var(--ghost)' }} />
+              <span className="text-[10px] uppercase tracking-[0.16em] font-mono" style={{ color: 'var(--ghost)' }}>
+                Campaign
+              </span>
+              <select
+                value={selectedCampaignId ?? ''}
+                onChange={e => setSelectedCampaignId(e.target.value || null)}
+                disabled={isRunning}
+                className="text-[12px] outline-none disabled:opacity-50 cursor-pointer"
+                style={{
+                  background: 'transparent',
+                  color: 'var(--ink)',
+                  fontFamily: 'var(--font-body)',
+                  border: 'none',
+                  padding: '2px 4px',
+                  borderRadius: '2px',
+                }}
+              >
+                <option value="">— Ad-hoc post (no campaign) —</option>
+                {campaigns.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.is_pinned ? '★ ' : ''}{c.name}{c.status !== 'active' ? ` · ${c.status}` : ''}
+                  </option>
+                ))}
+              </select>
+              {selectedCampaign?.theme && (
+                <span
+                  title={selectedCampaign.theme}
+                  className="ml-auto text-[10px] font-mono truncate max-w-[40%]"
+                  style={{ color: 'var(--oxblood)' }}
+                >
+                  theme: {selectedCampaign.theme.slice(0, 80)}{selectedCampaign.theme.length > 80 ? '…' : ''}
+                </span>
+              )}
+            </div>
             <textarea
               ref={inputRef}
               value={input}

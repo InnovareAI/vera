@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
-  const { prompt, org_id } = await req.json()
+  const { prompt, org_id, campaign_id } = await req.json()
 
   if (!prompt) {
     return new Response(JSON.stringify({ error: 'prompt is required' }), {
@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
       const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
 
       try {
-        // ── STEP 1: Fetch org skills ──────────────────────────────────────────
+        // ── STEP 1: Fetch org skills + (optional) campaign context ──────────
         const skillsQuery = supabase
           .from('skills')
           .select('*')
@@ -104,7 +104,14 @@ Deno.serve(async (req) => {
           skillsQuery.is('org_id', null)
         }
 
-        const { data: skills } = await skillsQuery
+        // Parallel: also fetch the campaign if a brief was tied to one. Theme +
+        // name flow into the Strategist's system prompt so sibling posts in
+        // the same campaign cohere automatically.
+        const campaignQuery = campaign_id
+          ? supabase.from('campaigns').select('name, theme, description, goal, start_date, end_date').eq('id', campaign_id).maybeSingle()
+          : Promise.resolve({ data: null, error: null })
+
+        const [{ data: skills }, { data: campaign }] = await Promise.all([skillsQuery, campaignQuery])
 
         // ── STEP 2: STRATEGIST ────────────────────────────────────────────────
         const strategistSkills = skills?.filter(s => s.injected_into === 'strategist') ?? []
@@ -112,10 +119,24 @@ Deno.serve(async (req) => {
 
         let strategyRaw = ''
 
+        // If this brief is part of a campaign, build a context block that
+        // anchors the Strategist to the campaign's narrative. The theme is
+        // the most important field — it carries the monthly positioning.
+        const campaignContext = campaign ? `
+
+CAMPAIGN CONTEXT — this brief is part of an ongoing campaign. Honour the campaign's narrative; do NOT contradict it or restart positioning from scratch.
+- Campaign: "${campaign.name}"${campaign.start_date ? ` (${campaign.start_date} → ${campaign.end_date ?? 'ongoing'})` : ''}
+${campaign.theme ? `- Theme: ${campaign.theme}` : ''}
+${campaign.goal ? `- Campaign goal: ${campaign.goal}` : ''}
+${campaign.description ? `- Notes: ${campaign.description}` : ''}
+
+Sibling posts in this campaign share this theme. Stay on the narrative arc — don't repeat beats, don't re-explain the core positioning, build on it.` : ''
+
         const strategistStream = anthropic.messages.stream({
           model: 'claude-sonnet-4-6',
           max_tokens: 1024,
           system: `You are KAI's Strategist. Analyse the content brief and output a strategy as valid JSON only — no prose, no markdown fences.
+${campaignContext}
 
 Available skills:
 ${skillList || '(none configured yet)'}
@@ -473,6 +494,7 @@ followed by a summary of what must be fixed.`,
           .from('content_posts')
           .insert({
             org_id: org_id ?? null,
+            campaign_id: campaign_id ?? null,
             title: prompt.slice(0, 100),
             copy: currentCopy,
             channel: platformLabel,

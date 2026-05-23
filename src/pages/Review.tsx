@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LayoutList, LayoutGrid, X } from 'lucide-react'
+import { LayoutList, LayoutGrid, X, Layers } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import type { Post } from '../lib/supabase'
+import { useOrg } from '../lib/orgContext'
+import type { Post, Campaign } from '../lib/supabase'
 
 const APPROVAL_WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approval-webhook`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -67,7 +68,22 @@ export default function Review() {
   const [saving, setSaving] = useState<string | null>(null)
   const [view, setView] = useState<View>(() => (localStorage.getItem('reviewView') as View) ?? 'list')
   const [dragOverTab, setDragOverTab] = useState<StatusTab | null>(null)
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [campaignFilter, setCampaignFilter] = useState<string>('all')   // 'all' | 'adhoc' | <campaign_id>
+  const { activeOrg } = useOrg()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    if (!activeOrg?.id) { setCampaigns([]); return }
+    supabase.from('campaigns')
+      .select('id, name, status, is_pinned, color, theme, start_date, end_date')
+      .eq('org_id', activeOrg.id)
+      .order('is_pinned', { ascending: false })
+      .order('start_date', { ascending: false, nullsFirst: false })
+      .then(({ data }) => setCampaigns((data as Campaign[]) ?? []))
+  }, [activeOrg?.id])
+
+  const campaignsById = new Map(campaigns.map(c => [c.id, c]))
 
   useEffect(() => { localStorage.setItem('reviewView', view) }, [view])
 
@@ -121,25 +137,55 @@ export default function Review() {
     setSaving(null)
   }
 
-  const filtered = posts.filter(p => tabFor(p) === activeTab)
+  // Campaign filter narrows which posts feed into both views. 'all' = show all,
+  // 'adhoc' = only posts NOT tied to any campaign, otherwise = specific campaign.
+  const inFilter = (p: Post) => {
+    if (campaignFilter === 'all')   return true
+    if (campaignFilter === 'adhoc') return !p.campaign_id
+    return p.campaign_id === campaignFilter
+  }
+  const scoped = posts.filter(inFilter)
+  const filtered = scoped.filter(p => tabFor(p) === activeTab)
 
   const tabCounts = STATUS_TABS.reduce((acc, tab) => {
-    acc[tab] = posts.filter(p => tabFor(p) === tab).length
+    acc[tab] = scoped.filter(p => tabFor(p) === tab).length
     return acc
   }, {} as Record<StatusTab, number>)
 
   return (
     <div className="p-6 h-full flex flex-col">
       {/* Page header */}
-      <div className="flex items-end justify-between mb-5">
+      <div className="flex items-end justify-between mb-5 gap-4">
         <div>
           <h1 className="font-display text-[28px] leading-none tracking-tight" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 144, "wght" 500' }}>
             Review queue
           </h1>
           <p className="text-[12px] uppercase tracking-wider font-mono mt-2" style={{ color: 'var(--ghost)' }}>
-            {posts.length} posts · {tabCounts['Pending Review']} awaiting approval
+            {scoped.length} of {posts.length} posts · {tabCounts['Pending Review']} awaiting approval
           </p>
         </div>
+        <div className="flex items-center gap-3">
+          {/* Campaign filter */}
+          {campaigns.length > 0 && (
+            <div className="inline-flex items-center gap-2 px-3 py-1.5"
+              style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
+              <Layers size={12} style={{ color: 'var(--ghost)' }} />
+              <select
+                value={campaignFilter}
+                onChange={e => setCampaignFilter(e.target.value)}
+                className="text-[12px] outline-none cursor-pointer"
+                style={{ background: 'transparent', color: 'var(--ink)', border: 'none', fontFamily: 'var(--font-body)' }}
+              >
+                <option value="all">All campaigns + ad-hoc</option>
+                <option value="adhoc">Ad-hoc only (no campaign)</option>
+                {campaigns.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.is_pinned ? '★ ' : ''}{c.name}{c.status !== 'active' ? ` · ${c.status}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         {/* View switcher */}
         <div className="inline-flex p-0.5" style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
           <button
@@ -169,6 +215,7 @@ export default function Review() {
             <LayoutGrid size={13} /> Board
           </button>
         </div>
+        </div>
       </div>
 
       {view === 'list' ? (
@@ -183,14 +230,16 @@ export default function Review() {
           setSelected={setSelected}
           saving={saving}
           moveToTab={moveToTab}
+          campaignsById={campaignsById}
         />
       ) : (
         <BoardView
-          posts={posts}
+          posts={scoped}
           loading={loading}
           tabCounts={tabCounts}
           dragOverTab={dragOverTab}
           setDragOverTab={setDragOverTab}
+          campaignsById={campaignsById}
           onMove={moveToTab}
           onOpen={(p) => navigate(`/review/${p.id}`)}
         />
@@ -201,7 +250,7 @@ export default function Review() {
 
 // ─── List view (existing UX, refactored) ─────────────────────────────────
 function ListView({
-  loading, activeTab, setActiveTab, tabCounts, filtered, selected, setSelected, saving, moveToTab,
+  loading, activeTab, setActiveTab, tabCounts, filtered, selected, setSelected, saving, moveToTab, campaignsById,
 }: {
   posts: Post[]
   loading: boolean
@@ -213,6 +262,7 @@ function ListView({
   setSelected: (p: Post | null) => void
   saving: string | null
   moveToTab: (postId: string, target: StatusTab) => void | Promise<void>
+  campaignsById: Map<string, Campaign>
 }) {
   return (
     <div className="flex flex-1 gap-6 min-h-0">
@@ -255,42 +305,58 @@ function ListView({
               <span className="font-display text-2xl mb-2" style={{ color: 'var(--mist)' }}>—</span>
               <p className="text-sm">No posts in this queue</p>
             </div>
-          ) : filtered.map(post => (
-            <div
-              key={post.id}
-              onClick={() => setSelected(post)}
-              className="cursor-pointer p-4 transition-all"
-              style={{
-                background: 'var(--paper)',
-                border: `1px solid ${selected?.id === post.id ? 'var(--oxblood)' : 'var(--paper-edge)'}`,
-                borderRadius: '4px',
-                boxShadow: selected?.id === post.id ? '0 1px 3px rgba(122,31,43,0.10)' : 'none',
-              }}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    {post.channel && (
-                      <span className={`text-[10px] uppercase tracking-wider font-mono px-1.5 py-0.5 ${PLATFORM_COLORS[post.channel.toLowerCase()] || 'bg-gray-100 text-gray-600'}`} style={{ borderRadius: '2px' }}>
-                        {post.channel}
+          ) : filtered.map(post => {
+            const campaign = post.campaign_id ? campaignsById.get(post.campaign_id) : null
+            return (
+              <div
+                key={post.id}
+                onClick={() => setSelected(post)}
+                className="cursor-pointer p-4 transition-all relative"
+                style={{
+                  background: 'var(--paper)',
+                  border: `1px solid ${selected?.id === post.id ? 'var(--oxblood)' : 'var(--paper-edge)'}`,
+                  borderRadius: '4px',
+                  boxShadow: selected?.id === post.id ? '0 1px 3px rgba(122,31,43,0.10)' : 'none',
+                }}
+              >
+                {/* Campaign tint — left edge bar */}
+                {campaign && (
+                  <span
+                    className="absolute left-0 top-2 bottom-2 w-[2px]"
+                    style={{ background: 'var(--oxblood)', opacity: 0.6, borderRadius: '0 1px 1px 0' }}
+                    title={`Campaign: ${campaign.name}`}
+                  />
+                )}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      {post.channel && (
+                        <span className={`text-[10px] uppercase tracking-wider font-mono px-1.5 py-0.5 ${PLATFORM_COLORS[post.channel.toLowerCase()] || 'bg-gray-100 text-gray-600'}`} style={{ borderRadius: '2px' }}>
+                          {post.channel}
+                        </span>
+                      )}
+                      <span className="text-[10px] uppercase tracking-wider font-mono px-1.5 py-0.5"
+                        style={{
+                          background: isPosted(post) ? 'var(--oxblood-tint)' : 'var(--paper-warm)',
+                          color: isPosted(post) ? 'var(--oxblood)' : 'var(--ink-quiet)',
+                          borderRadius: '2px',
+                        }}>
+                        {isPosted(post) ? 'Posted' : post.status}
                       </span>
-                    )}
-                    <span className="text-[10px] uppercase tracking-wider font-mono px-1.5 py-0.5"
-                      style={{
-                        background: isPosted(post) ? 'var(--oxblood-tint)' : 'var(--paper-warm)',
-                        color: isPosted(post) ? 'var(--oxblood)' : 'var(--ink-quiet)',
-                        borderRadius: '2px',
-                      }}>
-                      {isPosted(post) ? 'Posted' : post.status}
-                    </span>
-                    <span className="text-[10px] font-mono ml-auto" style={{ color: 'var(--mist)' }}>{relativeTime(post.created_at)}</span>
+                      {campaign && (
+                        <span className="text-[10px] font-mono truncate" style={{ color: 'var(--oxblood)' }} title={campaign.theme || campaign.name}>
+                          · {campaign.name}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-mono ml-auto" style={{ color: 'var(--mist)' }}>{relativeTime(post.created_at)}</span>
+                    </div>
+                    <p className="font-display text-[15px] leading-snug truncate" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 24, "wght" 500' }}>{post.title || 'Untitled post'}</p>
+                    <p className="text-[12px] mt-1 line-clamp-2" style={{ color: 'var(--ink-quiet)' }}>{post.copy}</p>
                   </div>
-                  <p className="font-display text-[15px] leading-snug truncate" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 24, "wght" 500' }}>{post.title || 'Untitled post'}</p>
-                  <p className="text-[12px] mt-1 line-clamp-2" style={{ color: 'var(--ink-quiet)' }}>{post.copy}</p>
                 </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 
@@ -312,7 +378,7 @@ function ListView({
 
 // ─── Board view (Trello-style, 5 columns with HTML5 drag/drop) ───────────
 function BoardView({
-  posts, loading, tabCounts, dragOverTab, setDragOverTab, onMove, onOpen,
+  posts, loading, tabCounts, dragOverTab, setDragOverTab, onMove, onOpen, campaignsById,
 }: {
   posts: Post[]
   loading: boolean
@@ -321,6 +387,7 @@ function BoardView({
   setDragOverTab: React.Dispatch<React.SetStateAction<StatusTab | null>>
   onMove: (postId: string, target: StatusTab) => void | Promise<void>
   onOpen: (p: Post) => void
+  campaignsById: Map<string, Campaign>
 }) {
   if (loading) {
     return <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--ghost)' }}>Loading posts…</div>
@@ -393,6 +460,7 @@ function BoardView({
                   <BoardCard
                     key={post.id}
                     post={post}
+                    campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
                     onOpen={() => onOpen(post)}
                     draggable={!isForbidden /* Posted column items can be dragged out via detail page anyway */}
                   />
@@ -406,7 +474,7 @@ function BoardView({
   )
 }
 
-function BoardCard({ post, onOpen, draggable }: { post: Post; onOpen: () => void; draggable: boolean }) {
+function BoardCard({ post, campaign, onOpen, draggable }: { post: Post; campaign: Campaign | null; onOpen: () => void; draggable: boolean }) {
   const [isDragging, setIsDragging] = useState(false)
   return (
     <div
@@ -418,7 +486,7 @@ function BoardCard({ post, onOpen, draggable }: { post: Post; onOpen: () => void
       }}
       onDragEnd={() => setIsDragging(false)}
       onClick={onOpen}
-      className="p-3 cursor-pointer group transition-all"
+      className="p-3 cursor-pointer group transition-all relative"
       style={{
         background: 'var(--paper)',
         border: '1px solid var(--paper-edge)',
@@ -427,10 +495,23 @@ function BoardCard({ post, onOpen, draggable }: { post: Post; onOpen: () => void
         cursor: draggable ? 'grab' : 'pointer',
       }}
     >
+      {/* Campaign tint — left edge bar */}
+      {campaign && (
+        <span
+          className="absolute left-0 top-1.5 bottom-1.5 w-[2px]"
+          style={{ background: 'var(--oxblood)', opacity: 0.6, borderRadius: '0 1px 1px 0' }}
+          title={`Campaign: ${campaign.name}`}
+        />
+      )}
       <div className="flex items-center gap-1.5 mb-1.5">
         {post.channel && (
           <span className={`text-[9px] uppercase tracking-wider font-mono px-1.5 py-0.5 ${PLATFORM_COLORS[post.channel.toLowerCase()] || 'bg-gray-100 text-gray-600'}`} style={{ borderRadius: '2px' }}>
             {post.channel}
+          </span>
+        )}
+        {campaign && (
+          <span className="text-[9px] font-mono truncate max-w-[120px]" style={{ color: 'var(--oxblood)' }} title={campaign.name}>
+            · {campaign.name.replace(/^[A-Z][a-z]+ \d+ — /, '')}
           </span>
         )}
         <span className="text-[9px] font-mono ml-auto" style={{ color: 'var(--mist)' }}>{relativeTime(post.created_at)}</span>
