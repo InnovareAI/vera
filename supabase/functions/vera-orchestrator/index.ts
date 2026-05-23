@@ -34,8 +34,8 @@ async function perplexityResearch(query: string): Promise<{ findings: string; ci
     headers: {
       'Authorization': `Bearer ${key}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://content-studio-innovareai.netlify.app',
-      'X-Title': 'KAI Researcher',
+      'HTTP-Referer': 'https://vera.innovareai.com',
+      'X-Title': 'VERA Researcher',
     },
     body: JSON.stringify({
       model: 'perplexity/sonar',
