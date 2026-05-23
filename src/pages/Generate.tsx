@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Send, Sparkles, Loader2, Layers } from 'lucide-react'
 import { useOrg } from '../lib/orgContext'
 import { supabase } from '../lib/supabase'
@@ -244,6 +245,38 @@ export default function Generate() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
+  const [searchParams] = useSearchParams()
+
+  // When deep-linked from /intel ("Brief a response →"), pre-load the brief
+  // composer with a structured prompt that gives the Strategist the context
+  // it needs to produce a counter-positioning post.
+  useEffect(() => {
+    const intelId = searchParams.get('intel')
+    if (!intelId) return
+    supabase.from('competitor_events')
+      .select(`
+        kind, source_url, title, summary, detected_at,
+        competitor:competitor_id ( name, website_url )
+      `)
+      .eq('id', intelId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!data) return
+        const ev = data as Record<string, unknown>
+        const competitor = ev.competitor as { name?: string; website_url?: string } | null
+        const lines = [
+          `Competitor intel — react to this ${(ev.kind as string)?.replace('_', ' ')}.`,
+          ``,
+          `Competitor: ${competitor?.name ?? 'unknown'} (${competitor?.website_url ?? ''})`,
+          `URL: ${ev.source_url}`,
+          ev.title    ? `Title: ${ev.title}` : null,
+          ev.summary  ? `Summary: ${ev.summary}` : null,
+          ``,
+          `Write a post that calls out the weakest claim in their pitch and reinforces our differentiator. Don't mention them by name — just sharpen the contrast.`,
+        ].filter(Boolean).join('\n')
+        setInput(lines)
+      })
+  }, [searchParams])
 
   // Load this org's campaigns. We surface active + planned ones in the picker
   // (archived/completed are accessible from Library but rarely the target of

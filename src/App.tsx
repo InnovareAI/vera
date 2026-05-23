@@ -14,6 +14,7 @@ import LinkedInScore from './pages/LinkedInScore'
 import Clients from './pages/Clients'
 import Calendar from './pages/Calendar'
 import Library from './pages/Library'
+import Intel from './pages/Intel'
 import Templates from './pages/Templates'
 import Skills from './pages/Skills'
 import Settings from './pages/Settings'
@@ -39,6 +40,7 @@ export default function App() {
             <Route path="clients"    element={<Clients />} />
             <Route path="calendar"   element={<Calendar />} />
             <Route path="library"    element={<Library />} />
+            <Route path="intel"      element={<Intel />} />
             <Route path="templates"  element={<Templates />} />
             <Route path="skills"     element={<Skills />} />
             <Route path="settings"   element={<Settings />} />

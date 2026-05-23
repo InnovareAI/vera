@@ -19,7 +19,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   Star, Clock, Sparkles, CheckSquare, Telescope, BookOpen, Plus,
   Calendar, Layers, Zap, Building2, Settings, LogOut, Sun, Moon,
-  ChevronDown, Check, ChevronRight,
+  ChevronDown, Check, ChevronRight, Radar,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
@@ -342,6 +342,7 @@ export default function Layout() {
           <PrimaryNavItem to="/dashboard"  icon={Sparkles}    label="Overview" />
           <PrimaryNavItem to="/review"     icon={CheckSquare} label="Review" badge={4} />
           <PrimaryNavItem to="/audit"      icon={Telescope}   label="Audit" />
+          <PrimaryNavItem to="/intel"      icon={Radar}       label="Intel" />
           <PrimaryNavItem to="/library"    icon={BookOpen}    label="Library" />
         </nav>
 
