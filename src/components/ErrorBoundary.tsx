@@ -13,12 +13,13 @@
 // subtree clean, which is good enough for "try again" on most transient
 // errors (race conditions, stale network state, etc).
 //
-// Logging: console.error today. When Sentry is wired (next production-
-// readiness item) this is where `Sentry.captureException(err)` lands.
+// Logging: console.error always, plus Sentry.captureException via the
+// lib/sentry wrapper (no-ops when VITE_SENTRY_DSN isn't set).
 
 import { Component, Fragment } from 'react'
 import type { ReactNode, ErrorInfo } from 'react'
 import { AlertTriangle, RotateCw, Home } from 'lucide-react'
+import { captureError } from '../lib/sentry'
 
 interface Props {
   children: ReactNode
@@ -46,8 +47,11 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    // Surface for now — Sentry hook lands here next.
     console.error('[ErrorBoundary]', error, info.componentStack)
+    captureError(error, {
+      componentStack: info.componentStack,
+      boundary: this.props.variant ?? 'page',
+    })
   }
 
   componentDidUpdate(prevProps: Props): void {

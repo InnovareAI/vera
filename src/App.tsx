@@ -1,8 +1,10 @@
+import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { OrgProvider, useOrg } from './lib/orgContext'
 import { ThemeProvider } from './lib/theme'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { setUserContext, setOrgContext } from './lib/sentry'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -32,6 +34,7 @@ export default function App() {
       <ThemeProvider>
         <AuthProvider>
           <OrgProvider>
+            <SentryContextBridge />
             <Routes>
               <Route path="/login" element={<LoginGuard />} />
               <Route path="/onboarding" element={<Onboarding />} />
@@ -75,4 +78,19 @@ function AuditRedirect() {
   const { activeOrg } = useOrg()
   if (!activeOrg) return <Navigate to="/onboarding" replace />
   return <Navigate to={`/onboarding/audit/${activeOrg.id}`} replace />
+}
+
+// Pushes the current user + active org into the Sentry scope so crash
+// reports tell us who was affected and which workspace they were in.
+// Renders nothing — it's a hook host that sits inside the providers.
+function SentryContextBridge() {
+  const { user } = useAuth()
+  const { activeOrg } = useOrg()
+  useEffect(() => {
+    setUserContext(user ? { id: user.id, email: user.email } : null)
+  }, [user])
+  useEffect(() => {
+    setOrgContext(activeOrg ? { id: activeOrg.id, name: activeOrg.name } : null)
+  }, [activeOrg])
+  return null
 }
