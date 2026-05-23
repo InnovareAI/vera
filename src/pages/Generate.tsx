@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Send, Sparkles, Loader2, Layers } from 'lucide-react'
+import { Send, Sparkles, Loader2, Layers, Users } from 'lucide-react'
 import { useOrg } from '../lib/orgContext'
 import { supabase } from '../lib/supabase'
+import type { Audience } from '../lib/supabase'
 
 interface Campaign {
   id: string
@@ -186,6 +187,7 @@ async function runAgentPipeline(
   prompt: string,
   orgId: string | undefined,
   campaignId: string | null,
+  audienceId: string | null,
   onChunk: (agent: AgentName, chunk: string, done: boolean) => void
 ) {
   const response = await fetch(ORCHESTRATOR_URL, {
@@ -194,7 +196,7 @@ async function runAgentPipeline(
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
     },
-    body: JSON.stringify({ prompt, org_id: orgId, campaign_id: campaignId }),
+    body: JSON.stringify({ prompt, org_id: orgId, campaign_id: campaignId, audience_id: audienceId }),
   })
 
   if (!response.ok) {
@@ -245,6 +247,8 @@ export default function Generate() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
+  const [audiences, setAudiences] = useState<Audience[]>([])
+  const [selectedAudienceId, setSelectedAudienceId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
 
   // When deep-linked from /intel ("Brief a response →"), pre-load the brief
@@ -301,7 +305,31 @@ export default function Generate() {
     if (active) setSelectedCampaignId(active.id)
   }, [campaigns, selectedCampaignId])
 
+  // Load audiences for this org. Sort: primary first, then ICPs, then buyer
+  // personas inside their ICPs.
+  useEffect(() => {
+    if (!activeOrg?.id) { setAudiences([]); return }
+    supabase
+      .from('audiences')
+      .select('*')
+      .eq('org_id', activeOrg.id)
+      .order('is_primary', { ascending: false })
+      .order('kind', { ascending: true })   // 'buyer_persona' < 'icp' alphabetically, swap if we add more kinds
+      .then(({ data }) => setAudiences((data as Audience[]) ?? []))
+  }, [activeOrg?.id])
+
+  // Auto-select the primary buyer persona (it's the most specific reader,
+  // better default than the broader ICP).
+  useEffect(() => {
+    if (selectedAudienceId !== null) return
+    const primaryBuyer = audiences.find(a => a.kind === 'buyer_persona' && a.is_primary)
+    const fallback = audiences.find(a => a.is_primary) ?? audiences[0]
+    if (primaryBuyer) setSelectedAudienceId(primaryBuyer.id)
+    else if (fallback) setSelectedAudienceId(fallback.id)
+  }, [audiences, selectedAudienceId])
+
   const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId) ?? null
+  const selectedAudience = audiences.find(a => a.id === selectedAudienceId) ?? null
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -321,7 +349,7 @@ export default function Generate() {
     let currentId: string | null = null
 
     try {
-      await runAgentPipeline(input, activeOrg?.id, selectedCampaignId, (agent, chunk, done) => {
+      await runAgentPipeline(input, activeOrg?.id, selectedCampaignId, selectedAudienceId, (agent, chunk, done) => {
         // Reveal optional agents as they appear
         if (!CORE_AGENTS.includes(agent)) {
           setActiveAgents(prev => prev.includes(agent) ? prev : [...prev, agent])
@@ -443,6 +471,59 @@ export default function Generate() {
                 </span>
               )}
             </div>
+            {/* Audience picker — ICP / Buyer Persona */}
+            {audiences.length > 0 && (
+              <div className="flex items-center gap-2 px-4 py-2" style={{ borderBottom: '1px solid var(--paper-edge)' }}>
+                <Users size={12} style={{ color: 'var(--ghost)' }} />
+                <span className="text-[10px] uppercase tracking-[0.16em] font-mono" style={{ color: 'var(--ghost)' }}>
+                  Audience
+                </span>
+                <select
+                  value={selectedAudienceId ?? ''}
+                  onChange={e => setSelectedAudienceId(e.target.value || null)}
+                  disabled={isRunning}
+                  className="text-[12px] outline-none disabled:opacity-50 cursor-pointer"
+                  style={{
+                    background: 'transparent',
+                    color: 'var(--ink)',
+                    fontFamily: 'var(--font-body)',
+                    border: 'none',
+                    padding: '2px 4px',
+                    borderRadius: '2px',
+                  }}
+                >
+                  <option value="">— Generic (no specific audience) —</option>
+                  {audiences.filter(a => a.kind === 'icp').map(icp => (
+                    <optgroup key={icp.id} label={`ICP — ${icp.name}`}>
+                      <option value={icp.id}>{icp.is_primary ? '★ ' : ''}{icp.name} (the company)</option>
+                      {audiences
+                        .filter(p => p.parent_id === icp.id)
+                        .map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.is_primary ? '   ★ ' : '   · '}{p.name}
+                          </option>
+                        ))}
+                    </optgroup>
+                  ))}
+                  {audiences.filter(a => a.kind !== 'icp' && !a.parent_id).length > 0 && (
+                    <optgroup label="Standalone audiences">
+                      {audiences.filter(a => a.kind !== 'icp' && !a.parent_id).map(a => (
+                        <option key={a.id} value={a.id}>{a.is_primary ? '★ ' : ''}{a.name}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+                {selectedAudience && Array.isArray(selectedAudience.pain_points) && selectedAudience.pain_points.length > 0 && (
+                  <span
+                    title={selectedAudience.pain_points.join(' · ')}
+                    className="ml-auto text-[10px] font-mono truncate max-w-[45%]"
+                    style={{ color: 'var(--oxblood)' }}
+                  >
+                    pain: {selectedAudience.pain_points[0].slice(0, 70)}{selectedAudience.pain_points[0].length > 70 ? '…' : ''}
+                  </span>
+                )}
+              </div>
+            )}
             <textarea
               ref={inputRef}
               value={input}

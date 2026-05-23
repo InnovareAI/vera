@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Star } from 'lucide-react'
+import { Star, Users } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
-import type { Post, Campaign } from '../lib/supabase'
+import type { Post, Campaign, Audience } from '../lib/supabase'
 
 const PLATFORM_COLORS: Record<string, string> = {
   linkedin: 'bg-blue-100 text-blue-700',
@@ -25,6 +25,7 @@ const STATUS_COLORS: Record<string, string> = {
 export default function Library() {
   const [posts, setPosts] = useState<Post[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [audiences, setAudiences] = useState<Audience[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [platformFilter, setPlatformFilter] = useState('All')
@@ -42,13 +43,20 @@ export default function Library() {
   }, [])
 
   useEffect(() => {
-    if (!activeOrg?.id) { setCampaigns([]); return }
+    if (!activeOrg?.id) { setCampaigns([]); setAudiences([]); return }
+    const orgId = activeOrg.id
     supabase.from('campaigns')
       .select('id, name, theme, status, is_pinned, post_count, color, start_date, end_date, description')
-      .eq('org_id', activeOrg.id)
+      .eq('org_id', orgId)
       .order('is_pinned', { ascending: false })
       .order('start_date', { ascending: false, nullsFirst: false })
       .then(({ data }) => setCampaigns((data as Campaign[]) ?? []))
+    supabase.from('audiences')
+      .select('*')
+      .eq('org_id', orgId)
+      .order('is_primary', { ascending: false })
+      .order('kind', { ascending: true })
+      .then(({ data }) => setAudiences((data as Audience[]) ?? []))
   }, [activeOrg?.id])
 
   const postCountByCampaign = posts.reduce((acc, p) => {
@@ -75,9 +83,70 @@ export default function Library() {
         <div className="mb-6">
           <h1 className="font-display text-[28px] leading-none tracking-tight" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 144, "wght" 500' }}>Library</h1>
           <p className="text-[12px] uppercase tracking-wider font-mono mt-2" style={{ color: 'var(--ghost)' }}>
-            {campaigns.length} campaigns · {posts.length} posts
+            {audiences.length} audiences · {campaigns.length} campaigns · {posts.length} posts
           </p>
         </div>
+
+        {/* Audiences section — ICPs and Buyer Personas */}
+        {audiences.length > 0 && (
+          <div className="mb-6">
+            <div className="px-1 pb-2 flex items-baseline gap-2">
+              <span className="text-[10px] uppercase tracking-[0.18em] font-mono" style={{ color: 'var(--ghost)' }}>
+                — audiences · icps + buyer personas
+              </span>
+              <span className="flex-1 h-px" style={{ background: 'var(--oxblood-rule)' }} />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              {audiences.map(a => {
+                const parent = a.parent_id ? audiences.find(x => x.id === a.parent_id) : null
+                const kindLabel = a.kind === 'icp' ? 'ICP' : a.kind === 'buyer_persona' ? 'Buyer Persona' : a.kind === 'consumer_persona' ? 'Consumer Persona' : 'Audience'
+                return (
+                  <div
+                    key={a.id}
+                    className="p-4 relative"
+                    style={{
+                      background: 'var(--paper)',
+                      border: '1px solid var(--paper-edge)',
+                      borderRadius: '4px',
+                    }}
+                  >
+                    {a.is_primary && (
+                      <span
+                        className="absolute left-0 top-2 bottom-2 w-[2px]"
+                        style={{ background: 'var(--oxblood)', borderRadius: '0 1px 1px 0' }}
+                      />
+                    )}
+                    <div className="flex items-center gap-2 mb-2">
+                      <Users size={11} style={{ color: 'var(--ghost)' }} />
+                      <span className="text-[9px] uppercase tracking-wider font-mono px-1.5 py-0.5"
+                        style={{
+                          background: a.kind === 'icp' ? 'var(--oxblood-tint)' : 'var(--paper-warm)',
+                          color: a.kind === 'icp' ? 'var(--oxblood)' : 'var(--ink-quiet)',
+                          borderRadius: '2px',
+                        }}>
+                        {kindLabel}
+                      </span>
+                      {a.is_primary && <Star size={10} style={{ color: 'var(--oxblood)' }} />}
+                    </div>
+                    <p className="font-display text-[15px] leading-snug mb-1" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 24, "wght" 500' }}>
+                      {a.name}
+                    </p>
+                    {parent && (
+                      <p className="text-[10px] uppercase tracking-wider font-mono mb-2" style={{ color: 'var(--mist)' }}>
+                        inside ICP: {parent.name}
+                      </p>
+                    )}
+                    {Array.isArray(a.pain_points) && a.pain_points.length > 0 && (
+                      <p className="text-[11px] line-clamp-2" style={{ color: 'var(--ink-quiet)' }}>
+                        {(a.pain_points as string[]).slice(0, 2).join(' · ')}
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Campaigns section — folders for monthly groupings */}
         {campaigns.length > 0 && (

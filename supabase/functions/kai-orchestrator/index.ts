@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
-  const { prompt, org_id, campaign_id } = await req.json()
+  const { prompt, org_id, campaign_id, audience_id } = await req.json()
 
   if (!prompt) {
     return new Response(JSON.stringify({ error: 'prompt is required' }), {
@@ -111,7 +111,20 @@ Deno.serve(async (req) => {
           ? supabase.from('campaigns').select('name, theme, description, goal, start_date, end_date').eq('id', campaign_id).maybeSingle()
           : Promise.resolve({ data: null, error: null })
 
-        const [{ data: skills }, { data: campaign }] = await Promise.all([skillsQuery, campaignQuery])
+        // Fetch the audience (and its parent ICP if it's a buyer persona) so
+        // the Strategist writes for a specific reader, not a generic one.
+        const audienceQuery = audience_id
+          ? supabase.from('audiences').select('kind, name, pain_points, goals, attributes, notes, parent_id').eq('id', audience_id).maybeSingle()
+          : Promise.resolve({ data: null, error: null })
+
+        const [{ data: skills }, { data: campaign }, { data: audience }] = await Promise.all([
+          skillsQuery, campaignQuery, audienceQuery,
+        ])
+
+        // If the audience is a buyer_persona, fetch the parent ICP for full context
+        const parentIcp = (audience?.parent_id)
+          ? (await supabase.from('audiences').select('name, attributes, pain_points').eq('id', audience.parent_id).maybeSingle()).data
+          : null
 
         // ── STEP 2: STRATEGIST ────────────────────────────────────────────────
         const strategistSkills = skills?.filter(s => s.injected_into === 'strategist') ?? []
@@ -132,11 +145,25 @@ ${campaign.description ? `- Notes: ${campaign.description}` : ''}
 
 Sibling posts in this campaign share this theme. Stay on the narrative arc — don't repeat beats, don't re-explain the core positioning, build on it.` : ''
 
+        // Audience context — write for THIS reader, not a generic one. For
+        // buyer personas inside an ICP, also surface the firmographic frame.
+        const audienceContext = audience ? `
+
+TARGET AUDIENCE — write for this specific reader. They need to recognise themselves in the first two lines or they'll scroll past.
+- Audience: "${audience.name}" (${audience.kind})
+${parentIcp ? `- Inside ICP: "${parentIcp.name}" — ${formatAttributes(parentIcp.attributes)}` : ''}
+${Array.isArray(audience.pain_points) && audience.pain_points.length ? `- Pain points: ${(audience.pain_points as string[]).join('; ')}` : ''}
+${Array.isArray(audience.goals) && audience.goals.length ? `- Goals: ${(audience.goals as string[]).join('; ')}` : ''}
+${formatAttributes(audience.attributes) ? `- Profile: ${formatAttributes(audience.attributes)}` : ''}
+${audience.notes ? `- Operator notes: ${audience.notes}` : ''}
+
+This is not "a VP of Sales" — it is THIS VP of Sales with THESE pains. Reference one specific pain or goal in the post.` : ''
+
         const strategistStream = anthropic.messages.stream({
           model: 'claude-sonnet-4-6',
           max_tokens: 1024,
           system: `You are KAI's Strategist. Analyse the content brief and output a strategy as valid JSON only — no prose, no markdown fences.
-${campaignContext}
+${campaignContext}${audienceContext}
 
 Available skills:
 ${skillList || '(none configured yet)'}
@@ -495,6 +522,7 @@ followed by a summary of what must be fixed.`,
           .insert({
             org_id: org_id ?? null,
             campaign_id: campaign_id ?? null,
+            audience_id: audience_id ?? null,
             title: prompt.slice(0, 100),
             copy: currentCopy,
             channel: platformLabel,
@@ -600,4 +628,26 @@ Dek: <one-sentence subtitle>
     default:
       return `Shape: optimise for ${platform}. Be concise, lead with the value, no fluff.`
   }
+}
+
+// Render an audience.attributes jsonb into a single human-readable line for
+// the Strategist's system prompt. Filters empties, joins arrays, keeps the
+// output tight enough to not blow the prompt budget.
+function formatAttributes(attrs: unknown): string {
+  if (!attrs || typeof attrs !== 'object') return ''
+  const parts: string[] = []
+  for (const [key, value] of Object.entries(attrs as Record<string, unknown>)) {
+    if (value === null || value === undefined || value === '') continue
+    const k = key.replace(/_/g, ' ')
+    if (Array.isArray(value)) {
+      if (value.length === 0) continue
+      parts.push(`${k}: ${value.join(', ')}`)
+    } else if (typeof value === 'object') {
+      // skip nested objects — too verbose
+      continue
+    } else {
+      parts.push(`${k}: ${value}`)
+    }
+  }
+  return parts.join(' · ')
 }

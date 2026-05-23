@@ -55,6 +55,21 @@ export interface Post {
   updated_at: string
 }
 
+export interface Audience {
+  id: string
+  org_id: string
+  kind: 'icp' | 'buyer_persona' | 'consumer_persona' | 'audience'
+  name: string
+  is_primary: boolean
+  pain_points: string[]
+  goals: string[]
+  attributes: Record<string, unknown>
+  parent_id?: string | null
+  notes?: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface Campaign {
   id: string
   org_id: string
