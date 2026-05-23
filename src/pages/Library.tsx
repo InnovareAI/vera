@@ -81,8 +81,8 @@ export default function Library() {
     <div className="flex gap-6 h-full">
       <div className="flex-1 flex flex-col min-w-0">
         <div className="mb-6">
-          <h1 className="font-display text-[28px] leading-none tracking-tight" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 144, "wght" 500' }}>Library</h1>
-          <p className="text-[12px] uppercase tracking-wider font-mono mt-2" style={{ color: 'var(--ghost)' }}>
+          <h1 className="text-[28px] leading-tight tracking-tight font-semibold" style={{ color: 'var(--ink)' }}>Library</h1>
+          <p className="text-[13px] mt-1" style={{ color: 'var(--ghost)' }}>
             {audiences.length} audiences · {campaigns.length} campaigns · {posts.length} posts
           </p>
         </div>
@@ -91,10 +91,9 @@ export default function Library() {
         {audiences.length > 0 && (
           <div className="mb-6">
             <div className="px-1 pb-2 flex items-baseline gap-2">
-              <span className="text-[10px] uppercase tracking-[0.18em] font-mono" style={{ color: 'var(--ghost)' }}>
-                — audiences · icps + buyer personas
+              <span className="text-[12px] font-medium" style={{ color: 'var(--ghost)' }}>
+                Audiences
               </span>
-              <span className="flex-1 h-px" style={{ background: 'var(--oxblood-rule)' }} />
             </div>
             <div className="grid grid-cols-3 gap-3">
               {audiences.map(a => {
@@ -107,7 +106,7 @@ export default function Library() {
                     style={{
                       background: 'var(--paper)',
                       border: '1px solid var(--paper-edge)',
-                      borderRadius: '4px',
+                      borderRadius: 'var(--radius-lg)',
                     }}
                   >
                     {a.is_primary && (
@@ -152,10 +151,9 @@ export default function Library() {
         {campaigns.length > 0 && (
           <div className="mb-6">
             <div className="px-1 pb-2 flex items-baseline gap-2">
-              <span className="text-[10px] uppercase tracking-[0.18em] font-mono" style={{ color: 'var(--ghost)' }}>
-                — campaigns
+              <span className="text-[12px] font-medium" style={{ color: 'var(--ghost)' }}>
+                Campaigns
               </span>
-              <span className="flex-1 h-px" style={{ background: 'var(--oxblood-rule)' }} />
             </div>
             <div className="grid grid-cols-3 gap-3">
               {campaigns.map(c => {
@@ -171,7 +169,7 @@ export default function Library() {
                     style={{
                       background: 'var(--paper)',
                       border: '1px solid var(--paper-edge)',
-                      borderRadius: '4px',
+                      borderRadius: 'var(--radius-lg)',
                     }}
                   >
                     {/* Oxblood left bar for active/pinned */}
@@ -215,10 +213,9 @@ export default function Library() {
 
         {/* Posts section header */}
         <div className="px-1 pb-2 flex items-baseline gap-2">
-          <span className="text-[10px] uppercase tracking-[0.18em] font-mono" style={{ color: 'var(--ghost)' }}>
-            — all posts
+          <span className="text-[12px] font-medium" style={{ color: 'var(--ghost)' }}>
+            All posts
           </span>
-          <span className="flex-1 h-px" style={{ background: 'var(--oxblood-rule)' }} />
         </div>
 
         <div className="flex gap-3 mb-4 flex-wrap">

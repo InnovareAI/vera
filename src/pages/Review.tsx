@@ -324,7 +324,7 @@ function ListView({
                 style={{
                   background: 'var(--paper)',
                   border: `1px solid ${selected?.id === post.id ? 'var(--oxblood)' : 'var(--paper-edge)'}`,
-                  borderRadius: '4px',
+                  borderRadius: 'var(--radius-lg)',
                   boxShadow: selected?.id === post.id ? '0 1px 3px rgba(122,31,43,0.10)' : 'none',
                 }}
               >
@@ -375,7 +375,7 @@ function ListView({
           <PostDetailPanel post={selected} onClose={() => setSelected(null)} saving={saving} onMove={moveToTab} />
         ) : (
           <div className="p-8 flex flex-col items-center justify-center text-center h-64"
-            style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '4px' }}>
+            style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}>
             <span className="font-display text-3xl mb-3" style={{ color: 'var(--mist)' }}>—</span>
             <p className="text-sm" style={{ color: 'var(--ghost)' }}>Select a post to preview and take action</p>
           </div>
@@ -430,7 +430,7 @@ function BoardView({
               style={{
                 background: isDragTarget ? 'var(--oxblood-tint)' : 'var(--paper-warm)',
                 border: `1px dashed ${isDragTarget ? 'var(--oxblood)' : 'var(--paper-edge)'}`,
-                borderRadius: '4px',
+                borderRadius: 'var(--radius-lg)',
                 transition: 'background 0.15s, border-color 0.15s',
               }}
             >
@@ -563,7 +563,7 @@ function PostDetailPanel({
 }) {
   return (
     <div className="sticky top-0 p-5"
-      style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '4px' }}>
+      style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-[11px] uppercase tracking-wider font-mono" style={{ color: 'var(--ghost)' }}>— preview</h2>
         <button onClick={onClose} className="p-1 hover:bg-[var(--paper-warm)] rounded-sm" style={{ color: 'var(--ghost)' }}>

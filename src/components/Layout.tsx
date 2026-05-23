@@ -57,28 +57,28 @@ function WorkspaceSwitcher() {
   )
 
   return (
-    <div className="relative">
+    <div className="relative px-2">
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-[var(--paper-warm)] transition-colors text-left group"
-        style={{ borderBottom: '1px solid var(--paper-edge)' }}
+        className="w-full flex items-center gap-2.5 px-2 py-2 hover:bg-[var(--fog)] transition-colors text-left group"
+        style={{ borderRadius: 'var(--radius-md)' }}
       >
         <div
-          className="w-6 h-6 flex items-center justify-center text-[11px] font-display font-medium flex-shrink-0"
+          className="w-6 h-6 flex items-center justify-center text-[11px] font-medium flex-shrink-0"
           style={{
             background: 'var(--ink)',
-            color: 'var(--paper)',
-            borderRadius: '3px',
+            color: 'var(--paper-warm)',
+            borderRadius: 'var(--radius-sm)',
           }}
         >
-          {activeOrg?.name?.slice(0, 1).toUpperCase() ?? '◐'}
+          {activeOrg?.name?.slice(0, 1).toUpperCase() ?? '·'}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-display font-medium leading-tight truncate" style={{ color: 'var(--ink)' }}>
+          <div className="text-[13px] font-medium leading-tight truncate" style={{ color: 'var(--ink)' }}>
             {activeOrg?.name ?? 'Select workspace'}
           </div>
-          <div className="text-[10px] uppercase tracking-[0.08em] mt-0.5 font-mono" style={{ color: 'var(--ghost)' }}>
-            workspace · {orgs.length}
+          <div className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--ghost)' }}>
+            {orgs.length === 1 ? '1 workspace' : `${orgs.length} workspaces`}
           </div>
         </div>
         <ChevronDown size={14} style={{ color: 'var(--ghost)' }} className="flex-shrink-0 group-hover:opacity-100 opacity-60" />
@@ -90,53 +90,53 @@ function WorkspaceSwitcher() {
           <div
             className="absolute left-2 right-2 top-full mt-1 z-40 overflow-hidden"
             style={{
-              background: 'var(--paper)',
+              background: 'var(--paper-warm)',
               border: '1px solid var(--paper-edge)',
-              boxShadow: '0 12px 32px -8px rgba(14, 14, 15, 0.18)',
-              borderRadius: '4px',
+              boxShadow: '0 16px 48px -12px rgba(0, 0, 0, 0.12), 0 4px 12px -4px rgba(0, 0, 0, 0.06)',
+              borderRadius: 'var(--radius-lg)',
             }}
           >
             <input
               autoFocus
               value={filter}
               onChange={e => setFilter(e.target.value)}
-              placeholder="Search workspaces…"
-              className="w-full px-3 py-2.5 text-[12px] outline-none"
+              placeholder="Search workspaces"
+              className="w-full px-4 py-3 text-[13px] outline-none"
               style={{
                 background: 'transparent',
                 color: 'var(--ink)',
                 borderBottom: '1px solid var(--paper-edge)',
-                fontFamily: 'var(--font-mono)',
               }}
             />
-            <div className="max-h-72 overflow-y-auto py-1">
+            <div className="max-h-72 overflow-y-auto p-1">
               {matches.map(m => (
                 <button
                   key={m.org_id}
                   onClick={() => { switchOrg(m.org_id); setOpen(false); setFilter('') }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-[var(--paper-warm)] transition-colors text-left"
+                  className="w-full flex items-center gap-2.5 px-2 py-2 hover:bg-[var(--fog)] transition-colors text-left"
+                  style={{ borderRadius: 'var(--radius-md)' }}
                 >
                   <div
-                    className="w-5 h-5 flex items-center justify-center text-[10px] font-display font-medium flex-shrink-0"
+                    className="w-5 h-5 flex items-center justify-center text-[10px] font-medium flex-shrink-0"
                     style={{
                       background: m.org_id === activeOrg?.id ? 'var(--oxblood)' : 'var(--fog)',
-                      color: m.org_id === activeOrg?.id ? 'var(--paper)' : 'var(--ink)',
-                      borderRadius: '3px',
+                      color: m.org_id === activeOrg?.id ? 'var(--paper-warm)' : 'var(--ink)',
+                      borderRadius: 'var(--radius-sm)',
                     }}
                   >
                     {m.organisations.name.slice(0, 1).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-[12px] truncate" style={{ color: 'var(--ink)' }}>{m.organisations.name}</div>
-                    <div className="text-[10px] uppercase tracking-wider font-mono" style={{ color: 'var(--ghost)' }}>{m.role}</div>
+                    <div className="text-[13px] truncate" style={{ color: 'var(--ink)' }}>{m.organisations.name}</div>
+                    <div className="text-[11px] truncate capitalize" style={{ color: 'var(--ghost)' }}>{m.role}</div>
                   </div>
                   {m.org_id === activeOrg?.id && (
-                    <Check size={11} style={{ color: 'var(--oxblood)' }} className="flex-shrink-0" />
+                    <Check size={12} style={{ color: 'var(--oxblood)' }} className="flex-shrink-0" />
                   )}
                 </button>
               ))}
               {matches.length === 0 && (
-                <div className="px-3 py-3 text-[11px] font-mono" style={{ color: 'var(--ghost)' }}>
+                <div className="px-3 py-3 text-[12px]" style={{ color: 'var(--ghost)' }}>
                   No workspaces match "{filter}"
                 </div>
               )}
@@ -149,55 +149,55 @@ function WorkspaceSwitcher() {
 }
 
 // ─── rail section heading ────────────────────────────────────────────────
-// Em-dash typographic divider — the "notebook spread" detail. Hairline above.
+// Quiet uppercase label with subtle letter-spacing — no em-dash, no rule.
+// Modern minimal: hierarchy comes from spacing, not decorative chrome.
 function RailSection({ label, count }: { label: string; count?: number }) {
   return (
-    <div className="px-4 pt-5 pb-1.5 flex items-baseline gap-2">
-      <span className="text-[9px] uppercase tracking-[0.18em] font-mono" style={{ color: 'var(--ghost)' }}>
-        — {label}
+    <div className="px-4 pt-6 pb-2 flex items-baseline gap-1.5">
+      <span className="text-[11px] font-medium" style={{ color: 'var(--ghost)' }}>
+        {label}
       </span>
       {typeof count === 'number' && count > 0 && (
-        <span className="text-[9px] font-mono" style={{ color: 'var(--mist)' }}>· {count}</span>
+        <span className="text-[11px]" style={{ color: 'var(--mist)' }}>{count}</span>
       )}
-      <span className="flex-1 h-px rule-oxblood mt-1 ml-2" />
     </div>
   )
 }
 
 // ─── primary nav item ────────────────────────────────────────────────────
+// Modern minimal: full pill-shaped hover/active background instead of an
+// edge-bar. Single radius, generous padding, no decorative elements.
 function PrimaryNavItem({
   to, icon: Icon, label, badge,
 }: { to: string; icon: React.ElementType; label: string; badge?: number }) {
   return (
     <NavLink
       to={to}
+      end={to === '/dashboard'}
       className={({ isActive }) =>
-        `relative flex items-center gap-3 px-4 py-2 text-[13px] transition-all group ${
+        `flex items-center gap-2.5 px-2 py-1.5 mx-2 text-[13px] transition-all ${
           isActive ? 'is-active' : ''
         }`
       }
       style={({ isActive }) => ({
-        background: isActive ? 'var(--oxblood-tint)' : 'transparent',
+        background: isActive ? 'var(--fog)' : 'transparent',
         color: isActive ? 'var(--ink)' : 'var(--ink-quiet)',
         fontWeight: isActive ? 500 : 400,
+        borderRadius: 'var(--radius-md)',
       })}
     >
       {({ isActive }) => (
         <>
-          {/* oxblood left-edge bar when active — the "you are here" mark */}
-          <span
-            className="absolute left-0 top-1.5 bottom-1.5 w-[2px]"
-            style={{ background: isActive ? 'var(--oxblood)' : 'transparent' }}
-          />
-          <Icon size={14} style={{ color: isActive ? 'var(--oxblood)' : 'var(--ghost)' }} className="flex-shrink-0" />
+          <Icon size={15} style={{ color: isActive ? 'var(--ink)' : 'var(--ghost)' }} className="flex-shrink-0" strokeWidth={isActive ? 2 : 1.75} />
           <span className="flex-1">{label}</span>
           {typeof badge === 'number' && badge > 0 && (
             <span
-              className="text-[10px] font-mono px-1.5 py-px"
+              className="text-[11px] px-1.5 leading-tight py-px"
               style={{
                 background: isActive ? 'var(--oxblood)' : 'var(--paper-edge)',
-                color: isActive ? 'var(--paper)' : 'var(--ink-quiet)',
-                borderRadius: '2px',
+                color: isActive ? 'var(--paper-warm)' : 'var(--ink-quiet)',
+                borderRadius: 'var(--radius-sm)',
+                fontWeight: 500,
               }}
             >
               {badge}
@@ -210,23 +210,26 @@ function PrimaryNavItem({
 }
 
 // ─── rail item (pinned / recent) ─────────────────────────────────────────
+// Quieter than nav items — smaller text, no icon prominence, indent for
+// hierarchy.
 function RailItem({
   to, icon: Icon, title, meta,
 }: { to: string; icon?: React.ElementType; title: string; meta?: string }) {
   return (
     <NavLink
       to={to}
-      className="group flex items-start gap-2 px-4 py-1.5 hover:bg-[var(--paper-warm)] transition-colors"
+      className="group flex items-start gap-2 mx-2 px-2 py-1.5 hover:bg-[var(--fog)] transition-colors"
+      style={{ borderRadius: 'var(--radius-md)' }}
     >
       {Icon && (
-        <Icon size={11} style={{ color: 'var(--mist)' }} className="flex-shrink-0 mt-1 group-hover:text-[var(--oxblood)] transition-colors" />
+        <Icon size={12} style={{ color: 'var(--mist)' }} className="flex-shrink-0 mt-0.5 group-hover:text-[var(--ink-quiet)] transition-colors" strokeWidth={1.75} />
       )}
       <div className="flex-1 min-w-0">
-        <div className="text-[12px] leading-snug truncate" style={{ color: 'var(--ink-quiet)' }}>
+        <div className="text-[12.5px] leading-snug truncate" style={{ color: 'var(--ink-quiet)' }}>
           {title}
         </div>
         {meta && (
-          <div className="text-[10px] uppercase tracking-wider font-mono mt-0.5 truncate" style={{ color: 'var(--mist)' }}>
+          <div className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--mist)' }}>
             {meta}
           </div>
         )}
@@ -299,46 +302,53 @@ export default function Layout() {
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--paper)' }}>
       {/* Rail */}
       <aside
-        className="w-60 flex-shrink-0 flex flex-col"
+        className="w-64 flex-shrink-0 flex flex-col"
         style={{
           background: 'var(--paper)',
           borderRight: '1px solid var(--paper-edge)',
         }}
       >
-        {/* Brand mark — typographic, not iconic */}
-        <div className="px-4 pt-5 pb-3 flex items-baseline gap-2">
-          <span className="font-display text-[22px] leading-none tracking-tight" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 144, "wght" 500' }}>
-            kai
-          </span>
-          <span className="text-[9px] uppercase tracking-[0.16em] font-mono" style={{ color: 'var(--ghost)' }}>
-            by InnovareAI
+        {/* Brand mark */}
+        <div className="px-4 pt-5 pb-4 flex items-center gap-2">
+          <div
+            className="w-7 h-7 flex items-center justify-center text-[13px] font-semibold flex-shrink-0"
+            style={{
+              background: 'var(--ink)',
+              color: 'var(--paper-warm)',
+              borderRadius: 'var(--radius-md)',
+            }}
+          >
+            K
+          </div>
+          <span className="text-[15px] font-semibold tracking-tight" style={{ color: 'var(--ink)' }}>
+            KAI
           </span>
         </div>
 
         {/* Workspace switcher */}
         <WorkspaceSwitcher />
 
-        {/* + Brief CTA — primary action, oxblood block */}
-        <div className="px-3 pt-3">
+        {/* + Brief CTA */}
+        <div className="px-2 pt-3">
           <button
             onClick={() => navigate('/generate')}
-            className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 transition-all hover:opacity-95"
+            className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 transition-opacity hover:opacity-90"
             style={{
               background: 'var(--oxblood)',
-              color: 'var(--paper)',
-              borderRadius: '3px',
+              color: 'var(--paper-warm)',
+              borderRadius: 'var(--radius-md)',
             }}
           >
             <span className="inline-flex items-center gap-2">
-              <Plus size={14} />
-              <span className="text-[12px] font-medium tracking-wide">New brief</span>
+              <Plus size={14} strokeWidth={2.25} />
+              <span className="text-[13px] font-medium">New brief</span>
             </span>
-            <span className="text-[10px] font-mono opacity-60 uppercase tracking-wider">⌘N</span>
+            <span className="text-[11px] opacity-60">⌘N</span>
           </button>
         </div>
 
         {/* Primary nav */}
-        <nav className="pt-3 pb-1">
+        <nav className="pt-3 pb-1 space-y-0.5">
           <PrimaryNavItem to="/dashboard"  icon={Sparkles}    label="Overview" />
           <PrimaryNavItem to="/review"     icon={CheckSquare} label="Review" badge={4} />
           <PrimaryNavItem to="/audit"      icon={Telescope}   label="Audit" />
@@ -348,10 +358,10 @@ export default function Layout() {
 
         {/* Scrolling middle — pinned + recent + more */}
         <div className="flex-1 overflow-y-auto">
-          <RailSection label="pinned" count={pinnedCampaigns.length} />
+          <RailSection label="Pinned" count={pinnedCampaigns.length} />
           {pinnedCampaigns.length === 0 ? (
-            <div className="px-4 py-1 text-[11px] font-mono" style={{ color: 'var(--mist)' }}>
-              — pin a campaign to surface it here
+            <div className="px-4 py-1 text-[12px]" style={{ color: 'var(--mist)' }}>
+              No pinned campaigns
             </div>
           ) : pinnedCampaigns.map(c => (
             <RailItem
@@ -366,10 +376,10 @@ export default function Layout() {
             />
           ))}
 
-          <RailSection label="recent" />
+          <RailSection label="Recent" />
           {recentPosts.length === 0 ? (
-            <div className="px-4 py-1 text-[11px] font-mono" style={{ color: 'var(--mist)' }}>
-              — no recent activity
+            <div className="px-4 py-1 text-[12px]" style={{ color: 'var(--mist)' }}>
+              Nothing here yet
             </div>
           ) : recentPosts.map(p => (
             <RailItem
@@ -385,15 +395,15 @@ export default function Layout() {
           <div className="px-4 pt-5 pb-1">
             <button
               onClick={() => setMoreOpen(o => !o)}
-              className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.18em] font-mono hover:opacity-80"
+              className="flex items-center gap-1 text-[11px] font-medium transition-opacity hover:opacity-80"
               style={{ color: 'var(--ghost)' }}
             >
-              <ChevronRight size={9} className={`transition-transform ${moreOpen ? 'rotate-90' : ''}`} />
-              — more
+              <ChevronRight size={11} className={`transition-transform ${moreOpen ? 'rotate-90' : ''}`} strokeWidth={2} />
+              More
             </button>
           </div>
           {moreOpen && (
-            <div className="pb-2">
+            <div className="pb-2 space-y-0.5 pt-1">
               <RailItem to="/clients"   icon={Building2} title="Clients" />
               <RailItem to="/calendar"  icon={Calendar}  title="Calendar" />
               <RailItem to="/templates" icon={Layers}    title="Templates" />
@@ -405,29 +415,30 @@ export default function Layout() {
 
         {/* Footer — Settings + theme + user */}
         <div
-          className="px-3 py-2.5 flex items-center gap-2"
+          className="px-2 py-2 flex items-center gap-1"
           style={{ borderTop: '1px solid var(--paper-edge)' }}
         >
           <NavLink
             to="/settings"
-            className="flex items-center gap-2 flex-1 px-1.5 py-1 hover:bg-[var(--paper-warm)] rounded-sm transition-colors text-[12px]"
-            style={{ color: 'var(--ink-quiet)' }}
+            className="flex items-center gap-2 flex-1 px-2 py-1.5 hover:bg-[var(--fog)] transition-colors text-[13px]"
+            style={{ color: 'var(--ink-quiet)', borderRadius: 'var(--radius-md)' }}
           >
-            <Settings size={13} style={{ color: 'var(--ghost)' }} />
+            <Settings size={14} style={{ color: 'var(--ghost)' }} strokeWidth={1.75} />
             <span>Settings</span>
           </NavLink>
           <button
             onClick={toggle}
             title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
-            className="p-1.5 hover:bg-[var(--paper-warm)] rounded-sm transition-colors"
+            className="p-2 hover:bg-[var(--fog)] transition-colors"
+            style={{ borderRadius: 'var(--radius-md)' }}
           >
             {theme === 'dark'
-              ? <Sun size={13} style={{ color: 'var(--ghost)' }} />
-              : <Moon size={13} style={{ color: 'var(--ghost)' }} />}
+              ? <Sun size={14} style={{ color: 'var(--ghost)' }} strokeWidth={1.75} />
+              : <Moon size={14} style={{ color: 'var(--ghost)' }} strokeWidth={1.75} />}
           </button>
           <div className="group relative">
             <button
-              className="w-6 h-6 flex items-center justify-center text-[9px] font-mono uppercase tracking-wider"
+              className="w-7 h-7 flex items-center justify-center text-[11px] font-medium"
               style={{
                 background: 'var(--fog)',
                 color: 'var(--ink)',

@@ -236,7 +236,7 @@ export default function Intel() {
               style={{
                 background: 'var(--paper)',
                 border: `1px solid ${isUnread ? 'var(--oxblood-rule)' : 'var(--paper-edge)'}`,
-                borderRadius: '4px',
+                borderRadius: 'var(--radius-lg)',
               }}>
               {isUnread && (
                 <span className="absolute left-0 top-2 bottom-2 w-[2px]"

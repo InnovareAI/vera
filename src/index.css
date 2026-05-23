@@ -1,57 +1,65 @@
-/* ─── Atelier — typography ───────────────────────────────────────────────── */
-/* Fraunces (variable serif, opsz + wght axes) for display.                  */
-/* Geist for body. Geist Mono for metadata + numerals.                       */
+/* ─── Typography — single sans-serif (Geist), no serif display ───────────── */
+/* Geist for body + headings. Geist Mono kept but used sparingly (IDs only). */
 /* @imports must precede all other rules per CSS spec.                       */
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..900&family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&display=swap');
 @import "tailwindcss";
 
 * { box-sizing: border-box; }
 
-/* ─── Atelier — design tokens ────────────────────────────────────────────── */
-/* Light mode is the editorial paper-and-ink default. Dark mode is the warm- */
-/* inverted slate variant. All accent / surface use the same oxblood family. */
+/* ─── Design tokens — "Minimal" (Claude / ChatGPT inspired) ──────────────── */
+/* Modern minimal: warm off-white canvas, pure white surfaces, near-invisible */
+/* borders, oxblood as the InnovareAI accent used sparingly. Hierarchy comes */
+/* from typography + spacing, not from color or texture.                     */
+/* Variable names kept (--paper, --ink, --oxblood) so existing component     */
+/* code keeps working — the visual is what shifts.                           */
 :root {
   /* Surfaces */
-  --paper:        #F6F2EA;        /* canvas + rail base */
-  --paper-warm:   #EFEAE0;        /* hover, soft surfaces */
-  --paper-edge:   #E4DED1;        /* hairlines, dividers */
-  --fog:          #DCD6C8;        /* tertiary surface, blocks */
+  --paper:        #FAFAF9;        /* page background (warm off-white) */
+  --paper-warm:   #FFFFFF;        /* cards, sidebar — pure white surfaces stand out subtly against the warm bg */
+  --paper-edge:   #ECECEA;        /* near-invisible borders */
+  --fog:          #F4F4F2;        /* hover, soft surfaces */
 
-  /* Ink (text) */
-  --ink:          #0E0E0F;        /* primary */
-  --ink-quiet:    #4A463D;        /* secondary */
-  --ghost:        #847E6F;        /* tertiary, metadata */
-  --mist:         #B5AEA0;        /* placeholders, disabled */
+  /* Ink (text) — neutral grey scale, no warm cast */
+  --ink:          #171717;        /* primary text */
+  --ink-quiet:    #525252;        /* secondary text */
+  --ghost:        #A3A3A3;        /* tertiary text, metadata */
+  --mist:         #D4D4D4;        /* placeholders, disabled */
 
-  /* Accent — oxblood family */
-  --oxblood:      #7A1F2B;        /* primary actions, active state */
-  --oxblood-deep: #5A1620;        /* hover */
-  --oxblood-soft: #A04050;        /* secondary accent uses */
-  --oxblood-tint: rgba(122, 31, 43, 0.08);
-  --oxblood-rule: rgba(122, 31, 43, 0.20);
+  /* Accent — oxblood family, used sparingly for primary CTAs + active state */
+  --oxblood:      #7A1F2B;
+  --oxblood-deep: #5A1620;
+  --oxblood-soft: #A04050;
+  --oxblood-tint: rgba(122, 31, 43, 0.06);
+  --oxblood-rule: rgba(122, 31, 43, 0.18);
 
-  /* Type */
-  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  /* Type — single family, no serif display */
+  --font-display: 'Geist', system-ui, -apple-system, sans-serif;
   --font-body:    'Geist', system-ui, -apple-system, sans-serif;
   --font-mono:    'Geist Mono', 'SF Mono', ui-monospace, monospace;
+
+  /* Radii — softer corners for modern feel */
+  --radius-sm:    6px;
+  --radius-md:    8px;
+  --radius-lg:    12px;
 }
 
 body[data-theme="dark"] {
-  --paper:        #16161A;
-  --paper-warm:   #1E1E24;
-  --paper-edge:   #2A2A30;
-  --fog:          #34343C;
+  /* Near-black canvas like ChatGPT, with #171717 surfaces */
+  --paper:        #0A0A0A;
+  --paper-warm:   #171717;
+  --paper-edge:   #262626;
+  --fog:          #1F1F1F;
 
-  --ink:          #F0ECE3;
-  --ink-quiet:    #C9C3B6;
-  --ghost:        #8A8478;
-  --mist:         #5C574E;
+  --ink:          #FAFAFA;
+  --ink-quiet:    #A3A3A3;
+  --ghost:        #737373;
+  --mist:         #404040;
 
-  --oxblood:      #C24556;
-  --oxblood-deep: #D26068;
-  --oxblood-soft: #E07880;
-  --oxblood-tint: rgba(194, 69, 86, 0.14);
-  --oxblood-rule: rgba(194, 69, 86, 0.30);
+  --oxblood:      #D44C5B;
+  --oxblood-deep: #E36572;
+  --oxblood-soft: #E58088;
+  --oxblood-tint: rgba(212, 76, 91, 0.10);
+  --oxblood-rule: rgba(212, 76, 91, 0.24);
 }
 
 /* ─── Base (light) ───────────────────────────────────────────────────────── */
