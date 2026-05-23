@@ -27,6 +27,7 @@ import { useTheme } from '../lib/theme'
 import { supabase } from '../lib/supabase'
 import type { Campaign, Post } from '../lib/supabase'
 import { ErrorBoundary } from './ErrorBoundary'
+import { ChatPanel } from './ChatPanel'
 
 // ─── shared status badge (kept here so pages that import it still work) ──
 const statusColors: Record<string, string> = {
@@ -509,11 +510,14 @@ export default function Layout() {
       {/* page renders a compact fallback without losing the rail.            */}
       {/* resetKey={pathname} clears the error when the operator navigates    */}
       {/* away from the crashed page (e.g. picks a different rail item).      */}
-      <main className="flex-1 overflow-y-auto" style={{ background: 'var(--paper)' }}>
+      <main className="flex-1 overflow-y-auto min-w-0" style={{ background: 'var(--paper)' }}>
         <ErrorBoundary variant="route" resetKey={location.pathname}>
           <Outlet />
         </ErrorBoundary>
       </main>
+
+      {/* VERA — permanent chat rail. Always-present surface across the app. */}
+      <ChatPanel />
     </div>
   )
 }

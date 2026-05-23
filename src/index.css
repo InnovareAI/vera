@@ -194,6 +194,12 @@ body[data-theme="dark"] .bg-white.border-gray-100 {
   border-color: rgba(255,255,255,0.08) !important;
 }
 
+/* VERA thinking-dot pulse — used by the chat panel's loading indicator */
+@keyframes vera-pulse {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+  40%           { opacity: 1;    transform: scale(1.1); }
+}
+
 /* Scrollbar */
 body[data-theme="dark"] ::-webkit-scrollbar { width: 4px; height: 4px; }
 body[data-theme="dark"] ::-webkit-scrollbar-track { background: transparent; }
