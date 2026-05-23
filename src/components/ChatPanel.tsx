@@ -94,11 +94,12 @@ export function ChatPanel() {
     return () => window.removeEventListener('keydown', onKey)
   }, [mode])
 
-  // Auto-grow textarea
+  // Auto-grow textarea — clamp between 4 lines (default) and ~10 lines (cap)
   useEffect(() => {
-    if (!textareaRef.current) return
-    textareaRef.current.style.height = 'auto'
-    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 240)}px`
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 96), 240)}px`
   }, [input])
 
   const send = useCallback(async () => {
@@ -307,7 +308,7 @@ export function ChatPanel() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={onComposerKey}
-              rows={1}
+              rows={4}
               placeholder={
                 activeOrg
                   ? 'Tell VERA what to do — draft a post, summarize the queue, run an audit…'
@@ -315,7 +316,7 @@ export function ChatPanel() {
               }
               disabled={!activeOrg}
               className="flex-1 resize-none outline-none bg-transparent text-[14.5px] leading-relaxed disabled:opacity-50 py-1"
-              style={{ color: 'var(--ink)', maxHeight: 240 }}
+              style={{ color: 'var(--ink)', minHeight: 96, maxHeight: 240 }}
             />
             {streaming ? (
               <button
