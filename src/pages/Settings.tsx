@@ -71,7 +71,7 @@ function WorkspaceTab() {
           <input value={form.website} onChange={e => setForm(f => ({...f, website: e.target.value}))}
             className="input" placeholder="https://innovareai.com" />
         </Field>
-        <Field label="Industry" hint="Helps KAI tailor content">
+        <Field label="Industry" hint="Helps VERA tailor content">
           <input value={form.industry} onChange={e => setForm(f => ({...f, industry: e.target.value}))}
             className="input" placeholder="AI / Technology" />
         </Field>
@@ -297,7 +297,7 @@ function BrandVoiceTab() {
     <div className="max-w-xl space-y-5">
       <div>
         <h2 className="text-base font-semibold text-gray-900">Brand Voice</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Define the tone and style KAI uses when generating content.</p>
+        <p className="text-sm text-gray-500 mt-0.5">Define the tone and style VERA uses when generating content.</p>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
@@ -492,7 +492,7 @@ function IntegrationsTab() {
                       value={(config as Record<string, unknown>)['access_token'] as string ?? ''}
                       onChange={e => update(platform, { access_token: e.target.value } as Partial<PlatformConfig>)}
                       className="input w-full pr-8"
-                      placeholder="Stored encrypted · not used directly by KAI yet"
+                      placeholder="Stored encrypted · not used directly by VERA yet"
                     />
                   </div>
                   <p className="text-[10px] text-gray-400 mt-1">
@@ -516,7 +516,7 @@ function IntegrationsTab() {
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100">
           <div className="text-sm font-medium text-gray-800">AI Model Settings</div>
-          <div className="text-xs text-gray-400 mt-0.5">Configure the models powering KAI</div>
+          <div className="text-xs text-gray-400 mt-0.5">Configure the models powering VERA</div>
         </div>
         <div className="px-4 py-3 space-y-3">
           {[

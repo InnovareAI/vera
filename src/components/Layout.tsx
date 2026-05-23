@@ -369,10 +369,10 @@ export default function Layout() {
               borderRadius: 'var(--radius-md)',
             }}
           >
-            K
+            V
           </div>
           <span className="text-[15px] font-semibold tracking-tight" style={{ color: 'var(--ink)' }}>
-            KAI
+            VERA
           </span>
         </div>
 

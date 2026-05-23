@@ -162,7 +162,7 @@ This is not "a VP of Sales" — it is THIS VP of Sales with THESE pains. Referen
         const strategistStream = anthropic.messages.stream({
           model: 'claude-sonnet-4-6',
           max_tokens: 1024,
-          system: `You are KAI's Strategist. Analyse the content brief and output a strategy as valid JSON only — no prose, no markdown fences.
+          system: `You are VERA's Strategist. Analyse the content brief and output a strategy as valid JSON only — no prose, no markdown fences.
 ${campaignContext}${audienceContext}
 
 Available skills:
@@ -259,7 +259,7 @@ When run_image_designer is true, populate image_prompt with a concrete 1-2 sente
         const writerStream = anthropic.messages.stream({
           model: 'claude-sonnet-4-6',
           max_tokens: 2048,
-          system: `You are KAI's Writer. Write the content based on the strategy brief below.
+          system: `You are VERA's Writer. Write the content based on the strategy brief below.
 
 ## Target platform: ${platformLabel}
 ${platformGuide(platform)}
@@ -292,7 +292,7 @@ Write only the final content — no preamble, no explanation, no labels, no mark
           const seoStream = anthropic.messages.stream({
             model: 'claude-haiku-4-5',
             max_tokens: 1024,
-            system: `You are KAI's SEO Agent. Optimise the given content for search engines while preserving its voice and quality.
+            system: `You are VERA's SEO Agent. Optimise the given content for search engines while preserving its voice and quality.
 
 Target keywords: ${(strategy.target_keywords as string[]).join(', ')}
 
@@ -329,7 +329,7 @@ SEO NOTES:
           const personaStream = anthropic.messages.stream({
             model: 'claude-haiku-4-5',
             max_tokens: 1024,
-            system: `You are KAI's Persona Adapter. Rewrite the given content to resonate specifically with the target persona described below. Adjust language, examples, pain points, and benefits to match their world — while keeping the core message and length.
+            system: `You are VERA's Persona Adapter. Rewrite the given content to resonate specifically with the target persona described below. Adjust language, examples, pain points, and benefits to match their world — while keeping the core message and length.
 
 Target persona: ${strategy.persona_detail}
 
@@ -425,7 +425,7 @@ Output the rewritten content only — no labels, no explanation.`,
         const brandStream = anthropic.messages.stream({
           model: 'claude-sonnet-4-6',
           max_tokens: 512,
-          system: `You are KAI's Brand Guard. Review the content against brand guidelines.
+          system: `You are VERA's Brand Guard. Review the content against brand guidelines.
 
 ${brandRules || 'No specific brand rules configured. Check for general quality, clarity, and professionalism.'}
 
@@ -453,7 +453,7 @@ Respond concisely:
         const complianceStream = anthropic.messages.stream({
           model: 'claude-haiku-4-5',
           max_tokens: 512,
-          system: `You are KAI's Compliance Checker. Review the content for the following compliance issues:
+          system: `You are VERA's Compliance Checker. Review the content for the following compliance issues:
 
 1. FALSE CLAIMS — any unverified statistics, guarantees, or factual claims that could mislead
 2. COMPETITOR ATTACKS — negative comparisons, disparaging language, or unfair competitor references

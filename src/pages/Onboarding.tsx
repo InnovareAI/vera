@@ -232,7 +232,7 @@ function IntroStep({ onStart }: { onStart: () => void }) {
       <div className="inline-flex w-14 h-14 rounded-2xl bg-gray-100 items-center justify-center mb-6">
         <Sparkles className="w-7 h-7 text-gray-700" />
       </div>
-      <h1 className="text-3xl font-bold text-gray-900 mb-3">Welcome to KAI</h1>
+      <h1 className="text-3xl font-bold text-gray-900 mb-3">Welcome to VERA</h1>
       <p className="text-base text-gray-600 max-w-md mx-auto mb-8">
         We'll ask a few questions about your company and where you publish content. Takes about 2 minutes.
         You can skip anything you don't have.

@@ -273,7 +273,7 @@ export default function OnboardingAudit() {
             <div>
               <h2 className="text-base font-bold text-gray-900">Connect your LinkedIn</h2>
               <p className="text-sm text-gray-500 mt-0.5">
-                Unipile's hosted wizard handles the login. Once connected, KAI can read your posts and engagement
+                Unipile's hosted wizard handles the login. Once connected, VERA can read your posts and engagement
                 data to extract your voice — far richer signal than public scraping.
               </p>
             </div>

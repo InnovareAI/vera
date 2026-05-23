@@ -19,6 +19,7 @@ const ORCHESTRATOR_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kai-
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 type AgentName =
+  | 'VERA'
   | 'Strategist'
   | 'Researcher'
   | 'Writer'
@@ -39,6 +40,7 @@ interface Message {
 // Agent dots — neutral chip background with a small coloured dot prefix.
 // Maps each agent to its CSS dot-* variable (defined in index.css).
 const agentDots: Record<AgentName, string> = {
+  VERA:              'var(--ink)',                  // VERA owns the brand colour
   Strategist:        'var(--dot-violet)',
   Researcher:        'var(--dot-sky)',
   Writer:            'var(--dot-blue)',
@@ -50,6 +52,7 @@ const agentDots: Record<AgentName, string> = {
 }
 
 const agentAvatars: Record<AgentName, string> = {
+  VERA: 'V',
   Strategist: 'ST',
   Researcher: 'RS',
   Writer: 'WR',
@@ -242,8 +245,8 @@ function UserBubble({ content }: { content: string }) {
 const WELCOME: Message = {
   id: 'welcome',
   role: 'agent',
-  agent: 'Strategist',
-  content: "Hi! I'm your content team. Tell me what you need — a post, a thread, a Quora answer — and we'll create it together. Just describe what you want and I'll brief the team.",
+  agent: 'VERA',
+  content: "Hi, I'm VERA. Think of me as your creative partner — I turn ideas into content people actually feel something about. Tell me what you're working on, or just hand me a half-formed thought. I love a half-formed thought.",
 }
 
 async function runAgentPipeline(
@@ -462,7 +465,7 @@ export default function Generate() {
         </div>
         <div>
           <h1 className="text-[15px] font-semibold" style={{ color: 'var(--ink)' }}>Generate</h1>
-          <p className="text-[12px]" style={{ color: 'var(--ghost)' }}>Your AI content team — Strategist · Researcher · Writer · SEO · Persona · Brand Guard · Compliance · Publisher</p>
+          <p className="text-[12px]" style={{ color: 'var(--ghost)' }}>VERA + her team — Strategist · Researcher · Writer · SEO · Persona · Brand Guard · Compliance · Publisher</p>
         </div>
       </div>
 

@@ -42,7 +42,7 @@ export default function Templates() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Templates</h1>
-            <p className="text-sm text-gray-500 mt-1">Content briefs and frameworks for the KAI agents</p>
+            <p className="text-sm text-gray-500 mt-1">Content briefs and frameworks for the VERA agents</p>
           </div>
           {briefs.length === 0 && !loading && (
             <button onClick={seedTemplates} disabled={seeding}
