@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import { ExternalLink, FileText, Globe, Megaphone, RefreshCw, Check, Filter } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
+import { Chip } from '../components/Chip'
 
 const DISCOVER_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/discover-competitor-intel`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -149,7 +150,7 @@ export default function Intel() {
   if (loading) {
     return (
       <div className="p-6">
-        <p className="text-[12px] font-mono uppercase tracking-wider" style={{ color: 'var(--ghost)' }}>Loading intel…</p>
+        <p className="text-[13px]" style={{ color: 'var(--ghost)' }}>Loading intel…</p>
       </div>
     )
   }
@@ -159,26 +160,26 @@ export default function Intel() {
       {/* Page header */}
       <div className="flex items-end justify-between mb-5 gap-4">
         <div>
-          <h1 className="font-display text-[28px] leading-none tracking-tight" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 144, "wght" 500' }}>
+          <h1 className="text-[28px] leading-tight tracking-tight font-semibold" style={{ color: 'var(--ink)' }}>
             Intel
           </h1>
-          <p className="text-[12px] uppercase tracking-wider font-mono mt-2" style={{ color: 'var(--ghost)' }}>
+          <p className="text-[13px] mt-1" style={{ color: 'var(--ghost)' }}>
             {events.length} events · {competitors.length} competitors tracked
           </p>
         </div>
         <div className="flex items-center gap-3">
           {refreshReport && (
-            <span className="text-[11px] font-mono" style={{ color: 'var(--ghost)' }}>{refreshReport}</span>
+            <span className="text-[12px]" style={{ color: 'var(--ghost)' }}>{refreshReport}</span>
           )}
           <button
             onClick={refresh}
             disabled={refreshing || !activeOrg?.id}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition-all disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] transition-all disabled:opacity-40 hover:opacity-90"
             style={{
-              background: 'var(--oxblood)', color: 'var(--paper)', borderRadius: '3px',
+              background: 'var(--ink)', color: 'var(--paper-warm)', borderRadius: 'var(--radius-md)',
             }}
           >
-            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} strokeWidth={2} />
             {refreshing ? 'Scanning…' : 'Refresh'}
           </button>
         </div>
@@ -188,7 +189,7 @@ export default function Intel() {
       {(competitors.length > 0 || events.length > 0) && (
         <div className="flex items-center gap-3 mb-4 flex-wrap">
           <div className="inline-flex items-center gap-2 px-3 py-1.5"
-            style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
+            style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-md)' }}>
             <Filter size={12} style={{ color: 'var(--ghost)' }} />
             <select value={competitorFilter} onChange={e => setCompetitorFilter(e.target.value)}
               className="text-[12px] outline-none cursor-pointer"
@@ -198,7 +199,7 @@ export default function Intel() {
             </select>
           </div>
           <div className="inline-flex items-center gap-2 px-3 py-1.5"
-            style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
+            style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-md)' }}>
             <select value={kindFilter} onChange={e => setKindFilter(e.target.value)}
               className="text-[12px] outline-none cursor-pointer"
               style={{ background: 'transparent', color: 'var(--ink)', border: 'none', fontFamily: 'var(--font-body)' }}>
@@ -215,7 +216,7 @@ export default function Intel() {
           <div className="flex flex-col items-center justify-center h-64" style={{ color: 'var(--ghost)' }}>
             <span className="font-display text-3xl mb-3" style={{ color: 'var(--mist)' }}>—</span>
             <p className="text-sm">No intel yet.</p>
-            <p className="text-[12px] font-mono mt-2" style={{ color: 'var(--ghost)' }}>
+            <p className="text-[13px] mt-2" style={{ color: 'var(--ghost)' }}>
               {competitors.length === 0
                 ? 'Add competitors in Settings → Competitors to start tracking.'
                 : 'Click Refresh to scan now, or wait for the daily cron at 06:00 UTC.'}
@@ -234,65 +235,62 @@ export default function Intel() {
             <div key={event.id}
               className="p-4 transition-all relative"
               style={{
-                background: 'var(--paper)',
-                border: `1px solid ${isUnread ? 'var(--oxblood-rule)' : 'var(--paper-edge)'}`,
+                background: 'var(--paper-warm)',
+                border: '1px solid var(--paper-edge)',
                 borderRadius: 'var(--radius-lg)',
               }}>
-              {isUnread && (
-                <span className="absolute left-0 top-2 bottom-2 w-[2px]"
-                  style={{ background: 'var(--oxblood)', borderRadius: '0 1px 1px 0' }} />
-              )}
               <div className="flex items-start gap-3">
-                <div className="flex-shrink-0 mt-0.5">
-                  <Icon size={14} style={{ color: isUnread ? 'var(--oxblood)' : 'var(--ghost)' }} />
+                <div className="flex-shrink-0 mt-0.5 relative">
+                  <Icon size={15} style={{ color: 'var(--ghost)' }} strokeWidth={1.75} />
+                  {isUnread && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full"
+                      style={{ background: 'var(--accent)' }} />
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                    <span className="text-[10px] uppercase tracking-wider font-mono px-1.5 py-0.5"
-                      style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', borderRadius: '2px' }}>
-                      {KIND_LABEL[event.kind]}
-                    </span>
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                    <Chip dotColor="var(--ghost)">{KIND_LABEL[event.kind]}</Chip>
                     {competitor && (
-                      <span className="text-[11px] font-mono" style={{ color: 'var(--oxblood)' }}>
+                      <span className="text-[13px] font-medium" style={{ color: 'var(--ink-quiet)' }}>
                         {competitor.name}
                       </span>
                     )}
-                    <span className="text-[10px] font-mono ml-auto" style={{ color: 'var(--mist)' }}>
+                    <span className="text-[12px] ml-auto" style={{ color: 'var(--mist)' }}>
                       {relativeTime(event.detected_at)}
                     </span>
                   </div>
-                  <p className="font-display text-[15px] leading-snug mb-1" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 24, "wght" 500' }}>
+                  <p className="text-[15px] font-medium leading-snug mb-1" style={{ color: 'var(--ink)' }}>
                     {event.title || event.source_url}
                   </p>
                   {event.summary && (
-                    <p className="text-[12px] line-clamp-2 mb-2" style={{ color: 'var(--ink-quiet)' }}>
+                    <p className="text-[13px] line-clamp-2 mb-2" style={{ color: 'var(--ink-quiet)' }}>
                       {event.summary}
                     </p>
                   )}
-                  <div className="flex items-center gap-3 mt-2">
+                  <div className="flex items-center gap-3 mt-3">
                     <a href={event.source_url} target="_blank" rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-[11px] font-mono"
+                      className="inline-flex items-center gap-1 text-[12px] hover:opacity-80"
                       style={{ color: 'var(--ghost)' }}>
-                      <ExternalLink size={11} /> View source
+                      <ExternalLink size={12} strokeWidth={1.75} /> View source
                     </a>
                     <button onClick={() => briefResponse(event)}
-                      className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 transition-all"
+                      className="inline-flex items-center gap-1 text-[12px] font-medium px-2.5 py-1 transition-opacity hover:opacity-90"
                       style={{
-                        background: 'var(--oxblood-tint)', color: 'var(--oxblood)',
-                        borderRadius: '2px',
+                        background: 'var(--ink)', color: 'var(--paper-warm)',
+                        borderRadius: 'var(--radius-sm)',
                       }}>
                       Brief a response →
                     </button>
                     {isUnread && (
                       <button onClick={() => markRead(event.id)}
-                        className="inline-flex items-center gap-1 text-[11px] font-mono ml-auto"
+                        className="inline-flex items-center gap-1 text-[12px] ml-auto hover:opacity-80"
                         style={{ color: 'var(--ghost)' }}>
-                        <Check size={11} /> Mark read
+                        <Check size={12} strokeWidth={1.75} /> Mark read
                       </button>
                     )}
                     {event.briefed_at && (
-                      <span className="text-[11px] font-mono ml-auto" style={{ color: 'var(--oxblood)' }}>
-                        ✓ briefed
+                      <span className="text-[12px] ml-auto" style={{ color: 'var(--ink-quiet)' }}>
+                        ✓ Briefed
                       </span>
                     )}
                   </div>
