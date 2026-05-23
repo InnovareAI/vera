@@ -119,7 +119,7 @@ function WorkspaceSwitcher() {
                   <div
                     className="w-5 h-5 flex items-center justify-center text-[10px] font-medium flex-shrink-0"
                     style={{
-                      background: m.org_id === activeOrg?.id ? 'var(--oxblood)' : 'var(--fog)',
+                      background: m.org_id === activeOrg?.id ? 'var(--ink)' : 'var(--fog)',
                       color: m.org_id === activeOrg?.id ? 'var(--paper-warm)' : 'var(--ink)',
                       borderRadius: 'var(--radius-sm)',
                     }}
@@ -131,7 +131,7 @@ function WorkspaceSwitcher() {
                     <div className="text-[11px] truncate capitalize" style={{ color: 'var(--ghost)' }}>{m.role}</div>
                   </div>
                   {m.org_id === activeOrg?.id && (
-                    <Check size={12} style={{ color: 'var(--oxblood)' }} className="flex-shrink-0" />
+                    <Check size={12} style={{ color: 'var(--ink)' }} className="flex-shrink-0" />
                   )}
                 </button>
               ))}
@@ -194,7 +194,7 @@ function PrimaryNavItem({
             <span
               className="text-[11px] px-1.5 leading-tight py-px"
               style={{
-                background: isActive ? 'var(--oxblood)' : 'var(--paper-edge)',
+                background: isActive ? 'var(--ink)' : 'var(--paper-edge)',
                 color: isActive ? 'var(--paper-warm)' : 'var(--ink-quiet)',
                 borderRadius: 'var(--radius-sm)',
                 fontWeight: 500,
@@ -328,13 +328,13 @@ export default function Layout() {
         {/* Workspace switcher */}
         <WorkspaceSwitcher />
 
-        {/* + Brief CTA */}
+        {/* + Brief CTA — ink-filled primary action, Notion style */}
         <div className="px-2 pt-3">
           <button
             onClick={() => navigate('/generate')}
             className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 transition-opacity hover:opacity-90"
             style={{
-              background: 'var(--oxblood)',
+              background: 'var(--ink)',
               color: 'var(--paper-warm)',
               borderRadius: 'var(--radius-md)',
             }}

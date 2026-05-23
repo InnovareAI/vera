@@ -4,22 +4,13 @@ import { LayoutList, LayoutGrid, X, Layers } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 import type { Post, Campaign } from '../lib/supabase'
+import { PlatformChip, StatusChip } from '../components/Chip'
 
 const APPROVAL_WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approval-webhook`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-const PLATFORM_COLORS: Record<string, string> = {
-  linkedin: 'bg-blue-100 text-blue-700',
-  twitter: 'bg-sky-100 text-sky-700',
-  instagram: 'bg-pink-100 text-pink-700',
-  quora: 'bg-red-100 text-red-700',
-  facebook: 'bg-indigo-100 text-indigo-700',
-  blog: 'bg-amber-100 text-amber-700',
-  email: 'bg-emerald-100 text-emerald-700',
-  medium: 'bg-gray-100 text-gray-700',
-  reddit: 'bg-orange-100 text-orange-700',
-  substack: 'bg-pink-100 text-pink-700',
-}
+// Platform + status chip helpers moved to ../components/Chip — neutral
+// chips with coloured dots replace the older bright Tailwind pills.
 
 const STATUS_TABS = ['Pending Review', 'Approved', 'Scheduled', 'Posted', 'Rejected'] as const
 type StatusTab = typeof STATUS_TABS[number]
@@ -166,10 +157,10 @@ export default function Review() {
       {/* Page header */}
       <div className="flex items-end justify-between mb-5 gap-4">
         <div>
-          <h1 className="font-display text-[28px] leading-none tracking-tight" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 144, "wght" 500' }}>
+          <h1 className="text-[28px] leading-tight tracking-tight font-semibold" style={{ color: 'var(--ink)' }}>
             Review queue
           </h1>
-          <p className="text-[12px] uppercase tracking-wider font-mono mt-2" style={{ color: 'var(--ghost)' }}>
+          <p className="text-[13px] mt-1" style={{ color: 'var(--ghost)' }}>
             {scoped.length} of {posts.length} posts · {tabCounts['Pending Review']} awaiting approval
           </p>
         </div>
@@ -293,11 +284,12 @@ function ListView({
             >
               {tab}
               {tabCounts[tab] > 0 && (
-                <span className="text-[10px] font-mono px-1.5"
+                <span className="text-[11px] px-1.5"
                   style={{
-                    background: activeTab === tab ? 'var(--oxblood)' : 'var(--paper-edge)',
-                    color: activeTab === tab ? 'var(--paper)' : 'var(--ink-quiet)',
-                    borderRadius: '2px',
+                    background: activeTab === tab ? 'var(--ink)' : 'var(--paper-edge)',
+                    color: activeTab === tab ? 'var(--paper-warm)' : 'var(--ink-quiet)',
+                    borderRadius: 'var(--radius-sm)',
+                    fontWeight: 500,
                   }}>
                   {tabCounts[tab]}
                 </span>
@@ -338,26 +330,15 @@ function ListView({
                 )}
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1.5">
-                      {post.channel && (
-                        <span className={`text-[10px] uppercase tracking-wider font-mono px-1.5 py-0.5 ${PLATFORM_COLORS[post.channel.toLowerCase()] || 'bg-gray-100 text-gray-600'}`} style={{ borderRadius: '2px' }}>
-                          {post.channel}
-                        </span>
-                      )}
-                      <span className="text-[10px] uppercase tracking-wider font-mono px-1.5 py-0.5"
-                        style={{
-                          background: isPosted(post) ? 'var(--oxblood-tint)' : 'var(--paper-warm)',
-                          color: isPosted(post) ? 'var(--oxblood)' : 'var(--ink-quiet)',
-                          borderRadius: '2px',
-                        }}>
-                        {isPosted(post) ? 'Posted' : post.status}
-                      </span>
+                    <div className="flex items-center gap-2 mb-2">
+                      <PlatformChip channel={post.channel} />
+                      <StatusChip status={isPosted(post) ? 'Posted' : post.status} />
                       {campaign && (
-                        <span className="text-[10px] font-mono truncate" style={{ color: 'var(--oxblood)' }} title={campaign.theme || campaign.name}>
+                        <span className="text-[12px] truncate" style={{ color: 'var(--ghost)' }} title={campaign.theme || campaign.name}>
                           · {campaign.name}
                         </span>
                       )}
-                      <span className="text-[10px] font-mono ml-auto" style={{ color: 'var(--mist)' }}>{relativeTime(post.created_at)}</span>
+                      <span className="text-[12px] ml-auto" style={{ color: 'var(--mist)' }}>{relativeTime(post.created_at)}</span>
                     </div>
                     <p className="font-display text-[15px] leading-snug truncate" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 24, "wght" 500' }}>{post.title || 'Untitled post'}</p>
                     <p className="text-[12px] mt-1 line-clamp-2" style={{ color: 'var(--ink-quiet)' }}>{post.copy}</p>
@@ -512,28 +493,24 @@ function BoardCard({ post, campaign, onOpen, draggable }: { post: Post; campaign
           title={`Campaign: ${campaign.name}`}
         />
       )}
-      <div className="flex items-center gap-1.5 mb-1.5">
-        {post.channel && (
-          <span className={`text-[9px] uppercase tracking-wider font-mono px-1.5 py-0.5 ${PLATFORM_COLORS[post.channel.toLowerCase()] || 'bg-gray-100 text-gray-600'}`} style={{ borderRadius: '2px' }}>
-            {post.channel}
-          </span>
-        )}
+      <div className="flex items-center gap-2 mb-2">
+        <PlatformChip channel={post.channel} size="sm" />
         {campaign && (
-          <span className="text-[9px] font-mono truncate max-w-[120px]" style={{ color: 'var(--oxblood)' }} title={campaign.name}>
-            · {campaign.name.replace(/^[A-Z][a-z]+ \d+ — /, '')}
+          <span className="text-[11px] truncate max-w-[120px]" style={{ color: 'var(--ghost)' }} title={campaign.name}>
+            {campaign.name.replace(/^[A-Z][a-z]+ \d+ — /, '')}
           </span>
         )}
-        <span className="text-[9px] font-mono ml-auto" style={{ color: 'var(--mist)' }}>{relativeTime(post.created_at)}</span>
+        <span className="text-[11px] ml-auto" style={{ color: 'var(--mist)' }}>{relativeTime(post.created_at)}</span>
       </div>
       {post.media_url && (
-        <div className="mb-2 overflow-hidden" style={{ borderRadius: '2px' }}>
+        <div className="mb-2 overflow-hidden" style={{ borderRadius: 'var(--radius-sm)' }}>
           <img src={post.media_url} alt="" className="w-full h-20 object-cover" />
         </div>
       )}
-      <p className="font-display text-[13px] leading-tight line-clamp-2 mb-1" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 18, "wght" 500' }}>
+      <p className="text-[14px] font-medium leading-snug line-clamp-2 mb-1" style={{ color: 'var(--ink)' }}>
         {post.title || 'Untitled post'}
       </p>
-      <p className="text-[11px] line-clamp-2" style={{ color: 'var(--ink-quiet)' }}>
+      <p className="text-[13px] line-clamp-2" style={{ color: 'var(--ink-quiet)' }}>
         {post.copy?.replace(/^Subject:.+\n+/, '')}
       </p>
       {isPosted(post) && post.posted_url && (
@@ -563,19 +540,15 @@ function PostDetailPanel({
 }) {
   return (
     <div className="sticky top-0 p-5"
-      style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}>
+      style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-[11px] uppercase tracking-wider font-mono" style={{ color: 'var(--ghost)' }}>— preview</h2>
-        <button onClick={onClose} className="p-1 hover:bg-[var(--paper-warm)] rounded-sm" style={{ color: 'var(--ghost)' }}>
+        <h2 className="text-[13px] font-medium" style={{ color: 'var(--ghost)' }}>Preview</h2>
+        <button onClick={onClose} className="p-1 hover:bg-[var(--fog)] transition-colors" style={{ color: 'var(--ghost)', borderRadius: 'var(--radius-sm)' }}>
           <X size={14} />
         </button>
       </div>
-      {post.channel && (
-        <span className={`text-[10px] uppercase tracking-wider font-mono px-1.5 py-0.5 ${PLATFORM_COLORS[post.channel.toLowerCase()] || 'bg-gray-100 text-gray-600'}`} style={{ borderRadius: '2px' }}>
-          {post.channel}
-        </span>
-      )}
-      <h3 className="font-display text-[18px] mt-3 mb-3 leading-snug" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 32, "wght" 500' }}>
+      <PlatformChip channel={post.channel} />
+      <h3 className="text-[17px] font-semibold mt-3 mb-3 leading-snug" style={{ color: 'var(--ink)' }}>
         {post.title || 'Untitled'}
       </h3>
       {post.media_url && (

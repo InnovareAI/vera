@@ -6,45 +6,70 @@
 
 * { box-sizing: border-box; }
 
-/* ─── Design tokens — "Minimal" (Claude / ChatGPT inspired) ──────────────── */
-/* Modern minimal: warm off-white canvas, pure white surfaces, near-invisible */
-/* borders, oxblood as the InnovareAI accent used sparingly. Hierarchy comes */
-/* from typography + spacing, not from color or texture.                     */
-/* Variable names kept (--paper, --ink, --oxblood) so existing component     */
-/* code keeps working — the visual is what shifts.                           */
+/* ─── Design tokens — "Minimal" (Notion / Linear / ChatGPT) ──────────────── */
+/* Monochrome-first. Primary actions use ink (black). Brand colour (--accent) */
+/* is used only at rare brand-moment surfaces (small dot in workspace         */
+/* switcher, unread indicator). Hierarchy comes from typography + spacing.   */
+/* Status colours come from neutral chips with small coloured dots, not from */
+/* coloured backgrounds.                                                     */
+/* Variable names preserved so existing components keep working.             */
 :root {
   /* Surfaces */
-  --paper:        #FAFAF9;        /* page background (warm off-white) */
-  --paper-warm:   #FFFFFF;        /* cards, sidebar — pure white surfaces stand out subtly against the warm bg */
+  --paper:        #FAFAF9;        /* page background */
+  --paper-warm:   #FFFFFF;        /* cards, sidebar */
   --paper-edge:   #ECECEA;        /* near-invisible borders */
-  --fog:          #F4F4F2;        /* hover, soft surfaces */
+  --fog:          #F4F4F2;        /* hover surface */
 
-  /* Ink (text) — neutral grey scale, no warm cast */
-  --ink:          #171717;        /* primary text */
-  --ink-quiet:    #525252;        /* secondary text */
-  --ghost:        #A3A3A3;        /* tertiary text, metadata */
-  --mist:         #D4D4D4;        /* placeholders, disabled */
+  /* Ink (text + primary actions) */
+  --ink:          #171717;        /* primary text + CTA fills */
+  --ink-quiet:    #525252;
+  --ghost:        #8E8E8C;
+  --mist:         #C4C4C2;
 
-  /* Accent — oxblood family, used sparingly for primary CTAs + active state */
-  --oxblood:      #7A1F2B;
-  --oxblood-deep: #5A1620;
-  --oxblood-soft: #A04050;
-  --oxblood-tint: rgba(122, 31, 43, 0.06);
-  --oxblood-rule: rgba(122, 31, 43, 0.18);
+  /* Brand accent — InnovareAI oxblood. Used sparingly: workspace dot,    */
+  /* unread indicators, never as a CTA fill. Aliased here for callers     */
+  /* that need a brand touchpoint.                                        */
+  --accent:       #7A1F2B;
+  --accent-soft:  #A04050;
+  --accent-tint:  rgba(122, 31, 43, 0.06);
+  --accent-rule:  rgba(122, 31, 43, 0.16);
 
-  /* Type — single family, no serif display */
+  /* Legacy oxblood aliases — still exported so old usages don't break,   */
+  /* but the practical visual contract is "rare brand accent" now.        */
+  --oxblood:      var(--accent);
+  --oxblood-deep: var(--accent);
+  --oxblood-soft: var(--accent-soft);
+  --oxblood-tint: var(--accent-tint);
+  --oxblood-rule: var(--accent-rule);
+
+  /* Status dot colours (used as small <span> dots, not pill backgrounds) */
+  --dot-blue:     #3B82F6;        /* linkedin, scheduled */
+  --dot-sky:      #0EA5E9;        /* twitter / x */
+  --dot-pink:     #EC4899;        /* instagram */
+  --dot-amber:    #F59E0B;        /* pending */
+  --dot-green:    #10B981;        /* approved, posted */
+  --dot-rose:     #F43F5E;        /* rejected */
+  --dot-violet:   #8B5CF6;        /* medium */
+  --dot-orange:   #F97316;        /* reddit */
+  --dot-emerald:  #10B981;        /* email */
+  --dot-indigo:   #6366F1;        /* facebook */
+
+  /* Type — single family */
   --font-display: 'Geist', system-ui, -apple-system, sans-serif;
   --font-body:    'Geist', system-ui, -apple-system, sans-serif;
   --font-mono:    'Geist Mono', 'SF Mono', ui-monospace, monospace;
 
-  /* Radii — softer corners for modern feel */
+  /* Radii */
   --radius-sm:    6px;
   --radius-md:    8px;
   --radius-lg:    12px;
+
+  /* Base body size — bumped to read like Notion / Asana (14-15px is the */
+  /* modern productivity-tool sweet spot, not 12-13px dashboard density) */
+  --text-base:    14px;
 }
 
 body[data-theme="dark"] {
-  /* Near-black canvas like ChatGPT, with #171717 surfaces */
   --paper:        #0A0A0A;
   --paper-warm:   #171717;
   --paper-edge:   #262626;
@@ -55,17 +80,24 @@ body[data-theme="dark"] {
   --ghost:        #737373;
   --mist:         #404040;
 
-  --oxblood:      #D44C5B;
-  --oxblood-deep: #E36572;
-  --oxblood-soft: #E58088;
-  --oxblood-tint: rgba(212, 76, 91, 0.10);
-  --oxblood-rule: rgba(212, 76, 91, 0.24);
+  --accent:       #D44C5B;
+  --accent-soft:  #E58088;
+  --accent-tint:  rgba(212, 76, 91, 0.10);
+  --accent-rule:  rgba(212, 76, 91, 0.20);
+
+  --oxblood:      var(--accent);
+  --oxblood-deep: var(--accent);
+  --oxblood-soft: var(--accent-soft);
+  --oxblood-tint: var(--accent-tint);
+  --oxblood-rule: var(--accent-rule);
 }
 
 /* ─── Base (light) ───────────────────────────────────────────────────────── */
 body {
   margin: 0;
   font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: 1.5;
   font-feature-settings: 'tnum' 1, 'cv11' 1;  /* tabular figures, single-storey a */
   background: var(--paper);
   color: var(--ink);
