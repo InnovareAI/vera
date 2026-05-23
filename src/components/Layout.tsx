@@ -19,7 +19,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   Star, Clock, Sparkles, CheckSquare, Telescope, BookOpen, Plus,
   Calendar, Layers, Zap, Building2, Settings, LogOut, Sun, Moon,
-  ChevronDown, Check, ChevronRight, Radar,
+  ChevronDown, Check, ChevronRight, Radar, Monitor,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
@@ -238,6 +238,57 @@ function RailItem({
   )
 }
 
+// ─── theme switcher ──────────────────────────────────────────────────────
+// 3-way segmented control: Sun (light) · Monitor (system) · Moon (dark).
+// Active mode gets the pill background; others are quiet. Matches Linear /
+// GitHub / Vercel pattern.
+function ThemeSwitcher({
+  theme,
+  setTheme,
+}: {
+  theme: 'light' | 'dark' | 'system'
+  setTheme: (t: 'light' | 'dark' | 'system') => void
+}) {
+  const options: Array<{ value: 'light' | 'dark' | 'system'; Icon: React.ElementType; label: string }> = [
+    { value: 'light',  Icon: Sun,     label: 'Light' },
+    { value: 'system', Icon: Monitor, label: 'System' },
+    { value: 'dark',   Icon: Moon,    label: 'Dark' },
+  ]
+  return (
+    <div
+      className="inline-flex items-center p-0.5"
+      style={{
+        background: 'var(--fog)',
+        borderRadius: 'var(--radius-md)',
+      }}
+    >
+      {options.map(({ value, Icon, label }) => {
+        const active = theme === value
+        return (
+          <button
+            key={value}
+            onClick={() => setTheme(value)}
+            title={label}
+            aria-label={label}
+            className="p-1.5 transition-all"
+            style={{
+              background: active ? 'var(--paper-warm)' : 'transparent',
+              boxShadow: active ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+              borderRadius: 'var(--radius-sm)',
+            }}
+          >
+            <Icon
+              size={13}
+              strokeWidth={active ? 2 : 1.75}
+              style={{ color: active ? 'var(--ink)' : 'var(--ghost)' }}
+            />
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 // Relative time formatter for Recent list
 function ago(iso: string): string {
   const d = new Date(iso).getTime()
@@ -256,7 +307,7 @@ function ago(iso: string): string {
 export default function Layout() {
   const { user, signOut } = useAuth()
   const { activeOrg, activeRole } = useOrg()
-  const { theme, toggle } = useTheme()
+  const { theme, setTheme } = useTheme()
   const navigate = useNavigate()
   const [moreOpen, setMoreOpen] = useState(false)
   const [pinnedCampaigns, setPinnedCampaigns] = useState<Campaign[]>([])
@@ -426,16 +477,7 @@ export default function Layout() {
             <Settings size={14} style={{ color: 'var(--ghost)' }} strokeWidth={1.75} />
             <span>Settings</span>
           </NavLink>
-          <button
-            onClick={toggle}
-            title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
-            className="p-2 hover:bg-[var(--fog)] transition-colors"
-            style={{ borderRadius: 'var(--radius-md)' }}
-          >
-            {theme === 'dark'
-              ? <Sun size={14} style={{ color: 'var(--ghost)' }} strokeWidth={1.75} />
-              : <Moon size={14} style={{ color: 'var(--ghost)' }} strokeWidth={1.75} />}
-          </button>
+          <ThemeSwitcher theme={theme} setTheme={setTheme} />
           <div className="group relative">
             <button
               className="w-7 h-7 flex items-center justify-center text-[11px] font-medium"
