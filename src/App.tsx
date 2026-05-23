@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { OrgProvider, useOrg } from './lib/orgContext'
 import { ThemeProvider } from './lib/theme'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -21,35 +22,42 @@ import Settings from './pages/Settings'
 import Agency from './pages/Agency'
 
 export default function App() {
+  // Top-level boundary catches anything that escapes a route boundary —
+  // provider crashes, route-shell crashes, anything in the non-Layout
+  // routes (Login, Onboarding, OnboardingAudit, LinkedInScore). Route-level
+  // boundary lives inside Layout, wrapping <Outlet />, so the rail survives
+  // when a single page blows up.
   return (
-    <ThemeProvider>
-    <AuthProvider>
-      <OrgProvider>
-        <Routes>
-          <Route path="/login" element={<LoginGuard />} />
-          <Route path="/onboarding" element={<Onboarding />} />
-          <Route path="/onboarding/audit/:orgId" element={<OnboardingAudit />} />
-          <Route path="/linkedin-score/:orgId" element={<LinkedInScore />} />
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard"  element={<Dashboard />} />
-            <Route path="generate"   element={<Generate />} />
-            <Route path="audit"      element={<AuditRedirect />} />
-            <Route path="review"     element={<Review />} />
-            <Route path="review/:id" element={<ReviewDetail />} />
-            <Route path="clients"    element={<Clients />} />
-            <Route path="calendar"   element={<Calendar />} />
-            <Route path="library"    element={<Library />} />
-            <Route path="intel"      element={<Intel />} />
-            <Route path="templates"  element={<Templates />} />
-            <Route path="skills"     element={<Skills />} />
-            <Route path="settings"   element={<Settings />} />
-            <Route path="agency"     element={<Agency />} />
-          </Route>
-        </Routes>
-      </OrgProvider>
-    </AuthProvider>
-    </ThemeProvider>
+    <ErrorBoundary variant="page">
+      <ThemeProvider>
+        <AuthProvider>
+          <OrgProvider>
+            <Routes>
+              <Route path="/login" element={<LoginGuard />} />
+              <Route path="/onboarding" element={<Onboarding />} />
+              <Route path="/onboarding/audit/:orgId" element={<OnboardingAudit />} />
+              <Route path="/linkedin-score/:orgId" element={<LinkedInScore />} />
+              <Route path="/" element={<Layout />}>
+                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route path="dashboard"  element={<Dashboard />} />
+                <Route path="generate"   element={<Generate />} />
+                <Route path="audit"      element={<AuditRedirect />} />
+                <Route path="review"     element={<Review />} />
+                <Route path="review/:id" element={<ReviewDetail />} />
+                <Route path="clients"    element={<Clients />} />
+                <Route path="calendar"   element={<Calendar />} />
+                <Route path="library"    element={<Library />} />
+                <Route path="intel"      element={<Intel />} />
+                <Route path="templates"  element={<Templates />} />
+                <Route path="skills"     element={<Skills />} />
+                <Route path="settings"   element={<Settings />} />
+                <Route path="agency"     element={<Agency />} />
+              </Route>
+            </Routes>
+          </OrgProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   )
 }
 

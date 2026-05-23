@@ -26,6 +26,7 @@ import { useOrg } from '../lib/orgContext'
 import { useTheme } from '../lib/theme'
 import { supabase } from '../lib/supabase'
 import type { Campaign, Post } from '../lib/supabase'
+import { ErrorBoundary } from './ErrorBoundary'
 
 // ─── shared status badge (kept here so pages that import it still work) ──
 const statusColors: Record<string, string> = {
@@ -503,9 +504,12 @@ export default function Layout() {
         </div>
       </aside>
 
-      {/* Canvas */}
+      {/* Canvas — wrapped in a route-level boundary so a crash in any single  */}
+      {/* page renders a compact fallback without losing the rail.            */}
       <main className="flex-1 overflow-y-auto" style={{ background: 'var(--paper)' }}>
-        <Outlet />
+        <ErrorBoundary variant="route">
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </div>
   )
