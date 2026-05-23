@@ -14,7 +14,7 @@
 // The canvas (right side) is just <Outlet />. No tabs, no breadcrumbs,
 // no second nav. One focused view at a time.
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   Star, Clock, Sparkles, CheckSquare, Telescope, BookOpen, Plus,
@@ -24,6 +24,8 @@ import {
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
 import { useTheme } from '../lib/theme'
+import { supabase } from '../lib/supabase'
+import type { Campaign, Post } from '../lib/supabase'
 
 // ─── shared status badge (kept here so pages that import it still work) ──
 const statusColors: Record<string, string> = {
@@ -233,21 +235,19 @@ function RailItem({
   )
 }
 
-// ─── mock data for pinned + recent ───────────────────────────────────────
-// These will get wired to real schema in a follow-up. Visual treatment
-// locked in first; data shape locked in by what these items want to express.
-const MOCK_PINNED = [
-  { id: 'p1', to: '/library?campaign=q1-linkedin',   title: 'Q1 LinkedIn campaign', meta: '12 posts · 4 pending' },
-  { id: 'p2', to: '/library?campaign=weekly-news',   title: 'Weekly newsletter',    meta: 'next: Mar 18' },
-  { id: 'p3', to: '/library?campaign=fashion-pitch', title: 'NIVEA fashion pitch',  meta: '6 assets · drafting' },
-]
-const MOCK_RECENT = [
-  { id: 'r1', to: '/review',              title: 'Why AI BDRs win on velocity', meta: 'post · 2h' },
-  { id: 'r2', to: '/library',             title: 'Jellyfish 10s commercial',    meta: 'video · 3h' },
-  { id: 'r3', to: '/dashboard',           title: 'Newsletter audit — March',    meta: 'audit · 5h' },
-  { id: 'r4', to: '/library',             title: 'InnovareAI brand voice v3',   meta: 'voice · 1d' },
-  { id: 'r5', to: '/review',              title: 'LinkedIn post · Filipino…',   meta: 'draft · 1d' },
-]
+// Relative time formatter for Recent list
+function ago(iso: string): string {
+  const d = new Date(iso).getTime()
+  const diff = Date.now() - d
+  const min = Math.round(diff / 60000)
+  if (min < 1) return 'now'
+  if (min < 60) return `${min}m`
+  const hr = Math.round(min / 60)
+  if (hr < 24) return `${hr}h`
+  const day = Math.round(hr / 24)
+  if (day < 7) return `${day}d`
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
 
 // ─── layout ──────────────────────────────────────────────────────────────
 export default function Layout() {
@@ -256,6 +256,36 @@ export default function Layout() {
   const { theme, toggle } = useTheme()
   const navigate = useNavigate()
   const [moreOpen, setMoreOpen] = useState(false)
+  const [pinnedCampaigns, setPinnedCampaigns] = useState<Campaign[]>([])
+  const [recentPosts, setRecentPosts] = useState<Post[]>([])
+
+  // Load pinned campaigns + recent posts for the active workspace. Both feed
+  // the rail; the "Pinned" section shows operator-flagged campaigns and the
+  // "Recent" section shows posts touched in the last week.
+  useEffect(() => {
+    if (!activeOrg?.id) {
+      setPinnedCampaigns([])
+      setRecentPosts([])
+      return
+    }
+    const orgId = activeOrg.id
+    Promise.all([
+      supabase.from('campaigns')
+        .select('id, name, theme, status, is_pinned, post_count, color, start_date, end_date')
+        .eq('org_id', orgId)
+        .eq('is_pinned', true)
+        .order('start_date', { ascending: false, nullsFirst: false })
+        .limit(6),
+      supabase.from('content_posts')
+        .select('id, title, channel, status, posted_at, updated_at, campaign_id')
+        .eq('org_id', orgId)
+        .order('updated_at', { ascending: false })
+        .limit(8),
+    ]).then(([campRes, postRes]) => {
+      setPinnedCampaigns((campRes.data as Campaign[]) ?? [])
+      setRecentPosts((postRes.data as Post[]) ?? [])
+    })
+  }, [activeOrg?.id])
 
   async function handleSignOut() {
     await signOut()
@@ -317,14 +347,37 @@ export default function Layout() {
 
         {/* Scrolling middle — pinned + recent + more */}
         <div className="flex-1 overflow-y-auto">
-          <RailSection label="pinned" count={MOCK_PINNED.length} />
-          {MOCK_PINNED.map(p => (
-            <RailItem key={p.id} to={p.to} icon={Star} title={p.title} meta={p.meta} />
+          <RailSection label="pinned" count={pinnedCampaigns.length} />
+          {pinnedCampaigns.length === 0 ? (
+            <div className="px-4 py-1 text-[11px] font-mono" style={{ color: 'var(--mist)' }}>
+              — pin a campaign to surface it here
+            </div>
+          ) : pinnedCampaigns.map(c => (
+            <RailItem
+              key={c.id}
+              to={`/review?campaign=${c.id}`}
+              icon={Star}
+              title={c.name}
+              meta={[
+                c.status !== 'active' ? c.status : null,
+                typeof c.post_count === 'number' ? `${c.post_count} posts` : null,
+              ].filter(Boolean).join(' · ') || undefined}
+            />
           ))}
 
           <RailSection label="recent" />
-          {MOCK_RECENT.map(r => (
-            <RailItem key={r.id} to={r.to} icon={Clock} title={r.title} meta={r.meta} />
+          {recentPosts.length === 0 ? (
+            <div className="px-4 py-1 text-[11px] font-mono" style={{ color: 'var(--mist)' }}>
+              — no recent activity
+            </div>
+          ) : recentPosts.map(p => (
+            <RailItem
+              key={p.id}
+              to={`/review/${p.id}`}
+              icon={Clock}
+              title={p.title || 'Untitled post'}
+              meta={`${(p.channel ?? 'post').toLowerCase()} · ${ago(p.updated_at)}`}
+            />
           ))}
 
           {/* More — collapsed secondary routes */}

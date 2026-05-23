@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
+import { Star } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import type { Post } from '../lib/supabase'
+import { useOrg } from '../lib/orgContext'
+import type { Post, Campaign } from '../lib/supabase'
 
 const PLATFORM_COLORS: Record<string, string> = {
   linkedin: 'bg-blue-100 text-blue-700',
@@ -21,12 +24,14 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function Library() {
   const [posts, setPosts] = useState<Post[]>([])
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [platformFilter, setPlatformFilter] = useState('All')
   const [statusFilter, setStatusFilter] = useState('All')
   const [selected, setSelected] = useState<Post | null>(null)
   const [copied, setCopied] = useState(false)
+  const { activeOrg } = useOrg()
 
   const platforms = ['All', 'LinkedIn', 'Twitter', 'Instagram', 'Quora', 'Facebook']
   const statuses = ['All', 'Published', 'Approved', 'Scheduled', 'Pending Review', 'Draft', 'Rejected']
@@ -35,6 +40,21 @@ export default function Library() {
     supabase.from('content_posts').select('*').order('created_at', { ascending: false }).limit(200)
       .then(({ data }) => { setPosts(data || []); setLoading(false) })
   }, [])
+
+  useEffect(() => {
+    if (!activeOrg?.id) { setCampaigns([]); return }
+    supabase.from('campaigns')
+      .select('id, name, theme, status, is_pinned, post_count, color, start_date, end_date, description')
+      .eq('org_id', activeOrg.id)
+      .order('is_pinned', { ascending: false })
+      .order('start_date', { ascending: false, nullsFirst: false })
+      .then(({ data }) => setCampaigns((data as Campaign[]) ?? []))
+  }, [activeOrg?.id])
+
+  const postCountByCampaign = posts.reduce((acc, p) => {
+    if (p.campaign_id) acc[p.campaign_id] = (acc[p.campaign_id] ?? 0) + 1
+    return acc
+  }, {} as Record<string, number>)
 
   const filtered = posts.filter(p => {
     const matchSearch = !search || (p.title || '').toLowerCase().includes(search.toLowerCase()) || p.copy.toLowerCase().includes(search.toLowerCase())
@@ -53,8 +73,83 @@ export default function Library() {
     <div className="flex gap-6 h-full">
       <div className="flex-1 flex flex-col min-w-0">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Content Library</h1>
-          <p className="text-sm text-gray-500 mt-1">All generated posts — search, filter, reuse</p>
+          <h1 className="font-display text-[28px] leading-none tracking-tight" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 144, "wght" 500' }}>Library</h1>
+          <p className="text-[12px] uppercase tracking-wider font-mono mt-2" style={{ color: 'var(--ghost)' }}>
+            {campaigns.length} campaigns · {posts.length} posts
+          </p>
+        </div>
+
+        {/* Campaigns section — folders for monthly groupings */}
+        {campaigns.length > 0 && (
+          <div className="mb-6">
+            <div className="px-1 pb-2 flex items-baseline gap-2">
+              <span className="text-[10px] uppercase tracking-[0.18em] font-mono" style={{ color: 'var(--ghost)' }}>
+                — campaigns
+              </span>
+              <span className="flex-1 h-px" style={{ background: 'var(--oxblood-rule)' }} />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              {campaigns.map(c => {
+                const count = postCountByCampaign[c.id] ?? c.post_count ?? 0
+                const dateRange = c.start_date && c.end_date
+                  ? `${new Date(c.start_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} → ${new Date(c.end_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+                  : null
+                return (
+                  <Link
+                    key={c.id}
+                    to={`/review?campaign=${c.id}`}
+                    className="block p-4 transition-all hover:shadow-sm relative"
+                    style={{
+                      background: 'var(--paper)',
+                      border: '1px solid var(--paper-edge)',
+                      borderRadius: '4px',
+                    }}
+                  >
+                    {/* Oxblood left bar for active/pinned */}
+                    {(c.is_pinned || c.status === 'active') && (
+                      <span
+                        className="absolute left-0 top-2 bottom-2 w-[2px]"
+                        style={{ background: 'var(--oxblood)', opacity: c.is_pinned ? 1 : 0.5, borderRadius: '0 1px 1px 0' }}
+                      />
+                    )}
+                    <div className="flex items-center gap-2 mb-2">
+                      {c.is_pinned && <Star size={11} style={{ color: 'var(--oxblood)' }} />}
+                      <span className="text-[9px] uppercase tracking-wider font-mono px-1.5 py-0.5"
+                        style={{
+                          background: c.status === 'active' ? 'var(--oxblood-tint)' : 'var(--paper-warm)',
+                          color: c.status === 'active' ? 'var(--oxblood)' : 'var(--ink-quiet)',
+                          borderRadius: '2px',
+                        }}>
+                        {c.status}
+                      </span>
+                      {dateRange && (
+                        <span className="text-[10px] font-mono ml-auto" style={{ color: 'var(--mist)' }}>{dateRange}</span>
+                      )}
+                    </div>
+                    <p className="font-display text-[15px] leading-snug mb-1" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 24, "wght" 500' }}>
+                      {c.name}
+                    </p>
+                    {c.theme && (
+                      <p className="text-[11px] line-clamp-2 mb-2" style={{ color: 'var(--ink-quiet)' }}>
+                        {c.theme}
+                      </p>
+                    )}
+                    <p className="text-[10px] uppercase tracking-wider font-mono" style={{ color: 'var(--ghost)' }}>
+                      {count} {count === 1 ? 'post' : 'posts'}
+                    </p>
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Posts section header */}
+        <div className="px-1 pb-2 flex items-baseline gap-2">
+          <span className="text-[10px] uppercase tracking-[0.18em] font-mono" style={{ color: 'var(--ghost)' }}>
+            — all posts
+          </span>
+          <span className="flex-1 h-px" style={{ background: 'var(--oxblood-rule)' }} />
         </div>
 
         <div className="flex gap-3 mb-4 flex-wrap">

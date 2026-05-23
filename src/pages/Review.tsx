@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { LayoutList, LayoutGrid, X, Layers } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -69,7 +69,16 @@ export default function Review() {
   const [view, setView] = useState<View>(() => (localStorage.getItem('reviewView') as View) ?? 'list')
   const [dragOverTab, setDragOverTab] = useState<StatusTab | null>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
-  const [campaignFilter, setCampaignFilter] = useState<string>('all')   // 'all' | 'adhoc' | <campaign_id>
+  const [searchParams, setSearchParams] = useSearchParams()
+  const campaignFilter = searchParams.get('campaign') ?? 'all'   // 'all' | 'adhoc' | <campaign_id>
+  const setCampaignFilter = (next: string) => {
+    if (next === 'all') {
+      searchParams.delete('campaign')
+    } else {
+      searchParams.set('campaign', next)
+    }
+    setSearchParams(searchParams, { replace: true })
+  }
   const { activeOrg } = useOrg()
   const navigate = useNavigate()
 
