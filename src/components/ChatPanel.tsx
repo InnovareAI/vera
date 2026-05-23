@@ -43,9 +43,17 @@ const MODE_HEIGHTS: Record<Mode, string> = {
   fullscreen: '100%',
 }
 
+interface PendingImage {
+  id: string
+  media_type: string
+  data: string         // base64
+  preview_url: string  // object URL for <img> preview before send
+}
+
 export function ChatPanel() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
   const [streaming, setStreaming] = useState(false)
   const [mode, setMode] = useState<Mode>('fullscreen')
   const [historyLoaded, setHistoryLoaded] = useState(false)
@@ -56,7 +64,8 @@ export function ChatPanel() {
   const { activeOrg } = useOrg()
   const { user } = useAuth()
 
-  // Load thread on workspace switch
+  // Load thread on workspace switch (including image attachments persisted
+  // via chat_messages.attachments jsonb sidecar)
   useEffect(() => {
     if (!activeOrg?.id) {
       setMessages([])
@@ -67,15 +76,21 @@ export function ChatPanel() {
     setHistoryLoaded(false)
     supabase
       .from('chat_messages')
-      .select('id, role, content')
+      .select('id, role, content, attachments')
       .eq('org_id', activeOrg.id)
       .in('role', ['user', 'assistant'])
       .order('created_at', { ascending: false })
       .limit(HISTORY_LIMIT)
       .then(({ data }) => {
         if (cancelled) return
-        const rows = (data ?? []) as Array<{ id: string; role: 'user' | 'assistant'; content: string }>
-        setMessages(rows.reverse().map(r => ({ id: r.id, role: r.role, content: r.content })))
+        type Row = { id: string; role: 'user' | 'assistant'; content: string; attachments: Array<{ kind: string; url: string }> | null }
+        const rows = (data ?? []) as Row[]
+        setMessages(rows.reverse().map(r => ({
+          id: r.id,
+          role: r.role,
+          content: r.content,
+          images: (r.attachments ?? []).filter(a => a.kind === 'image').map(a => a.url),
+        })))
         setHistoryLoaded(true)
       })
     return () => { cancelled = true }
@@ -111,19 +126,95 @@ export function ChatPanel() {
     el.style.height = `${Math.min(Math.max(el.scrollHeight, 96), 240)}px`
   }, [input])
 
+  // Convert a File or Blob to a base64 PendingImage
+  async function attachImage(file: File | Blob) {
+    if (!file.type.startsWith('image/')) return
+    const buf = await file.arrayBuffer()
+    const bytes = new Uint8Array(buf)
+    // chunk-encode to avoid stack overflow on large images
+    let bin = ''
+    const CHUNK = 0x8000
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)))
+    }
+    const data = btoa(bin)
+    const preview_url = URL.createObjectURL(file)
+    setPendingImages(prev => [...prev, {
+      id: crypto.randomUUID(),
+      media_type: file.type,
+      data,
+      preview_url,
+    }])
+  }
+
+  // Paste handler — image data in the clipboard becomes a pending attachment
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      if (!e.clipboardData) return
+      const items = Array.from(e.clipboardData.items)
+      const imgItem = items.find(it => it.type.startsWith('image/'))
+      if (imgItem) {
+        const file = imgItem.getAsFile()
+        if (file) {
+          e.preventDefault()
+          attachImage(file)
+        }
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [])
+
+  // Drop handler on the panel
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault()
+    const files = Array.from(e.dataTransfer.files)
+    for (const f of files) attachImage(f)
+  }
+  function onDragOver(e: React.DragEvent) {
+    if (e.dataTransfer.types.includes('Files')) e.preventDefault()
+  }
+
   const send = useCallback(async () => {
     const text = input.trim()
-    if (!text || streaming || !activeOrg?.id) return
+    if ((!text && pendingImages.length === 0) || streaming || !activeOrg?.id) return
 
-    const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text }
+    // Build the user message content — string for text-only, array for vision
+    const userContent: string | Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> =
+      pendingImages.length === 0
+        ? text
+        : [
+            ...(text ? [{ type: 'text', text }] : []),
+            ...pendingImages.map(img => ({
+              type: 'image',
+              source: { type: 'base64', media_type: img.media_type, data: img.data },
+            })),
+          ]
+
+    const userPreviewImages = pendingImages.map(p => p.preview_url)
+    const userMsg: Message = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: text,
+      images: userPreviewImages.length ? userPreviewImages : undefined,
+    }
     const assistantId = crypto.randomUUID()
     const placeholder: Message = { id: assistantId, role: 'assistant', content: '', pending: true }
 
     const nextMessages = [...messages, userMsg]
     setMessages([...nextMessages, placeholder])
     setInput('')
+    setPendingImages([])
     setStreaming(true)
     if (mode === 'minimized') setMode('default')  // surface the reply
+
+    // Build the wire-format messages array: existing turns use plain string
+    // content, but the LATEST user turn uses array content when images are
+    // present so Anthropic sees them via vision.
+    const wireMessages = [
+      ...nextMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content })),
+      { role: 'user' as const, content: userContent },
+    ]
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -140,7 +231,7 @@ export function ChatPanel() {
           'apikey': anonKey,
         },
         body: JSON.stringify({
-          messages: nextMessages.map(m => ({ role: m.role, content: m.content })),
+          messages: wireMessages,
           org_id: activeOrg.id,
           user_id: user?.id ?? null,
           route: location.pathname,
@@ -233,7 +324,7 @@ export function ChatPanel() {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [input, streaming, activeOrg?.id, messages, user?.id, location.pathname, mode])
+  }, [input, pendingImages, streaming, activeOrg?.id, messages, user?.id, location.pathname, mode])
 
   function stop() {
     abortRef.current?.abort()
@@ -252,6 +343,8 @@ export function ChatPanel() {
   return (
     <section
       className="flex-shrink-0 flex flex-col"
+      onDrop={onDrop}
+      onDragOver={onDragOver}
       style={{
         height: MODE_HEIGHTS[mode],
         minHeight: MODE_HEIGHTS[mode],
@@ -323,6 +416,34 @@ export function ChatPanel() {
         style={!isMin ? { borderTop: '1px solid var(--paper-edge)' } : {}}
       >
         <div className="w-full">
+          {/* Pending image attachments — preview thumbnails above composer */}
+          {pendingImages.length > 0 && (
+            <div className="flex gap-2 mb-2 flex-wrap">
+              {pendingImages.map(img => (
+                <div
+                  key={img.id}
+                  className="relative group"
+                  style={{
+                    width: 64, height: 64,
+                    background: 'var(--paper)',
+                    border: '1px solid var(--paper-edge)',
+                    borderRadius: 'var(--radius-md)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <img src={img.preview_url} alt="" className="w-full h-full object-cover" />
+                  <button
+                    onClick={() => setPendingImages(prev => prev.filter(p => p.id !== img.id))}
+                    className="absolute top-0.5 right-0.5 w-4 h-4 flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ background: 'var(--ink)', color: 'var(--paper-warm)', borderRadius: '50%' }}
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div
             className="flex items-end gap-3 px-4 py-3"
             style={{
