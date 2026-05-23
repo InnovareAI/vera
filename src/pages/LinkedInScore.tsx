@@ -192,7 +192,7 @@ export default function LinkedInScore() {
         <div className="flex items-center justify-between mb-3">
           <p className="text-sm font-semibold text-gray-900">360Brew principles ({enabledPrinciples.length} of {ALL_PRINCIPLES.length})</p>
           <button onClick={runBrew} disabled={brewLoading || !enabledPrinciples.length}
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-600 hover:text-violet-700 disabled:opacity-40">
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 hover:text-gray-900 disabled:opacity-40">
             {brewLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCw className="w-3.5 h-3.5" />}
             Re-run brew360 with current selection
           </button>
@@ -202,9 +202,9 @@ export default function LinkedInScore() {
             const on = enabledPrinciples.includes(p.id)
             return (
               <button key={p.id} onClick={() => togglePrinciple(p.id)}
-                className={`text-left p-3 rounded-lg border-2 transition-all ${on ? 'border-violet-400 bg-violet-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
+                className={`text-left p-3 rounded-lg border-2 transition-all ${on ? 'border-gray-400 bg-gray-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
                 <div className="flex items-start gap-2">
-                  <div className={`w-4 h-4 mt-0.5 rounded border-2 flex-shrink-0 flex items-center justify-center ${on ? 'border-violet-600 bg-violet-600' : 'border-gray-300 bg-white'}`}>
+                  <div className={`w-4 h-4 mt-0.5 rounded border-2 flex-shrink-0 flex items-center justify-center ${on ? 'border-violet-600 bg-gray-900' : 'border-gray-300 bg-white'}`}>
                     {on && <Check className="w-3 h-3 text-white" />}
                   </div>
                   <div>
@@ -293,7 +293,7 @@ export default function LinkedInScore() {
           <div className="space-y-2">
             {profile?.fixes?.slice(0, 3).map((f, i) => (
               <div key={`p-${i}`} className="flex items-start gap-2 text-sm">
-                <span className="text-[10px] uppercase font-bold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded mt-0.5 flex-shrink-0">PROFILE</span>
+                <span className="text-[10px] uppercase font-bold text-gray-900 bg-gray-100 px-1.5 py-0.5 rounded mt-0.5 flex-shrink-0">PROFILE</span>
                 <div className="text-gray-700"><span className="font-medium">{f.section}:</span> {f.fix}</div>
               </div>
             ))}
@@ -313,7 +313,7 @@ export default function LinkedInScore() {
           {canContinue ? "When you're ready, continue to the voice audit." : "Both audits must complete before you can continue."}
         </p>
         <button onClick={() => navigate(`/onboarding/audit/${orgId}?skip_brew=1`)} disabled={!canContinue}
-          className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg text-sm font-semibold">
+          className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-40 text-white rounded-lg text-sm font-semibold">
           Continue to voice audit <ArrowRight className="w-4 h-4" />
         </button>
       </div>
@@ -339,7 +339,7 @@ function ScoreCard({ title, subtitle, loading, score, grade, subline, runAt, onR
       </div>
       <div className="flex items-end gap-3 mb-4">
         <span className="text-5xl font-bold text-gray-900">{loading && score === undefined ? '—' : (score ?? '—')}</span>
-        {grade && <span className="text-2xl font-bold text-violet-600 mb-1">{grade}</span>}
+        {grade && <span className="text-2xl font-bold text-gray-700 mb-1">{grade}</span>}
       </div>
       {subline && <p className="text-xs text-gray-500 mb-1">{subline}</p>}
       {runAt && <p className="text-[10px] text-gray-400 mb-4">Last run {relativeTime(runAt)}</p>}

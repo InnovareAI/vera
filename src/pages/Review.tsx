@@ -324,7 +324,7 @@ function ListView({
                 {campaign && (
                   <span
                     className="absolute left-0 top-2 bottom-2 w-[2px]"
-                    style={{ background: 'var(--oxblood)', opacity: 0.6, borderRadius: '0 1px 1px 0' }}
+                    style={{ background: 'var(--ink)', opacity: 0.6, borderRadius: '0 1px 1px 0' }}
                     title={`Campaign: ${campaign.name}`}
                   />
                 )}
@@ -489,7 +489,7 @@ function BoardCard({ post, campaign, onOpen, draggable }: { post: Post; campaign
       {campaign && (
         <span
           className="absolute left-0 top-1.5 bottom-1.5 w-[2px]"
-          style={{ background: 'var(--oxblood)', opacity: 0.6, borderRadius: '0 1px 1px 0' }}
+          style={{ background: 'var(--ink)', opacity: 0.6, borderRadius: '0 1px 1px 0' }}
           title={`Campaign: ${campaign.name}`}
         />
       )}
@@ -520,7 +520,7 @@ function BoardCard({ post, campaign, onOpen, draggable }: { post: Post; campaign
           rel="noreferrer"
           onClick={(e) => e.stopPropagation()}
           className="block mt-2 text-[10px] font-mono truncate underline"
-          style={{ color: 'var(--oxblood)' }}
+          style={{ color: 'var(--ink-quiet)' }}
         >
           {post.posted_url}
         </a>
@@ -568,8 +568,8 @@ function PostDetailPanel({
       )}
       {isPosted(post) && (
         <div className="mb-4 p-3 text-[12px]"
-          style={{ background: 'var(--oxblood-tint)', border: '1px solid var(--oxblood-rule)', borderRadius: '3px' }}>
-          <div className="font-medium mb-1" style={{ color: 'var(--oxblood)' }}>✓ Posted to {post.channel}</div>
+          style={{ background: 'var(--fog)', border: '1px solid var(--oxblood-rule)', borderRadius: '3px' }}>
+          <div className="font-medium mb-1" style={{ color: 'var(--ink-quiet)' }}>✓ Posted to {post.channel}</div>
           {post.posted_at && (
             <div className="text-[11px]" style={{ color: 'var(--ink-quiet)' }}>
               {new Date(post.posted_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
@@ -578,7 +578,7 @@ function PostDetailPanel({
           {post.posted_url && (
             <a href={post.posted_url} target="_blank" rel="noopener noreferrer"
               className="mt-1 inline-block underline truncate max-w-full text-[11px] font-mono"
-              style={{ color: 'var(--oxblood)' }}>
+              style={{ color: 'var(--ink-quiet)' }}>
               {post.posted_url}
             </a>
           )}
@@ -588,7 +588,7 @@ function PostDetailPanel({
         {isPending(post.status) && !isPosted(post) && (<>
           <button onClick={() => onMove(post.id, 'Approved')} disabled={saving === post.id}
             className="w-full py-2 text-[13px] font-medium transition-colors disabled:opacity-50"
-            style={{ background: 'var(--oxblood)', color: 'var(--paper)', borderRadius: '3px' }}>
+            style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '3px' }}>
             {saving === post.id ? 'Saving…' : '✓ Approve'}
           </button>
           <button onClick={() => onMove(post.id, 'Rejected')} disabled={saving === post.id}

@@ -556,7 +556,7 @@ function TagField({ label, hint, items, input, setInput, onAdd, onRemove, color 
   color: 'violet' | 'blue' | 'red'
 }) {
   const colorMap = {
-    violet: 'bg-violet-100 text-violet-700',
+    violet: 'bg-gray-100 text-gray-900',
     blue:   'bg-blue-100 text-blue-700',
     red:    'bg-red-100 text-red-700',
   }

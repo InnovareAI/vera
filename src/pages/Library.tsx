@@ -96,7 +96,7 @@ export default function Library() {
                     {a.is_primary && (
                       <span
                         className="absolute left-0 top-2 bottom-2 w-[2px]"
-                        style={{ background: 'var(--oxblood)', borderRadius: '0 1px 1px 0' }}
+                        style={{ background: 'var(--ink)', borderRadius: '0 1px 1px 0' }}
                       />
                     )}
                     <div className="flex items-center gap-2 mb-2">

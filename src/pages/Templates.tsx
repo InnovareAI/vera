@@ -8,7 +8,7 @@ const PLATFORM_COLORS: Record<string, string> = {
   instagram: 'bg-pink-100 text-pink-700',
   quora: 'bg-red-100 text-red-700',
   facebook: 'bg-indigo-100 text-indigo-700',
-  universal: 'bg-violet-100 text-violet-700',
+  universal: 'bg-gray-100 text-gray-900',
 }
 
 const STARTER_BRIEFS = [
@@ -46,7 +46,7 @@ export default function Templates() {
           </div>
           {briefs.length === 0 && !loading && (
             <button onClick={seedTemplates} disabled={seeding}
-              className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50 transition-colors">
+              className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 disabled:opacity-50 transition-colors">
               {seeding ? 'Seeding…' : '✨ Seed Starter Templates'}
             </button>
           )}
@@ -59,7 +59,7 @@ export default function Templates() {
             <span className="text-4xl mb-3">📝</span>
             <p className="text-sm mb-4">No templates yet</p>
             <button onClick={seedTemplates} disabled={seeding}
-              className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50">
+              className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 disabled:opacity-50">
               {seeding ? 'Seeding…' : '✨ Seed Starter Templates'}
             </button>
           </div>
@@ -67,7 +67,7 @@ export default function Templates() {
           <div className="flex-1 overflow-auto grid grid-cols-1 md:grid-cols-2 gap-4">
             {briefs.map(brief => (
               <div key={brief.id} onClick={() => setSelected(brief)}
-                className={`bg-white rounded-2xl border-2 p-5 cursor-pointer transition-all hover:border-gray-300 ${selected?.id === brief.id ? 'border-violet-400' : 'border-transparent'}`}>
+                className={`bg-white rounded-2xl border-2 p-5 cursor-pointer transition-all hover:border-gray-300 ${selected?.id === brief.id ? 'border-gray-400' : 'border-transparent'}`}>
                 <div className="flex items-center gap-2 mb-3">
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PLATFORM_COLORS[brief.platform?.toLowerCase()] || 'bg-gray-100 text-gray-600'}`}>
                     {brief.platform}
@@ -81,7 +81,7 @@ export default function Templates() {
                 {brief.key_messages && brief.key_messages.length > 0 && (
                   <div className="flex gap-1 mt-2 flex-wrap">
                     {brief.key_messages.slice(0, 2).map((msg, i) => (
-                      <span key={i} className="text-xs bg-violet-50 text-violet-600 px-2 py-0.5 rounded-full line-clamp-1 max-w-[120px]">
+                      <span key={i} className="text-xs bg-gray-50 text-gray-700 px-2 py-0.5 rounded-full line-clamp-1 max-w-[120px]">
                         {msg}
                       </span>
                     ))}
@@ -111,7 +111,7 @@ export default function Templates() {
             <h3 className="font-semibold text-gray-900 mb-3 text-sm">{selected.title}</h3>
             <div className="mb-3">
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Objective</p>
-              <p className="text-xs text-gray-700 bg-violet-50 rounded-lg p-2">{selected.objective}</p>
+              <p className="text-xs text-gray-700 bg-gray-50 rounded-lg p-2">{selected.objective}</p>
             </div>
             {selected.angle && (
               <div className="mb-3">

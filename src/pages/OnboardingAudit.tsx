@@ -245,8 +245,8 @@ export default function OnboardingAudit() {
     <div className="max-w-3xl mx-auto py-8 px-4">
       <div className="mb-8">
         <div className="inline-flex items-center gap-2 mb-3">
-          <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center">
-            <Sparkles className="w-5 h-5 text-violet-600" />
+          <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center">
+            <Sparkles className="w-5 h-5 text-gray-700" />
           </div>
           <span className="text-xs uppercase tracking-wider font-semibold text-gray-500">Auditor</span>
         </div>
@@ -268,7 +268,7 @@ export default function OnboardingAudit() {
         <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
           <div className="flex items-start gap-3 mb-4">
             <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-              <span className="text-blue-600 font-bold text-sm">in</span>
+              <span className="text-gray-700 font-bold text-sm">in</span>
             </div>
             <div>
               <h2 className="text-base font-bold text-gray-900">Connect your LinkedIn</h2>
@@ -280,7 +280,7 @@ export default function OnboardingAudit() {
           </div>
           <div className="flex gap-2">
             <button onClick={startUnipileConnect}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold">
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-sm font-semibold">
               Connect LinkedIn →
             </button>
             <button onClick={skipUnipileAndAudit}
@@ -293,7 +293,7 @@ export default function OnboardingAudit() {
 
       {phase === 'connecting_unipile' && (
         <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6 flex items-center gap-3">
-          <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
+          <Loader2 className="w-5 h-5 animate-spin text-gray-700" />
           <span className="text-sm text-gray-700">Opening LinkedIn authentication…</span>
         </div>
       )}
@@ -344,7 +344,7 @@ export default function OnboardingAudit() {
       {(phase === 'synthesising' || (phase === 'done' && !result)) && (
         <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
           <div className="flex items-center gap-2 mb-3">
-            <Loader2 className="w-4 h-4 animate-spin text-violet-600" />
+            <Loader2 className="w-4 h-4 animate-spin text-gray-700" />
             <span className="text-sm font-semibold text-gray-900">Synthesising voice profile…</span>
           </div>
           <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono max-h-64 overflow-auto bg-gray-50 p-3 rounded">
@@ -393,12 +393,12 @@ export default function OnboardingAudit() {
           <div className="flex justify-end gap-2 pt-2">
             {appliedAt ? (
               <Link to="/dashboard"
-                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-semibold">
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-sm font-semibold">
                 <Check className="w-4 h-4" /> Continue to dashboard
               </Link>
             ) : (
               <button onClick={applyAudit} disabled={applying}
-                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white rounded-lg text-sm font-semibold">
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white rounded-lg text-sm font-semibold">
                 {applying ? <><Loader2 className="w-4 h-4 animate-spin" /> Applying…</> : <><Check className="w-4 h-4" /> Apply audit</>}
               </button>
             )}
@@ -427,7 +427,7 @@ export default function OnboardingAudit() {
 }
 
 function ChannelIcon({ ok, pending }: { ok?: boolean; pending: boolean }) {
-  if (pending) return <Loader2 className="w-4 h-4 animate-spin text-violet-500" />
+  if (pending) return <Loader2 className="w-4 h-4 animate-spin text-gray-700" />
   if (ok) return <span className="w-4 h-4 inline-flex items-center justify-center rounded-full bg-emerald-100 text-emerald-600 text-[10px] font-bold">✓</span>
   return <span className="w-4 h-4 inline-flex items-center justify-center rounded-full bg-gray-200 text-gray-500 text-[10px] font-bold">–</span>
 }
@@ -462,7 +462,7 @@ function BrandVoiceCard({ bv, readOnly, onChange }: { bv: BV; readOnly: boolean;
           <div className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3 whitespace-pre-wrap">{bv.system_prompt}</div>
         ) : (
           <textarea value={bv.system_prompt ?? ''} onChange={e => onChange({ ...bv, system_prompt: e.target.value })}
-            className="w-full text-sm text-gray-700 bg-gray-50 rounded-lg p-3 border border-gray-200 focus:border-violet-400 focus:outline-none min-h-[100px]" />
+            className="w-full text-sm text-gray-700 bg-gray-50 rounded-lg p-3 border border-gray-200 focus:border-gray-400 focus:outline-none min-h-[100px]" />
         )}
       </div>
     </div>
@@ -490,9 +490,9 @@ function PersonasCard({ personas, readOnly, onChange }: { personas: Personas; re
               ) : (
                 <>
                   <input value={(p.name as string) ?? ''} onChange={e => update(i, { name: e.target.value })} placeholder="Persona name"
-                    className="flex-1 text-sm font-semibold text-gray-900 border border-gray-200 rounded px-2 py-1 focus:border-violet-400 focus:outline-none" />
+                    className="flex-1 text-sm font-semibold text-gray-900 border border-gray-200 rounded px-2 py-1 focus:border-gray-400 focus:outline-none" />
                   <input value={(p.title as string) ?? ''} onChange={e => update(i, { title: e.target.value })} placeholder="Title"
-                    className="w-48 text-xs text-gray-700 border border-gray-200 rounded px-2 py-1 focus:border-violet-400 focus:outline-none" />
+                    className="w-48 text-xs text-gray-700 border border-gray-200 rounded px-2 py-1 focus:border-gray-400 focus:outline-none" />
                 </>
               )}
               <label className="text-[10px] uppercase font-semibold text-gray-500 inline-flex items-center gap-1">
@@ -508,7 +508,7 @@ function PersonasCard({ personas, readOnly, onChange }: { personas: Personas; re
         ))}
       </div>
       {!readOnly && (
-        <button onClick={add} className="mt-3 text-xs text-violet-600 hover:text-violet-700 font-medium">+ Add persona</button>
+        <button onClick={add} className="mt-3 text-xs text-gray-700 hover:text-gray-900 font-medium">+ Add persona</button>
       )}
     </div>
   )
@@ -537,7 +537,7 @@ function SkillsCard({ skills, readOnly, onChange }: { skills: Skills; readOnly: 
                   <span className="font-semibold text-gray-900 flex-1">{(s.name as string) ?? 'Skill'}</span>
                 ) : (
                   <input value={(s.name as string) ?? ''} onChange={e => update(i, { name: e.target.value })} placeholder="Skill name"
-                    className="flex-1 text-sm font-semibold text-gray-900 border border-gray-200 rounded px-2 py-1 focus:border-violet-400 focus:outline-none" />
+                    className="flex-1 text-sm font-semibold text-gray-900 border border-gray-200 rounded px-2 py-1 focus:border-gray-400 focus:outline-none" />
                 )}
                 <select disabled={readOnly} value={typeNorm} onChange={e => update(i, { type: e.target.value })}
                   className="text-[11px] uppercase font-semibold text-gray-600 border border-gray-200 rounded px-1.5 py-1 bg-white disabled:opacity-70">
@@ -555,20 +555,20 @@ function SkillsCard({ skills, readOnly, onChange }: { skills: Skills; readOnly: 
                 s.description && <p className="text-sm text-gray-700 mb-2">{s.description as string}</p>
               ) : (
                 <textarea value={(s.description as string) ?? ''} onChange={e => update(i, { description: e.target.value })} placeholder="Short description"
-                  className="w-full text-sm text-gray-700 border border-gray-200 rounded px-2 py-1 mb-2 focus:border-violet-400 focus:outline-none" rows={2} />
+                  className="w-full text-sm text-gray-700 border border-gray-200 rounded px-2 py-1 mb-2 focus:border-gray-400 focus:outline-none" rows={2} />
               )}
               {readOnly ? (
                 s.prompt_module && <pre className="text-xs text-gray-600 bg-gray-50 rounded p-2 whitespace-pre-wrap font-mono max-h-32 overflow-auto">{s.prompt_module as string}</pre>
               ) : (
                 <textarea value={(s.prompt_module as string) ?? ''} onChange={e => update(i, { prompt_module: e.target.value })} placeholder="Prompt module — injected into the agent's system prompt"
-                  className="w-full text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded p-2 font-mono focus:border-violet-400 focus:outline-none" rows={4} />
+                  className="w-full text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded p-2 font-mono focus:border-gray-400 focus:outline-none" rows={4} />
               )}
             </div>
           )
         })}
       </div>
       {!readOnly && (
-        <button onClick={add} className="mt-3 text-xs text-violet-600 hover:text-violet-700 font-medium">+ Add skill</button>
+        <button onClick={add} className="mt-3 text-xs text-gray-700 hover:text-gray-900 font-medium">+ Add skill</button>
       )}
     </div>
   )
@@ -590,10 +590,10 @@ function TagEditor({ label, items, readOnly, onChange, placeholder, multiline }:
       <div className="text-xs font-semibold text-gray-500 mb-1">{label}</div>
       <div className="flex flex-wrap gap-1.5">
         {items.map((it, i) => (
-          <span key={i} className={`inline-flex items-center gap-1 text-xs rounded-full px-2.5 py-1 ${multiline ? 'bg-gray-50 border border-gray-200 text-gray-700 max-w-full' : 'bg-violet-50 text-violet-700'}`}>
+          <span key={i} className={`inline-flex items-center gap-1 text-xs rounded-full px-2.5 py-1 ${multiline ? 'bg-gray-50 border border-gray-200 text-gray-700 max-w-full' : 'bg-gray-50 text-gray-900'}`}>
             <span className={multiline ? 'whitespace-pre-wrap break-words' : ''}>{it}</span>
             {!readOnly && (
-              <button onClick={() => remove(i)} className="text-violet-400 hover:text-violet-700 leading-none">×</button>
+              <button onClick={() => remove(i)} className="text-gray-500 hover:text-gray-900 leading-none">×</button>
             )}
           </span>
         ))}
@@ -603,7 +603,7 @@ function TagEditor({ label, items, readOnly, onChange, placeholder, multiline }:
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit() } }}
               onBlur={() => { if (draft.trim()) commit() }}
               placeholder={items.length ? '+ add' : placeholder}
-              className="text-xs px-2 py-1 border border-dashed border-gray-300 rounded-full focus:border-violet-400 focus:outline-none min-w-[100px]" />
+              className="text-xs px-2 py-1 border border-dashed border-gray-300 rounded-full focus:border-gray-400 focus:outline-none min-w-[100px]" />
           </span>
         )}
       </div>

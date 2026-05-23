@@ -162,7 +162,7 @@ export default function Onboarding() {
             <span>{Math.round(progressPct)}%</span>
           </div>
           <div className="h-1 bg-gray-200 rounded-full overflow-hidden">
-            <div className="h-full bg-violet-600 transition-all" style={{ width: `${progressPct}%` }} />
+            <div className="h-full bg-gray-900 transition-all" style={{ width: `${progressPct}%` }} />
           </div>
         </div>
       )}
@@ -206,12 +206,12 @@ export default function Onboarding() {
             )}
             {step.type === 'review' ? (
               <button onClick={submitWizard} disabled={submitting}
-                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white rounded-lg text-sm font-semibold">
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white rounded-lg text-sm font-semibold">
                 {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : <>Finish setup <Check className="w-4 h-4" /></>}
               </button>
             ) : (
               <button onClick={goNext}
-                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-semibold">
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-sm font-semibold">
                 Next <ArrowRight className="w-4 h-4" />
               </button>
             )}
@@ -229,8 +229,8 @@ export default function Onboarding() {
 function IntroStep({ onStart }: { onStart: () => void }) {
   return (
     <div className="text-center py-16">
-      <div className="inline-flex w-14 h-14 rounded-2xl bg-violet-100 items-center justify-center mb-6">
-        <Sparkles className="w-7 h-7 text-violet-600" />
+      <div className="inline-flex w-14 h-14 rounded-2xl bg-gray-100 items-center justify-center mb-6">
+        <Sparkles className="w-7 h-7 text-gray-700" />
       </div>
       <h1 className="text-3xl font-bold text-gray-900 mb-3">Welcome to KAI</h1>
       <p className="text-base text-gray-600 max-w-md mx-auto mb-8">
@@ -238,7 +238,7 @@ function IntroStep({ onStart }: { onStart: () => void }) {
         You can skip anything you don't have.
       </p>
       <button onClick={onStart}
-        className="inline-flex items-center gap-1.5 px-6 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-semibold">
+        className="inline-flex items-center gap-1.5 px-6 py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-sm font-semibold">
         Get started <ArrowRight className="w-4 h-4" />
       </button>
     </div>
@@ -258,7 +258,7 @@ function FieldStep({ title, subtitle, placeholder, value, onChange, optional }:
       <input type="text" value={value} placeholder={placeholder}
         onChange={e => onChange(e.target.value)}
         autoFocus
-        className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-100" />
+        className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:border-gray-400 focus:ring-2 focus:ring-violet-100" />
     </div>
   )
 }

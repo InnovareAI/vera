@@ -23,7 +23,7 @@ interface Skill {
 
 const typeColors: Record<SkillType, string> = {
   platform:    'bg-blue-100 text-blue-700',
-  content:     'bg-violet-100 text-violet-700',
+  content:     'bg-gray-100 text-gray-900',
   brand:       'bg-amber-100 text-amber-700',
   persona:     'bg-pink-100 text-pink-700',
   enrichment:  'bg-emerald-100 text-emerald-700',
@@ -31,8 +31,8 @@ const typeColors: Record<SkillType, string> = {
 }
 
 const agentColors: Record<SkillAgent, string> = {
-  strategist:  'text-violet-600',
-  writer:      'text-blue-600',
+  strategist:  'text-gray-700',
+  writer:      'text-gray-700',
   brand_guard: 'text-amber-600',
   publisher:   'text-emerald-600',
   all:         'text-gray-500',
@@ -192,8 +192,8 @@ export default function Skills() {
       {/* Header */}
       <div className="px-8 py-5 border-b border-gray-100 bg-white flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-7 h-7 bg-violet-100 rounded-lg flex items-center justify-center">
-            <Sparkles size={14} className="text-violet-600" />
+          <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center">
+            <Sparkles size={14} className="text-gray-700" />
           </div>
           <div>
             <h1 className="text-sm font-semibold text-gray-900">Skills</h1>
@@ -261,7 +261,7 @@ export default function Skills() {
               {tab === 'custom' ? 'No custom skills yet.' : 'No skills match this filter.'}
             </p>
             {tab === 'custom' && (
-              <button onClick={openNew} className="text-xs text-violet-600 font-semibold hover:underline">
+              <button onClick={openNew} className="text-xs text-gray-700 font-semibold hover:underline">
                 Create your first skill →
               </button>
             )}
@@ -298,7 +298,7 @@ export default function Skills() {
                       <button
                         onClick={() => forkSkill(skill)}
                         title="Fork and customise"
-                        className="p-1.5 rounded-lg text-gray-400 hover:text-violet-600 hover:bg-violet-50 transition-colors"
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-50 transition-colors"
                       >
                         <Copy size={13} />
                       </button>
@@ -307,13 +307,13 @@ export default function Skills() {
                         {/* Active toggle */}
                         <button
                           onClick={() => toggleActive(skill)}
-                          className={`relative w-8 h-4 rounded-full transition-colors flex-shrink-0 ${skill.is_active ? 'bg-violet-500' : 'bg-gray-200'}`}
+                          className={`relative w-8 h-4 rounded-full transition-colors flex-shrink-0 ${skill.is_active ? 'bg-gray-500' : 'bg-gray-200'}`}
                         >
                           <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${skill.is_active ? 'translate-x-4' : 'translate-x-0.5'}`} />
                         </button>
                         <button
                           onClick={() => openEdit(skill)}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-blue-50 transition-colors"
                         >
                           <Pencil size={13} />
                         </button>
@@ -384,7 +384,7 @@ export default function Skills() {
                   value={form.name}
                   onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                   placeholder="e.g. LinkedIn Thought Leadership"
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-violet-300 bg-gray-50"
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-gray-50"
                 />
               </div>
 
@@ -395,7 +395,7 @@ export default function Skills() {
                   <select
                     value={form.type}
                     onChange={e => setForm(f => ({ ...f, type: e.target.value as SkillType }))}
-                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-violet-300 bg-gray-50"
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-gray-50"
                   >
                     {SKILL_TYPES.map(t => <option key={t} value={t} className="capitalize">{t}</option>)}
                   </select>
@@ -405,7 +405,7 @@ export default function Skills() {
                   <select
                     value={form.injected_into}
                     onChange={e => setForm(f => ({ ...f, injected_into: e.target.value as SkillAgent }))}
-                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-violet-300 bg-gray-50"
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-gray-50"
                   >
                     {SKILL_AGENTS.map(a => <option key={a} value={a}>{agentLabels[a]}</option>)}
                   </select>
@@ -421,7 +421,7 @@ export default function Skills() {
                   value={form.description}
                   onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                   placeholder="e.g. Formats content for LinkedIn with professional tone and strong hook"
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-violet-300 bg-gray-50"
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-gray-50"
                 />
               </div>
 
@@ -435,7 +435,7 @@ export default function Skills() {
                   onChange={e => setForm(f => ({ ...f, prompt_module: e.target.value }))}
                   placeholder="Write the instructions that will be injected into the agent's system prompt when this skill is active…"
                   rows={8}
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-violet-300 bg-gray-50 font-mono leading-relaxed resize-none"
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-gray-50 font-mono leading-relaxed resize-none"
                 />
               </div>
 
@@ -446,7 +446,7 @@ export default function Skills() {
                   value={form.tags}
                   onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
                   placeholder="linkedin, thought-leadership, b2b"
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-violet-300 bg-gray-50"
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-gray-50"
                 />
               </div>
             </div>

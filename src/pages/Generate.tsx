@@ -36,15 +36,17 @@ interface Message {
   isStreaming?: boolean
 }
 
-const agentColors: Record<AgentName, string> = {
-  Strategist: 'bg-violet-100 text-violet-700',
-  Researcher: 'bg-sky-100 text-sky-700',
-  Writer: 'bg-blue-100 text-blue-700',
-  'SEO Agent': 'bg-indigo-100 text-indigo-700',
-  'Persona Adapter': 'bg-pink-100 text-pink-700',
-  'Brand Guard': 'bg-amber-100 text-amber-700',
-  Compliance: 'bg-red-100 text-red-700',
-  Publisher: 'bg-emerald-100 text-emerald-700',
+// Agent dots — neutral chip background with a small coloured dot prefix.
+// Maps each agent to its CSS dot-* variable (defined in index.css).
+const agentDots: Record<AgentName, string> = {
+  Strategist:        'var(--dot-violet)',
+  Researcher:        'var(--dot-sky)',
+  Writer:            'var(--dot-blue)',
+  'SEO Agent':       'var(--dot-indigo)',
+  'Persona Adapter': 'var(--dot-pink)',
+  'Brand Guard':     'var(--dot-amber)',
+  Compliance:        'var(--dot-rose)',
+  Publisher:         'var(--dot-emerald)',
 }
 
 const agentAvatars: Record<AgentName, string> = {
@@ -92,14 +94,33 @@ function parsePublisherMessage(content: string): {
 }
 
 function PublisherBubble({ message }: { message: Message }) {
+  const dot = 'var(--dot-emerald)'
   if (message.isStreaming) {
     return (
       <div className="flex gap-3 items-start">
-        <div className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold bg-emerald-100 text-emerald-700">PB</div>
+        <div
+          className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-semibold relative"
+          style={{ background: 'var(--fog)', color: 'var(--ink)' }}
+        >
+          PB
+          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full" style={{ background: dot, border: '2px solid var(--paper-warm)' }} />
+        </div>
         <div className="flex-1 max-w-2xl">
-          <p className="text-[11px] font-semibold mb-1 text-emerald-700">Publisher</p>
-          <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-700 shadow-sm whitespace-pre-wrap">
-            <span>{message.content}<span className="inline-block w-1 h-4 bg-gray-400 ml-0.5 animate-pulse rounded" /></span>
+          <p className="text-[12px] font-medium mb-1 inline-flex items-center gap-1.5" style={{ color: 'var(--ink-quiet)' }}>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: dot }} />
+            Publisher
+          </p>
+          <div
+            className="px-4 py-3 text-[14px] whitespace-pre-wrap"
+            style={{
+              background: 'var(--paper-warm)',
+              border: '1px solid var(--paper-edge)',
+              color: 'var(--ink-quiet)',
+              borderRadius: 'var(--radius-lg)',
+              borderTopLeftRadius: 'var(--radius-sm)',
+            }}
+          >
+            <span>{message.content}<span className="inline-block w-1 h-4 ml-0.5 animate-pulse rounded" style={{ background: 'var(--mist)' }} /></span>
           </div>
         </div>
       </div>
@@ -111,27 +132,51 @@ function PublisherBubble({ message }: { message: Message }) {
 
   return (
     <div className="flex gap-3 items-start">
-      <div className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold bg-emerald-100 text-emerald-700">PB</div>
+      <div
+        className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-semibold relative"
+        style={{ background: 'var(--fog)', color: 'var(--ink)' }}
+      >
+        PB
+        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full" style={{ background: dot, border: '2px solid var(--paper-warm)' }} />
+      </div>
       <div className="flex-1 max-w-2xl">
-        <p className="text-[11px] font-semibold mb-1 text-emerald-700">Publisher</p>
-        <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-sm overflow-hidden shadow-sm">
+        <p className="text-[12px] font-medium mb-1 inline-flex items-center gap-1.5" style={{ color: 'var(--ink-quiet)' }}>
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: dot }} />
+          Publisher
+        </p>
+        <div
+          className="overflow-hidden"
+          style={{
+            background: 'var(--paper-warm)',
+            border: '1px solid var(--paper-edge)',
+            borderRadius: 'var(--radius-lg)',
+            borderTopLeftRadius: 'var(--radius-sm)',
+          }}
+        >
           <div className="px-4 py-3 space-y-3">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[13px]">
               {Object.entries(meta).map(([k, v]) => (
                 <div key={k}>
-                  <span className="text-gray-400">{k}: </span>
-                  <span className="text-gray-700 font-medium">{v}</span>
+                  <span style={{ color: 'var(--ghost)' }}>{k}: </span>
+                  <span className="font-medium" style={{ color: 'var(--ink)' }}>{v}</span>
                 </div>
               ))}
             </div>
             {status && (
-              <div className={`text-xs font-medium px-2.5 py-1.5 rounded-lg whitespace-pre-wrap ${hasIssues ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
+              <div
+                className="text-[13px] font-medium px-3 py-2 whitespace-pre-wrap"
+                style={{
+                  background: hasIssues ? 'var(--accent-tint)' : 'var(--fog)',
+                  color: hasIssues ? 'var(--accent)' : 'var(--ink-quiet)',
+                  borderRadius: 'var(--radius-md)',
+                }}
+              >
                 {status}
               </div>
             )}
             {postId && (
-              <p className="text-[11px] text-gray-400">
-                Post ID: {postId} · <a href={`/review/${postId}`} className="text-violet-500 hover:underline">Go to Review →</a>
+              <p className="text-[12px]" style={{ color: 'var(--ghost)' }}>
+                Post ID: {postId} · <a href={`/review/${postId}`} className="hover:underline" style={{ color: 'var(--ink-quiet)' }}>Go to Review →</a>
               </p>
             )}
           </div>
@@ -145,20 +190,38 @@ function AgentBubble({ message }: { message: Message }) {
   const agent = message.agent as AgentName
   if (agent === 'Publisher') return <PublisherBubble message={message} />
 
-  const colors = agentColors[agent] ?? 'bg-gray-100 text-gray-600'
+  const dot = agentDots[agent] ?? 'var(--mist)'
   const avatar = agentAvatars[agent] ?? agent.slice(0, 2).toUpperCase()
-  const textColor = colors.split(' ')[1]
 
   return (
     <div className="flex gap-3 items-start">
-      <div className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold ${colors}`}>
+      <div
+        className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-semibold relative"
+        style={{ background: 'var(--fog)', color: 'var(--ink)' }}
+      >
         {avatar}
+        <span
+          className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full"
+          style={{ background: dot, border: '2px solid var(--paper-warm)' }}
+        />
       </div>
       <div className="flex-1 max-w-2xl">
-        <p className={`text-[11px] font-semibold mb-1 ${textColor}`}>{agent}</p>
-        <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-700 leading-relaxed shadow-sm whitespace-pre-wrap">
+        <p className="text-[12px] font-medium mb-1 inline-flex items-center gap-1.5" style={{ color: 'var(--ink-quiet)' }}>
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: dot }} />
+          {agent}
+        </p>
+        <div
+          className="px-4 py-3 text-[14px] leading-relaxed whitespace-pre-wrap"
+          style={{
+            background: 'var(--paper-warm)',
+            border: '1px solid var(--paper-edge)',
+            color: 'var(--ink-quiet)',
+            borderRadius: 'var(--radius-lg)',
+            borderTopLeftRadius: 'var(--radius-sm)',
+          }}
+        >
           {message.isStreaming ? (
-            <span>{message.content}<span className="inline-block w-1 h-4 bg-gray-400 ml-0.5 animate-pulse rounded" /></span>
+            <span>{message.content}<span className="inline-block w-1 h-4 ml-0.5 animate-pulse rounded" style={{ background: 'var(--mist)' }} /></span>
           ) : message.content}
         </div>
       </div>
@@ -387,20 +450,36 @@ export default function Generate() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-8 py-5 border-b border-gray-100 bg-white flex items-center gap-3">
-        <div className="w-7 h-7 bg-violet-100 rounded-lg flex items-center justify-center">
-          <Sparkles size={14} className="text-violet-600" />
+      <div
+        className="px-8 py-5 flex items-center gap-3"
+        style={{ borderBottom: '1px solid var(--paper-edge)', background: 'var(--paper-warm)' }}
+      >
+        <div
+          className="w-7 h-7 flex items-center justify-center"
+          style={{ background: 'var(--fog)', borderRadius: 'var(--radius-md)' }}
+        >
+          <Sparkles size={14} style={{ color: 'var(--ink-quiet)' }} strokeWidth={1.75} />
         </div>
         <div>
-          <h1 className="text-sm font-semibold text-gray-900">Generate</h1>
-          <p className="text-xs text-gray-400">Your AI content team — Strategist · Researcher · Writer · SEO · Persona · Brand Guard · Compliance · Publisher</p>
+          <h1 className="text-[15px] font-semibold" style={{ color: 'var(--ink)' }}>Generate</h1>
+          <p className="text-[12px]" style={{ color: 'var(--ghost)' }}>Your AI content team — Strategist · Researcher · Writer · SEO · Persona · Brand Guard · Compliance · Publisher</p>
         </div>
       </div>
 
-      {/* Agent team pills — show core + any active optional agents */}
-      <div className="px-8 py-3 border-b border-gray-100 bg-white flex gap-2 flex-wrap">
+      {/* Agent team pills — neutral chip with coloured dot prefix */}
+      <div
+        className="px-8 py-3 flex gap-2 flex-wrap"
+        style={{ borderBottom: '1px solid var(--paper-edge)', background: 'var(--paper-warm)' }}
+      >
         {activeAgents.map(a => (
-          <span key={a} className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${agentColors[a]}`}>{a}</span>
+          <span
+            key={a}
+            className="inline-flex items-center gap-1.5 text-[12px] font-medium px-2 py-0.5"
+            style={{ background: 'var(--fog)', color: 'var(--ink-quiet)', borderRadius: 'var(--radius-sm)' }}
+          >
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: agentDots[a] }} />
+            {a}
+          </span>
         ))}
       </div>
 
@@ -413,10 +492,13 @@ export default function Generate() {
         )}
         {isRunning && messages[messages.length - 1]?.role === 'user' && (
           <div className="flex gap-3 items-center">
-            <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center">
-              <Loader2 size={12} className="text-violet-600 animate-spin" />
+            <div
+              className="w-7 h-7 rounded-full flex items-center justify-center"
+              style={{ background: 'var(--fog)' }}
+            >
+              <Loader2 size={12} className="animate-spin" style={{ color: 'var(--ink-quiet)' }} strokeWidth={2} />
             </div>
-            <span className="text-sm text-gray-400">Team is working...</span>
+            <span className="text-[13px]" style={{ color: 'var(--ghost)' }}>Team is working…</span>
           </div>
         )}
         <div ref={bottomRef} />
@@ -437,7 +519,7 @@ export default function Generate() {
             {/* Campaign picker — sits at the top of the composer */}
             <div className="flex items-center gap-2 px-4 py-2" style={{ borderBottom: '1px solid var(--paper-edge)' }}>
               <Layers size={12} style={{ color: 'var(--ghost)' }} />
-              <span className="text-[10px] uppercase tracking-[0.16em] font-mono" style={{ color: 'var(--ghost)' }}>
+              <span className="text-[12px] font-medium" style={{ color: 'var(--ghost)' }}>
                 Campaign
               </span>
               <select
@@ -464,8 +546,8 @@ export default function Generate() {
               {selectedCampaign?.theme && (
                 <span
                   title={selectedCampaign.theme}
-                  className="ml-auto text-[10px] font-mono truncate max-w-[40%]"
-                  style={{ color: 'var(--oxblood)' }}
+                  className="ml-auto text-[12px] truncate max-w-[40%]"
+                  style={{ color: 'var(--ink-quiet)' }}
                 >
                   theme: {selectedCampaign.theme.slice(0, 80)}{selectedCampaign.theme.length > 80 ? '…' : ''}
                 </span>
@@ -475,7 +557,7 @@ export default function Generate() {
             {audiences.length > 0 && (
               <div className="flex items-center gap-2 px-4 py-2" style={{ borderBottom: '1px solid var(--paper-edge)' }}>
                 <Users size={12} style={{ color: 'var(--ghost)' }} />
-                <span className="text-[10px] uppercase tracking-[0.16em] font-mono" style={{ color: 'var(--ghost)' }}>
+                <span className="text-[12px] font-medium" style={{ color: 'var(--ghost)' }}>
                   Audience
                 </span>
                 <select
@@ -516,8 +598,8 @@ export default function Generate() {
                 {selectedAudience && Array.isArray(selectedAudience.pain_points) && selectedAudience.pain_points.length > 0 && (
                   <span
                     title={selectedAudience.pain_points.join(' · ')}
-                    className="ml-auto text-[10px] font-mono truncate max-w-[45%]"
-                    style={{ color: 'var(--oxblood)' }}
+                    className="ml-auto text-[12px] truncate max-w-[45%]"
+                    style={{ color: 'var(--ink-quiet)' }}
                   >
                     pain: {selectedAudience.pain_points[0].slice(0, 70)}{selectedAudience.pain_points[0].length > 70 ? '…' : ''}
                   </span>
@@ -556,11 +638,11 @@ export default function Generate() {
               }}
             />
             <div className="flex items-center justify-between px-5 py-2.5" style={{ borderTop: '1px solid var(--paper-edge)' }}>
-              <p className="text-[11px] font-mono uppercase tracking-wider" style={{ color: 'var(--ghost)' }}>
+              <p className="text-[12px] font-medium" style={{ color: 'var(--ghost)' }}>
                 Saved as pending · routed to Review
               </p>
               <div className="flex items-center gap-3">
-                <span className="text-[10px] font-mono" style={{ color: 'var(--mist)' }}>
+                <span className="text-[12px]" style={{ color: 'var(--mist)' }}>
                   enter to send · shift+enter for new line
                 </span>
                 <button
@@ -568,7 +650,7 @@ export default function Generate() {
                   disabled={!input.trim() || isRunning}
                   className="inline-flex items-center gap-1.5 px-4 py-1.5 text-[12px] font-medium transition-all disabled:opacity-40"
                   style={{
-                    background: 'var(--oxblood)',
+                    background: 'var(--ink)',
                     color: 'var(--paper)',
                     borderRadius: '3px',
                   }}

@@ -35,7 +35,7 @@ export default function Login() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex items-center justify-center gap-2.5 mb-10">
-          <div className="w-9 h-9 bg-violet-600 rounded-xl flex items-center justify-center shadow-lg">
+          <div className="w-9 h-9 bg-gray-900 rounded-xl flex items-center justify-center shadow-lg">
             <Sparkles size={18} className="text-white" />
           </div>
           <span className="text-xl font-bold text-gray-900 tracking-tight">KAI</span>
@@ -74,7 +74,7 @@ export default function Login() {
                     onChange={e => setEmail(e.target.value)}
                     placeholder="you@company.com"
                     required
-                    className="w-full pl-9 pr-4 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent bg-gray-50"
+                    className="w-full pl-9 pr-4 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-transparent bg-gray-50"
                   />
                 </div>
 

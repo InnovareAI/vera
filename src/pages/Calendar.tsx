@@ -73,8 +73,8 @@ export default function Calendar() {
               const isSelected = day === selectedDay
               return (
                 <div key={day} onClick={() => setSelectedDay(day === selectedDay ? null : day)}
-                  className={`min-h-[56px] rounded-xl p-1.5 cursor-pointer transition-all ${isSelected ? 'bg-violet-50 border-2 border-violet-400' : isToday ? 'bg-gray-900' : 'hover:bg-gray-50 border-2 border-transparent'}`}>
-                  <div className={`text-xs font-medium mb-1 w-5 h-5 flex items-center justify-center rounded-full ${isToday ? 'text-white' : isSelected ? 'text-violet-700' : 'text-gray-700'}`}>
+                  className={`min-h-[56px] rounded-xl p-1.5 cursor-pointer transition-all ${isSelected ? 'bg-gray-50 border-2 border-gray-400' : isToday ? 'bg-gray-900' : 'hover:bg-gray-50 border-2 border-transparent'}`}>
+                  <div className={`text-xs font-medium mb-1 w-5 h-5 flex items-center justify-center rounded-full ${isToday ? 'text-white' : isSelected ? 'text-gray-900' : 'text-gray-700'}`}>
                     {day}
                   </div>
                   <div className="flex flex-wrap gap-0.5">

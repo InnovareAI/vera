@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import type { Organisation } from '../lib/supabase'
 
 const INDUSTRY_COLORS: Record<string, string> = {
-  'SaaS': 'bg-violet-100 text-violet-700',
+  'SaaS': 'bg-gray-100 text-gray-900',
   'Fintech': 'bg-emerald-100 text-emerald-700',
   'Healthcare': 'bg-blue-100 text-blue-700',
   'E-commerce': 'bg-orange-100 text-orange-700',
@@ -66,7 +66,7 @@ export default function Clients() {
                   <input type="text" value={form[key as keyof typeof form]}
                     onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}
                     placeholder={placeholder}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-300" />
                 </div>
               ))}
             </div>
@@ -98,7 +98,7 @@ export default function Clients() {
                   {client.name.slice(0, 2).toUpperCase()}
                 </div>
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                  client.plan === 'enterprise' ? 'bg-violet-100 text-violet-700' :
+                  client.plan === 'enterprise' ? 'bg-gray-100 text-gray-900' :
                   client.plan === 'scale' ? 'bg-blue-100 text-blue-700' :
                   client.plan === 'growth' ? 'bg-emerald-100 text-emerald-700' :
                   'bg-gray-100 text-gray-600'
@@ -110,7 +110,7 @@ export default function Clients() {
                   {client.industry}
                 </span>
               )}
-              {client.website && <p className="text-xs text-blue-500 mt-2 truncate">{client.website}</p>}
+              {client.website && <p className="text-xs text-gray-600 mt-2 truncate">{client.website}</p>}
               <p className="text-xs text-gray-400 mt-2">{client.locale} · {client.timezone}</p>
             </div>
           ))}

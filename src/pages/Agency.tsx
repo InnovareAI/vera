@@ -63,7 +63,7 @@ export default function Agency() {
   const planColors: Record<string, string> = {
     starter: 'bg-gray-100 text-gray-600',
     growth:  'bg-blue-100 text-blue-700',
-    scale:   'bg-violet-100 text-violet-700',
+    scale:   'bg-gray-100 text-gray-900',
     enterprise: 'bg-amber-100 text-amber-700',
   }
 
@@ -86,7 +86,7 @@ export default function Agency() {
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-4 mb-6">
         {[
-          { label: 'Total Clients', value: clients.length, icon: Building2, color: 'text-violet-600 bg-violet-50' },
+          { label: 'Total Clients', value: clients.length, icon: Building2, color: 'text-gray-700 bg-gray-50' },
           { label: 'Active', value: clients.filter(c => c.plan !== 'starter').length, icon: Globe, color: 'text-emerald-600 bg-emerald-50' },
           { label: 'Starter Plan', value: clients.filter(c => c.plan === 'starter').length, icon: Users, color: 'text-gray-600 bg-gray-50' },
         ].map(({ label, value, icon: Icon, color }) => (
@@ -146,7 +146,7 @@ export default function Agency() {
                 {client.website && (
                   <a href={client.website} target="_blank" rel="noopener noreferrer"
                     onClick={e => e.stopPropagation()}
-                    className="text-[11px] text-blue-500 hover:underline truncate max-w-[120px]">
+                    className="text-[11px] text-gray-600 hover:underline truncate max-w-[120px]">
                     {client.website.replace('https://', '')}
                   </a>
                 )}
