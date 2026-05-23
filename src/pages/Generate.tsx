@@ -229,6 +229,7 @@ export default function Generate() {
   const [isRunning, setIsRunning] = useState(false)
   const [activeAgents, setActiveAgents] = useState<AgentName[]>(CORE_AGENTS)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -321,25 +322,74 @@ export default function Generate() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
-      <div className="px-8 py-4 border-t border-gray-100 bg-white">
-        <form onSubmit={handleSubmit} className="flex gap-3">
-          <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            placeholder="Tell the team what to create… e.g. 'LinkedIn post about SAM's HITL feature for VP of Sales'"
-            disabled={isRunning}
-            className="flex-1 text-sm border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent disabled:opacity-50 bg-gray-50"
-          />
-          <button
-            type="submit"
-            disabled={!input.trim() || isRunning}
-            className="bg-gray-900 text-white rounded-xl px-4 py-3 hover:bg-gray-800 disabled:opacity-40 transition-colors flex items-center gap-2"
+      {/* Brief composer — auto-growing textarea, Atelier-themed */}
+      <div className="px-8 py-5" style={{ borderTop: '1px solid var(--paper-edge)', background: 'var(--paper)' }}>
+        <form onSubmit={handleSubmit}>
+          <div
+            className="relative"
+            style={{
+              background: 'var(--paper-warm)',
+              border: '1px solid var(--paper-edge)',
+              borderRadius: '4px',
+              transition: 'border-color 0.15s, box-shadow 0.15s',
+            }}
           >
-            <Send size={15} />
-          </button>
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={e => {
+                setInput(e.target.value)
+                // Auto-grow: reset to min, then expand to content (capped)
+                const el = e.currentTarget
+                el.style.height = 'auto'
+                el.style.height = Math.min(el.scrollHeight, 240) + 'px'
+              }}
+              onKeyDown={e => {
+                // Enter sends; Shift+Enter inserts newline. ⌘/Ctrl+Enter also sends.
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  if (input.trim() && !isRunning) {
+                    handleSubmit(e as unknown as React.FormEvent)
+                  }
+                }
+              }}
+              rows={3}
+              placeholder="Tell the team what to create. A LinkedIn post for InnovareAI's VP-of-Sales persona about why HITL beats fully-autonomous outbound. Include a hook, a specific stat, and a clear CTA."
+              disabled={isRunning}
+              className="w-full px-5 py-4 text-[15px] leading-relaxed outline-none disabled:opacity-50 resize-none"
+              style={{
+                background: 'transparent',
+                color: 'var(--ink)',
+                fontFamily: 'var(--font-body)',
+                minHeight: '92px',
+                maxHeight: '240px',
+              }}
+            />
+            <div className="flex items-center justify-between px-5 py-2.5" style={{ borderTop: '1px solid var(--paper-edge)' }}>
+              <p className="text-[11px] font-mono uppercase tracking-wider" style={{ color: 'var(--ghost)' }}>
+                Saved as pending · routed to Review
+              </p>
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-mono" style={{ color: 'var(--mist)' }}>
+                  enter to send · shift+enter for new line
+                </span>
+                <button
+                  type="submit"
+                  disabled={!input.trim() || isRunning}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-[12px] font-medium transition-all disabled:opacity-40"
+                  style={{
+                    background: 'var(--oxblood)',
+                    color: 'var(--paper)',
+                    borderRadius: '3px',
+                  }}
+                >
+                  {isRunning ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                  {isRunning ? 'Working' : 'Send brief'}
+                </button>
+              </div>
+            </div>
+          </div>
         </form>
-        <p className="text-[11px] text-gray-400 mt-2 text-center">Generated content is saved as pending and routed to Review for approval.</p>
       </div>
     </div>
   )
