@@ -1,63 +1,74 @@
 // VERA permanent chat — right rail across the entire app.
 //
-// v1: UI shell only. Stub responder so we can iterate on the spatial
-// design before committing backend architecture. Real `vera-chat` edge
-// function + chat_messages table land in the next pass.
+// Layout: 380px expanded / 48px collapsed. Always visible on authenticated
+// pages. ⌘J focuses composer from anywhere.
 //
-// Behavior:
-//   - 380px fixed right rail, paper-warm background
-//   - Always visible (Claude.ai pattern); can be collapsed to 48px
-//   - Knows the current route via useLocation; future hook for context-
-//     aware prompts ("you're on /review — want me to pull the queue?")
-//   - ⌘J / Ctrl+J focuses the composer from anywhere
-//   - ⌘↩ sends; ↩ inserts newline (standard chat convention)
+// Backend: streams from /functions/v1/vera-chat (SSE). History is persisted
+// to chat_messages, loaded on mount for the active workspace. The frontend
+// owns the in-flight buffer; the edge function writes user+assistant turns
+// to disk as they happen so refreshes don't lose anything.
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ArrowUp, PanelRightClose, PanelRightOpen, Sparkles } from 'lucide-react'
+import { ArrowUp, PanelRightClose, PanelRightOpen, Sparkles, Square } from 'lucide-react'
+import { supabase } from '../lib/supabase'
+import { useOrg } from '../lib/orgContext'
+import { useAuth } from '../lib/auth'
 
 interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  // Future: tool_calls, route_context, attachments
+  pending?: boolean  // true while streaming
 }
 
-// Stubbed responder. Returns a canned line based on intent so we can
-// evaluate the chat layout without a backend. Replaced by SSE call to
-// vera-chat in the next pass.
-function stubRespond(input: string, route: string): string {
-  const lower = input.toLowerCase().trim()
-  if (/^(hi|hey|hello|yo)\b/.test(lower)) {
-    return "Hi. What are you working on?"
-  }
-  if (lower.includes('pending') || lower.includes('review queue')) {
-    return "You have 4 posts pending review — oldest is 3 days old. Want me to pull them up?"
-  }
-  if (lower.includes('audit') || lower.includes('score')) {
-    return "Last brew360 ran Sunday — score 76 (B). Profile score: 81. Want me to walk through what shifted?"
-  }
-  if (lower.includes('draft') || lower.includes('write') || lower.includes('post')) {
-    return "Happy to. Want me to open the full brief workshop on /generate, or sketch a quick draft right here?"
-  }
-  return `(stub) Heard. I'm a UI shell right now — real brain lands once the chat panel is wired to the vera-chat edge function. You're on ${route}.`
-}
+const HISTORY_LIMIT = 50
 
 export function ChatPanel() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
-  const [thinking, setThinking] = useState(false)
+  const [streaming, setStreaming] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
+  const [historyLoaded, setHistoryLoaded] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
   const location = useLocation()
+  const { activeOrg } = useOrg()
+  const { user } = useAuth()
 
-  // Auto-scroll to bottom whenever a new message lands
+  // Load thread history when the workspace changes. Newest messages on the
+  // bottom, so we order ascending after fetching the latest N descending.
+  useEffect(() => {
+    if (!activeOrg?.id) {
+      setMessages([])
+      setHistoryLoaded(true)
+      return
+    }
+    let cancelled = false
+    setHistoryLoaded(false)
+    supabase
+      .from('chat_messages')
+      .select('id, role, content')
+      .eq('org_id', activeOrg.id)
+      .in('role', ['user', 'assistant'])
+      .order('created_at', { ascending: false })
+      .limit(HISTORY_LIMIT)
+      .then(({ data }) => {
+        if (cancelled) return
+        const rows = (data ?? []) as Array<{ id: string; role: 'user' | 'assistant'; content: string }>
+        setMessages(rows.reverse().map(r => ({ id: r.id, role: r.role, content: r.content })))
+        setHistoryLoaded(true)
+      })
+    return () => { cancelled = true }
+  }, [activeOrg?.id])
+
+  // Auto-scroll on new content
   useEffect(() => {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: 'smooth' })
-  }, [messages, thinking])
+  }, [messages])
 
-  // ⌘J / Ctrl+J focuses the composer from anywhere
+  // ⌘J / Ctrl+J focuses composer
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
@@ -77,25 +88,109 @@ export function ChatPanel() {
     textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
   }, [input])
 
-  const send = useCallback(() => {
+  const send = useCallback(async () => {
     const text = input.trim()
-    if (!text || thinking) return
+    if (!text || streaming || !activeOrg?.id) return
+
     const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text }
-    setMessages(m => [...m, userMsg])
+    const assistantId = crypto.randomUUID()
+    const placeholder: Message = { id: assistantId, role: 'assistant', content: '', pending: true }
+
+    // Optimistic append — both user turn and an empty assistant bubble that
+    // will fill in as SSE chunks arrive.
+    const nextMessages = [...messages, userMsg]
+    setMessages([...nextMessages, placeholder])
     setInput('')
-    setThinking(true)
-    // Stub latency to feel realistic; replace with SSE stream from
-    // vera-chat in v2.
-    setTimeout(() => {
-      const reply: Message = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: stubRespond(text, location.pathname),
+    setStreaming(true)
+
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+      const res = await fetch(`${supabaseUrl}/functions/v1/vera-chat`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${anonKey}`,
+          'apikey': anonKey,
+        },
+        body: JSON.stringify({
+          messages: nextMessages.map(m => ({ role: m.role, content: m.content })),
+          org_id: activeOrg.id,
+          user_id: user?.id ?? null,
+          route: location.pathname,
+        }),
+      })
+
+      if (!res.ok || !res.body) {
+        const errText = await res.text().catch(() => '')
+        throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`)
       }
-      setMessages(m => [...m, reply])
-      setThinking(false)
-    }, 450 + Math.random() * 350)
-  }, [input, thinking, location.pathname])
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let accumulated = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        // SSE frames: lines starting with `data: ` separated by blank lines.
+        let idx
+        while ((idx = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, idx)
+          buffer = buffer.slice(idx + 2)
+          const line = frame.split('\n').find(l => l.startsWith('data: '))
+          if (!line) continue
+          try {
+            const event = JSON.parse(line.slice(6))
+            if (event.type === 'delta' && typeof event.text === 'string') {
+              accumulated += event.text
+              setMessages(prev => prev.map(m =>
+                m.id === assistantId ? { ...m, content: accumulated } : m,
+              ))
+            } else if (event.type === 'error') {
+              throw new Error(event.message ?? 'stream error')
+            }
+            // `done` is a signal, no extra payload needed for UI
+          } catch (parseErr) {
+            console.warn('vera-chat: bad SSE frame', line, parseErr)
+          }
+        }
+      }
+
+      // Flush final state — strip the pending flag
+      setMessages(prev => prev.map(m =>
+        m.id === assistantId ? { ...m, pending: false } : m,
+      ))
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') {
+        // User-initiated cancel — keep whatever streamed
+        setMessages(prev => prev.map(m =>
+          m.id === assistantId ? { ...m, pending: false } : m,
+        ))
+      } else {
+        console.error('vera-chat failed', err)
+        setMessages(prev => prev.map(m =>
+          m.id === assistantId
+            ? { ...m, pending: false, content: m.content || `⚠ ${(err as Error).message}` }
+            : m,
+        ))
+      }
+    } finally {
+      setStreaming(false)
+      abortRef.current = null
+    }
+  }, [input, streaming, activeOrg?.id, messages, user?.id, location.pathname])
+
+  function stop() {
+    abortRef.current?.abort()
+  }
 
   function onComposerKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -166,8 +261,8 @@ export function ChatPanel() {
           <div className="text-[13px] font-medium leading-tight" style={{ color: 'var(--ink)' }}>
             VERA
           </div>
-          <div className="text-[11px] mt-0.5" style={{ color: 'var(--ghost)' }}>
-            Always here · ⌘J
+          <div className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--ghost)' }}>
+            {activeOrg?.name ? `${activeOrg.name} · ⌘J` : 'Pick a workspace · ⌘J'}
           </div>
         </div>
         <button
@@ -182,12 +277,15 @@ export function ChatPanel() {
 
       {/* Messages */}
       <div ref={scrollerRef} className="flex-1 overflow-y-auto px-4 py-4">
-        {messages.length === 0 ? (
+        {!historyLoaded ? (
+          <div className="h-full flex items-center justify-center text-[12px]" style={{ color: 'var(--mist)' }}>
+            Loading thread…
+          </div>
+        ) : messages.length === 0 ? (
           <EmptyState onSuggest={s => { setInput(s); textareaRef.current?.focus() }} />
         ) : (
           <div className="space-y-4">
             {messages.map(m => <MessageBubble key={m.id} message={m} />)}
-            {thinking && <ThinkingBubble />}
           </div>
         )}
       </div>
@@ -208,23 +306,39 @@ export function ChatPanel() {
             onChange={e => setInput(e.target.value)}
             onKeyDown={onComposerKey}
             rows={1}
-            placeholder="Ask VERA anything…"
-            className="flex-1 resize-none outline-none bg-transparent text-[13.5px] leading-relaxed"
+            placeholder={activeOrg ? 'Ask VERA anything…' : 'Pick a workspace to start'}
+            disabled={!activeOrg}
+            className="flex-1 resize-none outline-none bg-transparent text-[13.5px] leading-relaxed disabled:opacity-50"
             style={{ color: 'var(--ink)', maxHeight: 200 }}
           />
-          <button
-            onClick={send}
-            disabled={!input.trim() || thinking}
-            className="w-7 h-7 flex items-center justify-center flex-shrink-0 transition-opacity disabled:opacity-30 hover:opacity-90"
-            style={{
-              background: 'var(--ink)',
-              color: 'var(--paper-warm)',
-              borderRadius: '50%',
-            }}
-            title="Send (⌘↩)"
-          >
-            <ArrowUp size={14} strokeWidth={2.25} />
-          </button>
+          {streaming ? (
+            <button
+              onClick={stop}
+              className="w-7 h-7 flex items-center justify-center flex-shrink-0 transition-opacity hover:opacity-90"
+              style={{
+                background: 'var(--ink)',
+                color: 'var(--paper-warm)',
+                borderRadius: '50%',
+              }}
+              title="Stop"
+            >
+              <Square size={11} strokeWidth={2.5} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              onClick={send}
+              disabled={!input.trim() || !activeOrg}
+              className="w-7 h-7 flex items-center justify-center flex-shrink-0 transition-opacity disabled:opacity-30 hover:opacity-90"
+              style={{
+                background: 'var(--ink)',
+                color: 'var(--paper-warm)',
+                borderRadius: '50%',
+              }}
+              title="Send (⌘↩)"
+            >
+              <ArrowUp size={14} strokeWidth={2.25} />
+            </button>
+          )}
         </div>
         <div className="mt-1.5 px-1 text-[10.5px]" style={{ color: 'var(--mist)' }}>
           ⌘↩ to send · ↩ for newline
@@ -289,7 +403,7 @@ function MessageBubble({ message }: { message: Message }) {
     return (
       <div className="flex justify-end">
         <div
-          className="max-w-[85%] px-3 py-2 text-[13.5px] leading-relaxed"
+          className="max-w-[85%] px-3 py-2 text-[13.5px] leading-relaxed whitespace-pre-wrap"
           style={{
             background: 'var(--fog)',
             color: 'var(--ink)',
@@ -318,32 +432,21 @@ function MessageBubble({ message }: { message: Message }) {
         className="flex-1 text-[13.5px] leading-relaxed whitespace-pre-wrap"
         style={{ color: 'var(--ink)' }}
       >
-        {message.content}
+        {message.content || (message.pending && <PendingDots />)}
+        {message.content && message.pending && <Caret />}
       </div>
     </div>
   )
 }
 
-// ─── Thinking indicator ─────────────────────────────────────────────────────
-function ThinkingBubble() {
+// Three pulsing dots while waiting for the first token
+function PendingDots() {
   return (
-    <div className="flex gap-2.5 items-center">
-      <div
-        className="w-6 h-6 flex items-center justify-center text-[11px] font-semibold flex-shrink-0"
-        style={{
-          background: 'var(--ink)',
-          color: 'var(--paper-warm)',
-          borderRadius: 'var(--radius-sm)',
-        }}
-      >
-        V
-      </div>
-      <div className="flex gap-1 items-center" style={{ color: 'var(--mist)' }}>
-        <Dot delay={0} />
-        <Dot delay={150} />
-        <Dot delay={300} />
-      </div>
-    </div>
+    <span className="inline-flex gap-1 items-center">
+      <Dot delay={0} />
+      <Dot delay={150} />
+      <Dot delay={300} />
+    </span>
   )
 }
 
@@ -355,6 +458,19 @@ function Dot({ delay }: { delay: number }) {
         background: 'var(--mist)',
         animation: 'vera-pulse 1.2s ease-in-out infinite',
         animationDelay: `${delay}ms`,
+      }}
+    />
+  )
+}
+
+// Blinking caret tail while still streaming
+function Caret() {
+  return (
+    <span
+      className="inline-block w-[2px] h-[14px] ml-0.5 align-text-bottom"
+      style={{
+        background: 'var(--ink)',
+        animation: 'vera-pulse 0.9s ease-in-out infinite',
       }}
     />
   )
