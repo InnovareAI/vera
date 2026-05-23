@@ -278,12 +278,12 @@ export function ChatPanel() {
         </div>
       )}
 
-      {/* Composer — always visible, the constant. Larger when chat is big. */}
+      {/* Composer — always visible, the constant. Spans the full canvas width. */}
       <div
         className="px-5 py-3 flex-shrink-0"
         style={!isMin ? { borderTop: '1px solid var(--paper-edge)' } : {}}
       >
-        <div className="max-w-4xl mx-auto">
+        <div className="w-full">
           <div
             className="flex items-end gap-3 px-4 py-3"
             style={{
