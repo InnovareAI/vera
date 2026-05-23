@@ -309,7 +309,7 @@ function BrandVoiceTab() {
           <input value={bv.persona_descriptor ?? ''} onChange={e => setBv(f => ({...f, persona_descriptor: e.target.value}))}
             className="input" placeholder="A sharp, empathetic AI strategist" />
         </Field>
-        <Field label="System Prompt Override" hint="Advanced: override KAI's base instructions">
+        <Field label="System Prompt Override" hint="Advanced: override VERA's base instructions">
           <textarea value={bv.system_prompt ?? ''} onChange={e => setBv(f => ({...f, system_prompt: e.target.value}))}
             className="input min-h-[80px] resize-y" placeholder="Write in first person. Never use buzzwords…" />
         </Field>

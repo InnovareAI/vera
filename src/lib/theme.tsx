@@ -33,7 +33,8 @@ const ThemeContext = createContext<ThemeContextType>({
   toggle: () => {},
 })
 
-const STORAGE_KEY = 'kai-theme'
+const STORAGE_KEY = 'vera-theme'
+const LEGACY_STORAGE_KEY = 'kai-theme'
 
 function getSystemTheme(): ResolvedTheme {
   if (typeof window === 'undefined') return 'light'
@@ -42,7 +43,18 @@ function getSystemTheme(): ResolvedTheme {
 
 function getInitialTheme(): Theme {
   if (typeof window === 'undefined') return 'system'
-  const stored = localStorage.getItem(STORAGE_KEY)
+  // Read from new key first, fall back to legacy kai-theme so users
+  // who set a preference under the old branding don't lose it on rename.
+  let stored = localStorage.getItem(STORAGE_KEY)
+  if (!stored) {
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
+    if (legacy) {
+      stored = legacy
+      // Migrate forward: stamp under the new key, leave the old one
+      // around for one release in case something else is reading it.
+      try { localStorage.setItem(STORAGE_KEY, legacy) } catch { /* ignore */ }
+    }
+  }
   if (stored === 'light' || stored === 'dark' || stored === 'system') return stored
   return 'system'
 }

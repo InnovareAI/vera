@@ -1,4 +1,4 @@
-// KAI shell — "Atelier" aesthetic. Cream paper + ink + oxblood accent,
+// VERA shell — "Atelier" aesthetic. Cream paper + ink + oxblood accent,
 // Fraunces (serif display) + Geist (body) + Geist Mono (metadata).
 //
 // Structure top to bottom in the rail:
