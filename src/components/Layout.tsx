@@ -22,6 +22,7 @@ import {
   Star, Clock, Sparkles, CheckSquare, Telescope, BookOpen, Plus,
   Calendar, Layers, Zap, Building2, Settings, LogOut, Sun, Moon,
   ChevronDown, Check, ChevronRight, Radar, Monitor,
+  Mic2, BarChart3, PenLine,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
@@ -301,16 +302,22 @@ export default function Layout() {
   const [pinnedCampaigns, setPinnedCampaigns] = useState<Campaign[]>([])
   const [recentPosts, setRecentPosts] = useState<Post[]>([])
   const [pendingCount, setPendingCount] = useState(0)
+  const [hasBrandVoice, setHasBrandVoice] = useState(false)
+  const [hasAudit, setHasAudit] = useState(false)
 
-  // Load pinned campaigns + recent posts + pending-review count for the
-  // active workspace. Feeds the rail: "Pinned" section shows operator-
-  // flagged campaigns, "Recent" shows posts touched recently, and the
-  // Review nav item gets a live badge for the queue depth.
+  // Load everything the rail needs for the active workspace:
+  //   - Pinned campaigns (operator-flagged active projects)
+  //   - Recent posts (split client-side into "In progress" + "Recent")
+  //   - Pending count for the Review nav badge
+  //   - Brand voice existence (anchor — workspace constant)
+  //   - Audit existence (anchor — links to latest score)
   useEffect(() => {
     if (!activeOrg?.id) {
       setPinnedCampaigns([])
       setRecentPosts([])
       setPendingCount(0)
+      setHasBrandVoice(false)
+      setHasAudit(false)
       return
     }
     const orgId = activeOrg.id
@@ -325,17 +332,37 @@ export default function Layout() {
         .select('id, title, channel, status, posted_at, updated_at, campaign_id')
         .eq('org_id', orgId)
         .order('updated_at', { ascending: false })
-        .limit(8),
+        .limit(12),
       supabase.from('content_posts')
         .select('id', { count: 'exact', head: true })
         .eq('org_id', orgId)
         .in('status', ['Pending Review', 'pending', 'Draft', 'draft']),
-    ]).then(([campRes, postRes, countRes]) => {
+      supabase.from('brand_voice')
+        .select('id', { count: 'exact', head: true })
+        .eq('org_id', orgId),
+      supabase.from('linkedin_audits')
+        .select('id', { count: 'exact', head: true })
+        .eq('org_id', orgId),
+    ]).then(([campRes, postRes, countRes, bvRes, auditRes]) => {
       setPinnedCampaigns((campRes.data as Campaign[]) ?? [])
       setRecentPosts((postRes.data as Post[]) ?? [])
       setPendingCount(countRes.count ?? 0)
+      setHasBrandVoice((bvRes.count ?? 0) > 0)
+      setHasAudit((auditRes.count ?? 0) > 0)
     })
   }, [activeOrg?.id])
+
+  // Split Recent into "In progress" (drafts touched in the last 14 days)
+  // and the rest. Caps each list at 4 so the rail stays compact.
+  const DRAFT_STATUSES = new Set(['Draft', 'draft', 'Pending Review', 'pending'])
+  const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000
+  const inProgressPosts = recentPosts.filter(p =>
+    DRAFT_STATUSES.has(p.status) &&
+    Date.now() - new Date(p.updated_at).getTime() < FOURTEEN_DAYS_MS,
+  ).slice(0, 4)
+  const inProgressIds = new Set(inProgressPosts.map(p => p.id))
+  const activityPosts = recentPosts.filter(p => !inProgressIds.has(p.id)).slice(0, 4)
+  const hasAnchors = hasBrandVoice || hasAudit
 
   async function handleSignOut() {
     await signOut()
@@ -403,8 +430,33 @@ export default function Layout() {
           <PrimaryNavItem to="/library"    icon={BookOpen}    label="Library" />
         </nav>
 
-        {/* Scrolling middle — pinned + recent + more */}
+        {/* Scrolling middle — anchors + pinned + in-progress + recent + more */}
         <div className="flex-1 overflow-y-auto">
+          {/* Anchors — workspace constants. Brand voice + latest audit.    */}
+          {/* Auto-populated, never curated by the operator. Hidden when    */}
+          {/* the org hasn't run audit or set brand voice yet (new clients).*/}
+          {hasAnchors && (
+            <>
+              <RailSection label="Anchors" />
+              {hasBrandVoice && (
+                <RailItem
+                  to="/settings"
+                  icon={Mic2}
+                  title="Brand voice"
+                  meta="reference"
+                />
+              )}
+              {hasAudit && activeOrg && (
+                <RailItem
+                  to={`/linkedin-score/${activeOrg.id}`}
+                  icon={BarChart3}
+                  title="LinkedIn audit"
+                  meta="latest score"
+                />
+              )}
+            </>
+          )}
+
           <RailSection label="Pinned" count={pinnedCampaigns.length} />
           {pinnedCampaigns.length === 0 ? (
             <div className="px-4 py-1 text-[12px]" style={{ color: 'var(--mist)' }}>
@@ -423,12 +475,31 @@ export default function Layout() {
             />
           ))}
 
+          {/* In progress — draft/pending posts touched in last 14 days.    */}
+          {/* Catches long-running drafts that would otherwise fall off the */}
+          {/* general Recent list when the operator gets pulled into other  */}
+          {/* work for a few days.                                          */}
+          {inProgressPosts.length > 0 && (
+            <>
+              <RailSection label="In progress" count={inProgressPosts.length} />
+              {inProgressPosts.map(p => (
+                <RailItem
+                  key={p.id}
+                  to={`/review/${p.id}`}
+                  icon={PenLine}
+                  title={p.title || 'Untitled post'}
+                  meta={`${(p.channel ?? 'post').toLowerCase()} · ${ago(p.updated_at)}`}
+                />
+              ))}
+            </>
+          )}
+
           <RailSection label="Recent" />
-          {recentPosts.length === 0 ? (
+          {activityPosts.length === 0 ? (
             <div className="px-4 py-1 text-[12px]" style={{ color: 'var(--mist)' }}>
               Nothing here yet
             </div>
-          ) : recentPosts.map(p => (
+          ) : activityPosts.map(p => (
             <RailItem
               key={p.id}
               to={`/review/${p.id}`}
