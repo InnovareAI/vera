@@ -7,6 +7,7 @@ import {
   Settings2, Users, Mic2, Plug, Building2, Save, Plus, Trash2,
   Eye, EyeOff, CheckCircle2, XCircle, AlertCircle
 } from 'lucide-react'
+import { PublishersCard } from '../components/PublishersCard'
 
 type Tab = 'workspace' | 'team' | 'brand' | 'integrations'
 
@@ -594,6 +595,9 @@ function IntegrationsTab() {
 
       {/* Workspace-level Unipile connection — separate concern from the per-platform settings below */}
       <UnipileConnectionCard />
+
+      {/* Connected blogs / CMSes / Git publishers */}
+      <PublishersCard />
 
       <div className="space-y-3">
         {PLATFORMS.map(platform => {
