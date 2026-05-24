@@ -1,0 +1,33 @@
+# Netlify _headers — security baseline for vera.innovareai.com.
+# Loaded by Netlify automatically; applied on every response.
+
+/*
+  # Stops the page from being framed by other sites (clickjacking).
+  X-Frame-Options: DENY
+
+  # Disables MIME-type sniffing — browsers must honor Content-Type.
+  X-Content-Type-Options: nosniff
+
+  # Locks down what the browser is allowed to load. We're strict on
+  # script-src (no inline scripts, no eval, only same-origin) and
+  # explicitly allow the Supabase + FAL endpoints we hit from JS.
+  # If a new endpoint is needed, add to connect-src below.
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.fal.media https://*.supabase.co https://supabase-content-eu.innovareai.com; connect-src 'self' https://supabase-content-eu.innovareai.com https://*.supabase.co wss://*.supabase.co https://*.ingest.sentry.io https://o*.ingest.sentry.io https://api.openai.com; frame-ancestors 'none'; base-uri 'self'; object-src 'none'
+
+  # Sends the origin only (not the full path) when navigating to
+  # other sites — leaks less in referrer headers.
+  Referrer-Policy: strict-origin-when-cross-origin
+
+  # Locks down what the page can ask the browser to do (camera, mic,
+  # geolocation, etc.). None of these are used by VERA.
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()
+
+  # HSTS — force https for 1 year, include subdomains. Netlify already
+  # serves over https; this just lets browsers cache the requirement.
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+
+# Source maps should not be served if accidentally generated. Block them
+# explicitly as belt-and-braces alongside the vite.config sourcemap: false.
+/*.map
+  X-Robots-Tag: noindex
+  Cache-Control: public, max-age=0, must-revalidate
