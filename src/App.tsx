@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { OrgProvider, useOrg } from './lib/orgContext'
+import { ProjectProvider } from './lib/projectContext'
 import { ThemeProvider } from './lib/theme'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { setUserContext, setOrgContext } from './lib/sentry'
@@ -35,6 +36,7 @@ export default function App() {
       <ThemeProvider>
         <AuthProvider>
           <OrgProvider>
+            <ProjectProvider>
             <SentryContextBridge />
             <Routes>
               <Route path="/login" element={<LoginGuard />} />
@@ -58,6 +60,7 @@ export default function App() {
                 <Route path="agency"     element={<Agency />} />
               </Route>
             </Routes>
+            </ProjectProvider>
           </OrgProvider>
         </AuthProvider>
       </ThemeProvider>

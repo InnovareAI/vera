@@ -69,9 +69,42 @@ export interface Audience {
   updated_at: string
 }
 
+// ─── Projects — Claude.ai-style bounded scopes within a workspace ────────
+// One workspace can have many projects. Each project has its own custom
+// instructions (injected into VERA's system prompt) and knowledge base.
+// Every artifact (campaign, post, chat, audit, voice) gets tagged with
+// project_id once migration 026 lands.
+export interface Project {
+  id: string
+  org_id: string
+  name: string
+  slug: string
+  description: string | null
+  instructions: string | null
+  is_starred: boolean
+  is_archived: boolean
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectKnowledge {
+  id: string
+  project_id: string
+  title: string
+  content: string
+  source_kind: 'paste' | 'url' | 'upload'
+  source_url: string | null
+  file_name: string | null
+  file_size: number | null
+  created_at: string
+  updated_at: string
+}
+
 export interface Campaign {
   id: string
   org_id: string
+  project_id?: string                  // 026 — added by projects migration
   name: string
   theme?: string | null               // narrative anchor, flows into the Strategist
   description?: string

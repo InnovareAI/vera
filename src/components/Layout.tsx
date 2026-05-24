@@ -22,10 +22,11 @@ import {
   Star, Clock, Sparkles, CheckSquare, Telescope, BookOpen, Plus,
   Calendar, Layers, Zap, Building2, Settings, LogOut, Sun, Moon,
   ChevronDown, Check, ChevronRight, Radar, Monitor,
-  Mic2, BarChart3, PenLine,
+  Mic2, BarChart3, PenLine, FolderOpen,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
+import { useProject } from '../lib/projectContext'
 import { useTheme } from '../lib/theme'
 import { supabase } from '../lib/supabase'
 import type { Campaign, Post } from '../lib/supabase'
@@ -197,6 +198,55 @@ function PrimaryNavItem({
   )
 }
 
+// ─── project rail item ───────────────────────────────────────────────────
+// Tighter than RailItem — projects are *primary* nav, not artifacts.
+// Active state highlights with --fog; star icon for starred projects,
+// folder for everything else. Clicking switches the active project
+// (URL doesn't change in Phase 1; pages don't filter by project yet).
+function ProjectRailItem({
+  name, description, isStarred, isActive, onClick,
+}: {
+  name: string; description: string | null; isStarred: boolean;
+  isActive: boolean; onClick: () => void;
+}) {
+  const Icon = isStarred ? Star : FolderOpen
+  return (
+    <button
+      onClick={onClick}
+      className="group w-full flex items-start gap-2 mx-2 px-2 py-1.5 transition-colors text-left hover:bg-[var(--fog)]"
+      style={{
+        borderRadius: 'var(--radius-md)',
+        background: isActive ? 'var(--fog)' : 'transparent',
+        width: 'calc(100% - 1rem)',
+      }}
+    >
+      <Icon
+        size={12}
+        className="flex-shrink-0 mt-0.5"
+        style={{ color: isActive ? 'var(--ink)' : 'var(--mist)' }}
+        strokeWidth={isActive ? 2 : 1.75}
+        fill={isStarred && isActive ? 'currentColor' : 'none'}
+      />
+      <div className="flex-1 min-w-0">
+        <div
+          className="text-[12.5px] leading-snug truncate"
+          style={{
+            color: isActive ? 'var(--ink)' : 'var(--ink-quiet)',
+            fontWeight: isActive ? 500 : 400,
+          }}
+        >
+          {name}
+        </div>
+        {description && (
+          <div className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--mist)' }}>
+            {description}
+          </div>
+        )}
+      </div>
+    </button>
+  )
+}
+
 // ─── rail item (pinned / recent) ─────────────────────────────────────────
 // Quieter than nav items — smaller text, no icon prominence, indent for
 // hierarchy.
@@ -295,6 +345,7 @@ function ago(iso: string): string {
 export default function Layout() {
   const { user, signOut } = useAuth()
   const { activeOrg, activeRole } = useOrg()
+  const { activeProject, starredProjects, recentProjects, switchProject } = useProject()
   const { theme, setTheme } = useTheme()
   const navigate = useNavigate()
   const location = useLocation()
@@ -430,8 +481,47 @@ export default function Layout() {
           <PrimaryNavItem to="/library"    icon={BookOpen}    label="Library" />
         </nav>
 
-        {/* Scrolling middle — anchors + pinned + in-progress + recent + more */}
+        {/* Scrolling middle — projects (Claude.ai style) + workspace surfaces */}
         <div className="flex-1 overflow-y-auto">
+          {/* Starred projects — Claude.ai-style primary nav inside the    */}
+          {/* workspace. Operator stars projects they want fast access to. */}
+          {/* Renders only if projects exist (migration 026 applied AND at */}
+          {/* least one project starred). Pre-migration this stays hidden  */}
+          {/* so the rail doesn't show empty sections.                     */}
+          {starredProjects.length > 0 && (
+            <>
+              <RailSection label="Starred" count={starredProjects.length} />
+              {starredProjects.map(p => (
+                <ProjectRailItem
+                  key={p.id}
+                  name={p.name}
+                  description={p.description}
+                  isStarred={true}
+                  isActive={activeProject?.id === p.id}
+                  onClick={() => switchProject(p.slug)}
+                />
+              ))}
+            </>
+          )}
+
+          {/* Recent projects — last-touched projects (non-starred) for     */}
+          {/* quick switching. Capped at 6 by the context provider.         */}
+          {recentProjects.length > 0 && (
+            <>
+              <RailSection label="Recent projects" />
+              {recentProjects.map(p => (
+                <ProjectRailItem
+                  key={p.id}
+                  name={p.name}
+                  description={p.description}
+                  isStarred={false}
+                  isActive={activeProject?.id === p.id}
+                  onClick={() => switchProject(p.slug)}
+                />
+              ))}
+            </>
+          )}
+
           {/* Anchors — workspace constants. Brand voice + latest audit.    */}
           {/* Auto-populated, never curated by the operator. Hidden when    */}
           {/* the org hasn't run audit or set brand voice yet (new clients).*/}
