@@ -97,6 +97,8 @@ interface Discovery {
   detected_cms: string
   detected_hosting: string
   detected_ssg: string
+  original_url?: string
+  sniffed_blog_url?: string | null
   hint: {
     connection_name?: string
     base_url?: string
@@ -240,18 +242,33 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
         <div className="px-6 py-5 space-y-5">
           {/* URL input — always visible at top */}
           <div>
-            <label className="text-xs font-medium text-gray-700 block mb-1.5">Blog URL</label>
+            <label className="text-xs font-medium text-gray-700 block mb-1.5">Where does your blog live?</label>
             <div className="flex gap-2">
               <input autoFocus value={url} onChange={e => setUrl(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && !discovering && runDiscover()}
-                placeholder="https://acme.com/blog"
+                placeholder="https://acme.com/blog  or  https://blog.acme.com"
                 className="input flex-1" />
               <button onClick={runDiscover} disabled={!url.trim() || discovering}
                 className="text-xs px-3 py-1.5 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 inline-flex items-center gap-1.5">
                 {discovering ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Discovering…</> : 'Discover'}
               </button>
             </div>
+            <p className="text-[11px] text-gray-400 mt-1.5">
+              Paste any page on your blog — main URL, a category page, or even a specific post. If you're not sure, paste your homepage and we'll find the blog.
+            </p>
           </div>
+
+          {/* Sniffed-elsewhere banner */}
+          {discovery?.sniffed_blog_url && discovery.original_url && (
+            <div className="p-3 rounded-lg bg-blue-50 border border-blue-200">
+              <p className="text-xs font-medium text-blue-900">
+                Couldn't find a blog at <code className="bg-blue-100 px-1 rounded">{discovery.original_url}</code> — but we found one at <code className="bg-blue-100 px-1 rounded">{discovery.sniffed_blog_url}</code>.
+              </p>
+              <p className="text-[11px] text-blue-700 mt-1">
+                We're using that. If wrong, paste the actual blog URL above and Discover again.
+              </p>
+            </div>
+          )}
 
           {/* Discovery result + credential form (single screen, all on one page) */}
           {discovery && discovery.credential_needed && (
