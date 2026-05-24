@@ -187,6 +187,9 @@ export default function LinkedInScore() {
         </p>
       </div>
 
+      {/* Audit context — extracted from website, operator reviews + edits */}
+      <AuditContextCard orgId={orgId!} />
+
       {/* Toggles */}
       <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
         <div className="flex items-center justify-between mb-3">
@@ -358,4 +361,218 @@ function relativeTime(iso: string): string {
   if (m < 60)  return `${m}m ago`
   const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`
   const d = Math.floor(h / 24); return `${d}d ago`
+}
+
+// ─── AuditContextCard ────────────────────────────────────────────────────────
+// Captures the operator's ICP, offer, value prop, positioning, themes, tone,
+// and success criteria so both audits score against intent, not generic
+// best practices. Pre-fills via the extract-audit-intent edge function
+// (which crawls the org website + LLM-extracts). Operator reviews/edits/saves.
+
+interface AuditIntent {
+  icp_summary?: string
+  offer?: string
+  value_prop?: string
+  role_positioning?: string
+  themes?: string[]
+  tone_target?: string
+  success_criteria?: string
+  extracted_at?: string
+  extracted_from?: string[]
+}
+
+function AuditContextCard({ orgId }: { orgId: string }) {
+  const [intent, setIntent] = useState<AuditIntent | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState(false)
+  const [extracting, setExtracting] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [draft, setDraft] = useState<AuditIntent>({})
+
+  useEffect(() => {
+    let cancelled = false
+    supabase.from('organizations').select('settings').eq('id', orgId).maybeSingle().then(({ data }) => {
+      if (cancelled) return
+      const ai = ((data?.settings as Record<string, unknown> | null) ?? {}).audit_intent as AuditIntent | undefined
+      setIntent(ai ?? null)
+      setDraft(ai ?? {})
+      setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [orgId])
+
+  async function extractFromWebsite() {
+    setExtracting(true)
+    setError(null)
+    try {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-audit-intent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ org_id: orgId, force: true }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error ?? `HTTP ${res.status}`)
+      setIntent(data.audit_intent as AuditIntent)
+      setDraft(data.audit_intent as AuditIntent)
+      setEditing(true)  // open editor so the operator reviews the extraction
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally { setExtracting(false) }
+  }
+
+  async function save() {
+    setSaving(true)
+    setError(null)
+    try {
+      const { data } = await supabase.from('organizations').select('settings').eq('id', orgId).maybeSingle()
+      const settings = { ...((data?.settings as Record<string, unknown> | null) ?? {}), audit_intent: { ...draft, edited_at: new Date().toISOString() } }
+      const { error: updErr } = await supabase.from('organizations').update({ settings }).eq('id', orgId)
+      if (updErr) throw new Error(updErr.message)
+      setIntent(draft)
+      setEditing(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally { setSaving(false) }
+  }
+
+  if (loading) {
+    return (
+      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-6 text-xs text-gray-400">Loading audit context…</div>
+    )
+  }
+
+  // Empty state — no audit_intent set
+  if (!intent && !editing) {
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 mb-6">
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold flex-shrink-0">!</div>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-amber-900">No audit context set</p>
+            <p className="text-xs text-amber-800 mt-1">
+              Both audits score against generic best practices unless you tell them who this profile is for, what you sell, and how you want to be perceived. Pull this from your website to start.
+            </p>
+            <div className="flex gap-2 mt-3">
+              <button onClick={extractFromWebsite} disabled={extracting}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
+                {extracting ? <><Loader2 className="w-3 h-3 animate-spin" /> Extracting…</> : 'Pull from website'}
+              </button>
+              <button onClick={() => { setDraft({}); setEditing(true) }}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-amber-300 text-amber-900 hover:bg-amber-100">
+                Enter manually
+              </button>
+            </div>
+            {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Editor
+  if (editing) {
+    return (
+      <div className="bg-white border-2 border-gray-300 rounded-xl p-5 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-sm font-semibold text-gray-900">Audit context</p>
+          <div className="flex gap-2">
+            <button onClick={extractFromWebsite} disabled={extracting}
+              className="text-xs px-2.5 py-1 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+              {extracting ? '…' : 'Re-extract from website'}
+            </button>
+          </div>
+        </div>
+        <div className="space-y-3">
+          <IntentField label="ICP (who is this for?)" hint="Segment, role, stage, buying trigger"
+            value={draft.icp_summary} onChange={v => setDraft(d => ({ ...d, icp_summary: v }))} />
+          <IntentField label="Offer (what you sell)" hint="Concrete deliverable, not category"
+            value={draft.offer} onChange={v => setDraft(d => ({ ...d, offer: v }))} />
+          <IntentField label="Value prop (specific outcome)" hint="Numbers + differentiation vs the obvious alternative"
+            value={draft.value_prop} onChange={v => setDraft(d => ({ ...d, value_prop: v }))} />
+          <IntentField label="Role positioning" hint="How you want to be perceived to credibly sell this"
+            value={draft.role_positioning} onChange={v => setDraft(d => ({ ...d, role_positioning: v }))} />
+          <IntentField label="Content themes" hint="3-5 themes, comma-separated"
+            value={draft.themes?.join(', ') ?? ''}
+            onChange={v => setDraft(d => ({ ...d, themes: v.split(',').map(s => s.trim()).filter(Boolean) }))} />
+          <IntentField label="Tone target" hint="Voice profile — direct, opinionated, technical, etc."
+            value={draft.tone_target} onChange={v => setDraft(d => ({ ...d, tone_target: v }))} />
+          <IntentField label="Success criteria" hint="What 'winning' on LinkedIn looks like in 6 months"
+            value={draft.success_criteria} onChange={v => setDraft(d => ({ ...d, success_criteria: v }))} />
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button onClick={save} disabled={saving}
+            className="text-xs px-3 py-1.5 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button onClick={() => { setEditing(false); setDraft(intent ?? {}) }}
+            className="text-xs px-3 py-1.5 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50">
+            Cancel
+          </button>
+        </div>
+        {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+      </div>
+    )
+  }
+
+  // Compact view
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-6">
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <p className="text-sm font-semibold text-gray-900">Audit context</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {intent?.extracted_at ? `Extracted ${relativeTime(intent.extracted_at)}` : 'Manually set'}
+            {intent?.extracted_from?.length ? ` from ${intent.extracted_from.length} page${intent.extracted_from.length === 1 ? '' : 's'}` : ''}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setEditing(true)}
+            className="text-xs px-2.5 py-1 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50">
+            Edit
+          </button>
+          <button onClick={extractFromWebsite} disabled={extracting}
+            className="text-xs px-2.5 py-1 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+            {extracting ? '…' : 'Re-extract'}
+          </button>
+        </div>
+      </div>
+      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
+        <CompactRow label="ICP"           value={intent?.icp_summary} />
+        <CompactRow label="Offer"         value={intent?.offer} />
+        <CompactRow label="Value prop"    value={intent?.value_prop} />
+        <CompactRow label="Positioning"   value={intent?.role_positioning} />
+        <CompactRow label="Themes"        value={intent?.themes?.join(' · ')} />
+        <CompactRow label="Tone"          value={intent?.tone_target} />
+        <CompactRow label="Success"       value={intent?.success_criteria} fullWidth />
+      </dl>
+    </div>
+  )
+}
+
+function IntentField({ label, hint, value, onChange }: {
+  label: string; hint: string; value?: string; onChange: (v: string) => void
+}) {
+  return (
+    <div>
+      <label className="text-xs font-medium text-gray-700 block mb-0.5">{label}</label>
+      <p className="text-[11px] text-gray-400 mb-1.5">{hint}</p>
+      <textarea
+        value={value ?? ''}
+        onChange={e => onChange(e.target.value)}
+        rows={2}
+        className="input w-full resize-y"
+        placeholder="—"
+      />
+    </div>
+  )
+}
+
+function CompactRow({ label, value, fullWidth }: { label: string; value?: string; fullWidth?: boolean }) {
+  return (
+    <div className={fullWidth ? 'sm:col-span-2' : ''}>
+      <dt className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">{label}</dt>
+      <dd className="text-xs text-gray-700 mt-0.5">{value || <span className="text-gray-300">—</span>}</dd>
+    </div>
+  )
 }
