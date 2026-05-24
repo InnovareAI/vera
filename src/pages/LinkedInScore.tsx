@@ -1,6 +1,21 @@
+// LinkedIn audit. Answers ONE question: "How is this client's surface scoring?"
+//
+// Applied the UX declutter skill:
+//   · Cut eyebrow + H1 + 2-line subtitle (rail labels the page; scores
+//     speak for themselves)
+//   · Toggles collapsed into a quiet expander — they're configuration,
+//     not content. Operator opens it when they want to dial principles.
+//   · Audited-against + Verdict moved out of ScoreCard nesting into a
+//     single quiet section above the score grid (the foundation reads
+//     once, not embedded inside the algo card)
+//   · Top fixes: badges flattened to muted prefixes
+//   · Continue-to-voice-audit only renders when brand_voice doesn't yet
+//     exist for this org (i.e. user is still in onboarding flow). Daily
+//     users never see it.
+
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Loader2, ArrowRight, RotateCw, Check } from 'lucide-react'
+import { Loader2, ArrowRight, RotateCw, Check, ChevronRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 const PROFILE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/linkedin-profile-score`
@@ -63,6 +78,8 @@ export default function LinkedInScore() {
   const [profileRunAt, setProfileRunAt] = useState<string | null>(null)
   const [brewRunAt, setBrewRunAt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [togglesOpen, setTogglesOpen] = useState(false)
+  const [hasBrandVoice, setHasBrandVoice] = useState(false)
 
   // Persist toggles to localStorage (UI fallback) AND to organisations.settings
   // (durable per-org). Org settings win on load.
@@ -137,7 +154,8 @@ export default function LinkedInScore() {
   }, [orgId, enabledPrinciples])
 
   // On first mount: load org settings (toggles) + cached results from
-  // linkedin_audits. Only fetch fresh if no cached row exists.
+  // linkedin_audits + brand_voice existence (drives Continue visibility).
+  // Only fetch fresh audits if no cached row exists.
   useEffect(() => {
     if (!orgId) return
     let cancelled = false
@@ -152,7 +170,17 @@ export default function LinkedInScore() {
       const orgPrinciples = (org?.settings as Record<string, unknown> | null)?.brew_principles as string[] | undefined
       if (orgPrinciples?.length) setEnabledPrinciples(orgPrinciples)
 
-      // 2. Load latest cached audits (one per kind)
+      // 2. Brand voice existence — drives whether "Continue to voice audit"
+      //    renders. If the operator has already set a voice, they're past
+      //    onboarding and don't need the continue prompt every visit.
+      const { count: bvCount } = await supabase
+        .from('brand_voice')
+        .select('id', { count: 'exact', head: true })
+        .eq('org_id', orgId!)
+      if (cancelled) return
+      setHasBrandVoice((bvCount ?? 0) > 0)
+
+      // 3. Load latest cached audits (one per kind)
       const { data: cached } = await supabase
         .from('linkedin_audits')
         .select('kind, result, created_at')
@@ -178,50 +206,27 @@ export default function LinkedInScore() {
 
   const canContinue = !!profile && !!brew
 
+  const verdictText = brew?.audit?.verdict
+  const auditedAgainstText = brew?.audit?.audited_against
+  const showOnboardingContinue = !hasBrandVoice
+
   return (
     <div className="max-w-4xl mx-auto py-8 px-4 pb-16">
-      <div className="mb-8">
-        <p className="text-xs uppercase tracking-wider font-semibold text-gray-500 mb-1">LinkedIn audit · required</p>
-        <h1 className="text-2xl font-bold text-gray-900">How LinkedIn sees you</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Two scores: your profile quality (deterministic) and your fit with LinkedIn's 360Brew algorithm (AI-judged on the 5 principles below).
-          Toggle the principles you want included in the algorithm score.
-        </p>
-      </div>
-
       {/* Audit context — extracted from website, operator reviews + edits */}
       <AuditContextCard orgId={orgId!} />
 
-      {/* Toggles */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-sm font-semibold text-gray-900">360Brew principles ({enabledPrinciples.length} of {ALL_PRINCIPLES.length})</p>
-          <button onClick={runBrew} disabled={brewLoading || !enabledPrinciples.length}
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 hover:text-gray-900 disabled:opacity-40">
-            {brewLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCw className="w-3.5 h-3.5" />}
-            Re-run brew360 with current selection
-          </button>
+      {/* Verdict + audited-against, lifted out of the algo card so it reads */}
+      {/* once as the foundation rather than nested inside one of two scores. */}
+      {(verdictText || auditedAgainstText) && (
+        <div className="mb-6 text-sm" style={{ borderLeft: '2px solid var(--accent-soft)', paddingLeft: 14 }}>
+          {verdictText && (
+            <p className="font-medium leading-snug mb-1.5" style={{ color: 'var(--ink)' }}>{verdictText}</p>
+          )}
+          {auditedAgainstText && (
+            <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--ink-quiet)' }}>{auditedAgainstText}</p>
+          )}
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {ALL_PRINCIPLES.map(p => {
-            const on = enabledPrinciples.includes(p.id)
-            return (
-              <button key={p.id} onClick={() => togglePrinciple(p.id)}
-                className={`text-left p-3 rounded-lg border-2 transition-all ${on ? 'border-gray-400 bg-gray-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
-                <div className="flex items-start gap-2">
-                  <div className={`w-4 h-4 mt-0.5 rounded border-2 flex-shrink-0 flex items-center justify-center ${on ? 'border-violet-600 bg-gray-900' : 'border-gray-300 bg-white'}`}>
-                    {on && <Check className="w-3 h-3 text-white" />}
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">{p.label}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">{p.desc}</p>
-                  </div>
-                </div>
-              </button>
-            )
-          })}
-        </div>
-      </div>
+      )}
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-sm mb-4">
@@ -231,10 +236,8 @@ export default function LinkedInScore() {
 
       {/* Two score cards side-by-side on desktop */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Profile score */}
         <ScoreCard
           title="Profile score"
-          subtitle={profile ? `Deterministic — ${profile.sections.length} sections checked` : 'Deterministic — every profile field scored'}
           loading={profileLoading}
           score={profile?.score}
           grade={profile?.grade}
@@ -245,24 +248,14 @@ export default function LinkedInScore() {
           {profile && (
             <div className="space-y-1.5">
               {profile.sections.map(s => (
-                <div key={s.id} className="flex items-center justify-between gap-3">
-                  <span className="text-xs text-gray-600">{s.label}</span>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <div className="w-20 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                      <div className={`h-full ${s.score >= 70 ? 'bg-emerald-500' : s.score >= 40 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${s.score}%` }} />
-                    </div>
-                    <span className="text-xs font-mono text-gray-700 w-8 text-right">{s.score}</span>
-                  </div>
-                </div>
+                <ScoreBar key={s.id} label={s.label} score={s.score} />
               ))}
             </div>
           )}
         </ScoreCard>
 
-        {/* Brew360 score */}
         <ScoreCard
-          title="360Brew algo fit"
-          subtitle={`AI scoring · ${enabledPrinciples.length} principle${enabledPrinciples.length === 1 ? '' : 's'}`}
+          title="360Brew fit"
           loading={brewLoading}
           score={brew?.audit?.overall_score}
           grade={brew?.audit?.grade}
@@ -271,104 +264,190 @@ export default function LinkedInScore() {
           onRefresh={runBrew}
         >
           {brew?.audit && (
-            <div className="space-y-3">
-              {/* Echo back what we audited against + the verdict */}
-              {(brew.audit.audited_against || brew.audit.verdict) && (
-                <div className="text-xs text-gray-600 leading-relaxed pb-3 border-b border-gray-100 space-y-2">
-                  {brew.audit.audited_against && (
-                    <div>
-                      <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold block mb-1">Audited against</span>
-                      <p className="text-gray-700">{brew.audit.audited_against}</p>
-                    </div>
-                  )}
-                  {brew.audit.verdict && (
-                    <div>
-                      <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold block mb-1">Verdict</span>
-                      <p className="text-gray-800 font-medium">{brew.audit.verdict}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-              <div className="space-y-1.5">
+            <div className="space-y-1.5">
               {Object.entries(brew.audit.principles).map(([key, val]) => {
                 const meta = ALL_PRINCIPLES.find(p => p.id === key)
-                return (
-                  <div key={key} className="flex items-center justify-between gap-3">
-                    <span className="text-xs text-gray-600">{meta?.label ?? key}</span>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <div className="w-20 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                        <div className={`h-full ${val.score >= 70 ? 'bg-emerald-500' : val.score >= 40 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${val.score}%` }} />
-                      </div>
-                      <span className="text-xs font-mono text-gray-700 w-8 text-right">{val.score}</span>
-                    </div>
-                  </div>
-                )
+                return <ScoreBar key={key} label={meta?.label ?? key} score={val.score} />
               })}
-              </div>
             </div>
           )}
         </ScoreCard>
       </div>
 
-      {/* Top fixes pooled from both audits */}
-      {(profile || brew) && (
-        <div className="mt-6 bg-white rounded-xl border border-gray-200 p-5">
-          <p className="text-sm font-semibold text-gray-900 mb-3">Top fixes</p>
-          <div className="space-y-2">
+      {/* Top fixes — flat list, no badge chrome. Source signalled by muted */}
+      {/* prefix; visual rhythm comes from hairline rules, not card frames.  */}
+      {(profile?.fixes?.length || brew?.audit?.quick_wins?.length) && (
+        <div className="mt-8">
+          <p className="text-[12px] font-medium uppercase tracking-wide mb-3" style={{ color: 'var(--ghost)' }}>Top fixes</p>
+          <div style={{ borderTop: '1px solid var(--paper-edge)' }}>
             {profile?.fixes?.slice(0, 3).map((f, i) => (
-              <div key={`p-${i}`} className="flex items-start gap-2 text-sm">
-                <span className="text-[10px] uppercase font-bold text-gray-900 bg-gray-100 px-1.5 py-0.5 rounded mt-0.5 flex-shrink-0">PROFILE</span>
-                <div className="text-gray-700"><span className="font-medium">{f.section}:</span> {f.fix}</div>
-              </div>
+              <FixRow key={`p-${i}`} source="Profile" focus={f.section} text={f.fix} />
             ))}
             {brew?.audit?.quick_wins?.slice(0, 3).map((w, i) => (
-              <div key={`b-${i}`} className="flex items-start gap-2 text-sm">
-                <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded mt-0.5 flex-shrink-0">BREW360</span>
-                <div className="text-gray-700">{w}</div>
-              </div>
+              <FixRow key={`b-${i}`} source="Brew360" text={w} />
             ))}
           </div>
         </div>
       )}
 
-      {/* Continue */}
-      <div className="mt-8 flex items-center justify-between">
-        <p className="text-xs text-gray-500">
-          {canContinue ? "When you're ready, continue to the voice audit." : "Both audits must complete before you can continue."}
-        </p>
-        <button onClick={() => navigate(`/onboarding/audit/${orgId}?skip_brew=1`)} disabled={!canContinue}
-          className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-40 text-white rounded-lg text-sm font-semibold">
-          Continue to voice audit <ArrowRight className="w-4 h-4" />
+      {/* Principles toggle — collapsed by default. It's configuration that  */}
+      {/* most operators set once and never revisit; surfacing it as a full   */}
+      {/* card every visit was the page's biggest violation of the skill.    */}
+      <div className="mt-8" style={{ borderTop: '1px solid var(--paper-edge)' }}>
+        <button
+          onClick={() => setTogglesOpen(o => !o)}
+          className="w-full flex items-center gap-2 py-3 text-left transition-colors hover:bg-[var(--fog)] -mx-2 px-2"
+          style={{ color: 'var(--ink-quiet)' }}
+        >
+          <ChevronRight size={13} className={`transition-transform ${togglesOpen ? 'rotate-90' : ''}`} strokeWidth={2} />
+          <span className="text-[13px] font-medium">
+            Brew360 principles
+            <span className="ml-1.5 font-normal" style={{ color: 'var(--ghost)' }}>
+              {enabledPrinciples.length} of {ALL_PRINCIPLES.length} active
+            </span>
+          </span>
+          {togglesOpen && (
+            <button
+              onClick={e => { e.stopPropagation(); runBrew() }}
+              disabled={brewLoading || !enabledPrinciples.length}
+              className="ml-auto inline-flex items-center gap-1.5 text-[12px] font-medium hover:opacity-80 disabled:opacity-40"
+              style={{ color: 'var(--ink)' }}
+            >
+              {brewLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCw className="w-3 h-3" strokeWidth={2} />}
+              Re-run
+            </button>
+          )}
         </button>
+        {togglesOpen && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pb-4">
+            {ALL_PRINCIPLES.map(p => {
+              const on = enabledPrinciples.includes(p.id)
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => togglePrinciple(p.id)}
+                  className="text-left px-3 py-2 transition-colors hover:bg-[var(--fog)]"
+                  style={{ borderRadius: 'var(--radius-md)' }}
+                >
+                  <div className="flex items-start gap-2.5">
+                    <div
+                      className="w-4 h-4 mt-0.5 flex-shrink-0 flex items-center justify-center"
+                      style={{
+                        background: on ? 'var(--ink)' : 'transparent',
+                        border: on ? 'none' : '1px solid var(--mist)',
+                        borderRadius: 'var(--radius-sm)',
+                      }}
+                    >
+                      {on && <Check className="w-3 h-3" style={{ color: 'var(--paper-warm)' }} strokeWidth={2.5} />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-medium" style={{ color: 'var(--ink)' }}>{p.label}</p>
+                      <p className="text-[11.5px] mt-0.5 leading-snug" style={{ color: 'var(--ghost)' }}>{p.desc}</p>
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Continue — only renders during onboarding (when brand_voice hasn't  */}
+      {/* been set yet). Daily users hitting /audit never see this prompt.    */}
+      {showOnboardingContinue && (
+        <div className="mt-8 flex items-center justify-between" style={{ borderTop: '1px solid var(--paper-edge)', paddingTop: 24 }}>
+          <p className="text-[12px]" style={{ color: 'var(--ghost)' }}>
+            {canContinue ? 'Both audits complete. Continue to voice setup.' : 'Both audits must complete before you can continue.'}
+          </p>
+          <button
+            onClick={() => navigate(`/onboarding/audit/${orgId}?skip_brew=1`)}
+            disabled={!canContinue}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium transition-opacity hover:opacity-90 disabled:opacity-40"
+            style={{ background: 'var(--ink)', color: 'var(--paper-warm)', borderRadius: 'var(--radius-md)' }}
+          >
+            Continue <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── ScoreBar — shared section-score row used by both audit cards ────────
+function ScoreBar({ label, score }: { label: string; score: number }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-xs text-gray-600">{label}</span>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="w-20 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+          <div
+            className={`h-full ${score >= 70 ? 'bg-emerald-500' : score >= 40 ? 'bg-amber-500' : 'bg-red-500'}`}
+            style={{ width: `${score}%` }}
+          />
+        </div>
+        <span className="text-xs font-mono text-gray-700 w-8 text-right">{score}</span>
       </div>
     </div>
   )
 }
 
-function ScoreCard({ title, subtitle, loading, score, grade, subline, runAt, onRefresh, children }: {
-  title: string; subtitle: string; loading: boolean; score?: number; grade?: string;
+// ─── FixRow — flat hairline-divided row, muted source prefix ─────────────
+function FixRow({ source, focus, text }: { source: string; focus?: string; text: string }) {
+  return (
+    <div className="py-2.5 flex gap-3 text-[13px] leading-relaxed" style={{ borderBottom: '1px solid var(--paper-edge)' }}>
+      <span className="text-[11px] font-medium uppercase tracking-wide flex-shrink-0 w-16 mt-0.5" style={{ color: 'var(--ghost)' }}>
+        {source}
+      </span>
+      <span style={{ color: 'var(--ink-quiet)' }}>
+        {focus && <span className="font-medium" style={{ color: 'var(--ink)' }}>{focus}: </span>}
+        {text}
+      </span>
+    </div>
+  )
+}
+
+function ScoreCard({ title, loading, score, grade, subline, runAt, onRefresh, children }: {
+  title: string; loading: boolean; score?: number; grade?: string;
   subline: string | null; runAt?: string | null; onRefresh: () => void; children?: React.ReactNode;
 }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
+    <div
+      className="p-5"
+      style={{
+        background: 'var(--paper-warm)',
+        border: '1px solid var(--paper-edge)',
+        borderRadius: 'var(--radius-lg)',
+      }}
+    >
       <div className="flex items-start justify-between mb-3">
-        <div>
-          <p className="text-sm font-semibold text-gray-900">{title}</p>
-          <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>
-        </div>
-        <button onClick={onRefresh} disabled={loading} title={runAt ? `Last run ${relativeTime(runAt)}` : 'Run'}
-          className="text-gray-400 hover:text-gray-600 disabled:opacity-40">
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCw className="w-4 h-4" />}
+        <p className="text-[13px] font-medium" style={{ color: 'var(--ink)' }}>{title}</p>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          title={runAt ? `Last run ${relativeTime(runAt)}` : 'Run'}
+          className="hover:opacity-100 opacity-50 disabled:opacity-30 transition-opacity"
+          style={{ color: 'var(--ink-quiet)' }}
+        >
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCw className="w-3.5 h-3.5" strokeWidth={1.75} />}
         </button>
       </div>
-      <div className="flex items-end gap-3 mb-4">
-        <span className="text-5xl font-bold text-gray-900">{loading && score === undefined ? '—' : (score ?? '—')}</span>
-        {grade && <span className="text-2xl font-bold text-gray-700 mb-1">{grade}</span>}
+      <div className="flex items-end gap-3 mb-3">
+        <span className="text-[40px] font-semibold leading-none" style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>
+          {loading && score === undefined ? '—' : (score ?? '—')}
+        </span>
+        {grade && <span className="text-[20px] font-semibold pb-0.5" style={{ color: 'var(--ink-quiet)' }}>{grade}</span>}
       </div>
-      {subline && <p className="text-xs text-gray-500 mb-1">{subline}</p>}
-      {runAt && <p className="text-[10px] text-gray-400 mb-4">Last run {relativeTime(runAt)}</p>}
+      {/* One meta line — subline + runAt collapsed together. Picked over    */}
+      {/* "Last run X" double-printing.                                       */}
+      {(subline || runAt) && (
+        <p className="text-[11.5px] mb-4" style={{ color: 'var(--ghost)' }}>
+          {[subline, runAt ? `· ${relativeTime(runAt)}` : null].filter(Boolean).join(' ')}
+        </p>
+      )}
       {loading && score === undefined && (
-        <div className="text-xs text-gray-400 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Running…</div>
+        <div className="text-[12px] flex items-center gap-1.5" style={{ color: 'var(--ghost)' }}>
+          <Loader2 className="w-3 h-3 animate-spin" /> Running…
+        </div>
       )}
       {children}
     </div>
