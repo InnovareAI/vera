@@ -319,9 +319,10 @@ function connectorFn(kind: string): string | null {
     wordpress: 'wordpress-publish',
     ghost: 'ghost-publish',
     github_mdx: 'git-publish',
-    // webflow: 'webflow-publish',
-    // contentful: 'contentful-publish',
-    // sanity: 'sanity-publish',
+    webflow: 'webflow-publish',
+    contentful: 'contentful-publish',
+    sanity: 'sanity-publish',
+    // hubspot: 'hubspot-publish',
   } as Record<string, string>)[kind] ?? null
 }
 

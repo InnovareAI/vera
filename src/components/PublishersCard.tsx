@@ -158,6 +158,9 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
         wordpress: 'wordpress-publish',
         ghost: 'ghost-publish',
         github_mdx: 'git-publish',
+        webflow: 'webflow-publish',
+        contentful: 'contentful-publish',
+        sanity: 'sanity-publish',
       }[discovery.credential_needed.kind]
       if (!connectorEndpoint) {
         setError({ message: `No connector for ${discovery.credential_needed.kind}.`, recovery: 'Coming next.' })
@@ -190,6 +193,13 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
           pr_mode: editPrMode,
           github_pat: creds.github_pat,
         })
+      } else {
+        // Webflow / Contentful / Sanity — pass every field from credential_needed
+        // verbatim. The credential_needed.fields[] schema enumerates exactly what
+        // the connector wants, so we forward all of them.
+        for (const f of discovery.credential_needed.fields) {
+          payload[f.name] = creds[f.name]
+        }
       }
 
       const res = await fetch(FN(connectorEndpoint), {
@@ -210,9 +220,12 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
     } finally { setSubmitting(false) }
   }
 
-  const canSubmit = !!discovery?.credential_needed && discovery.credential_needed.fields.every(f =>
-    f.name === 'repo' ? !!editRepo.trim() : !!creds[f.name]?.trim()
-  ) && !submitting
+  const canSubmit = !!discovery?.credential_needed && discovery.credential_needed.fields.every(f => {
+    if (f.name === 'repo') return !!editRepo.trim() || !!discovery.hint.repo
+    // Fields with default placeholders (environment_id, dataset) auto-fill
+    // from placeholder if operator doesn't type — we still want them required-on-submit.
+    return !!(creds[f.name]?.trim() || f.placeholder)
+  }) && !submitting
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
