@@ -120,6 +120,31 @@ interface Discovery {
   message?: string
 }
 
+// Manual-pick platforms — for cases where auto-detection can't see the
+// CMS (Strapi self-hosted on a different domain than the rendered site,
+// or operators who already know what they want).
+const MANUAL_PLATFORMS: Record<string, { label: string; kind: string; fields: Array<{ name: string; label: string; type: 'text' | 'password'; placeholder?: string; note?: string }>; hint: string }> = {
+  strapi: {
+    label: 'Strapi (self-hosted)',
+    kind: 'strapi',
+    hint: 'Your Strapi API URL + content type UID + API token. Strapi runs on a separate domain from the rendered site so we can\'t auto-detect it from a public URL.',
+    fields: [
+      { name: 'base_url', label: 'Strapi URL', type: 'text', placeholder: 'https://cms.example.com', note: 'The Strapi admin/API root.' },
+      { name: 'content_type_uid', label: 'Content type UID', type: 'text', placeholder: 'articles', note: 'Kebab-case ID from Strapi → Content-Type Builder (e.g. "articles" or "blog-posts").' },
+      { name: 'token', label: 'API Token', type: 'password', placeholder: '...', note: 'Generate in Strapi Admin → Settings → API Tokens with read/write on this content type.' },
+    ],
+  },
+  hubspot: {
+    label: 'HubSpot CMS',
+    kind: 'hubspot',
+    hint: 'If your HubSpot site isn\'t reachable publicly (preview / sandbox), enter manually. Otherwise paste the live URL to auto-detect.',
+    fields: [
+      { name: 'access_token', label: 'Private App Access Token', type: 'password', placeholder: 'pat-na1-...', note: 'HubSpot → Settings → Integrations → Private Apps.' },
+      { name: 'content_group_id', label: 'Blog ID', type: 'text', placeholder: '123456789', note: 'The numeric blog ID (visible in HubSpot URLs).' },
+    ],
+  },
+}
+
 function AddBlogWizard({ onClose }: { onClose: () => void }) {
   const { activeOrg } = useOrg()
   const [url, setUrl] = useState('')
@@ -127,11 +152,28 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
   const [discovery, setDiscovery] = useState<Discovery | null>(null)
   const [creds, setCreds] = useState<Record<string, string>>({})
   // Editable mirrors of the auto-discovered hint values (operator can override)
-  const [editName, setEditName] = useState('')
+  const [editName, setEditName] = useState('Main blog')
   const [editRepo, setEditRepo] = useState('')
   const [editPrMode, setEditPrMode] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<{ message: string; recovery?: string } | null>(null)
+  const [manualKind, setManualKind] = useState<string | null>(null)
+
+  function pickManualPlatform(kind: string) {
+    const m = MANUAL_PLATFORMS[kind]
+    if (!m) return
+    setManualKind(kind)
+    setDiscovery({
+      platform: m.kind,
+      recommended_path: 'cms_direct',
+      confidence: 1.0,
+      detected_cms: m.kind,
+      detected_hosting: 'unknown',
+      detected_ssg: 'unknown',
+      hint: { connection_name: m.label },
+      credential_needed: { kind: m.kind, label: m.label, hint: m.hint, fields: m.fields },
+    })
+  }
 
   async function runDiscover() {
     if (!url.trim()) return
@@ -163,6 +205,8 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
         webflow: 'webflow-publish',
         contentful: 'contentful-publish',
         sanity: 'sanity-publish',
+        hubspot: 'hubspot-publish',
+        strapi: 'strapi-publish',
       }[discovery.credential_needed.kind]
       if (!connectorEndpoint) {
         setError({ message: `No connector for ${discovery.credential_needed.kind}.`, recovery: 'Coming next.' })
@@ -240,23 +284,58 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="px-6 py-5 space-y-5">
-          {/* URL input — always visible at top */}
-          <div>
-            <label className="text-xs font-medium text-gray-700 block mb-1.5">Where does your blog live?</label>
-            <div className="flex gap-2">
-              <input autoFocus value={url} onChange={e => setUrl(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && !discovering && runDiscover()}
-                placeholder="https://acme.com/blog  or  https://blog.acme.com"
-                className="input flex-1" />
-              <button onClick={runDiscover} disabled={!url.trim() || discovering}
-                className="text-xs px-3 py-1.5 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 inline-flex items-center gap-1.5">
-                {discovering ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Discovering…</> : 'Discover'}
+          {/* URL input — hidden when operator picked a manual platform */}
+          {!manualKind && (
+            <div>
+              <label className="text-xs font-medium text-gray-700 block mb-1.5">Where does your blog live?</label>
+              <div className="flex gap-2">
+                <input autoFocus value={url} onChange={e => setUrl(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && !discovering && runDiscover()}
+                  placeholder="https://acme.com/blog  or  https://blog.acme.com"
+                  className="input flex-1" />
+                <button onClick={runDiscover} disabled={!url.trim() || discovering}
+                  className="text-xs px-3 py-1.5 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 inline-flex items-center gap-1.5">
+                  {discovering ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Discovering…</> : 'Discover'}
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1.5">
+                Paste any page on your blog. If you're not sure, paste your homepage and we'll find the blog.
+                {' '}
+                <span className="text-gray-500">Using Strapi or another self-hosted CMS?{' '}
+                  <button onClick={() => pickManualPlatform('strapi')} className="text-gray-700 underline hover:text-gray-900">Set up manually</button>
+                </span>
+              </p>
+            </div>
+          )}
+
+          {/* When discovery returns nothing useful — offer the manual platform list */}
+          {discovery && !discovery.credential_needed && !manualKind && (
+            <div className="p-3 rounded-lg bg-gray-50 border border-gray-200">
+              <p className="text-xs font-medium text-gray-700 mb-2">We couldn't auto-detect a supported platform at that URL. Pick manually:</p>
+              <div className="space-y-1.5">
+                {Object.entries(MANUAL_PLATFORMS).map(([k, p]) => (
+                  <button key={k} onClick={() => pickManualPlatform(k)}
+                    className="w-full text-left px-3 py-2 rounded-md border border-gray-200 hover:bg-white text-xs">
+                    <div className="font-medium text-gray-900">{p.label}</div>
+                    <div className="text-[11px] text-gray-500 mt-0.5">{p.hint}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Manual-pick mode banner — back button */}
+          {manualKind && (
+            <div className="flex items-center justify-between p-2.5 rounded-lg bg-gray-50 border border-gray-200">
+              <p className="text-xs text-gray-700">
+                Setting up <span className="font-medium">{MANUAL_PLATFORMS[manualKind]?.label}</span> manually.
+              </p>
+              <button onClick={() => { setManualKind(null); setDiscovery(null); setCreds({}) }}
+                className="text-[11px] text-gray-500 hover:text-gray-700 underline">
+                ← Back to URL detection
               </button>
             </div>
-            <p className="text-[11px] text-gray-400 mt-1.5">
-              Paste any page on your blog — main URL, a category page, or even a specific post. If you're not sure, paste your homepage and we'll find the blog.
-            </p>
-          </div>
+          )}
 
           {/* Sniffed-elsewhere banner */}
           {discovery?.sniffed_blog_url && discovery.original_url && (

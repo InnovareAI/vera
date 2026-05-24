@@ -322,7 +322,8 @@ function connectorFn(kind: string): string | null {
     webflow: 'webflow-publish',
     contentful: 'contentful-publish',
     sanity: 'sanity-publish',
-    // hubspot: 'hubspot-publish',
+    hubspot: 'hubspot-publish',
+    strapi: 'strapi-publish',
   } as Record<string, string>)[kind] ?? null
 }
 
