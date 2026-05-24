@@ -1,8 +1,20 @@
+// Dashboard answers ONE question: "What needs my attention right now?"
+//
+// Applied the UX declutter skill (skills.tool.ux_declutter):
+//   · Cut the H1 + date subtitle — rail already labels the page "Overview"
+//   · Cut the 3-stat grid (Awaiting/Active/Recent) — numbers that don't
+//     change meaningfully day-to-day, and the Review nav badge already
+//     surfaces "Awaiting"
+//   · Cut the "Recent activity" card — pure duplication of the rail's
+//     Recent + In-progress sections
+//   · Kept the LinkedIn audit card (the actual answer to client health)
+//   · Kept the pending-approval list, framed as the work surface
+
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, RotateCw, ArrowRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import type { Post, Campaign } from '../lib/supabase'
+import type { Post } from '../lib/supabase'
 import { StatusChip } from '../components/Chip'
 
 interface LinkedInAuditSummary {
@@ -18,14 +30,10 @@ interface LinkedInAuditSummary {
 export default function Dashboard() {
   const navigate = useNavigate()
   const [pendingPosts, setPendingPosts] = useState<Post[]>([])
-  const [recentPosts, setRecentPosts] = useState<Post[]>([])
-  const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [loading, setLoading] = useState(true)
   const [audit, setAudit] = useState<LinkedInAuditSummary | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
-
-  const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
 
   const loadAudit = useCallback(async () => {
     const { data: latest } = await supabase
@@ -69,180 +77,121 @@ export default function Dashboard() {
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const [pendingRes, recentRes, campaignsRes] = await Promise.all([
-        supabase.from('content_posts').select('*').in('status', ['Draft', 'Pending Review']).order('created_at', { ascending: false }).limit(5),
-        supabase.from('content_posts').select('*').order('updated_at', { ascending: false }).limit(5),
-        supabase.from('campaigns').select('*').eq('status', 'active'),
-      ])
-      setPendingPosts(pendingRes.data || [])
-      setRecentPosts(recentRes.data || [])
-      setCampaigns(campaignsRes.data || [])
+      const { data: pendingRes } = await supabase
+        .from('content_posts')
+        .select('*')
+        .in('status', ['Draft', 'Pending Review'])
+        .order('created_at', { ascending: false })
+        .limit(6)
+      setPendingPosts(pendingRes || [])
       setLoading(false)
       await loadAudit()
     }
     load()
   }, [loadAudit])
 
-  const stats = [
-    { value: loading ? '—' : pendingPosts.length, label: 'Awaiting approval' },
-    { value: loading ? '—' : campaigns.length, label: 'Active campaigns' },
-    { value: loading ? '—' : recentPosts.length, label: 'Recent posts' },
-  ]
-
   return (
-    <div className="p-8">
-      <div className="flex items-end justify-between mb-8">
-        <div>
-          <h1 className="text-[28px] leading-tight tracking-tight font-semibold" style={{ color: 'var(--ink)' }}>Dashboard</h1>
-          <p className="text-[13px] mt-1" style={{ color: 'var(--ghost)' }}>{dateStr}</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-4 mb-8">
-        {stats.map(stat => (
-          <div
-            key={stat.label}
-            className="p-5"
-            style={{
-              background: 'var(--paper-warm)',
-              border: '1px solid var(--paper-edge)',
-              borderRadius: 'var(--radius-lg)',
-            }}
-          >
-            <div className="text-[32px] font-semibold leading-none mb-2" style={{ color: 'var(--ink)' }}>{stat.value}</div>
-            <div className="text-[13px]" style={{ color: 'var(--ghost)' }}>{stat.label}</div>
-          </div>
-        ))}
-      </div>
-
+    <div className="p-8 max-w-4xl">
+      {/* Client surface — the one-glance answer. Big scores, single ink   */}
+      {/* CTA (Re-run), one quiet secondary (View detail). No padding-on-   */}
+      {/* padding chrome.                                                    */}
       {audit && (
-        <div className="mb-8">
-          <p className="text-[13px] font-medium mb-3" style={{ color: 'var(--ghost)' }}>LinkedIn audit</p>
-          <div
-            className="p-5"
-            style={{
-              background: 'var(--paper-warm)',
-              border: '1px solid var(--paper-edge)',
-              borderRadius: 'var(--radius-lg)',
-            }}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-medium" style={{ color: 'var(--ink)' }}>{audit.org_name}</p>
-                <p className="text-[13px] mt-1" style={{ color: 'var(--ghost)' }}>
-                  {audit.last_run ? `Last run ${relTime(audit.last_run)}` : 'Not yet run'}
-                  {' · Auto-refresh Sundays 04:00 UTC'}
-                </p>
-                <div className="flex gap-6 mt-4">
-                  <ScoreChip label="Profile" score={audit.profile_score} grade={audit.profile_grade} />
-                  <ScoreChip label="Brew360" score={audit.brew_score} grade={audit.brew_grade} />
-                </div>
-              </div>
-              <div className="flex flex-col gap-2 flex-shrink-0">
-                <button
-                  onClick={() => navigate(`/linkedin-score/${audit.org_id}`)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium hover:opacity-80"
-                  style={{ color: 'var(--ink-quiet)' }}
-                >
-                  View detail <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
-                </button>
-                <button
-                  onClick={reRunAudits}
-                  disabled={refreshing}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium transition-opacity hover:opacity-90 disabled:opacity-50"
-                  style={{ background: 'var(--ink)', color: 'var(--paper-warm)', borderRadius: 'var(--radius-md)' }}
-                >
-                  {refreshing
-                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Re-running…</>
-                    : <><RotateCw className="w-3.5 h-3.5" strokeWidth={2} /> Re-run now</>}
-                </button>
-              </div>
+        <section className="mb-10">
+          <div className="flex items-start justify-between gap-6 mb-4">
+            <div>
+              <p className="text-[12px] font-medium uppercase tracking-wide mb-1.5" style={{ color: 'var(--ghost)' }}>Client surface</p>
+              <p className="text-[20px] font-semibold leading-tight" style={{ color: 'var(--ink)' }}>{audit.org_name}</p>
+              <p className="text-[12px] mt-1" style={{ color: 'var(--ghost)' }}>
+                {audit.last_run ? `Audited ${relTime(audit.last_run)}` : 'Not yet audited'}
+              </p>
             </div>
-            {refreshError && (
-              <p
-                className="mt-3 text-[12px] px-3 py-2"
-                style={{
-                  color: 'var(--accent)',
-                  background: 'var(--accent-tint)',
-                  border: `1px solid var(--accent-rule)`,
-                  borderRadius: 'var(--radius-sm)',
-                }}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => navigate(`/linkedin-score/${audit.org_id}`)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[13px] font-medium hover:opacity-80"
+                style={{ color: 'var(--ink-quiet)' }}
               >
-                {refreshError}
-              </p>
-            )}
-            {refreshing && (
-              <p className="mt-3 text-[12px]" style={{ color: 'var(--ghost)' }}>
-                Fired via pg_cron's refresh function. Both audits are running in the background — the new score will appear once they complete (~30 s).
-              </p>
-            )}
+                Detail <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
+              </button>
+              <button
+                onClick={reRunAudits}
+                disabled={refreshing}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium transition-opacity hover:opacity-90 disabled:opacity-50"
+                style={{ background: 'var(--ink)', color: 'var(--paper-warm)', borderRadius: 'var(--radius-md)' }}
+              >
+                {refreshing
+                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Re-running…</>
+                  : <><RotateCw className="w-3.5 h-3.5" strokeWidth={2} /> Re-run</>}
+              </button>
+            </div>
           </div>
-        </div>
+          <div className="flex gap-10 py-5" style={{ borderTop: '1px solid var(--paper-edge)', borderBottom: '1px solid var(--paper-edge)' }}>
+            <ScoreChip label="Profile" score={audit.profile_score} grade={audit.profile_grade} />
+            <ScoreChip label="Brew360" score={audit.brew_score} grade={audit.brew_grade} />
+          </div>
+          {refreshError && (
+            <p
+              className="mt-3 text-[12px] px-3 py-2"
+              style={{
+                color: 'var(--accent)',
+                background: 'var(--accent-tint)',
+                border: '1px solid var(--accent-rule)',
+                borderRadius: 'var(--radius-sm)',
+              }}
+            >
+              {refreshError}
+            </p>
+          )}
+          {refreshing && (
+            <p className="mt-3 text-[12px]" style={{ color: 'var(--ghost)' }}>
+              Running in the background — new score appears in ~30s.
+            </p>
+          )}
+        </section>
       )}
 
-      <div className="mb-8">
-        <p className="text-[13px] font-medium mb-3" style={{ color: 'var(--ghost)' }}>Pending approval</p>
-        <div
-          className="divide-y"
-          style={{
-            background: 'var(--paper-warm)',
-            border: '1px solid var(--paper-edge)',
-            borderRadius: 'var(--radius-lg)',
-            ['--tw-divide-opacity' as never]: 1,
-          }}
-        >
-          {loading ? (
-            <div className="px-4 py-6 text-[13px] text-center" style={{ color: 'var(--ghost)' }}>Loading…</div>
-          ) : pendingPosts.length === 0 ? (
-            <div className="px-4 py-6 text-[13px] text-center" style={{ color: 'var(--ghost)' }}>Nothing pending</div>
-          ) : pendingPosts.map(post => (
-            <div
-              key={post.id}
-              onClick={() => navigate('/review')}
-              className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-[var(--fog)] transition-colors"
-              style={{ borderColor: 'var(--paper-edge)' }}
-            >
-              <div className="w-7 h-7 rounded-full flex-shrink-0" style={{ background: 'var(--fog)' }} />
-              <div className="flex-1 min-w-0">
-                <p className="text-[14px] truncate" style={{ color: 'var(--ink)' }}>{post.title || 'Untitled post'}</p>
-                <p className="text-[12px] mt-0.5" style={{ color: 'var(--ghost)' }}>{post.channel} · {post.format}</p>
-              </div>
-              <StatusChip status={post.status} />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <p className="text-[13px] font-medium mb-3" style={{ color: 'var(--ghost)' }}>Recent activity</p>
-        <div
-          className="divide-y"
-          style={{
-            background: 'var(--paper-warm)',
-            border: '1px solid var(--paper-edge)',
-            borderRadius: 'var(--radius-lg)',
-          }}
-        >
-          {loading ? (
-            <div className="px-4 py-6 text-[13px] text-center" style={{ color: 'var(--ghost)' }}>Loading…</div>
-          ) : recentPosts.length === 0 ? (
-            <div className="px-4 py-6 text-[13px] text-center" style={{ color: 'var(--ghost)' }}>No activity yet</div>
-          ) : recentPosts.map(post => (
-            <div
-              key={post.id}
-              className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--fog)] transition-colors"
-              style={{ borderColor: 'var(--paper-edge)' }}
-            >
-              <div className="w-7 h-7 rounded-full flex-shrink-0" style={{ background: 'var(--fog)' }} />
-              <div className="flex-1 min-w-0">
-                <p className="text-[14px] truncate" style={{ color: 'var(--ink)' }}>{post.title || 'Untitled post'}</p>
-                <p className="text-[12px] mt-0.5" style={{ color: 'var(--ghost)' }}>{post.channel} · {new Date(post.updated_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</p>
-              </div>
-              <StatusChip status={post.status} />
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* Pending approval — the work surface. Empty state hides the      */}
+      {/* whole section per the skill: don't show "Nothing yet" chrome.    */}
+      {(loading || pendingPosts.length > 0) && (
+        <section>
+          <div className="flex items-baseline justify-between mb-3">
+            <p className="text-[12px] font-medium uppercase tracking-wide" style={{ color: 'var(--ghost)' }}>
+              Awaiting your review
+              {!loading && pendingPosts.length > 0 && (
+                <span className="ml-1.5 normal-case tracking-normal" style={{ color: 'var(--mist)' }}>{pendingPosts.length}</span>
+              )}
+            </p>
+            {!loading && pendingPosts.length > 0 && (
+              <button
+                onClick={() => navigate('/review')}
+                className="text-[12px] font-medium hover:opacity-80 inline-flex items-center gap-1"
+                style={{ color: 'var(--ink-quiet)' }}
+              >
+                Open queue <ArrowRight className="w-3 h-3" strokeWidth={1.75} />
+              </button>
+            )}
+          </div>
+          <div style={{ borderTop: '1px solid var(--paper-edge)' }}>
+            {loading ? (
+              <div className="py-4 text-[13px]" style={{ color: 'var(--ghost)' }}>Loading…</div>
+            ) : pendingPosts.map(post => (
+              <button
+                key={post.id}
+                onClick={() => navigate(`/review/${post.id}`)}
+                className="w-full flex items-center gap-3 py-3 text-left hover:bg-[var(--fog)] transition-colors"
+                style={{ borderBottom: '1px solid var(--paper-edge)' }}
+              >
+                <div className="flex-1 min-w-0 px-2">
+                  <p className="text-[14px] truncate" style={{ color: 'var(--ink)' }}>{post.title || 'Untitled post'}</p>
+                  <p className="text-[11.5px] mt-0.5 lowercase" style={{ color: 'var(--ghost)' }}>{post.channel} · {post.format}</p>
+                </div>
+                <StatusChip status={post.status} />
+                <ArrowRight className="w-3.5 h-3.5 mr-2 flex-shrink-0" strokeWidth={1.5} style={{ color: 'var(--mist)' }} />
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }
