@@ -713,13 +713,18 @@ export default function Layout() {
       {/* Right side: canvas on top (page context), chat dock on the bottom. */}
       {/* Chat is the primary control surface — pages above are reference    */}
       {/* context. Vertical flex stack so chat can claim majority height.    */}
+      {/*                                                                    */}
+      {/* Exception: /generate has its OWN brief composer (the 9-agent       */}
+      {/* pipeline) so we hide the chat dock there. Rule: never two          */}
+      {/* composers on one page. Longer-term arc is to fold the pipeline     */}
+      {/* into a chat tool and delete the in-page composer entirely.         */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <main className="flex-1 overflow-y-auto min-h-0" style={{ background: 'var(--paper)' }}>
           <ErrorBoundary variant="route" resetKey={location.pathname}>
             <Outlet />
           </ErrorBoundary>
         </main>
-        <ChatPanel />
+        {!location.pathname.endsWith('/generate') && <ChatPanel />}
       </div>
 
       {newProjOpen && activeOrg && (
