@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { OrgProvider, useOrg } from './lib/orgContext'
-import { ProjectProvider } from './lib/projectContext'
+import { ProjectProvider, useProject } from './lib/projectContext'
 import { ThemeProvider } from './lib/theme'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { setUserContext, setOrgContext } from './lib/sentry'
@@ -44,12 +44,29 @@ export default function App() {
               <Route path="/onboarding/audit/:orgId" element={<OnboardingAudit />} />
               <Route path="/linkedin-score/:orgId" element={<LinkedInScore />} />
               <Route path="/" element={<Layout />}>
-                <Route index element={<Navigate to="/dashboard" replace />} />
-                <Route path="dashboard"  element={<Dashboard />} />
-                <Route path="generate"   element={<Generate />} />
+                <Route index element={<RedirectToProjectDashboard />} />
+
+                {/* Project-scoped routes — preferred. URL carries the
+                    active project's slug; pages filter by that project. */}
+                <Route path="p/:projectSlug">
+                  <Route index element={<Navigate to="dashboard" replace />} />
+                  <Route path="dashboard"  element={<Dashboard />} />
+                  <Route path="generate"   element={<Generate />} />
+                  <Route path="review"     element={<Review />} />
+                  <Route path="review/:id" element={<ReviewDetail />} />
+                </Route>
+
+                {/* Legacy flat routes — redirect to /p/:slug/* using the
+                    active project (or fall through to dashboard if no
+                    project context yet). Kept working so existing links,
+                    bookmarks, and rail items don't 404. */}
+                <Route path="dashboard"  element={<RedirectFlatToProject section="dashboard" />} />
+                <Route path="generate"   element={<RedirectFlatToProject section="generate" />} />
+                <Route path="review"     element={<RedirectFlatToProject section="review" />} />
+                <Route path="review/:id" element={<RedirectReviewDetailToProject />} />
+
+                {/* Workspace-level routes — not project-scoped. */}
                 <Route path="audit"      element={<AuditRedirect />} />
-                <Route path="review"     element={<Review />} />
-                <Route path="review/:id" element={<ReviewDetail />} />
                 <Route path="clients"    element={<Clients />} />
                 <Route path="calendar"   element={<Calendar />} />
                 <Route path="library"    element={<Library />} />
@@ -108,6 +125,44 @@ function AuditRedirect() {
 
   if (!target) return null
   return <Navigate to={target} replace />
+}
+
+// Root index — picks the right landing URL once project context loads.
+// Default project gets us /p/[default-slug]/dashboard; no project
+// context (pre-migration) falls back to the flat /dashboard route.
+function RedirectToProjectDashboard() {
+  const { activeProject, loading } = useProject()
+  if (loading) return null
+  if (activeProject) return <Navigate to={`/p/${activeProject.slug}/dashboard`} replace />
+  return <Navigate to="/dashboard" replace />
+}
+
+// Flat-route → project-scoped redirect. Used when somebody hits
+// /dashboard / /generate / /review without a project slug in the URL.
+// Reads the active project from context and rewrites. If no project
+// is loaded yet (pre-migration), renders the flat page so nothing
+// breaks visually.
+function RedirectFlatToProject({ section }: { section: string }) {
+  const { activeProject, loading } = useProject()
+  if (loading) return null
+  if (activeProject) return <Navigate to={`/p/${activeProject.slug}/${section}`} replace />
+  // Pre-migration fallback — render the underlying page directly so
+  // operators don't see a redirect loop. We re-route via the projects
+  // path once one exists.
+  if (section === 'dashboard') return <Dashboard />
+  if (section === 'generate')  return <Generate />
+  if (section === 'review')    return <Review />
+  return <Navigate to="/" replace />
+}
+
+// /review/:id flat → /p/:slug/review/:id. Same idea, preserves the id.
+function RedirectReviewDetailToProject() {
+  const { activeProject, loading } = useProject()
+  if (loading) return null
+  // Read the :id from the current URL ourselves — we're at /review/:id
+  const id = window.location.pathname.split('/').pop()
+  if (activeProject && id) return <Navigate to={`/p/${activeProject.slug}/review/${id}`} replace />
+  return <ReviewDetail />
 }
 
 // Pushes the current user + active org into the Sentry scope so crash

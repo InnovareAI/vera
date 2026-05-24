@@ -16,6 +16,8 @@ import { Loader2, RotateCw, ArrowRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { StatusChip } from '../components/Chip'
+import { useProject } from '../lib/projectContext'
+import { useOrg } from '../lib/orgContext'
 
 interface LinkedInAuditSummary {
   org_id: string
@@ -29,6 +31,8 @@ interface LinkedInAuditSummary {
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { activeProject } = useProject()
+  const { activeOrg } = useOrg()
   const [pendingPosts, setPendingPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
   const [audit, setAudit] = useState<LinkedInAuditSummary | null>(null)
@@ -77,18 +81,24 @@ export default function Dashboard() {
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const { data: pendingRes } = await supabase
+      // Pending list scoped to the active project (and workspace).
+      // When no project is active yet (pre-migration), falls back to
+      // workspace-level — same behavior as before projects shipped.
+      let q = supabase
         .from('content_posts')
         .select('*')
         .in('status', ['Draft', 'Pending Review'])
         .order('created_at', { ascending: false })
         .limit(6)
+      if (activeOrg?.id)     q = q.eq('org_id', activeOrg.id)
+      if (activeProject?.id) q = q.eq('project_id', activeProject.id)
+      const { data: pendingRes } = await q
       setPendingPosts(pendingRes || [])
       setLoading(false)
       await loadAudit()
     }
     load()
-  }, [loadAudit])
+  }, [loadAudit, activeOrg?.id, activeProject?.id])
 
   return (
     <div className="p-8 max-w-4xl">

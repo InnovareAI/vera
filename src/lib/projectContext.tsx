@@ -16,6 +16,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import type { ReactNode } from 'react'
+import { useNavigate, useLocation, useMatch } from 'react-router-dom'
 import { supabase } from './supabase'
 import type { Project } from './supabase'
 import { useOrg } from './orgContext'
@@ -46,6 +47,14 @@ const ACTIVE_PROJECT_STORAGE = 'vera-active-project'
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const { activeOrg } = useOrg()
+  const navigate = useNavigate()
+  const location = useLocation()
+  // URL pattern: /p/:projectSlug/* — when present, the slug in the URL
+  // is authoritative for the active project. Otherwise we fall back to
+  // localStorage, then default, then first.
+  const urlMatch = useMatch('/p/:projectSlug/*')
+  const urlSlug = urlMatch?.params.projectSlug ?? null
+
   const [projects, setProjects] = useState<Project[]>([])
   const [activeSlug, setActiveSlug] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -81,10 +90,15 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         }
         const list = (data ?? []) as Project[]
         setProjects(list)
-        // Pick active: stored slug if still valid, else the org's default project, else first.
+        // Pick active in priority order:
+        //   1. URL slug if it matches a real project (deep-linkable)
+        //   2. Stored slug for this org if still valid
+        //   3. The org's default project
+        //   4. First project in the list
         const storageKey = `${ACTIVE_PROJECT_STORAGE}:${activeOrg.id}`
         const stored = localStorage.getItem(storageKey)
         const pick =
+          (urlSlug && list.find(p => p.slug === urlSlug)) ||
           (stored && list.find(p => p.slug === stored)) ||
           list.find(p => p.is_default) ||
           list[0] ||
@@ -93,7 +107,26 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         setLoading(false)
       })
     return () => { cancelled = true }
+    // urlSlug intentionally excluded — we don't want to re-fetch projects
+    // every time the URL changes; the slug-sync useEffect below handles
+    // syncing the active project when the URL changes within a workspace.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeOrg?.id, tick])
+
+  // URL → context sync. When the user navigates to /p/:slug/... directly
+  // (deep link, back button, switcher click), pick up the slug and make
+  // it the active project.
+  useEffect(() => {
+    if (!urlSlug || projects.length === 0) return
+    const fromUrl = projects.find(p => p.slug === urlSlug)
+    if (fromUrl && fromUrl.slug !== activeSlug) {
+      setActiveSlug(fromUrl.slug)
+      if (activeOrg?.id) {
+        try { localStorage.setItem(`${ACTIVE_PROJECT_STORAGE}:${activeOrg.id}`, fromUrl.slug) }
+        catch { /* ignore */ }
+      }
+    }
+  }, [urlSlug, projects, activeSlug, activeOrg?.id])
 
   const switchProject = useCallback((slugOrId: string) => {
     const target = projects.find(p => p.slug === slugOrId || p.id === slugOrId)
@@ -102,7 +135,26 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     try {
       localStorage.setItem(`${ACTIVE_PROJECT_STORAGE}:${activeOrg.id}`, target.slug)
     } catch { /* ignore quota errors */ }
-  }, [projects, activeOrg?.id])
+
+    // Navigate to the target project's URL while preserving the current
+    // section. If we're on /p/old-slug/review → switch to /p/new-slug/review.
+    // If we're on a non-project URL (e.g. /audit, /settings, or a legacy
+    // flat route), navigate to /p/new-slug/dashboard.
+    const path = location.pathname
+    if (path.startsWith('/p/')) {
+      const rest = path.split('/').slice(3).join('/') || 'dashboard'
+      navigate(`/p/${target.slug}/${rest}`)
+    } else {
+      // Don't auto-navigate from workspace-level pages (Audit, Intel, etc.)
+      // — switching projects there is informational, not a navigation event.
+      // Only redirect if the current page is one of the project-scoped ones.
+      const flatToProjectScoped = ['/dashboard', '/generate', '/review']
+      if (flatToProjectScoped.some(p => path === p || path.startsWith(`${p}/`))) {
+        const suffix = path === '/' ? 'dashboard' : path.slice(1)
+        navigate(`/p/${target.slug}/${suffix}`)
+      }
+    }
+  }, [projects, activeOrg?.id, location.pathname, navigate])
 
   const refetch = useCallback(() => setTick(t => t + 1), [])
 

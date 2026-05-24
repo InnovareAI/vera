@@ -16,7 +16,7 @@
 // The canvas (right side) is just <Outlet />. No tabs, no breadcrumbs,
 // no second nav. One focused view at a time.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   Star, Clock, Sparkles, CheckSquare, Telescope, BookOpen, Plus,
@@ -345,7 +345,7 @@ function ago(iso: string): string {
 export default function Layout() {
   const { user, signOut } = useAuth()
   const { activeOrg, activeRole } = useOrg()
-  const { activeProject, starredProjects, recentProjects, switchProject } = useProject()
+  const { activeProject, starredProjects, recentProjects, switchProject, refetch: refetchProjects } = useProject()
   const { theme, setTheme } = useTheme()
   const navigate = useNavigate()
   const location = useLocation()
@@ -355,13 +355,20 @@ export default function Layout() {
   const [pendingCount, setPendingCount] = useState(0)
   const [hasBrandVoice, setHasBrandVoice] = useState(false)
   const [hasAudit, setHasAudit] = useState(false)
+  const [newProjOpen, setNewProjOpen] = useState(false)
 
-  // Load everything the rail needs for the active workspace:
-  //   - Pinned campaigns (operator-flagged active projects)
+  // Load everything the rail needs for the active workspace + project:
+  //   - Pinned campaigns (operator-flagged campaigns in the active project)
   //   - Recent posts (split client-side into "In progress" + "Recent")
   //   - Pending count for the Review nav badge
-  //   - Brand voice existence (anchor — workspace constant)
+  //   - Brand voice existence (anchor — workspace constant for now)
   //   - Audit existence (anchor — links to latest score)
+  //
+  // When a project is active, all artifact queries also filter by
+  // project_id so the rail reflects that project's state. The brand
+  // voice + audit anchors stay workspace-level (those tables also got
+  // project_id columns but for Phase 2 we keep them org-scoped — a
+  // dedicated project-settings page will scope them per-project later).
   useEffect(() => {
     if (!activeOrg?.id) {
       setPinnedCampaigns([])
@@ -372,22 +379,36 @@ export default function Layout() {
       return
     }
     const orgId = activeOrg.id
+    const projId = activeProject?.id
+
+    const campQ = supabase.from('campaigns')
+      .select('id, name, theme, status, is_pinned, post_count, color, start_date, end_date')
+      .eq('org_id', orgId)
+      .eq('is_pinned', true)
+      .order('start_date', { ascending: false, nullsFirst: false })
+      .limit(6)
+    const recentQ = supabase.from('content_posts')
+      .select('id, title, channel, status, posted_at, updated_at, campaign_id')
+      .eq('org_id', orgId)
+      .order('updated_at', { ascending: false })
+      .limit(12)
+    const pendingQ = supabase.from('content_posts')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', orgId)
+      .in('status', ['Pending Review', 'pending', 'Draft', 'draft'])
+
+    // Layer in project_id filter when one is active. Defensive against
+    // the migration not being applied yet: PostgREST will error if the
+    // column doesn't exist, in which case the Promise.all catches and
+    // we fall back to org-only data.
+    const scopedCampQ    = projId ? campQ.eq('project_id', projId)    : campQ
+    const scopedRecentQ  = projId ? recentQ.eq('project_id', projId)  : recentQ
+    const scopedPendingQ = projId ? pendingQ.eq('project_id', projId) : pendingQ
+
     Promise.all([
-      supabase.from('campaigns')
-        .select('id, name, theme, status, is_pinned, post_count, color, start_date, end_date')
-        .eq('org_id', orgId)
-        .eq('is_pinned', true)
-        .order('start_date', { ascending: false, nullsFirst: false })
-        .limit(6),
-      supabase.from('content_posts')
-        .select('id, title, channel, status, posted_at, updated_at, campaign_id')
-        .eq('org_id', orgId)
-        .order('updated_at', { ascending: false })
-        .limit(12),
-      supabase.from('content_posts')
-        .select('id', { count: 'exact', head: true })
-        .eq('org_id', orgId)
-        .in('status', ['Pending Review', 'pending', 'Draft', 'draft']),
+      scopedCampQ,
+      scopedRecentQ,
+      scopedPendingQ,
       supabase.from('brand_voice')
         .select('id', { count: 'exact', head: true })
         .eq('org_id', orgId),
@@ -400,8 +421,11 @@ export default function Layout() {
       setPendingCount(countRes.count ?? 0)
       setHasBrandVoice((bvRes.count ?? 0) > 0)
       setHasAudit((auditRes.count ?? 0) > 0)
+    }).catch(err => {
+      // eslint-disable-next-line no-console
+      console.warn('[layout] rail queries failed (migration 026 may not be applied yet):', err)
     })
-  }, [activeOrg?.id])
+  }, [activeOrg?.id, activeProject?.id])
 
   // Split Recent into "In progress" (drafts touched in the last 14 days)
   // and the rest. Caps each list at 4 so the rail stays compact.
@@ -422,6 +446,13 @@ export default function Layout() {
 
   const initials = user?.email?.slice(0, 2).toUpperCase() ?? 'V'
   const isAgencyAdmin = activeOrg?.org_type === 'agency' || activeRole === 'agency_admin'
+
+  // Build the right URL for a project-scoped section. When a project is
+  // active, all project-scoped pages live under /p/:slug. Otherwise we
+  // fall back to the legacy flat route (which redirects via
+  // RedirectFlatToProject once a project exists).
+  const projectPath = (section: string) =>
+    activeProject ? `/p/${activeProject.slug}/${section}` : `/${section}`
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--paper)' }}>
@@ -453,10 +484,12 @@ export default function Layout() {
         {/* Workspace switcher */}
         <WorkspaceSwitcher />
 
-        {/* + Brief CTA — ink-filled primary action, Notion style */}
+        {/* + Brief CTA — ink-filled primary action, Notion style. Routes  */}
+        {/* through the active project slug when one exists so the resulting */}
+        {/* draft gets tagged to it.                                        */}
         <div className="px-2 pt-3">
           <button
-            onClick={() => navigate('/generate')}
+            onClick={() => navigate(projectPath('generate'))}
             className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 transition-opacity hover:opacity-90"
             style={{
               background: 'var(--ink)',
@@ -472,13 +505,14 @@ export default function Layout() {
           </button>
         </div>
 
-        {/* Primary nav */}
+        {/* Primary nav — project-scoped surfaces use the active project's */}
+        {/* slug; workspace-level surfaces (Audit, Intel, Library) don't.  */}
         <nav className="pt-3 pb-1 space-y-0.5">
-          <PrimaryNavItem to="/dashboard"  icon={Sparkles}    label="Overview" />
-          <PrimaryNavItem to="/review"     icon={CheckSquare} label="Review" badge={pendingCount} />
-          <PrimaryNavItem to="/audit"      icon={Telescope}   label="Audit" />
-          <PrimaryNavItem to="/intel"      icon={Radar}       label="Intel" />
-          <PrimaryNavItem to="/library"    icon={BookOpen}    label="Library" />
+          <PrimaryNavItem to={projectPath('dashboard')} icon={Sparkles}    label="Overview" />
+          <PrimaryNavItem to={projectPath('review')}    icon={CheckSquare} label="Review" badge={pendingCount} />
+          <PrimaryNavItem to="/audit"                   icon={Telescope}   label="Audit" />
+          <PrimaryNavItem to="/intel"                   icon={Radar}       label="Intel" />
+          <PrimaryNavItem to="/library"                 icon={BookOpen}    label="Library" />
         </nav>
 
         {/* Scrolling middle — projects (Claude.ai style) + workspace surfaces */}
@@ -522,6 +556,22 @@ export default function Layout() {
             </>
           )}
 
+          {/* + New project — shown once at least one project exists. Hidden  */}
+          {/* pre-migration so we don't tease an affordance that errors.     */}
+          {(starredProjects.length > 0 || recentProjects.length > 0) && (
+            <button
+              onClick={() => setNewProjOpen(true)}
+              className="group w-full flex items-center gap-2 mx-2 px-2 py-1.5 mt-1 transition-colors text-left hover:bg-[var(--fog)]"
+              style={{
+                borderRadius: 'var(--radius-md)',
+                width: 'calc(100% - 1rem)',
+              }}
+            >
+              <Plus size={12} className="flex-shrink-0" style={{ color: 'var(--ghost)' }} strokeWidth={2} />
+              <span className="text-[12.5px]" style={{ color: 'var(--ink-quiet)' }}>New project</span>
+            </button>
+          )}
+
           {/* Anchors — workspace constants. Brand voice + latest audit.    */}
           {/* Auto-populated, never curated by the operator. Hidden when    */}
           {/* the org hasn't run audit or set brand voice yet (new clients).*/}
@@ -555,7 +605,7 @@ export default function Layout() {
           ) : pinnedCampaigns.map(c => (
             <RailItem
               key={c.id}
-              to={`/review?campaign=${c.id}`}
+              to={`${projectPath('review')}?campaign=${c.id}`}
               icon={Star}
               title={c.name}
               meta={[
@@ -575,7 +625,7 @@ export default function Layout() {
               {inProgressPosts.map(p => (
                 <RailItem
                   key={p.id}
-                  to={`/review/${p.id}`}
+                  to={`${projectPath('review')}/${p.id}`}
                   icon={PenLine}
                   title={p.title || 'Untitled post'}
                   meta={`${(p.channel ?? 'post').toLowerCase()} · ${ago(p.updated_at)}`}
@@ -592,7 +642,7 @@ export default function Layout() {
           ) : activityPosts.map(p => (
             <RailItem
               key={p.id}
-              to={`/review/${p.id}`}
+              to={`${projectPath('review')}/${p.id}`}
               icon={Clock}
               title={p.title || 'Untitled post'}
               meta={`${(p.channel ?? 'post').toLowerCase()} · ${ago(p.updated_at)}`}
@@ -670,6 +720,151 @@ export default function Layout() {
           </ErrorBoundary>
         </main>
         <ChatPanel />
+      </div>
+
+      {newProjOpen && activeOrg && (
+        <NewProjectModal
+          orgId={activeOrg.id}
+          onClose={() => setNewProjOpen(false)}
+          onCreated={(slug) => {
+            setNewProjOpen(false)
+            refetchProjects()
+            switchProject(slug)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── NewProjectModal — minimal create flow ───────────────────────────────
+// Just name + description. Slug auto-generated from name. Custom
+// instructions + brand voice + knowledge are configured later from the
+// project settings page (Phase 3). Idea: low-friction creation so the
+// operator can spin up "Coca Cola exercise" in 5 seconds without first
+// filling out a config form.
+function NewProjectModal({
+  orgId, onClose, onCreated,
+}: { orgId: string; onClose: () => void; onCreated: (slug: string) => void }) {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const nameRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    nameRef.current?.focus()
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  function slugify(s: string): string {
+    return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)
+  }
+
+  async function create() {
+    const trimmed = name.trim()
+    if (!trimmed || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      let slug = slugify(trimmed) || 'project'
+      // Collision-safe slug: append -2, -3, ... if needed
+      const { data: existing } = await supabase
+        .from('projects')
+        .select('slug')
+        .eq('org_id', orgId)
+        .ilike('slug', `${slug}%`)
+      const taken = new Set((existing ?? []).map((r: { slug: string }) => r.slug))
+      if (taken.has(slug)) {
+        let n = 2
+        while (taken.has(`${slug}-${n}`)) n++
+        slug = `${slug}-${n}`
+      }
+      const { error: insErr } = await supabase
+        .from('projects')
+        .insert({
+          org_id: orgId,
+          name: trimmed,
+          slug,
+          description: description.trim() || null,
+        })
+      if (insErr) throw new Error(insErr.message)
+      onCreated(slug)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function onKey(e: React.KeyboardEvent) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) create()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" onClick={onClose} style={{ background: 'rgba(0,0,0,0.32)' }}>
+      <div
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-md p-6"
+        style={{
+          background: 'var(--paper-warm)',
+          border: '1px solid var(--paper-edge)',
+          borderRadius: 'var(--radius-lg)',
+          boxShadow: '0 20px 60px -16px rgba(0,0,0,0.25)',
+        }}
+      >
+        <h2 className="text-[16px] font-semibold mb-1" style={{ color: 'var(--ink)' }}>New project</h2>
+        <p className="text-[12.5px] mb-5" style={{ color: 'var(--ghost)' }}>
+          Bounded scope for a brand, prospect, exercise, or internal stream. You can add instructions, knowledge, and a brand voice from settings.
+        </p>
+        <label className="block">
+          <span className="text-[12px] font-medium block mb-1.5" style={{ color: 'var(--ink-quiet)' }}>Name</span>
+          <input
+            ref={nameRef}
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={onKey}
+            placeholder="Coca Cola — style exercise"
+            className="input w-full"
+          />
+        </label>
+        <label className="block mt-3">
+          <span className="text-[12px] font-medium block mb-1.5" style={{ color: 'var(--ink-quiet)' }}>Description <span style={{ color: 'var(--mist)' }}>(optional)</span></span>
+          <input
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            onKeyDown={onKey}
+            placeholder="Benchmark vs millennial-targeted CPG"
+            className="input w-full"
+          />
+        </label>
+        {error && (
+          <p className="mt-3 text-[12px] px-3 py-2" style={{ color: 'var(--accent)', background: 'var(--accent-tint)', border: '1px solid var(--accent-rule)', borderRadius: 'var(--radius-sm)' }}>
+            {error}
+          </p>
+        )}
+        <div className="flex items-center justify-end gap-2 mt-5">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-[13px] font-medium hover:opacity-80"
+            style={{ color: 'var(--ink-quiet)' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={create}
+            disabled={!name.trim() || busy}
+            className="inline-flex items-center gap-1.5 px-4 py-1.5 text-[13px] font-medium transition-opacity hover:opacity-90 disabled:opacity-40"
+            style={{ background: 'var(--ink)', color: 'var(--paper-warm)', borderRadius: 'var(--radius-md)' }}
+          >
+            {busy ? 'Creating…' : 'Create'}
+            <span className="text-[11px] opacity-60 ml-1">⌘↩</span>
+          </button>
+        </div>
       </div>
     </div>
   )
