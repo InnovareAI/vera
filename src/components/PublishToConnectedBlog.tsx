@@ -317,9 +317,11 @@ interface PublishResult {
 function connectorFn(kind: string): string | null {
   return ({
     wordpress: 'wordpress-publish',
-    // ghost: 'ghost-publish',
+    ghost: 'ghost-publish',
+    github_mdx: 'git-publish',
     // webflow: 'webflow-publish',
-    // ...
+    // contentful: 'contentful-publish',
+    // sanity: 'sanity-publish',
   } as Record<string, string>)[kind] ?? null
 }
 

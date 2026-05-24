@@ -155,16 +155,19 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
             <DetectionResult detection={detection} url={url} onContinue={() => setStep('connect')} />
           )}
 
-          {step === 'connect' && detection && (
-            detection.detected_cms === 'wordpress'
-              ? <WordPressConnectForm
-                  detection={detection}
-                  url={url}
-                  orgId={activeOrg?.id ?? ''}
-                  onConnected={() => { onClose(); window.location.reload() }}
-                />
-              : <ComingSoonForm detection={detection} />
-          )}
+          {step === 'connect' && detection && (() => {
+            const onConnected = () => { onClose(); window.location.reload() }
+            if (detection.detected_cms === 'wordpress') {
+              return <WordPressConnectForm detection={detection} url={url} orgId={activeOrg?.id ?? ''} onConnected={onConnected} />
+            }
+            if (detection.detected_cms === 'ghost') {
+              return <GhostConnectForm url={url} orgId={activeOrg?.id ?? ''} onConnected={onConnected} />
+            }
+            if (detection.recommended_path === 'git_backed') {
+              return <GitPublishConnectForm url={url} orgId={activeOrg?.id ?? ''} onConnected={onConnected} />
+            }
+            return <ComingSoonForm detection={detection} />
+          })()}
         </div>
 
         <div className="px-6 py-3 border-t border-gray-100 flex justify-end gap-2">
@@ -328,6 +331,185 @@ function WordPressConnectForm({ detection: _detection, url, orgId, onConnected }
       <button onClick={submit} disabled={!canSubmit}
         className="w-full inline-flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
         {submitting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Connecting…</> : 'Connect WordPress'}
+      </button>
+    </div>
+  )
+}
+
+// ─── Ghost connect form ────────────────────────────────────────────────────
+function GhostConnectForm({ url, orgId, onConnected }: { url: string; orgId: string; onConnected: () => void }) {
+  const detectedBase = (() => { try { return new URL(url).origin } catch { return url } })()
+  const [name, setName] = useState('Main blog')
+  const [baseUrl, setBaseUrl] = useState(detectedBase)
+  const [apiKey, setApiKey] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [err, setErr] = useState<{ message: string; recovery: string } | null>(null)
+
+  async function submit() {
+    setSubmitting(true); setErr(null)
+    try {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ghost-publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
+        body: JSON.stringify({ action: 'connect', org_id: orgId, name, base_url: baseUrl, api_key: apiKey }),
+      })
+      const data = await res.json() as { ok: boolean; error?: { message: string; recovery_action: string } }
+      if (!data.ok) {
+        setErr({ message: data.error?.message ?? 'Connection failed.',
+                 recovery: data.error?.recovery_action ?? 'Try again.' })
+        return
+      }
+      onConnected()
+    } catch (e) {
+      setErr({ message: e instanceof Error ? e.message : String(e), recovery: 'Network — try again.' })
+    } finally { setSubmitting(false) }
+  }
+
+  const canSubmit = !!(name.trim() && baseUrl.trim() && apiKey.trim()) && !submitting
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-gray-800">
+        Connecting to <span className="font-medium">{detectedBase}</span>. You'll need a Custom Integration's
+        Admin API Key (Ghost Admin → Integrations → Add custom integration).
+      </p>
+      <div>
+        <label className="text-xs font-medium text-gray-700 block mb-1">Connection name</label>
+        <input value={name} onChange={e => setName(e.target.value)} className="input w-full" />
+      </div>
+      <div>
+        <label className="text-xs font-medium text-gray-700 block mb-1">Ghost site URL</label>
+        <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} className="input w-full" />
+        <p className="text-[11px] text-gray-400 mt-1">Site root, e.g. https://blog.example.com.</p>
+      </div>
+      <div>
+        <label className="text-xs font-medium text-gray-700 block mb-1">Admin API Key</label>
+        <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)}
+          className="input w-full" placeholder="<24-char id>:<64-char secret>" autoComplete="off" />
+        <p className="text-[11px] text-gray-400 mt-1">
+          Format is <code>id:secret</code>. Copy from Ghost Admin → Integrations → your custom integration → Admin API Key.
+        </p>
+      </div>
+      {err && (
+        <div className="p-3 rounded-lg bg-red-50 border border-red-200">
+          <p className="text-xs font-medium text-red-700">{err.message}</p>
+          <p className="text-[11px] text-red-600 mt-1">{err.recovery}</p>
+        </div>
+      )}
+      <button onClick={submit} disabled={!canSubmit}
+        className="w-full inline-flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
+        {submitting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Connecting…</> : 'Connect Ghost'}
+      </button>
+    </div>
+  )
+}
+
+// ─── Git-publish connect form ──────────────────────────────────────────────
+function GitPublishConnectForm({ url, orgId, onConnected }: { url: string; orgId: string; onConnected: () => void }) {
+  const [name, setName] = useState('Main blog')
+  const [repo, setRepo] = useState('')
+  const [branch, setBranch] = useState('main')
+  const [contentDir, setContentDir] = useState('content/blog')
+  const [fileFormat, setFileFormat] = useState<'mdx' | 'md'>('mdx')
+  const [pat, setPat] = useState('')
+  const [prMode, setPrMode] = useState(false)
+  const [webhookUrl, setWebhookUrl] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [err, setErr] = useState<{ message: string; recovery: string } | null>(null)
+
+  async function submit() {
+    setSubmitting(true); setErr(null)
+    try {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/git-publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
+        body: JSON.stringify({
+          action: 'connect',
+          org_id: orgId, name, repo, branch, content_dir: contentDir, file_format: fileFormat,
+          pr_mode: prMode, webhook_url: webhookUrl.trim() || null, github_pat: pat,
+        }),
+      })
+      const data = await res.json() as { ok: boolean; error?: { message: string; recovery_action: string } }
+      if (!data.ok) {
+        setErr({ message: data.error?.message ?? 'Connection failed.',
+                 recovery: data.error?.recovery_action ?? 'Try again.' })
+        return
+      }
+      onConnected()
+    } catch (e) {
+      setErr({ message: e instanceof Error ? e.message : String(e), recovery: 'Network — try again.' })
+    } finally { setSubmitting(false) }
+  }
+
+  const canSubmit = !!(name && repo && branch && contentDir && pat) && /^[\w.-]+\/[\w.-]+$/.test(repo) && !submitting
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-gray-800">
+        Detected a static site at <span className="font-medium">{(() => { try { return new URL(url).origin } catch { return url } })()}</span>.
+        We'll publish by committing Markdown files to your GitHub repo — the site rebuilds automatically on push.
+      </p>
+      <div>
+        <label className="text-xs font-medium text-gray-700 block mb-1">Connection name</label>
+        <input value={name} onChange={e => setName(e.target.value)} className="input w-full" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs font-medium text-gray-700 block mb-1">Repo (owner/name)</label>
+          <input value={repo} onChange={e => setRepo(e.target.value)} className="input w-full" placeholder="innovareai/blog" />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-700 block mb-1">Branch</label>
+          <input value={branch} onChange={e => setBranch(e.target.value)} className="input w-full" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs font-medium text-gray-700 block mb-1">Content folder</label>
+          <input value={contentDir} onChange={e => setContentDir(e.target.value)} className="input w-full" placeholder="content/blog" />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-700 block mb-1">File format</label>
+          <select value={fileFormat} onChange={e => setFileFormat(e.target.value as 'mdx' | 'md')} className="input w-full">
+            <option value="mdx">mdx</option>
+            <option value="md">md</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label className="text-xs font-medium text-gray-700 block mb-1">GitHub Personal Access Token</label>
+        <input type="password" value={pat} onChange={e => setPat(e.target.value)} className="input w-full"
+          placeholder="github_pat_..." autoComplete="off" />
+        <p className="text-[11px] text-gray-400 mt-1">
+          Fine-grained PAT with <strong>Contents: Read+Write</strong> on this repo. Generate at GitHub → Settings → Developer settings → Personal access tokens.
+        </p>
+      </div>
+      <div>
+        <label className="flex items-center gap-2 text-xs text-gray-700">
+          <input type="checkbox" checked={prMode} onChange={e => setPrMode(e.target.checked)} />
+          <span>Open a Pull Request instead of pushing directly</span>
+        </label>
+        <p className="text-[11px] text-gray-400 mt-0.5 ml-5">
+          Recommended for teams with deploy gates or PR-required branches.
+        </p>
+      </div>
+      <div>
+        <label className="text-xs font-medium text-gray-700 block mb-1">Build hook URL (optional)</label>
+        <input value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} className="input w-full"
+          placeholder="https://api.vercel.com/v1/integrations/deploy/..." />
+        <p className="text-[11px] text-gray-400 mt-1">
+          Only needed if your site doesn't auto-rebuild on push (monorepos, deploy filters). We POST after the commit.
+        </p>
+      </div>
+      {err && (
+        <div className="p-3 rounded-lg bg-red-50 border border-red-200">
+          <p className="text-xs font-medium text-red-700">{err.message}</p>
+          <p className="text-[11px] text-red-600 mt-1">{err.recovery}</p>
+        </div>
+      )}
+      <button onClick={submit} disabled={!canSubmit}
+        className="w-full inline-flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
+        {submitting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Connecting…</> : 'Connect GitHub'}
       </button>
     </div>
   )
