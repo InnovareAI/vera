@@ -30,6 +30,8 @@ interface ProfileResult {
 interface BrewResult {
   success: boolean
   audit?: {
+    audited_against?: string
+    verdict?: string
     overall_score: number
     grade: string
     principles: Record<string, { score: number; findings: string[]; suggestions: string[] }>
@@ -269,7 +271,25 @@ export default function LinkedInScore() {
           onRefresh={runBrew}
         >
           {brew?.audit && (
-            <div className="space-y-1.5">
+            <div className="space-y-3">
+              {/* Echo back what we audited against + the verdict */}
+              {(brew.audit.audited_against || brew.audit.verdict) && (
+                <div className="text-xs text-gray-600 leading-relaxed pb-3 border-b border-gray-100 space-y-2">
+                  {brew.audit.audited_against && (
+                    <div>
+                      <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold block mb-1">Audited against</span>
+                      <p className="text-gray-700">{brew.audit.audited_against}</p>
+                    </div>
+                  )}
+                  {brew.audit.verdict && (
+                    <div>
+                      <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold block mb-1">Verdict</span>
+                      <p className="text-gray-800 font-medium">{brew.audit.verdict}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="space-y-1.5">
               {Object.entries(brew.audit.principles).map(([key, val]) => {
                 const meta = ALL_PRINCIPLES.find(p => p.id === key)
                 return (
@@ -284,6 +304,7 @@ export default function LinkedInScore() {
                   </div>
                 )
               })}
+              </div>
             </div>
           )}
         </ScoreCard>
@@ -370,6 +391,7 @@ function relativeTime(iso: string): string {
 // (which crawls the org website + LLM-extracts). Operator reviews/edits/saves.
 
 interface AuditIntent {
+  summary?: string
   icp_summary?: string
   offer?: string
   value_prop?: string
@@ -379,6 +401,8 @@ interface AuditIntent {
   success_criteria?: string
   extracted_at?: string
   extracted_from?: string[]
+  sitemap_urls_found?: number
+  blog_posts_sampled?: number
 }
 
 function AuditContextCard({ orgId }: { orgId: string }) {
@@ -484,6 +508,8 @@ function AuditContextCard({ orgId }: { orgId: string }) {
           </div>
         </div>
         <div className="space-y-3">
+          <IntentField label="Summary (the foundation BREW360 echoes back)" hint="60-90 word narrative — who you are, who for, what success looks like"
+            value={draft.summary} onChange={v => setDraft(d => ({ ...d, summary: v }))} />
           <IntentField label="ICP (who is this for?)" hint="Segment, role, stage, buying trigger"
             value={draft.icp_summary} onChange={v => setDraft(d => ({ ...d, icp_summary: v }))} />
           <IntentField label="Offer (what you sell)" hint="Concrete deliverable, not category"
@@ -516,6 +542,8 @@ function AuditContextCard({ orgId }: { orgId: string }) {
   }
 
   // Compact view
+  const sources = intent?.extracted_from?.length ?? 0
+  const blogN = intent?.blog_posts_sampled ?? 0
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5 mb-6">
       <div className="flex items-start justify-between mb-3">
@@ -523,7 +551,8 @@ function AuditContextCard({ orgId }: { orgId: string }) {
           <p className="text-sm font-semibold text-gray-900">Audit context</p>
           <p className="text-xs text-gray-500 mt-0.5">
             {intent?.extracted_at ? `Extracted ${relativeTime(intent.extracted_at)}` : 'Manually set'}
-            {intent?.extracted_from?.length ? ` from ${intent.extracted_from.length} page${intent.extracted_from.length === 1 ? '' : 's'}` : ''}
+            {sources ? ` from ${sources} source${sources === 1 ? '' : 's'}` : ''}
+            {blogN ? ` (incl. ${blogN} blog post${blogN === 1 ? '' : 's'})` : ''}
           </p>
         </div>
         <div className="flex gap-2">
@@ -537,6 +566,14 @@ function AuditContextCard({ orgId }: { orgId: string }) {
           </button>
         </div>
       </div>
+
+      {/* Lead narrative — reads first, becomes the foundation BREW360 echoes back */}
+      {intent?.summary && (
+        <p className="text-sm text-gray-800 leading-relaxed mb-4 pb-4 border-b border-gray-100">
+          {intent.summary}
+        </p>
+      )}
+
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
         <CompactRow label="ICP"           value={intent?.icp_summary} />
         <CompactRow label="Offer"         value={intent?.offer} />
