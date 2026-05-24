@@ -1,5 +1,7 @@
-// VERA shell — "Atelier" aesthetic. Cream paper + ink + oxblood accent,
-// Fraunces (serif display) + Geist (body) + Geist Mono (metadata).
+// VERA shell. Cream paper + ink + oxblood accent. Single-family Geist —
+// hierarchy comes from weight + size + spacing, not from font mixing.
+// (Tried Fraunces for display moments; chose to stay monochrome / single-
+// font for visual quiet. Linear/Notion/ChatGPT pattern.)
 //
 // Structure top to bottom in the rail:
 //   1. Brand mark (typographic, not iconic)
@@ -28,23 +30,6 @@ import { supabase } from '../lib/supabase'
 import type { Campaign, Post } from '../lib/supabase'
 import { ErrorBoundary } from './ErrorBoundary'
 import { ChatPanel } from './ChatPanel'
-
-// ─── shared status badge (kept here so pages that import it still work) ──
-const statusColors: Record<string, string> = {
-  pending: 'bg-amber-100 text-amber-700',
-  revision: 'bg-orange-100 text-orange-700',
-  approved: 'bg-green-100 text-green-700',
-  draft: 'bg-gray-100 text-gray-500',
-}
-
-export function StatusBadge({ status }: { status: string }) {
-  const s = status.toLowerCase()
-  return (
-    <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full capitalize ${statusColors[s] || 'bg-gray-100 text-gray-500'}`}>
-      {status}
-    </span>
-  )
-}
 
 // ─── workspace switcher ──────────────────────────────────────────────────
 // Single-line top-of-rail. Glyph + name + chevron. Click expands an overlay
@@ -315,14 +300,17 @@ export default function Layout() {
   const [moreOpen, setMoreOpen] = useState(false)
   const [pinnedCampaigns, setPinnedCampaigns] = useState<Campaign[]>([])
   const [recentPosts, setRecentPosts] = useState<Post[]>([])
+  const [pendingCount, setPendingCount] = useState(0)
 
-  // Load pinned campaigns + recent posts for the active workspace. Both feed
-  // the rail; the "Pinned" section shows operator-flagged campaigns and the
-  // "Recent" section shows posts touched in the last week.
+  // Load pinned campaigns + recent posts + pending-review count for the
+  // active workspace. Feeds the rail: "Pinned" section shows operator-
+  // flagged campaigns, "Recent" shows posts touched recently, and the
+  // Review nav item gets a live badge for the queue depth.
   useEffect(() => {
     if (!activeOrg?.id) {
       setPinnedCampaigns([])
       setRecentPosts([])
+      setPendingCount(0)
       return
     }
     const orgId = activeOrg.id
@@ -338,9 +326,14 @@ export default function Layout() {
         .eq('org_id', orgId)
         .order('updated_at', { ascending: false })
         .limit(8),
-    ]).then(([campRes, postRes]) => {
+      supabase.from('content_posts')
+        .select('id', { count: 'exact', head: true })
+        .eq('org_id', orgId)
+        .in('status', ['Pending Review', 'pending', 'Draft', 'draft']),
+    ]).then(([campRes, postRes, countRes]) => {
       setPinnedCampaigns((campRes.data as Campaign[]) ?? [])
       setRecentPosts((postRes.data as Post[]) ?? [])
+      setPendingCount(countRes.count ?? 0)
     })
   }, [activeOrg?.id])
 
@@ -349,7 +342,7 @@ export default function Layout() {
     navigate('/login')
   }
 
-  const initials = user?.email?.slice(0, 2).toUpperCase() ?? 'KA'
+  const initials = user?.email?.slice(0, 2).toUpperCase() ?? 'V'
   const isAgencyAdmin = activeOrg?.org_type === 'agency' || activeRole === 'agency_admin'
 
   return (
@@ -404,7 +397,7 @@ export default function Layout() {
         {/* Primary nav */}
         <nav className="pt-3 pb-1 space-y-0.5">
           <PrimaryNavItem to="/dashboard"  icon={Sparkles}    label="Overview" />
-          <PrimaryNavItem to="/review"     icon={CheckSquare} label="Review" badge={4} />
+          <PrimaryNavItem to="/review"     icon={CheckSquare} label="Review" badge={pendingCount} />
           <PrimaryNavItem to="/audit"      icon={Telescope}   label="Audit" />
           <PrimaryNavItem to="/intel"      icon={Radar}       label="Intel" />
           <PrimaryNavItem to="/library"    icon={BookOpen}    label="Library" />

@@ -55,7 +55,10 @@ export function ChatPanel() {
   const [input, setInput] = useState('')
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
   const [streaming, setStreaming] = useState(false)
-  const [mode, setMode] = useState<Mode>('fullscreen')
+  // Default to 'default' (60vh) so the canvas above (Dashboard / Review /
+  // Audit) is visible on every page load. Fullscreen is still one click /
+  // ⌘\ away — for when the operator wants chat-only focus.
+  const [mode, setMode] = useState<Mode>('default')
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const scrollerRef = useRef<HTMLDivElement | null>(null)

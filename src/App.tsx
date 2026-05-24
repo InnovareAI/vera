@@ -1,10 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { OrgProvider, useOrg } from './lib/orgContext'
 import { ThemeProvider } from './lib/theme'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { setUserContext, setOrgContext } from './lib/sentry'
+import { supabase } from './lib/supabase'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -72,12 +73,38 @@ function LoginGuard() {
   return <Login />
 }
 
-// /audit → /onboarding/audit/:orgId for the active workspace. Keeps the
-// rail nav stable while the audit page itself stays at its existing route.
+// /audit picks the right destination for the active workspace:
+//   - no org              → /onboarding (first-time signup)
+//   - org, no audit yet   → /onboarding/audit/:orgId (run the first audit)
+//   - org, audit exists   → /linkedin-score/:orgId (the actual report)
+// Avoids the old footgun of always landing on the setup flow even when a
+// fresh score already exists.
 function AuditRedirect() {
   const { activeOrg } = useOrg()
-  if (!activeOrg) return <Navigate to="/onboarding" replace />
-  return <Navigate to={`/onboarding/audit/${activeOrg.id}`} replace />
+  const [target, setTarget] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!activeOrg?.id) {
+      setTarget('/onboarding')
+      return
+    }
+    let cancelled = false
+    supabase
+      .from('linkedin_audits')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', activeOrg.id)
+      .then(({ count }) => {
+        if (cancelled) return
+        const hasAudit = (count ?? 0) > 0
+        setTarget(hasAudit
+          ? `/linkedin-score/${activeOrg.id}`
+          : `/onboarding/audit/${activeOrg.id}`)
+      })
+    return () => { cancelled = true }
+  }, [activeOrg?.id])
+
+  if (!target) return null
+  return <Navigate to={target} replace />
 }
 
 // Pushes the current user + active org into the Sentry scope so crash
