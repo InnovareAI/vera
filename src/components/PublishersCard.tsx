@@ -1,16 +1,16 @@
 // Connected blogs / CMS / Git publishers — Settings → Integrations.
 //
-// Phase 0: list publishers, run detect-cms wizard to scaffold a new
-// connection, but the per-platform connect steps are stubbed pending
-// phase 1 (WordPress first, then Ghost / Webflow / git-publish).
+// One-screen connect flow: operator pastes URL → auto-discover-publisher
+// runs → shows what we found + asks for ONLY the credential the platform
+// needs. Every other field is pre-filled.
 
 import { useState, useEffect } from 'react'
 import { Loader2, Plus, Globe } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 
-const DETECT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/detect-cms`
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
+const FN = (name: string) => `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${name}`
 
 interface Publisher {
   id: string
@@ -44,7 +44,7 @@ export function PublishersCard() {
         <div>
           <p className="text-sm font-semibold text-gray-900">Connected blogs & CMSes</p>
           <p className="text-xs text-gray-500 mt-0.5">
-            Publishing targets for client blogs. Auto-detects WordPress / Ghost / Webflow / Vercel-Netlify static sites.
+            Auto-detects WordPress / Ghost / static sites on Vercel-Netlify-CF Pages. One URL — we discover the rest.
           </p>
         </div>
         <button onClick={() => setWizardOpen(true)}
@@ -88,102 +88,233 @@ export function PublishersCard() {
   )
 }
 
-// ─── Add-a-blog wizard ──────────────────────────────────────────────────────
+// ─── One-screen add-a-blog wizard ──────────────────────────────────────────
+interface Discovery {
+  platform: string
+  recommended_path: 'cms_direct' | 'headless_cms' | 'git_backed' | 'manual_paste'
+  confidence: number
+  detection_summary?: string
+  detected_cms: string
+  detected_hosting: string
+  detected_ssg: string
+  hint: {
+    connection_name?: string
+    base_url?: string
+    api_endpoint?: string
+    wp_categories?: string[]
+    wp_tags?: string[]
+    repo?: string
+    branch?: string
+    content_dir?: string
+    file_format?: string
+    sniff_source?: string
+  }
+  credential_needed: {
+    kind: string
+    label: string
+    hint: string
+    fields: Array<{ name: string; label: string; type: 'text' | 'password'; placeholder?: string; note?: string }>
+  } | null
+  message?: string
+}
+
 function AddBlogWizard({ onClose }: { onClose: () => void }) {
   const { activeOrg } = useOrg()
-  const [step, setStep] = useState<'url' | 'detecting' | 'detected' | 'connect'>('url')
   const [url, setUrl] = useState('')
-  const [detection, setDetection] = useState<DetectionResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [discovering, setDiscovering] = useState(false)
+  const [discovery, setDiscovery] = useState<Discovery | null>(null)
+  const [creds, setCreds] = useState<Record<string, string>>({})
+  // Editable mirrors of the auto-discovered hint values (operator can override)
+  const [editName, setEditName] = useState('')
+  const [editRepo, setEditRepo] = useState('')
+  const [editPrMode, setEditPrMode] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<{ message: string; recovery?: string } | null>(null)
 
-  async function runDetect() {
+  async function runDiscover() {
     if (!url.trim()) return
-    setStep('detecting')
-    setError(null)
+    setDiscovering(true); setError(null); setDiscovery(null)
     try {
-      const res = await fetch(DETECT_URL, {
+      const res = await fetch(FN('auto-discover-publisher'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
         body: JSON.stringify({ url: url.trim() }),
       })
-      const data = await res.json() as DetectionResult & { error?: string }
+      const data = await res.json() as Discovery & { error?: string }
       if (data.error) throw new Error(data.error)
-      setDetection(data)
-      setStep('detected')
+      setDiscovery(data)
+      setEditName(data.hint.connection_name ?? 'Main blog')
+      setEditRepo(data.hint.repo ?? '')
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      setStep('url')
-    }
+      setError({ message: e instanceof Error ? e.message : String(e) })
+    } finally { setDiscovering(false) }
   }
+
+  async function runConnect() {
+    if (!discovery?.credential_needed || !activeOrg) return
+    setSubmitting(true); setError(null)
+    try {
+      const connectorEndpoint = {
+        wordpress: 'wordpress-publish',
+        ghost: 'ghost-publish',
+        github_mdx: 'git-publish',
+      }[discovery.credential_needed.kind]
+      if (!connectorEndpoint) {
+        setError({ message: `No connector for ${discovery.credential_needed.kind}.`, recovery: 'Coming next.' })
+        return
+      }
+
+      // Build the platform-specific payload
+      const payload: Record<string, unknown> = {
+        action: 'connect',
+        org_id: activeOrg.id,
+        name: editName.trim() || 'Main blog',
+      }
+      if (discovery.credential_needed.kind === 'wordpress') {
+        Object.assign(payload, {
+          base_url: discovery.hint.base_url,
+          username: creds.username,
+          app_password: creds.app_password,
+        })
+      } else if (discovery.credential_needed.kind === 'ghost') {
+        Object.assign(payload, {
+          base_url: discovery.hint.base_url,
+          api_key: creds.api_key,
+        })
+      } else if (discovery.credential_needed.kind === 'github_mdx') {
+        Object.assign(payload, {
+          repo: editRepo.trim() || discovery.hint.repo,
+          branch: discovery.hint.branch ?? 'main',
+          content_dir: discovery.hint.content_dir ?? 'content/blog',
+          file_format: discovery.hint.file_format ?? 'mdx',
+          pr_mode: editPrMode,
+          github_pat: creds.github_pat,
+        })
+      }
+
+      const res = await fetch(FN(connectorEndpoint), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json() as { ok: boolean; error?: { message: string; recovery_action: string } }
+      if (!data.ok) {
+        setError({ message: data.error?.message ?? 'Connection failed.', recovery: data.error?.recovery_action })
+        return
+      }
+      // Connected — close + refresh
+      onClose()
+      window.location.reload()
+    } catch (e) {
+      setError({ message: e instanceof Error ? e.message : String(e) })
+    } finally { setSubmitting(false) }
+  }
+
+  const canSubmit = !!discovery?.credential_needed && discovery.credential_needed.fields.every(f =>
+    f.name === 'repo' ? !!editRepo.trim() : !!creds[f.name]?.trim()
+  ) && !submitting
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-gray-100">
           <p className="text-sm font-semibold text-gray-900">Add a blog</p>
           <p className="text-xs text-gray-500 mt-0.5">
-            {step === 'url' && 'Paste the URL — we\'ll figure out the platform.'}
-            {step === 'detecting' && 'Looking at the site…'}
-            {step === 'detected' && 'Here\'s what we found.'}
-            {step === 'connect' && 'Connecting…'}
+            Paste your blog URL — we'll auto-discover the platform and pre-fill everything we can.
           </p>
         </div>
 
-        <div className="px-6 py-5">
-          {step === 'url' && (
-            <div>
-              <label className="text-xs font-medium text-gray-700 block mb-1.5">Blog URL</label>
-              <input
-                autoFocus value={url} onChange={e => setUrl(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && runDetect()}
+        <div className="px-6 py-5 space-y-5">
+          {/* URL input — always visible at top */}
+          <div>
+            <label className="text-xs font-medium text-gray-700 block mb-1.5">Blog URL</label>
+            <div className="flex gap-2">
+              <input autoFocus value={url} onChange={e => setUrl(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !discovering && runDiscover()}
                 placeholder="https://acme.com/blog"
-                className="input w-full"
-              />
-              <p className="text-[11px] text-gray-400 mt-1.5">Just the blog homepage — we'll inspect it from there.</p>
-              {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+                className="input flex-1" />
+              <button onClick={runDiscover} disabled={!url.trim() || discovering}
+                className="text-xs px-3 py-1.5 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 inline-flex items-center gap-1.5">
+                {discovering ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Discovering…</> : 'Discover'}
+              </button>
+            </div>
+          </div>
+
+          {/* Discovery result + credential form (single screen, all on one page) */}
+          {discovery && discovery.credential_needed && (
+            <>
+              <DiscoveryCard discovery={discovery} />
+
+              <div className="space-y-3 pt-2 border-t border-gray-100">
+                <div>
+                  <label className="text-xs font-medium text-gray-700 block mb-1">Connection name</label>
+                  <input value={editName} onChange={e => setEditName(e.target.value)} className="input w-full" />
+                </div>
+
+                {discovery.credential_needed.kind === 'github_mdx' && (
+                  <>
+                    {!discovery.hint.repo && (
+                      <div>
+                        <label className="text-xs font-medium text-gray-700 block mb-1">GitHub repo (owner/name)</label>
+                        <input value={editRepo} onChange={e => setEditRepo(e.target.value)} className="input w-full"
+                          placeholder="innovareai/blog" />
+                      </div>
+                    )}
+                    <label className="flex items-center gap-2 text-xs text-gray-700">
+                      <input type="checkbox" checked={editPrMode} onChange={e => setEditPrMode(e.target.checked)} />
+                      <span>Open a Pull Request instead of pushing directly</span>
+                    </label>
+                  </>
+                )}
+
+                <div className="pt-2">
+                  <p className="text-xs font-medium text-gray-900 mb-1">{discovery.credential_needed.label}</p>
+                  <p className="text-[11px] text-gray-500 mb-3">{discovery.credential_needed.hint}</p>
+                  {discovery.credential_needed.fields.filter(f => f.name !== 'repo').map(field => (
+                    <div key={field.name} className="mb-3">
+                      <label className="text-xs font-medium text-gray-700 block mb-1">{field.label}</label>
+                      <input
+                        type={field.type}
+                        value={creds[field.name] ?? ''}
+                        onChange={e => setCreds(c => ({ ...c, [field.name]: e.target.value }))}
+                        placeholder={field.placeholder}
+                        className="input w-full"
+                        autoComplete="off"
+                      />
+                      {field.note && <p className="text-[11px] text-gray-400 mt-1">{field.note}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Unknown / unsupported platform */}
+          {discovery && !discovery.credential_needed && (
+            <div className="text-center py-6 px-4 bg-gray-50 rounded-lg">
+              <Globe className="w-7 h-7 mx-auto text-gray-300 mb-2" />
+              <p className="text-sm text-gray-700">{discovery.message ?? 'No supported connector for this site yet.'}</p>
+              <p className="text-[11px] text-gray-500 mt-1">WordPress · Ghost · Git-backed static sites are live. Webflow / HubSpot / headless CMSes ship next.</p>
             </div>
           )}
 
-          {step === 'detecting' && (
-            <div className="py-8 text-center text-sm text-gray-500">
-              <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2" />
-              Inspecting {url}…
+          {/* Error */}
+          {error && (
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200">
+              <p className="text-xs font-medium text-red-700">{error.message}</p>
+              {error.recovery && <p className="text-[11px] text-red-600 mt-1">{error.recovery}</p>}
             </div>
           )}
-
-          {step === 'detected' && detection && (
-            <DetectionResult detection={detection} url={url} onContinue={() => setStep('connect')} />
-          )}
-
-          {step === 'connect' && detection && (() => {
-            const onConnected = () => { onClose(); window.location.reload() }
-            if (detection.detected_cms === 'wordpress') {
-              return <WordPressConnectForm detection={detection} url={url} orgId={activeOrg?.id ?? ''} onConnected={onConnected} />
-            }
-            if (detection.detected_cms === 'ghost') {
-              return <GhostConnectForm url={url} orgId={activeOrg?.id ?? ''} onConnected={onConnected} />
-            }
-            if (detection.recommended_path === 'git_backed') {
-              return <GitPublishConnectForm url={url} orgId={activeOrg?.id ?? ''} onConnected={onConnected} />
-            }
-            return <ComingSoonForm detection={detection} />
-          })()}
         </div>
 
         <div className="px-6 py-3 border-t border-gray-100 flex justify-end gap-2">
           <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50">
-            {step === 'detected' ? 'Cancel' : 'Close'}
+            Cancel
           </button>
-          {step === 'url' && (
-            <button onClick={runDetect} disabled={!url.trim()}
-              className="text-xs px-3 py-1.5 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
-              Detect →
-            </button>
-          )}
-          {step === 'detected' && detection && detection.recommended_path !== 'manual_paste' && (
-            <button onClick={() => setStep('connect')}
-              className="text-xs px-3 py-1.5 rounded-md bg-gray-900 text-white hover:bg-gray-800">
-              Continue →
+          {discovery?.credential_needed && (
+            <button onClick={runConnect} disabled={!canSubmit}
+              className="text-xs px-3 py-1.5 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 inline-flex items-center gap-1.5">
+              {submitting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Connecting…</> : `Connect ${discovery.platform}`}
             </button>
           )}
         </div>
@@ -192,354 +323,60 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
   )
 }
 
-interface DetectionResult {
-  url: string
-  detected_cms: string
-  cms_confidence: number
-  cms_signals: string[]
-  detected_hosting: string
-  hosting_confidence: number
-  detected_ssg: string
-  ssg_confidence: number
-  recommended_path: 'cms_direct' | 'headless_cms' | 'git_backed' | 'manual_paste'
-  recommendation_reason: string
-}
-
-function DetectionResult({ detection, url, onContinue: _onContinue }: { detection: DetectionResult; url: string; onContinue: () => void }) {
-  const pathBadge = {
-    cms_direct:   { bg: 'bg-emerald-50',  text: 'text-emerald-700', label: 'Direct CMS publish' },
-    headless_cms: { bg: 'bg-blue-50',     text: 'text-blue-700',    label: 'Headless CMS' },
-    git_backed:   { bg: 'bg-violet-50',   text: 'text-violet-700',  label: 'Git-backed static' },
-    manual_paste: { bg: 'bg-gray-100',    text: 'text-gray-600',    label: 'Manual paste' },
-  }[detection.recommended_path]
+// ─── Discovery summary card ────────────────────────────────────────────────
+function DiscoveryCard({ discovery }: { discovery: Discovery }) {
+  const pathStyle = {
+    cms_direct:   { bg: 'bg-emerald-50',  text: 'text-emerald-700' },
+    headless_cms: { bg: 'bg-blue-50',     text: 'text-blue-700'    },
+    git_backed:   { bg: 'bg-violet-50',   text: 'text-violet-700'  },
+    manual_paste: { bg: 'bg-gray-100',    text: 'text-gray-600'    },
+  }[discovery.recommended_path]
 
   return (
-    <div className="space-y-4">
-      <div className="text-xs text-gray-500">Inspected: <code className="text-gray-700">{url}</code></div>
-
-      <div className={`p-3 rounded-lg ${pathBadge.bg}`}>
-        <div className={`text-[10px] uppercase tracking-wider font-semibold ${pathBadge.text} mb-1`}>
-          {pathBadge.label}
-        </div>
-        <p className="text-sm text-gray-800">{detection.recommendation_reason}</p>
+    <div className={`p-4 rounded-lg ${pathStyle.bg} space-y-3`}>
+      <div className="flex items-center gap-2">
+        <span className={`text-[10px] uppercase tracking-wider font-semibold ${pathStyle.text}`}>Detected</span>
+        <span className={`text-sm font-semibold ${pathStyle.text} capitalize`}>
+          {discovery.platform.replace('_', ' ')}
+          {discovery.confidence > 0.4 && <span className="ml-2 text-xs opacity-70">{Math.round(discovery.confidence * 100)}%</span>}
+        </span>
       </div>
 
-      <dl className="grid grid-cols-3 gap-3 text-xs">
-        <StackLayer label="CMS"     value={detection.detected_cms}     confidence={detection.cms_confidence} />
-        <StackLayer label="Hosting" value={detection.detected_hosting} confidence={detection.hosting_confidence} />
-        <StackLayer label="Framework" value={detection.detected_ssg}   confidence={detection.ssg_confidence} />
-      </dl>
-
-      {detection.cms_signals.length > 0 && (
-        <div>
-          <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-1">Detected signals</p>
-          <ul className="text-[11px] text-gray-600 space-y-0.5">
-            {detection.cms_signals.slice(0, 5).map((s, i) => <li key={i}>• {s}</li>)}
-          </ul>
-        </div>
-      )}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+        {discovery.detected_hosting !== 'unknown' && (
+          <DiscoveryRow label="Hosting" value={discovery.detected_hosting.replace('_', ' ')} />
+        )}
+        {discovery.detected_ssg !== 'unknown' && (
+          <DiscoveryRow label="Framework" value={discovery.detected_ssg} />
+        )}
+        {discovery.hint.api_endpoint && (
+          <DiscoveryRow label="API endpoint" value={discovery.hint.api_endpoint} mono fullWidth />
+        )}
+        {discovery.hint.repo && (
+          <DiscoveryRow
+            label="GitHub repo"
+            value={`${discovery.hint.repo}@${discovery.hint.branch ?? 'main'} → ${discovery.hint.content_dir ?? 'content/blog'}`}
+            mono fullWidth
+            note={discovery.hint.sniff_source ? `sniffed from ${discovery.hint.sniff_source}` : undefined}
+          />
+        )}
+        {discovery.hint.wp_categories && discovery.hint.wp_categories.length > 0 && (
+          <DiscoveryRow label="Categories found" value={`${discovery.hint.wp_categories.length} (${discovery.hint.wp_categories.slice(0, 5).join(', ')}${discovery.hint.wp_categories.length > 5 ? '…' : ''})`} fullWidth />
+        )}
+        {discovery.hint.wp_tags && discovery.hint.wp_tags.length > 0 && (
+          <DiscoveryRow label="Tags found" value={`${discovery.hint.wp_tags.length} (${discovery.hint.wp_tags.slice(0, 5).join(', ')}${discovery.hint.wp_tags.length > 5 ? '…' : ''})`} fullWidth />
+        )}
+      </div>
     </div>
   )
 }
 
-// ─── WordPress connect form (phase 1) ──────────────────────────────────────
-function WordPressConnectForm({ detection: _detection, url, orgId, onConnected }: {
-  detection: DetectionResult; url: string; orgId: string; onConnected: () => void
-}) {
-  // Pre-fill defaults from the detected URL
-  const detectedBase = (() => { try { return new URL(url).origin } catch { return url } })()
-  const [name, setName] = useState('Main blog')
-  const [baseUrl, setBaseUrl] = useState(detectedBase)
-  const [username, setUsername] = useState('')
-  const [appPassword, setAppPassword] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [err, setErr] = useState<{ message: string; recovery: string } | null>(null)
-
-  async function submit() {
-    if (!orgId) { setErr({ message: 'No workspace selected.', recovery: 'Pick a workspace and try again.' }); return }
-    setSubmitting(true); setErr(null)
-    try {
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wordpress-publish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
-        body: JSON.stringify({
-          action: 'connect',
-          org_id: orgId, name, base_url: baseUrl, username, app_password: appPassword,
-        }),
-      })
-      const data = await res.json() as { ok: boolean; error?: { message: string; recovery_action: string }; publisher_id?: string }
-      if (!data.ok || !data.publisher_id) {
-        setErr({
-          message: data.error?.message ?? 'Connection failed.',
-          recovery: data.error?.recovery_action ?? 'Check the URL and credentials and try again.',
-        })
-        return
-      }
-      onConnected()
-    } catch (e) {
-      setErr({ message: e instanceof Error ? e.message : String(e), recovery: 'Try again, or check network.' })
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const canSubmit = !!(name.trim() && baseUrl.trim() && username.trim() && appPassword.trim()) && !submitting
-
+function DiscoveryRow({ label, value, mono, fullWidth, note }: { label: string; value: string; mono?: boolean; fullWidth?: boolean; note?: string }) {
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-gray-800">
-        Connecting to <span className="font-medium">{detectedBase}</span>. You'll need an
-        Application Password from WP Admin → Users → Your Profile.
-      </p>
-
-      <div>
-        <label className="text-xs font-medium text-gray-700 block mb-1">Connection name</label>
-        <input value={name} onChange={e => setName(e.target.value)} className="input w-full" placeholder="Main blog" />
-      </div>
-
-      <div>
-        <label className="text-xs font-medium text-gray-700 block mb-1">WordPress URL</label>
-        <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} className="input w-full"
-          placeholder="https://blog.example.com" />
-        <p className="text-[11px] text-gray-400 mt-1">Site root, not a sub-path. We'll talk to /wp-json/wp/v2/.</p>
-      </div>
-
-      <div>
-        <label className="text-xs font-medium text-gray-700 block mb-1">Username</label>
-        <input value={username} onChange={e => setUsername(e.target.value)} className="input w-full"
-          placeholder="your-wp-username" autoComplete="off" />
-        <p className="text-[11px] text-gray-400 mt-1">The WP username (not email).</p>
-      </div>
-
-      <div>
-        <label className="text-xs font-medium text-gray-700 block mb-1">Application Password</label>
-        <input type="password" value={appPassword} onChange={e => setAppPassword(e.target.value)}
-          className="input w-full" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx" autoComplete="off" />
-        <p className="text-[11px] text-gray-400 mt-1">
-          Generate in <code>WP Admin → Users → Profile → Application Passwords</code>. Spaces in the
-          password are fine — copy it exactly.
-        </p>
-      </div>
-
-      {err && (
-        <div className="p-3 rounded-lg bg-red-50 border border-red-200">
-          <p className="text-xs font-medium text-red-700">{err.message}</p>
-          <p className="text-[11px] text-red-600 mt-1">{err.recovery}</p>
-        </div>
-      )}
-
-      <button onClick={submit} disabled={!canSubmit}
-        className="w-full inline-flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
-        {submitting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Connecting…</> : 'Connect WordPress'}
-      </button>
-    </div>
-  )
-}
-
-// ─── Ghost connect form ────────────────────────────────────────────────────
-function GhostConnectForm({ url, orgId, onConnected }: { url: string; orgId: string; onConnected: () => void }) {
-  const detectedBase = (() => { try { return new URL(url).origin } catch { return url } })()
-  const [name, setName] = useState('Main blog')
-  const [baseUrl, setBaseUrl] = useState(detectedBase)
-  const [apiKey, setApiKey] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [err, setErr] = useState<{ message: string; recovery: string } | null>(null)
-
-  async function submit() {
-    setSubmitting(true); setErr(null)
-    try {
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ghost-publish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
-        body: JSON.stringify({ action: 'connect', org_id: orgId, name, base_url: baseUrl, api_key: apiKey }),
-      })
-      const data = await res.json() as { ok: boolean; error?: { message: string; recovery_action: string } }
-      if (!data.ok) {
-        setErr({ message: data.error?.message ?? 'Connection failed.',
-                 recovery: data.error?.recovery_action ?? 'Try again.' })
-        return
-      }
-      onConnected()
-    } catch (e) {
-      setErr({ message: e instanceof Error ? e.message : String(e), recovery: 'Network — try again.' })
-    } finally { setSubmitting(false) }
-  }
-
-  const canSubmit = !!(name.trim() && baseUrl.trim() && apiKey.trim()) && !submitting
-
-  return (
-    <div className="space-y-3">
-      <p className="text-sm text-gray-800">
-        Connecting to <span className="font-medium">{detectedBase}</span>. You'll need a Custom Integration's
-        Admin API Key (Ghost Admin → Integrations → Add custom integration).
-      </p>
-      <div>
-        <label className="text-xs font-medium text-gray-700 block mb-1">Connection name</label>
-        <input value={name} onChange={e => setName(e.target.value)} className="input w-full" />
-      </div>
-      <div>
-        <label className="text-xs font-medium text-gray-700 block mb-1">Ghost site URL</label>
-        <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} className="input w-full" />
-        <p className="text-[11px] text-gray-400 mt-1">Site root, e.g. https://blog.example.com.</p>
-      </div>
-      <div>
-        <label className="text-xs font-medium text-gray-700 block mb-1">Admin API Key</label>
-        <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)}
-          className="input w-full" placeholder="<24-char id>:<64-char secret>" autoComplete="off" />
-        <p className="text-[11px] text-gray-400 mt-1">
-          Format is <code>id:secret</code>. Copy from Ghost Admin → Integrations → your custom integration → Admin API Key.
-        </p>
-      </div>
-      {err && (
-        <div className="p-3 rounded-lg bg-red-50 border border-red-200">
-          <p className="text-xs font-medium text-red-700">{err.message}</p>
-          <p className="text-[11px] text-red-600 mt-1">{err.recovery}</p>
-        </div>
-      )}
-      <button onClick={submit} disabled={!canSubmit}
-        className="w-full inline-flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
-        {submitting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Connecting…</> : 'Connect Ghost'}
-      </button>
-    </div>
-  )
-}
-
-// ─── Git-publish connect form ──────────────────────────────────────────────
-function GitPublishConnectForm({ url, orgId, onConnected }: { url: string; orgId: string; onConnected: () => void }) {
-  const [name, setName] = useState('Main blog')
-  const [repo, setRepo] = useState('')
-  const [branch, setBranch] = useState('main')
-  const [contentDir, setContentDir] = useState('content/blog')
-  const [fileFormat, setFileFormat] = useState<'mdx' | 'md'>('mdx')
-  const [pat, setPat] = useState('')
-  const [prMode, setPrMode] = useState(false)
-  const [webhookUrl, setWebhookUrl] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [err, setErr] = useState<{ message: string; recovery: string } | null>(null)
-
-  async function submit() {
-    setSubmitting(true); setErr(null)
-    try {
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/git-publish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
-        body: JSON.stringify({
-          action: 'connect',
-          org_id: orgId, name, repo, branch, content_dir: contentDir, file_format: fileFormat,
-          pr_mode: prMode, webhook_url: webhookUrl.trim() || null, github_pat: pat,
-        }),
-      })
-      const data = await res.json() as { ok: boolean; error?: { message: string; recovery_action: string } }
-      if (!data.ok) {
-        setErr({ message: data.error?.message ?? 'Connection failed.',
-                 recovery: data.error?.recovery_action ?? 'Try again.' })
-        return
-      }
-      onConnected()
-    } catch (e) {
-      setErr({ message: e instanceof Error ? e.message : String(e), recovery: 'Network — try again.' })
-    } finally { setSubmitting(false) }
-  }
-
-  const canSubmit = !!(name && repo && branch && contentDir && pat) && /^[\w.-]+\/[\w.-]+$/.test(repo) && !submitting
-
-  return (
-    <div className="space-y-3">
-      <p className="text-sm text-gray-800">
-        Detected a static site at <span className="font-medium">{(() => { try { return new URL(url).origin } catch { return url } })()}</span>.
-        We'll publish by committing Markdown files to your GitHub repo — the site rebuilds automatically on push.
-      </p>
-      <div>
-        <label className="text-xs font-medium text-gray-700 block mb-1">Connection name</label>
-        <input value={name} onChange={e => setName(e.target.value)} className="input w-full" />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs font-medium text-gray-700 block mb-1">Repo (owner/name)</label>
-          <input value={repo} onChange={e => setRepo(e.target.value)} className="input w-full" placeholder="innovareai/blog" />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-700 block mb-1">Branch</label>
-          <input value={branch} onChange={e => setBranch(e.target.value)} className="input w-full" />
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs font-medium text-gray-700 block mb-1">Content folder</label>
-          <input value={contentDir} onChange={e => setContentDir(e.target.value)} className="input w-full" placeholder="content/blog" />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-700 block mb-1">File format</label>
-          <select value={fileFormat} onChange={e => setFileFormat(e.target.value as 'mdx' | 'md')} className="input w-full">
-            <option value="mdx">mdx</option>
-            <option value="md">md</option>
-          </select>
-        </div>
-      </div>
-      <div>
-        <label className="text-xs font-medium text-gray-700 block mb-1">GitHub Personal Access Token</label>
-        <input type="password" value={pat} onChange={e => setPat(e.target.value)} className="input w-full"
-          placeholder="github_pat_..." autoComplete="off" />
-        <p className="text-[11px] text-gray-400 mt-1">
-          Fine-grained PAT with <strong>Contents: Read+Write</strong> on this repo. Generate at GitHub → Settings → Developer settings → Personal access tokens.
-        </p>
-      </div>
-      <div>
-        <label className="flex items-center gap-2 text-xs text-gray-700">
-          <input type="checkbox" checked={prMode} onChange={e => setPrMode(e.target.checked)} />
-          <span>Open a Pull Request instead of pushing directly</span>
-        </label>
-        <p className="text-[11px] text-gray-400 mt-0.5 ml-5">
-          Recommended for teams with deploy gates or PR-required branches.
-        </p>
-      </div>
-      <div>
-        <label className="text-xs font-medium text-gray-700 block mb-1">Build hook URL (optional)</label>
-        <input value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} className="input w-full"
-          placeholder="https://api.vercel.com/v1/integrations/deploy/..." />
-        <p className="text-[11px] text-gray-400 mt-1">
-          Only needed if your site doesn't auto-rebuild on push (monorepos, deploy filters). We POST after the commit.
-        </p>
-      </div>
-      {err && (
-        <div className="p-3 rounded-lg bg-red-50 border border-red-200">
-          <p className="text-xs font-medium text-red-700">{err.message}</p>
-          <p className="text-[11px] text-red-600 mt-1">{err.recovery}</p>
-        </div>
-      )}
-      <button onClick={submit} disabled={!canSubmit}
-        className="w-full inline-flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
-        {submitting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Connecting…</> : 'Connect GitHub'}
-      </button>
-    </div>
-  )
-}
-
-function ComingSoonForm({ detection }: { detection: DetectionResult }) {
-  return (
-    <div className="py-8 text-center">
-      <Globe className="w-8 h-8 mx-auto text-gray-300 mb-3" />
-      <p className="text-sm text-gray-700">
-        Connector for <strong className="capitalize">{detection.detected_cms === 'unknown' ? detection.recommended_path.replace('_', ' ') : detection.detected_cms}</strong> ships next.
-      </p>
-      <p className="text-xs text-gray-500 mt-2 max-w-sm mx-auto">
-        WordPress is the first concrete connector. Ghost, Webflow, headless CMSes, and the universal git-publish follow.
-      </p>
-    </div>
-  )
-}
-
-function StackLayer({ label, value, confidence }: { label: string; value: string; confidence: number }) {
-  const known = value !== 'unknown' && confidence >= 0.4
-  return (
-    <div className="p-2.5 rounded-md border border-gray-100">
-      <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">{label}</div>
-      <div className={`text-sm font-medium mt-0.5 capitalize ${known ? 'text-gray-900' : 'text-gray-400'}`}>
-        {value.replace('_', ' ')}
-      </div>
-      {known && (
-        <div className="text-[10px] text-gray-500 mt-0.5">{Math.round(confidence * 100)}% confidence</div>
-      )}
+    <div className={fullWidth ? 'col-span-2' : ''}>
+      <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">{label}</div>
+      <div className={`text-xs text-gray-800 ${mono ? 'font-mono' : ''}`}>{value}</div>
+      {note && <div className="text-[10px] text-gray-500 italic">{note}</div>}
     </div>
   )
 }
