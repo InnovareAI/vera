@@ -17,7 +17,6 @@ export interface Organisation {
   industry?: string
   timezone: string
   locale: string
-  airtable_base_id?: string
   settings: Record<string, unknown>
   created_at: string
   updated_at: string
