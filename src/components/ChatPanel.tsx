@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
+import { useProject } from '../lib/projectContext'
 import { useAuth } from '../lib/auth'
 
 interface ToolEvent {
@@ -65,10 +66,13 @@ export function ChatPanel() {
   const abortRef = useRef<AbortController | null>(null)
   const location = useLocation()
   const { activeOrg } = useOrg()
+  const { activeProject } = useProject()
   const { user } = useAuth()
 
-  // Load thread on workspace switch (including image attachments persisted
-  // via chat_messages.attachments jsonb sidecar)
+  // Load thread on workspace + project switch. Each project keeps its own
+  // chat history — switching projects swaps the thread (per the user's
+  // call: "chat scoped to a project"). Workspace-level chats (project_id
+  // null) load when no project is active.
   useEffect(() => {
     if (!activeOrg?.id) {
       setMessages([])
@@ -77,14 +81,20 @@ export function ChatPanel() {
     }
     let cancelled = false
     setHistoryLoaded(false)
-    supabase
+    let q = supabase
       .from('chat_messages')
       .select('id, role, content, attachments')
       .eq('org_id', activeOrg.id)
       .in('role', ['user', 'assistant'])
       .order('created_at', { ascending: false })
       .limit(HISTORY_LIMIT)
-      .then(({ data }) => {
+    if (activeProject?.id) {
+      q = q.eq('project_id', activeProject.id)
+    } else {
+      // No project active — show workspace-level (null project_id) thread.
+      q = q.is('project_id', null)
+    }
+    q.then(({ data }) => {
         if (cancelled) return
         type Row = { id: string; role: 'user' | 'assistant'; content: string; attachments: Array<{ kind: string; url: string }> | null }
         const rows = (data ?? []) as Row[]
@@ -97,7 +107,7 @@ export function ChatPanel() {
         setHistoryLoaded(true)
       })
     return () => { cancelled = true }
-  }, [activeOrg?.id])
+  }, [activeOrg?.id, activeProject?.id])
 
   // Auto-scroll
   useEffect(() => {
@@ -237,6 +247,7 @@ export function ChatPanel() {
           messages: wireMessages,
           org_id: activeOrg.id,
           user_id: user?.id ?? null,
+          project_id: activeProject?.id ?? null,
           route: location.pathname,
         }),
       })
