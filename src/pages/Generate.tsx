@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Send, Sparkles, Loader2, Layers, Users } from 'lucide-react'
+import { Send, Sparkles, Loader2 } from 'lucide-react'
 import { useOrg } from '../lib/orgContext'
+import { useProject } from '../lib/projectContext'
 import { supabase } from '../lib/supabase'
 import type { Audience } from '../lib/supabase'
 
@@ -242,6 +243,56 @@ function UserBubble({ content }: { content: string }) {
   )
 }
 
+// ─── ContextSelect — inline breadcrumb-style <select> ─────────────────────
+// Native <select> with all visual chrome stripped so it reads as inline
+// text. Click opens the browser-native dropdown (acceptable trade vs.
+// building a custom popover). Hover gets a --fog background so the
+// affordance is discoverable.
+function ContextSelect({
+  value,
+  onChange,
+  disabled,
+  placeholder,
+  children,
+}: {
+  value: string
+  onChange: (v: string) => void
+  disabled?: boolean
+  placeholder?: string
+  children: React.ReactNode
+}) {
+  return (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      disabled={disabled}
+      data-placeholder={placeholder}
+      className="cursor-pointer transition-colors hover:bg-[var(--fog)] focus:bg-[var(--fog)]"
+      style={{
+        appearance: 'none',
+        WebkitAppearance: 'none',
+        MozAppearance: 'none',
+        background: 'transparent',
+        border: 'none',
+        outline: 'none',
+        font: 'inherit',
+        fontWeight: 500,
+        color: value ? 'var(--ink)' : 'var(--ghost)',
+        padding: '2px 6px',
+        borderRadius: '4px',
+        maxWidth: '240px',
+        textOverflow: 'ellipsis',
+      }}
+    >
+      {children}
+    </select>
+  )
+}
+
+function SegmentDivider() {
+  return <span style={{ color: 'var(--mist)', userSelect: 'none' }}>·</span>
+}
+
 const WELCOME: Message = {
   id: 'welcome',
   role: 'agent',
@@ -305,6 +356,7 @@ async function runAgentPipeline(
 
 export default function Generate() {
   const { activeOrg } = useOrg()
+  const { activeProject, projects, switchProject } = useProject()
   const [messages, setMessages] = useState<Message[]>([WELCOME])
   const [input, setInput] = useState('')
   const [isRunning, setIsRunning] = useState(false)
@@ -393,9 +445,6 @@ export default function Generate() {
     if (primaryBuyer) setSelectedAudienceId(primaryBuyer.id)
     else if (fallback) setSelectedAudienceId(fallback.id)
   }, [audiences, selectedAudienceId])
-
-  const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId) ?? null
-  const selectedAudience = audiences.find(a => a.id === selectedAudienceId) ?? null
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -519,96 +568,81 @@ export default function Generate() {
               transition: 'border-color 0.15s, box-shadow 0.15s',
             }}
           >
-            {/* Campaign picker — sits at the top of the composer */}
-            <div className="flex items-center gap-2 px-4 py-2" style={{ borderBottom: '1px solid var(--paper-edge)' }}>
-              <Layers size={12} style={{ color: 'var(--ghost)' }} />
-              <span className="text-[12px] font-medium" style={{ color: 'var(--ghost)' }}>
-                Campaign
-              </span>
-              <select
+            {/* Single-line context breadcrumb. Project · Campaign · Audience.    */}
+            {/* Each segment is a styled inline <select> — click to swap, no     */}
+            {/* labels, no theme/pain meta. Removes the two-row stacked card     */}
+            {/* that ate vertical space before the writer ever touched the keys. */}
+            <div className="flex items-center gap-1 px-4 py-2 text-[13px] flex-wrap" style={{ borderBottom: '1px solid var(--paper-edge)' }}>
+              <span className="mr-1" style={{ color: 'var(--ghost)' }}>For</span>
+
+              {/* Project segment — only shows when projects are loaded (migration 026 applied) */}
+              {projects.length > 0 && activeProject && (
+                <>
+                  <ContextSelect
+                    value={activeProject.slug}
+                    onChange={slug => switchProject(slug)}
+                    disabled={isRunning}
+                  >
+                    {projects.map(p => (
+                      <option key={p.id} value={p.slug}>
+                        {p.is_starred ? '★ ' : ''}{p.name}
+                      </option>
+                    ))}
+                  </ContextSelect>
+                  <SegmentDivider />
+                </>
+              )}
+
+              {/* Campaign segment */}
+              <ContextSelect
                 value={selectedCampaignId ?? ''}
-                onChange={e => setSelectedCampaignId(e.target.value || null)}
+                onChange={v => setSelectedCampaignId(v || null)}
                 disabled={isRunning}
-                className="text-[12px] outline-none disabled:opacity-50 cursor-pointer"
-                style={{
-                  background: 'transparent',
-                  color: 'var(--ink)',
-                  fontFamily: 'var(--font-body)',
-                  border: 'none',
-                  padding: '2px 4px',
-                  borderRadius: '2px',
-                }}
+                placeholder="No campaign"
               >
-                <option value="">— Ad-hoc post (no campaign) —</option>
+                <option value="">No campaign</option>
                 {campaigns.map(c => (
                   <option key={c.id} value={c.id}>
                     {c.is_pinned ? '★ ' : ''}{c.name}{c.status !== 'active' ? ` · ${c.status}` : ''}
                   </option>
                 ))}
-              </select>
-              {selectedCampaign?.theme && (
-                <span
-                  title={selectedCampaign.theme}
-                  className="ml-auto text-[12px] truncate max-w-[40%]"
-                  style={{ color: 'var(--ink-quiet)' }}
-                >
-                  theme: {selectedCampaign.theme.slice(0, 80)}{selectedCampaign.theme.length > 80 ? '…' : ''}
-                </span>
+              </ContextSelect>
+
+              {/* Audience segment — only renders if at least one exists */}
+              {audiences.length > 0 && (
+                <>
+                  <SegmentDivider />
+                  <ContextSelect
+                    value={selectedAudienceId ?? ''}
+                    onChange={v => setSelectedAudienceId(v || null)}
+                    disabled={isRunning}
+                    placeholder="No audience"
+                  >
+                    <option value="">No audience</option>
+                    {audiences.filter(a => a.kind === 'icp').map(icp => (
+                      <optgroup key={icp.id} label={`ICP — ${icp.name}`}>
+                        <option value={icp.id}>{icp.is_primary ? '★ ' : ''}{icp.name}</option>
+                        {audiences
+                          .filter(p => p.parent_id === icp.id)
+                          .map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.is_primary ? '   ★ ' : '   · '}{p.name}
+                            </option>
+                          ))}
+                      </optgroup>
+                    ))}
+                    {audiences.filter(a => a.kind !== 'icp' && !a.parent_id).length > 0 && (
+                      <optgroup label="Standalone">
+                        {audiences.filter(a => a.kind !== 'icp' && !a.parent_id).map(a => (
+                          <option key={a.id} value={a.id}>{a.is_primary ? '★ ' : ''}{a.name}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </ContextSelect>
+                </>
               )}
             </div>
-            {/* Audience picker — ICP / Buyer Persona */}
-            {audiences.length > 0 && (
-              <div className="flex items-center gap-2 px-4 py-2" style={{ borderBottom: '1px solid var(--paper-edge)' }}>
-                <Users size={12} style={{ color: 'var(--ghost)' }} />
-                <span className="text-[12px] font-medium" style={{ color: 'var(--ghost)' }}>
-                  Audience
-                </span>
-                <select
-                  value={selectedAudienceId ?? ''}
-                  onChange={e => setSelectedAudienceId(e.target.value || null)}
-                  disabled={isRunning}
-                  className="text-[12px] outline-none disabled:opacity-50 cursor-pointer"
-                  style={{
-                    background: 'transparent',
-                    color: 'var(--ink)',
-                    fontFamily: 'var(--font-body)',
-                    border: 'none',
-                    padding: '2px 4px',
-                    borderRadius: '2px',
-                  }}
-                >
-                  <option value="">— Generic (no specific audience) —</option>
-                  {audiences.filter(a => a.kind === 'icp').map(icp => (
-                    <optgroup key={icp.id} label={`ICP — ${icp.name}`}>
-                      <option value={icp.id}>{icp.is_primary ? '★ ' : ''}{icp.name} (the company)</option>
-                      {audiences
-                        .filter(p => p.parent_id === icp.id)
-                        .map(p => (
-                          <option key={p.id} value={p.id}>
-                            {p.is_primary ? '   ★ ' : '   · '}{p.name}
-                          </option>
-                        ))}
-                    </optgroup>
-                  ))}
-                  {audiences.filter(a => a.kind !== 'icp' && !a.parent_id).length > 0 && (
-                    <optgroup label="Standalone audiences">
-                      {audiences.filter(a => a.kind !== 'icp' && !a.parent_id).map(a => (
-                        <option key={a.id} value={a.id}>{a.is_primary ? '★ ' : ''}{a.name}</option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
-                {selectedAudience && Array.isArray(selectedAudience.pain_points) && selectedAudience.pain_points.length > 0 && (
-                  <span
-                    title={selectedAudience.pain_points.join(' · ')}
-                    className="ml-auto text-[12px] truncate max-w-[45%]"
-                    style={{ color: 'var(--ink-quiet)' }}
-                  >
-                    pain: {selectedAudience.pain_points[0].slice(0, 70)}{selectedAudience.pain_points[0].length > 70 ? '…' : ''}
-                  </span>
-                )}
-              </div>
-            )}
+
             <textarea
               ref={inputRef}
               value={input}
@@ -629,7 +663,7 @@ export default function Generate() {
                 }
               }}
               rows={3}
-              placeholder="Tell the team what to create. A LinkedIn post for InnovareAI's VP-of-Sales persona about why HITL beats fully-autonomous outbound. Include a hook, a specific stat, and a clear CTA."
+              placeholder="What should the team work on?"
               disabled={isRunning}
               className="w-full px-5 py-4 text-[15px] leading-relaxed outline-none disabled:opacity-50 resize-none"
               style={{
@@ -640,28 +674,26 @@ export default function Generate() {
                 maxHeight: '240px',
               }}
             />
-            <div className="flex items-center justify-between px-5 py-2.5" style={{ borderTop: '1px solid var(--paper-edge)' }}>
-              <p className="text-[12px] font-medium" style={{ color: 'var(--ghost)' }}>
-                Saved as pending · routed to Review
-              </p>
-              <div className="flex items-center gap-3">
-                <span className="text-[12px]" style={{ color: 'var(--mist)' }}>
-                  enter to send · shift+enter for new line
-                </span>
-                <button
-                  type="submit"
-                  disabled={!input.trim() || isRunning}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-[12px] font-medium transition-all disabled:opacity-40"
-                  style={{
-                    background: 'var(--ink)',
-                    color: 'var(--paper)',
-                    borderRadius: '3px',
-                  }}
-                >
-                  {isRunning ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                  {isRunning ? 'Working' : 'Send brief'}
-                </button>
-              </div>
+
+            {/* Bottom bar — just the Send action. The pre-send "Saved as       */}
+            {/* pending · routed to Review" copy moves to the agent stream      */}
+            {/* after submit (where it's actually true). The "enter to send"    */}
+            {/* hint is conveyed by the button title on hover.                  */}
+            <div className="flex items-center justify-end px-5 py-2.5" style={{ borderTop: '1px solid var(--paper-edge)' }}>
+              <button
+                type="submit"
+                disabled={!input.trim() || isRunning}
+                title="Send brief — Enter (Shift+Enter for newline)"
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-[12px] font-medium transition-all disabled:opacity-40"
+                style={{
+                  background: 'var(--ink)',
+                  color: 'var(--paper)',
+                  borderRadius: '3px',
+                }}
+              >
+                {isRunning ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                {isRunning ? 'Working' : 'Send brief'}
+              </button>
             </div>
           </div>
         </form>
