@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { Copy, Check, ExternalLink, ArrowLeft, ThumbsUp, MessageCircle, Repeat2, Send } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
+import { PublishToConnectedBlog } from '../components/PublishToConnectedBlog'
 
 const APPROVAL_WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approval-webhook`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -377,10 +378,13 @@ export default function ReviewDetail() {
               </button>
             )}
             {post.channel?.toLowerCase() === 'blog' && (
-              <button onClick={publishToBlog} disabled={marking}
-                className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 px-4 mb-2 bg-gray-900 hover:bg-gray-800 disabled:opacity-40 text-white rounded-lg text-sm font-semibold">
-                {marking ? 'Publishing…' : '📝 Publish to blog (auto-deploys via Netlify)'}
-              </button>
+              <>
+                <button onClick={publishToBlog} disabled={marking}
+                  className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 px-4 mb-2 bg-gray-900 hover:bg-gray-800 disabled:opacity-40 text-white rounded-lg text-sm font-semibold">
+                  {marking ? 'Publishing…' : '📝 Publish to InnovareAI blog (GitHub→Netlify)'}
+                </button>
+                <PublishToConnectedBlog post={post} />
+              </>
             )}
             {post.channel?.toLowerCase() === 'email' && (
               <div className="mb-2 space-y-2">
