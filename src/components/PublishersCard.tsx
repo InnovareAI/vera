@@ -90,6 +90,7 @@ export function PublishersCard() {
 
 // ─── Add-a-blog wizard ──────────────────────────────────────────────────────
 function AddBlogWizard({ onClose }: { onClose: () => void }) {
+  const { activeOrg } = useOrg()
   const [step, setStep] = useState<'url' | 'detecting' | 'detected' | 'connect'>('url')
   const [url, setUrl] = useState('')
   const [detection, setDetection] = useState<DetectionResult | null>(null)
@@ -154,16 +155,15 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
             <DetectionResult detection={detection} url={url} onContinue={() => setStep('connect')} />
           )}
 
-          {step === 'connect' && (
-            <div className="py-8 text-center">
-              <Globe className="w-8 h-8 mx-auto text-gray-300 mb-3" />
-              <p className="text-sm text-gray-700">
-                Per-platform connect flows ship in <strong>phase 1</strong>.
-              </p>
-              <p className="text-xs text-gray-500 mt-2 max-w-sm mx-auto">
-                Detection is live. WordPress connector lands first — Ghost, Webflow, headless CMSes, and the universal git-publish follow.
-              </p>
-            </div>
+          {step === 'connect' && detection && (
+            detection.detected_cms === 'wordpress'
+              ? <WordPressConnectForm
+                  detection={detection}
+                  url={url}
+                  orgId={activeOrg?.id ?? ''}
+                  onConnected={() => { onClose(); window.location.reload() }}
+                />
+              : <ComingSoonForm detection={detection} />
           )}
         </div>
 
@@ -235,6 +235,114 @@ function DetectionResult({ detection, url, onContinue: _onContinue }: { detectio
           </ul>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── WordPress connect form (phase 1) ──────────────────────────────────────
+function WordPressConnectForm({ detection: _detection, url, orgId, onConnected }: {
+  detection: DetectionResult; url: string; orgId: string; onConnected: () => void
+}) {
+  // Pre-fill defaults from the detected URL
+  const detectedBase = (() => { try { return new URL(url).origin } catch { return url } })()
+  const [name, setName] = useState('Main blog')
+  const [baseUrl, setBaseUrl] = useState(detectedBase)
+  const [username, setUsername] = useState('')
+  const [appPassword, setAppPassword] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [err, setErr] = useState<{ message: string; recovery: string } | null>(null)
+
+  async function submit() {
+    if (!orgId) { setErr({ message: 'No workspace selected.', recovery: 'Pick a workspace and try again.' }); return }
+    setSubmitting(true); setErr(null)
+    try {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wordpress-publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
+        body: JSON.stringify({
+          action: 'connect',
+          org_id: orgId, name, base_url: baseUrl, username, app_password: appPassword,
+        }),
+      })
+      const data = await res.json() as { ok: boolean; error?: { message: string; recovery_action: string }; publisher_id?: string }
+      if (!data.ok || !data.publisher_id) {
+        setErr({
+          message: data.error?.message ?? 'Connection failed.',
+          recovery: data.error?.recovery_action ?? 'Check the URL and credentials and try again.',
+        })
+        return
+      }
+      onConnected()
+    } catch (e) {
+      setErr({ message: e instanceof Error ? e.message : String(e), recovery: 'Try again, or check network.' })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const canSubmit = !!(name.trim() && baseUrl.trim() && username.trim() && appPassword.trim()) && !submitting
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-gray-800">
+        Connecting to <span className="font-medium">{detectedBase}</span>. You'll need an
+        Application Password from WP Admin → Users → Your Profile.
+      </p>
+
+      <div>
+        <label className="text-xs font-medium text-gray-700 block mb-1">Connection name</label>
+        <input value={name} onChange={e => setName(e.target.value)} className="input w-full" placeholder="Main blog" />
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-gray-700 block mb-1">WordPress URL</label>
+        <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} className="input w-full"
+          placeholder="https://blog.example.com" />
+        <p className="text-[11px] text-gray-400 mt-1">Site root, not a sub-path. We'll talk to /wp-json/wp/v2/.</p>
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-gray-700 block mb-1">Username</label>
+        <input value={username} onChange={e => setUsername(e.target.value)} className="input w-full"
+          placeholder="your-wp-username" autoComplete="off" />
+        <p className="text-[11px] text-gray-400 mt-1">The WP username (not email).</p>
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-gray-700 block mb-1">Application Password</label>
+        <input type="password" value={appPassword} onChange={e => setAppPassword(e.target.value)}
+          className="input w-full" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx" autoComplete="off" />
+        <p className="text-[11px] text-gray-400 mt-1">
+          Generate in <code>WP Admin → Users → Profile → Application Passwords</code>. Spaces in the
+          password are fine — copy it exactly.
+        </p>
+      </div>
+
+      {err && (
+        <div className="p-3 rounded-lg bg-red-50 border border-red-200">
+          <p className="text-xs font-medium text-red-700">{err.message}</p>
+          <p className="text-[11px] text-red-600 mt-1">{err.recovery}</p>
+        </div>
+      )}
+
+      <button onClick={submit} disabled={!canSubmit}
+        className="w-full inline-flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
+        {submitting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Connecting…</> : 'Connect WordPress'}
+      </button>
+    </div>
+  )
+}
+
+function ComingSoonForm({ detection }: { detection: DetectionResult }) {
+  return (
+    <div className="py-8 text-center">
+      <Globe className="w-8 h-8 mx-auto text-gray-300 mb-3" />
+      <p className="text-sm text-gray-700">
+        Connector for <strong className="capitalize">{detection.detected_cms === 'unknown' ? detection.recommended_path.replace('_', ' ') : detection.detected_cms}</strong> ships next.
+      </p>
+      <p className="text-xs text-gray-500 mt-2 max-w-sm mx-auto">
+        WordPress is the first concrete connector. Ghost, Webflow, headless CMSes, and the universal git-publish follow.
+      </p>
     </div>
   )
 }
