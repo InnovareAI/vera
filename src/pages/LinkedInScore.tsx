@@ -17,6 +17,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Loader2, ArrowRight, RotateCw, Check, ChevronRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useRightRail } from '../lib/rightRailContext'
 
 const PROFILE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/linkedin-profile-score`
 const BREW_URL    = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/brew360-audit`
@@ -80,6 +81,7 @@ export default function LinkedInScore() {
   const [error, setError] = useState<string | null>(null)
   const [togglesOpen, setTogglesOpen] = useState(false)
   const [hasBrandVoice, setHasBrandVoice] = useState(false)
+  const [recentRuns, setRecentRuns] = useState<Array<{ kind: string; created_at: string; score: number | null }>>([])
 
   // Persist toggles to localStorage (UI fallback) AND to organisations.settings
   // (durable per-org). Org settings win on load.
@@ -194,6 +196,17 @@ export default function LinkedInScore() {
       else runProfile()
       if (cachedBrew)    { setBrew(cachedBrew.result as BrewResult);          setBrewRunAt(cachedBrew.created_at) }
       else runBrew()
+
+      // 4. Recent runs — feeds the right-rail history
+      setRecentRuns((cached ?? []).slice(0, 8).map(r => ({
+        kind: r.kind as string,
+        created_at: r.created_at as string,
+        score: (() => {
+          if (r.kind === 'profile') return (r.result as { score?: number } | undefined)?.score ?? null
+          if (r.kind === 'brew360') return (r.result as { audit?: { overall_score?: number } } | undefined)?.audit?.overall_score ?? null
+          return null
+        })(),
+      })))
     }
     load()
     return () => { cancelled = true }
@@ -209,6 +222,17 @@ export default function LinkedInScore() {
   const verdictText = brew?.audit?.verdict
   const auditedAgainstText = brew?.audit?.audited_against
   const showOnboardingContinue = !hasBrandVoice
+
+  // Right rail — recent runs history + principle toggles summary
+  useRightRail(
+    <AuditRightRail
+      runs={recentRuns}
+      enabledCount={enabledPrinciples.length}
+      totalPrinciples={ALL_PRINCIPLES.length}
+      onOpenToggles={() => setTogglesOpen(true)}
+    />,
+    [recentRuns, enabledPrinciples.length],
+  )
 
   return (
     <div className="max-w-4xl mx-auto py-8 px-4 pb-16">
@@ -689,6 +713,72 @@ function CompactRow({ label, value, fullWidth }: { label: string; value?: string
     <div className={fullWidth ? 'sm:col-span-2' : ''}>
       <dt className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">{label}</dt>
       <dd className="text-xs text-gray-700 mt-0.5">{value || <span className="text-gray-300">—</span>}</dd>
+    </div>
+  )
+}
+
+// ─── Audit right rail ──────────────────────────────────────────────────
+// Recent runs history (chronological scores) + a compact summary of the
+// Brew360 principles toggle state (with a button that scrolls the page
+// down to the full toggle expander).
+function AuditRightRail({
+  runs, enabledCount, totalPrinciples, onOpenToggles,
+}: {
+  runs: Array<{ kind: string; created_at: string; score: number | null }>
+  enabledCount: number
+  totalPrinciples: number
+  onOpenToggles: () => void
+}) {
+  // Group runs by date — one row per day showing both scores
+  const byDate = new Map<string, { profile?: number | null; brew?: number | null; iso: string }>()
+  for (const r of runs) {
+    const day = new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    const existing = byDate.get(day) ?? { iso: r.created_at }
+    if (r.kind === 'profile') existing.profile = r.score
+    if (r.kind === 'brew360') existing.brew    = r.score
+    byDate.set(day, existing)
+  }
+  const grouped = Array.from(byDate.entries()).slice(0, 5)
+
+  return (
+    <div className="flex flex-col gap-6 py-6 pr-5 pl-1">
+      {grouped.length > 0 && (
+        <section>
+          <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+            Recent runs
+          </p>
+          <div className="flex flex-col text-[12.5px]" style={{ color: 'var(--ink-quiet)' }}>
+            {grouped.map(([day, scores], i) => (
+              <div
+                key={day}
+                className="flex justify-between py-2"
+                style={{ borderBottom: i < grouped.length - 1 ? '1px solid var(--paper-edge)' : 'none' }}
+              >
+                <span>{day}</span>
+                <span style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>
+                  {scores.profile ?? '—'} · {scores.brew ?? '—'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section>
+        <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+          Brew360 principles
+        </p>
+        <button
+          onClick={onOpenToggles}
+          className="text-left w-full text-[12.5px] hover:opacity-80 transition-opacity"
+          style={{ color: 'var(--ink-quiet)' }}
+        >
+          <span style={{ color: 'var(--ink)', fontWeight: 500 }}>{enabledCount}</span> of {totalPrinciples} active
+          <div className="text-[11px] mt-0.5" style={{ color: 'var(--ghost)' }}>
+            Tap to configure ↓
+          </div>
+        </button>
+      </section>
     </div>
   )
 }

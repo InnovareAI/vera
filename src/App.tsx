@@ -44,8 +44,12 @@ export default function App() {
               <Route path="/login" element={<LoginGuard />} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/onboarding/audit/:orgId" element={<OnboardingAudit />} />
-              <Route path="/linkedin-score/:orgId" element={<LinkedInScore />} />
               <Route path="/" element={<Layout />}>
+                {/* /linkedin-score moved INSIDE Layout so it picks up the     */}
+                {/* rails (the standalone version had no left rail / chat dock */}
+                {/* / right rail). Still works during onboarding — rails just  */}
+                {/* have less content for a brand-new workspace.               */}
+                <Route path="linkedin-score/:orgId" element={<LinkedInScore />} />
                 <Route index element={<RedirectToProjectDashboard />} />
 
                 {/* Project-scoped routes — preferred. URL carries the

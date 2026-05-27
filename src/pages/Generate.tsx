@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Send, Sparkles, Loader2 } from 'lucide-react'
 import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
+import { useRightRail } from '../lib/rightRailContext'
 import { supabase } from '../lib/supabase'
 import type { Audience } from '../lib/supabase'
 
@@ -499,6 +500,21 @@ export default function Generate() {
     setIsRunning(false)
   }
 
+  // Right rail — context + pipeline status. When idle, shows the active
+  // binding (project / campaign / audience) and a quiet brand voice
+  // reminder. When the pipeline is streaming, shows live agent status.
+  useRightRail(
+    <GenerateRightRail
+      isRunning={isRunning}
+      activeAgents={activeAgents}
+      projectName={activeProject?.name ?? null}
+      projectInstructions={activeProject?.instructions ?? null}
+      campaignName={campaigns.find(c => c.id === selectedCampaignId)?.name ?? null}
+      audienceName={audiences.find(a => a.id === selectedAudienceId)?.name ?? null}
+    />,
+    [isRunning, activeAgents, activeProject?.id, selectedCampaignId, selectedAudienceId],
+  )
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -698,6 +714,101 @@ export default function Generate() {
           </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+// ─── Generate right rail ───────────────────────────────────────────────
+// Two states:
+//   · Idle — show active binding (project · campaign · audience) +
+//     project's custom instructions quick-reference
+//   · Streaming — show which agents are running, completed, or pending
+function GenerateRightRail({
+  isRunning, activeAgents, projectName, projectInstructions, campaignName, audienceName,
+}: {
+  isRunning: boolean
+  activeAgents: AgentName[]
+  projectName: string | null
+  projectInstructions: string | null
+  campaignName: string | null
+  audienceName: string | null
+}) {
+  if (isRunning) {
+    return (
+      <div className="flex flex-col gap-6 py-6 pr-5 pl-1">
+        <section>
+          <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+            Pipeline · running
+          </p>
+          <div className="flex flex-col text-[12.5px]" style={{ color: 'var(--ink-quiet)' }}>
+            {activeAgents.map((agent, i) => (
+              <div
+                key={agent}
+                className="flex items-center gap-2 py-2"
+                style={{ borderBottom: i < activeAgents.length - 1 ? '1px solid var(--paper-edge)' : 'none' }}
+              >
+                <span
+                  className="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0"
+                  style={{ background: agentDots[agent] ?? 'var(--mist)' }}
+                />
+                <span style={{ color: 'var(--ink)' }}>{agent}</span>
+                <Loader2 size={11} className="animate-spin ml-auto" style={{ color: 'var(--ghost)' }} />
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-6 py-6 pr-5 pl-1">
+      <section>
+        <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+          Binding
+        </p>
+        <div className="text-[12.5px] flex flex-col gap-1.5" style={{ color: 'var(--ink-quiet)' }}>
+          <div>Project · <b style={{ color: 'var(--ink)' }}>{projectName ?? '—'}</b></div>
+          <div>Campaign · <b style={{ color: 'var(--ink)' }}>{campaignName ?? 'None'}</b></div>
+          <div>Audience · <b style={{ color: 'var(--ink)' }}>{audienceName ?? 'None'}</b></div>
+        </div>
+      </section>
+
+      {projectInstructions && (
+        <section>
+          <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+            Project rules
+          </p>
+          <p
+            className="text-[11.5px] leading-relaxed"
+            style={{ color: 'var(--ink-quiet)', whiteSpace: 'pre-wrap', maxHeight: 220, overflow: 'auto' }}
+          >
+            {projectInstructions}
+          </p>
+        </section>
+      )}
+
+      <section>
+        <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+          Pipeline · idle
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {CORE_AGENTS.map(a => (
+            <span
+              key={a}
+              className="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5"
+              style={{
+                background: 'var(--fog)',
+                color: 'var(--ink-quiet)',
+                borderRadius: 'var(--radius-sm)',
+              }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: agentDots[a] }} />
+              {a}
+            </span>
+          ))}
+        </div>
+      </section>
     </div>
   )
 }
