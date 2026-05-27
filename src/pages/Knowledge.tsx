@@ -35,6 +35,11 @@ interface KnowledgeRow {
   file_name: string | null
   file_size: number | null
   created_at: string
+  // VERA-classified fields (populated async after ingest by project-ingest)
+  kind: 'brief' | 'voice' | 'audit' | 'positioning' | 'case_study' | 'intel' | 'reference' | 'other' | null
+  summary: string | null
+  suggestion: string | null
+  classified_at: string | null
 }
 
 interface AssetRow {
@@ -101,7 +106,7 @@ export default function Knowledge() {
     }
     const [kRes, aRes] = await Promise.all([
       supabase.from('project_knowledge')
-        .select('id, project_id, title, content, source_kind, source_url, file_name, file_size, created_at')
+        .select('id, project_id, title, content, source_kind, source_url, file_name, file_size, created_at, kind, summary, suggestion, classified_at')
         .eq('project_id', activeProject.id)
         .order('created_at', { ascending: false }),
       supabase.from('project_assets')
@@ -114,6 +119,15 @@ export default function Knowledge() {
   }, [activeProject?.id])
 
   useEffect(() => { load() }, [load])
+
+  // Poll while any knowledge entry is still being classified by VERA
+  // (classification fires after upload and typically lands in 1-3s).
+  useEffect(() => {
+    const pending = knowledge.some(k => !k.classified_at)
+    if (!pending) return
+    const id = setInterval(load, 2000)
+    return () => clearInterval(id)
+  }, [knowledge, load])
 
   async function callIngest(body: Record<string, unknown>): Promise<{ ok: boolean; report?: string; error?: string }> {
     const res = await fetch(INGEST_URL, {
@@ -404,7 +418,7 @@ export default function Knowledge() {
         )}
       </div>
 
-      {/* Existing knowledge */}
+      {/* Existing knowledge — agentic surface */}
       {knowledge.length > 0 && (
         <section className="mb-7">
           <p className="text-[11px] font-medium uppercase tracking-wide mb-3" style={{ color: 'var(--ghost)' }}>
@@ -417,19 +431,32 @@ export default function Knowledge() {
                 className="flex items-start gap-3 py-3 group"
                 style={{ borderBottom: '1px solid var(--paper-edge)' }}
               >
-                <span
-                  className="text-[10px] uppercase font-medium px-1.5 py-0.5 rounded mt-0.5 flex-shrink-0"
-                  style={{
-                    background: 'var(--fog)',
-                    color: 'var(--ghost)',
-                    letterSpacing: '0.06em',
-                  }}
-                >
-                  {k.source_kind}
-                </span>
+                <KindBadge kind={k.kind} classified={!!k.classified_at} />
                 <div className="flex-1 min-w-0">
                   <p className="text-[13.5px] truncate" style={{ color: 'var(--ink)' }}>{k.title}</p>
-                  <p className="text-[11.5px] mt-0.5" style={{ color: 'var(--ghost)' }}>
+
+                  {/* VERA's classification summary — speaks back what she found */}
+                  {k.summary && (
+                    <p className="text-[12.5px] mt-1 leading-snug" style={{ color: 'var(--ink-quiet)' }}>
+                      <span style={{ color: 'var(--ink)' }}>VERA</span> · {k.summary}
+                    </p>
+                  )}
+
+                  {/* Agentic proposed action */}
+                  {k.suggestion && (
+                    <div className="mt-2 inline-flex items-center gap-2 text-[12px] px-2.5 py-1.5"
+                      style={{
+                        background: 'var(--accent-tint)',
+                        borderRadius: 'var(--radius-sm)',
+                        color: 'var(--accent)',
+                      }}
+                    >
+                      <span>↗</span>
+                      <span style={{ color: 'var(--ink)' }}>{k.suggestion}</span>
+                    </div>
+                  )}
+
+                  <p className="text-[11px] mt-1.5" style={{ color: 'var(--ghost)' }}>
                     {k.source_url ? (
                       <>
                         <a href={k.source_url} target="_blank" rel="noreferrer" className="hover:underline">
@@ -438,7 +465,7 @@ export default function Knowledge() {
                         {' · '}
                       </>
                     ) : null}
-                    {k.content.length.toLocaleString()} chars · {new Date(k.created_at).toLocaleDateString()}
+                    {k.source_kind} · {k.content.length.toLocaleString()} chars · {new Date(k.created_at).toLocaleDateString()}
                   </p>
                 </div>
                 <button
@@ -515,6 +542,43 @@ export default function Knowledge() {
         </p>
       )}
     </div>
+  )
+}
+
+// ─── KindBadge — VERA's classification of a knowledge entry ──────────
+const KIND_LABEL: Record<string, string> = {
+  brief:       'Brief',
+  voice:       'Voice',
+  audit:       'Audit',
+  positioning: 'Positioning',
+  case_study:  'Case study',
+  intel:       'Intel',
+  reference:   'Reference',
+  other:       'Other',
+}
+function KindBadge({ kind, classified }: { kind: KnowledgeRow['kind']; classified: boolean }) {
+  if (!classified) {
+    return (
+      <span
+        className="text-[10px] uppercase font-medium px-1.5 py-0.5 rounded mt-0.5 flex-shrink-0 inline-flex items-center gap-1"
+        style={{ background: 'var(--fog)', color: 'var(--ghost)', letterSpacing: '0.06em' }}
+        title="VERA is reading…"
+      >
+        <Loader2 size={9} className="animate-spin" /> Reading
+      </span>
+    )
+  }
+  return (
+    <span
+      className="text-[10px] uppercase font-medium px-1.5 py-0.5 rounded mt-0.5 flex-shrink-0"
+      style={{
+        background: kind === 'brief' || kind === 'voice' ? 'var(--accent-tint)' : 'var(--fog)',
+        color: kind === 'brief' || kind === 'voice' ? 'var(--accent)' : 'var(--ink-quiet)',
+        letterSpacing: '0.06em',
+      }}
+    >
+      {KIND_LABEL[kind ?? 'other']}
+    </span>
   )
 }
 
