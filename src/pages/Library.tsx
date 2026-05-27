@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Star, Users } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
+import { useRightRail } from '../lib/rightRailContext'
 import type { Post, Campaign, Audience } from '../lib/supabase'
 import { PlatformChip, StatusChip, Chip } from '../components/Chip'
 
@@ -60,6 +61,30 @@ export default function Library() {
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
+
+  // Right rail — search + filter summary + counts. Quick-jump to active
+  // campaigns and audiences from here so the canvas can focus on posts.
+  const primaryAudience = audiences.find(a => a.is_primary && a.kind === 'buyer_persona')
+    ?? audiences.find(a => a.is_primary) ?? audiences[0]
+  const activeCampaign = campaigns.find(c => c.is_pinned && c.status === 'active')
+    ?? campaigns.find(c => c.status === 'active') ?? campaigns[0]
+
+  useRightRail(
+    <LibraryRightRail
+      total={posts.length}
+      filtered={filtered.length}
+      campaignsCount={campaigns.length}
+      audiencesCount={audiences.length}
+      activeFilters={[
+        search ? `"${search}"` : null,
+        platformFilter !== 'All' ? platformFilter : null,
+        statusFilter !== 'All' ? statusFilter : null,
+      ].filter(Boolean) as string[]}
+      primaryAudience={primaryAudience ?? null}
+      activeCampaign={activeCampaign ?? null}
+    />,
+    [posts.length, filtered.length, campaigns.length, audiences.length, search, platformFilter, statusFilter, primaryAudience?.id, activeCampaign?.id],
+  )
 
   return (
     <div className="flex gap-6 h-full">
@@ -266,6 +291,107 @@ export default function Library() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// ─── Library right rail ────────────────────────────────────────────────
+// Search + filter summary, with counts and quick-pivots to the active
+// campaign + primary audience. Canvas keeps the post browser; the rail
+// is reference info.
+function LibraryRightRail({
+  total, filtered, campaignsCount, audiencesCount, activeFilters,
+  primaryAudience, activeCampaign,
+}: {
+  total: number
+  filtered: number
+  campaignsCount: number
+  audiencesCount: number
+  activeFilters: string[]
+  primaryAudience: Audience | null
+  activeCampaign: Campaign | null
+}) {
+  return (
+    <div className="flex flex-col gap-6 py-6 pr-5 pl-1">
+      <section>
+        <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+          Library
+        </p>
+        <div className="text-[12px] flex flex-col gap-1.5" style={{ color: 'var(--ink-quiet)' }}>
+          <div className="flex justify-between">
+            <span>Showing</span>
+            <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>
+              {filtered}
+              {filtered !== total && <span style={{ color: 'var(--ghost)', fontWeight: 400 }}> of {total}</span>}
+            </b>
+          </div>
+          <div className="flex justify-between">
+            <span>Campaigns</span>
+            <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{campaignsCount}</b>
+          </div>
+          <div className="flex justify-between">
+            <span>Audiences</span>
+            <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{audiencesCount}</b>
+          </div>
+        </div>
+      </section>
+
+      {activeFilters.length > 0 && (
+        <section>
+          <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+            Active filters
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {activeFilters.map(f => (
+              <span
+                key={f}
+                className="inline-flex items-center text-[11px] px-2 py-0.5"
+                style={{ background: 'var(--fog)', color: 'var(--ink-quiet)', borderRadius: 'var(--radius-sm)' }}
+              >
+                {f}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {activeCampaign && (
+        <section>
+          <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+            Active campaign
+          </p>
+          <Link
+            to={`/review?campaign=${activeCampaign.id}`}
+            className="block text-[12.5px] hover:opacity-80 transition-opacity"
+            style={{ color: 'var(--ink-quiet)' }}
+          >
+            <div style={{ color: 'var(--ink)', fontWeight: 500 }}>
+              {activeCampaign.is_pinned && '★ '}{activeCampaign.name}
+            </div>
+            {activeCampaign.theme && (
+              <div className="text-[11.5px] mt-1 line-clamp-2" style={{ color: 'var(--ghost)' }}>
+                {activeCampaign.theme}
+              </div>
+            )}
+          </Link>
+        </section>
+      )}
+
+      {primaryAudience && (
+        <section>
+          <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+            Primary audience
+          </p>
+          <div className="text-[12.5px]" style={{ color: 'var(--ink-quiet)' }}>
+            <div style={{ color: 'var(--ink)', fontWeight: 500 }}>★ {primaryAudience.name}</div>
+            {Array.isArray(primaryAudience.pain_points) && primaryAudience.pain_points.length > 0 && (
+              <div className="text-[11.5px] mt-1" style={{ color: 'var(--ghost)' }}>
+                Pain · {(primaryAudience.pain_points as string[])[0]}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
     </div>
   )
 }

@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import { ExternalLink, FileText, Globe, Megaphone, RefreshCw, Check, Filter } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
+import { useRightRail } from '../lib/rightRailContext'
 import { Chip } from '../components/Chip'
 
 const DISCOVER_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/discover-competitor-intel`
@@ -146,6 +147,20 @@ export default function Intel() {
     // Deep-link into /generate with the intel context
     navigate(`/generate?intel=${event.id}`)
   }
+
+  // Right rail — competitors tracked + intel stats
+  const unreadCount = events.filter(e => !e.read_at).length
+  const briefedCount = events.filter(e => e.briefed_at).length
+
+  useRightRail(
+    <IntelRightRail
+      competitors={competitors}
+      eventCount={events.length}
+      unreadCount={unreadCount}
+      briefedCount={briefedCount}
+    />,
+    [competitors, events.length, unreadCount, briefedCount],
+  )
 
   if (loading) {
     return (
@@ -300,6 +315,65 @@ export default function Intel() {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+// ─── Intel right rail ──────────────────────────────────────────────────
+// Competitors being tracked + counts (unread, briefed). Quick glance at
+// who's in the watch list and how much intel is sitting unread.
+function IntelRightRail({
+  competitors, eventCount, unreadCount, briefedCount,
+}: {
+  competitors: Competitor[]
+  eventCount: number
+  unreadCount: number
+  briefedCount: number
+}) {
+  return (
+    <div className="flex flex-col gap-6 py-6 pr-5 pl-1">
+      <section>
+        <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+          This week
+        </p>
+        <div className="text-[12px] flex flex-col gap-1.5" style={{ color: 'var(--ink-quiet)' }}>
+          <div className="flex justify-between">
+            <span>Events detected</span>
+            <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{eventCount}</b>
+          </div>
+          <div className="flex justify-between">
+            <span>Unread</span>
+            <b style={{ color: unreadCount > 0 ? 'var(--accent)' : 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{unreadCount}</b>
+          </div>
+          <div className="flex justify-between">
+            <span>Briefed in response</span>
+            <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{briefedCount}</b>
+          </div>
+        </div>
+      </section>
+
+      {competitors.length > 0 && (
+        <section>
+          <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+            Tracking · {competitors.length}
+          </p>
+          <div className="flex flex-col text-[12.5px]" style={{ color: 'var(--ink-quiet)' }}>
+            {competitors.map((c, i) => (
+              <a
+                key={c.id}
+                href={c.website_url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center justify-between py-2 hover:opacity-80 transition-opacity"
+                style={{ borderBottom: i < competitors.length - 1 ? '1px solid var(--paper-edge)' : 'none' }}
+              >
+                <span style={{ color: 'var(--ink)' }}>{c.name}</span>
+                <span style={{ color: 'var(--mist)', fontSize: '10.5px' }}>↗</span>
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }
