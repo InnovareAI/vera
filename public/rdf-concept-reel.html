@@ -248,14 +248,21 @@
   }
   .footer .agency a:hover { border-color: var(--ink); }
 
-  /* ── Subtle reveal on scroll ─────────────────────── */
+  /* ── Subtle reveal on scroll (opt-in via .js class) ─────── */
+  /* Default state: visible. The animation only kicks in if JS  */
+  /* is active AND the user hasn't opted out of motion. Without */
+  /* the .js class on <html>, content renders fully on first    */
+  /* paint — fixes the "white page" failure mode when scripts   */
+  /* are blocked, slow, or error out.                            */
   @media (prefers-reduced-motion: no-preference) {
-    .post, .hero {
+    html.js .post,
+    html.js .hero {
       opacity: 0;
       transform: translateY(12px);
       transition: opacity 0.9s ease, transform 0.9s ease;
     }
-    .post.in, .hero.in {
+    html.js .post.in,
+    html.js .hero.in {
       opacity: 1;
       transform: none;
     }
@@ -391,7 +398,11 @@
 </div>
 
 <script>
-  // Subtle reveal on scroll for sections
+  // Opt the page INTO the fade-in animation only if JS is alive.
+  // Without this class, CSS defaults keep everything visible — no
+  // dependency on this script for the page to render.
+  document.documentElement.classList.add('js')
+
   if ('IntersectionObserver' in window) {
     const io = new IntersectionObserver((entries) => {
       for (const e of entries) {
