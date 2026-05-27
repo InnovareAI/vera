@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { OrgProvider, useOrg } from './lib/orgContext'
 import { ProjectProvider, useProject } from './lib/projectContext'
+import { RightRailProvider } from './lib/rightRailContext'
 import { ThemeProvider } from './lib/theme'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { setUserContext, setOrgContext } from './lib/sentry'
@@ -37,6 +38,7 @@ export default function App() {
         <AuthProvider>
           <OrgProvider>
             <ProjectProvider>
+            <RightRailProvider>
             <SentryContextBridge />
             <Routes>
               <Route path="/login" element={<LoginGuard />} />
@@ -77,6 +79,7 @@ export default function App() {
                 <Route path="agency"     element={<Agency />} />
               </Route>
             </Routes>
+            </RightRailProvider>
             </ProjectProvider>
           </OrgProvider>
         </AuthProvider>

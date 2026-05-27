@@ -18,6 +18,7 @@ import type { Post } from '../lib/supabase'
 import { StatusChip } from '../components/Chip'
 import { useProject } from '../lib/projectContext'
 import { useOrg } from '../lib/orgContext'
+import { useRightRail } from '../lib/rightRailContext'
 
 interface LinkedInAuditSummary {
   org_id: string
@@ -99,6 +100,19 @@ export default function Dashboard() {
     }
     load()
   }, [loadAudit, activeOrg?.id, activeProject?.id])
+
+  // ─── Right rail content ───────────────────────────────────────────────
+  // "Suggested next" + "This week" stats. Both surface things the
+  // operator can act on without leaving the dashboard.
+  useRightRail(
+    <DashboardRightRail
+      auditOrgId={audit?.org_id}
+      profileScore={audit?.profile_score}
+      brewScore={audit?.brew_score}
+      pendingCount={pendingPosts.length}
+    />,
+    [audit?.org_id, audit?.profile_score, audit?.brew_score, pendingPosts.length],
+  )
 
   return (
     <div className="p-8 max-w-4xl">
@@ -223,4 +237,91 @@ function relTime(iso: string): string {
   if (m < 60) return `${m}m ago`
   const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`
   const d = Math.floor(h / 24); return `${d}d ago`
+}
+
+// ─── Dashboard right rail ──────────────────────────────────────────────
+// "Suggested next" — three contextual prompts derived from current state.
+// "This week" — a tight stats block (counts, not abstract metrics).
+//
+// All numbers update with deps. No "Nothing here yet" empty states — if
+// there's nothing to suggest, the section just doesn't render.
+function DashboardRightRail({
+  auditOrgId, profileScore, brewScore, pendingCount,
+}: {
+  auditOrgId: string | undefined
+  profileScore: number | null | undefined
+  brewScore: number | null | undefined
+  pendingCount: number
+}) {
+  // Build suggestions from the data we have. Each is short, actionable,
+  // and links to a real surface. Empty list → section hides.
+  const suggestions: Array<{ id: string; text: React.ReactNode; href?: string }> = []
+
+  if (typeof brewScore === 'number' && brewScore < 70) {
+    suggestions.push({
+      id: 'brew',
+      text: <>Brew360 is at <b style={{ color: 'var(--ink)' }}>{brewScore}</b> — below 70. <span style={{ color: 'var(--accent)' }}>Open audit →</span></>,
+      href: auditOrgId ? `/linkedin-score/${auditOrgId}` : undefined,
+    })
+  }
+  if (pendingCount > 0) {
+    suggestions.push({
+      id: 'review',
+      text: <><b style={{ color: 'var(--ink)' }}>{pendingCount}</b> {pendingCount === 1 ? 'post is' : 'posts are'} waiting on you. <span style={{ color: 'var(--accent)' }}>Open queue →</span></>,
+      href: '/review',
+    })
+  }
+  if (typeof profileScore === 'number' && profileScore >= 85) {
+    suggestions.push({
+      id: 'profile',
+      text: <>Profile score <b style={{ color: 'var(--ink)' }}>{profileScore}</b> · {profileScore >= 90 ? 'A+' : 'A'}. Solid foundation — focus next on Brew360 fixes.</>,
+    })
+  }
+
+  return (
+    <div className="flex flex-col gap-6 py-6 pr-5 pl-1">
+      {suggestions.length > 0 && (
+        <section>
+          <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+            Suggested next
+          </p>
+          <div className="flex flex-col text-[12.5px] leading-relaxed" style={{ color: 'var(--ink-quiet)' }}>
+            {suggestions.map((s, i) => (
+              <a
+                key={s.id}
+                href={s.href}
+                className="block py-2.5 hover:opacity-80 transition-opacity"
+                style={{
+                  borderBottom: i < suggestions.length - 1 ? '1px solid var(--paper-edge)' : 'none',
+                  cursor: s.href ? 'pointer' : 'default',
+                }}
+              >
+                {s.text}
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section>
+        <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+          This week
+        </p>
+        <div className="text-[12px] flex flex-col gap-1.5" style={{ color: 'var(--ink-quiet)' }}>
+          <div className="flex justify-between">
+            <span>Awaiting review</span>
+            <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{pendingCount}</b>
+          </div>
+          <div className="flex justify-between">
+            <span>Profile score</span>
+            <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{profileScore ?? '—'}</b>
+          </div>
+          <div className="flex justify-between">
+            <span>Brew360 fit</span>
+            <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{brewScore ?? '—'}</b>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
 }

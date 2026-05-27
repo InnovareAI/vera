@@ -27,6 +27,7 @@ import {
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
+import { useRightRailContent } from '../lib/rightRailContext'
 import { useTheme } from '../lib/theme'
 import { supabase } from '../lib/supabase'
 import type { Campaign, Post } from '../lib/supabase'
@@ -351,6 +352,7 @@ export default function Layout() {
   const { activeOrg, activeRole } = useOrg()
   const { activeProject, starredProjects, recentProjects, switchProject, refetch: refetchProjects } = useProject()
   const { theme, setTheme } = useTheme()
+  const rightRailContent = useRightRailContent()
   const navigate = useNavigate()
   const location = useLocation()
   const [moreOpen, setMoreOpen] = useState(false)
@@ -716,14 +718,13 @@ export default function Layout() {
         </div>
       </aside>
 
-      {/* Right side: canvas on top (page context), chat dock on the bottom. */}
-      {/* Chat is the primary control surface — pages above are reference    */}
-      {/* context. Vertical flex stack so chat can claim majority height.    */}
+      {/* Center + right rail. Center column holds the canvas + chat dock.   */}
+      {/* Right rail renders only when a page provides content via the       */}
+      {/* useRightRail() hook — otherwise the canvas takes its width.        */}
       {/*                                                                    */}
-      {/* Exception: /generate has its OWN brief composer (the 9-agent       */}
+      {/* Chat exception: /generate has its OWN brief composer (the 9-agent  */}
       {/* pipeline) so we hide the chat dock there. Rule: never two          */}
-      {/* composers on one page. Longer-term arc is to fold the pipeline     */}
-      {/* into a chat tool and delete the in-page composer entirely.         */}
+      {/* composers on one page.                                              */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <main className="flex-1 overflow-y-auto min-h-0" style={{ background: 'var(--paper)' }}>
           <ErrorBoundary variant="route" resetKey={location.pathname}>
@@ -732,6 +733,17 @@ export default function Layout() {
         </main>
         {!location.pathname.endsWith('/generate') && <ChatPanel />}
       </div>
+
+      {/* Right rail — same light treatment as the left rail. Same bg as    */}
+      {/* canvas, no border. Pages opt in via useRightRail(content, deps).  */}
+      {rightRailContent && (
+        <aside
+          className="w-[296px] flex-shrink-0 overflow-y-auto"
+          style={{ background: 'var(--paper)' }}
+        >
+          {rightRailContent}
+        </aside>
+      )}
 
       {newProjOpen && activeOrg && (
         <NewProjectModal
