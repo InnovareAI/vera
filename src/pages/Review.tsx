@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { LayoutList, LayoutGrid, X, Layers } from 'lucide-react'
+import { LayoutList, LayoutGrid, Calendar as CalendarIcon, X, Layers } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 import type { Post, Campaign } from '../lib/supabase'
@@ -14,7 +14,7 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 const STATUS_TABS = ['Pending Review', 'Approved', 'Scheduled', 'Posted', 'Rejected'] as const
 type StatusTab = typeof STATUS_TABS[number]
-type View = 'list' | 'board'
+type View = 'list' | 'board' | 'calendar'
 
 // Status-tab → underlying DB status value. Pending and Posted are special
 // (Pending matches a set of values; Posted is derived from posted_at).
@@ -202,6 +202,19 @@ export default function Review() {
             <LayoutList size={13} /> List
           </button>
           <button
+            onClick={() => setView('calendar')}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition-all"
+            style={{
+              background: view === 'calendar' ? 'var(--paper)' : 'transparent',
+              color: view === 'calendar' ? 'var(--ink)' : 'var(--ghost)',
+              fontWeight: view === 'calendar' ? 500 : 400,
+              boxShadow: view === 'calendar' ? '0 1px 3px rgba(14,14,15,0.06)' : 'none',
+              borderRadius: '2px',
+            }}
+          >
+            <CalendarIcon size={13} /> Calendar
+          </button>
+          <button
             onClick={() => setView('board')}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition-all"
             style={{
@@ -218,7 +231,7 @@ export default function Review() {
         </div>
       </div>
 
-      {view === 'list' ? (
+      {view === 'list' && (
         <ListView
           posts={posts}
           loading={loading}
@@ -232,7 +245,15 @@ export default function Review() {
           moveToTab={moveToTab}
           campaignsById={campaignsById}
         />
-      ) : (
+      )}
+      {view === 'calendar' && (
+        <CalendarView
+          posts={scoped}
+          loading={loading}
+          onOpen={(p) => navigate(`/review/${p.id}`)}
+        />
+      )}
+      {view === 'board' && (
         <BoardView
           posts={scoped}
           loading={loading}
@@ -612,4 +633,190 @@ function PostDetailPanel({
       </div>
     </div>
   )
+}
+
+// ─── Calendar view ──────────────────────────────────────────────────────
+// Week grid (Mon-Sun) showing posts on their target date. A post's date is:
+//   posted_at  > scheduled_at > publish_date
+// Drafts without a target date are EXCLUDED — they don't belong to a day
+// yet. Operator can navigate prev/next week or jump back to "this week".
+//
+// Visual: status-coded left border per event (draft/pending/scheduled/posted),
+// click → /review/:id detail. Empty days show as blank cells, not "Nothing
+// scheduled" chrome.
+function CalendarView({
+  posts, loading, onOpen,
+}: {
+  posts: Post[]
+  loading: boolean
+  onOpen: (p: Post) => void
+}) {
+  const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()))
+
+  const days: Date[] = []
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart); d.setDate(weekStart.getDate() + i); days.push(d)
+  }
+
+  // Bucket posts by ISO date string. Posts without a target date are dropped.
+  const byDay = new Map<string, Post[]>()
+  for (const p of posts) {
+    const iso = p.posted_at || p.scheduled_at || p.publish_date
+    if (!iso) continue
+    const key = isoDay(new Date(iso))
+    if (!byDay.has(key)) byDay.set(key, [])
+    byDay.get(key)!.push(p)
+  }
+
+  const today = new Date()
+  const todayKey = isoDay(today)
+  const isCurrentWeek = isoDay(weekStart) === isoDay(mondayOf(today))
+
+  const weekLabel = `${days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${
+    days[6].toLocaleDateString(undefined, {
+      month: days[0].getMonth() !== days[6].getMonth() ? 'short' : undefined,
+      day: 'numeric',
+    })
+  }`
+
+  function jumpWeek(delta: number) {
+    const d = new Date(weekStart); d.setDate(weekStart.getDate() + 7 * delta); setWeekStart(d)
+  }
+
+  return (
+    <div className="px-6 pb-10">
+      {/* Week nav */}
+      <div className="flex items-center gap-3 mb-4">
+        <button
+          onClick={() => jumpWeek(-1)}
+          className="px-2 py-1 text-[13px] hover:bg-[var(--fog)] rounded transition-colors"
+          style={{ color: 'var(--ink-quiet)' }}
+        >‹</button>
+        <span className="text-[13px] font-medium" style={{ color: 'var(--ink)' }}>
+          {weekLabel}
+        </span>
+        <button
+          onClick={() => jumpWeek(1)}
+          className="px-2 py-1 text-[13px] hover:bg-[var(--fog)] rounded transition-colors"
+          style={{ color: 'var(--ink-quiet)' }}
+        >›</button>
+        {!isCurrentWeek && (
+          <button
+            onClick={() => setWeekStart(mondayOf(new Date()))}
+            className="text-[12px] hover:opacity-80 transition-opacity"
+            style={{ color: 'var(--ink-quiet)' }}
+          >
+            Today
+          </button>
+        )}
+        {loading && (
+          <span className="text-[12px] ml-auto" style={{ color: 'var(--ghost)' }}>Loading…</span>
+        )}
+      </div>
+
+      {/* Week grid */}
+      <div
+        className="grid grid-cols-7"
+        style={{
+          background: 'var(--paper-edge)',
+          gap: '1px',
+          border: '1px solid var(--paper-edge)',
+          borderRadius: 'var(--radius-md)',
+          overflow: 'hidden',
+        }}
+      >
+        {days.map(d => {
+          const key = isoDay(d)
+          const events = byDay.get(key) ?? []
+          const isToday = key === todayKey
+          const dayName = d.toLocaleDateString(undefined, { weekday: 'short' })
+          return (
+            <div
+              key={key}
+              className="flex flex-col min-h-[200px] p-2"
+              style={{ background: 'var(--paper-warm)' }}
+            >
+              <div className="flex items-baseline justify-between mb-2 px-1">
+                <span
+                  className="text-[10px] uppercase font-medium"
+                  style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}
+                >
+                  {dayName}
+                </span>
+                <span
+                  className="text-[13px] font-semibold"
+                  style={{ color: isToday ? 'var(--accent)' : 'var(--ink)' }}
+                >
+                  {d.getDate()}
+                </span>
+              </div>
+              <div className="flex flex-col gap-1">
+                {events.map(p => (
+                  <CalendarEvent key={p.id} post={p} onOpen={() => onOpen(p)} />
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function CalendarEvent({ post, onOpen }: { post: Post; onOpen: () => void }) {
+  const tab = tabFor(post)
+  const border =
+    tab === 'Posted'        ? '#3B82F6'
+    : tab === 'Approved'    ? '#10B981'
+    : tab === 'Scheduled'   ? '#10B981'
+    : tab === 'Rejected'    ? '#EF4444'
+    : '#F59E0B'  // pending review
+  const isPosted = tab === 'Posted'
+  const timeIso = post.posted_at || post.scheduled_at || post.publish_date
+  const time = timeIso ? new Date(timeIso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : null
+  return (
+    <button
+      onClick={onOpen}
+      className="text-left px-2 py-1.5 transition-colors hover:bg-[var(--fog)]"
+      style={{
+        background: 'var(--paper)',
+        borderRadius: '3px',
+        borderLeft: `3px solid ${border}`,
+        opacity: isPosted ? 0.7 : 1,
+      }}
+    >
+      <div
+        className="text-[11px] leading-snug line-clamp-2"
+        style={{ color: 'var(--ink)' }}
+      >
+        <span
+          className="font-medium uppercase mr-1"
+          style={{ color: 'var(--ghost)', fontSize: '9.5px', letterSpacing: '0.04em' }}
+        >
+          {(post.channel ?? 'post').slice(0, 2)}
+        </span>
+        {post.title || 'Untitled'}
+      </div>
+      {time && (
+        <div className="text-[10px] mt-0.5" style={{ color: 'var(--ghost)', fontVariantNumeric: 'tabular-nums' }}>
+          {time}
+        </div>
+      )}
+    </button>
+  )
+}
+
+function mondayOf(d: Date): Date {
+  const x = new Date(d)
+  const day = x.getDay() // 0=Sun, 1=Mon, ... 6=Sat
+  x.setDate(x.getDate() - ((day + 6) % 7))
+  x.setHours(0, 0, 0, 0)
+  return x
+}
+
+function isoDay(d: Date): string {
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
 }

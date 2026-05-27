@@ -104,13 +104,19 @@ function LoginGuard() {
 //   - no org              → /onboarding (first-time signup)
 //   - org, no audit yet   → /onboarding/audit/:orgId (run the first audit)
 //   - org, audit exists   → /linkedin-score/:orgId (the actual report)
-// Avoids the old footgun of always landing on the setup flow even when a
-// fresh score already exists.
+//
+// Waits for the org context to finish loading before deciding — earlier
+// version raced the load and always fired '/onboarding' on first paint
+// because activeOrg was null while the OrgProvider's query was in flight.
 function AuditRedirect() {
-  const { activeOrg } = useOrg()
+  const { activeOrg, loading: orgLoading } = useOrg()
   const [target, setTarget] = useState<string | null>(null)
 
   useEffect(() => {
+    // Hold redirect until the org context has settled. Without this gate,
+    // the component fires Navigate('/onboarding') on first paint and we
+    // never see activeOrg even when one exists.
+    if (orgLoading) return
     if (!activeOrg?.id) {
       setTarget('/onboarding')
       return
@@ -128,7 +134,7 @@ function AuditRedirect() {
           : `/onboarding/audit/${activeOrg.id}`)
       })
     return () => { cancelled = true }
-  }, [activeOrg?.id])
+  }, [activeOrg?.id, orgLoading])
 
   if (!target) return null
   return <Navigate to={target} replace />

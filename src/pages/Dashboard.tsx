@@ -41,28 +41,31 @@ export default function Dashboard() {
   const [refreshError, setRefreshError] = useState<string | null>(null)
 
   const loadAudit = useCallback(async () => {
+    // Scope to the active workspace. Previously this pulled the latest
+    // audit from ANY org and surfaced it on every dashboard regardless of
+    // which workspace was active — caused the Dashboard to show one org's
+    // score while /audit (correctly scoped) said no audit existed.
+    if (!activeOrg?.id) { setAudit(null); return }
     const { data: latest } = await supabase
       .from('linkedin_audits')
       .select('org_id, kind, result, created_at')
+      .eq('org_id', activeOrg.id)
       .order('created_at', { ascending: false })
       .limit(20)
     if (!latest?.length) { setAudit(null); return }
-    const orgId = latest[0].org_id as string
-    const forOrg = latest.filter(r => r.org_id === orgId)
-    const profile = forOrg.find(r => r.kind === 'profile')
-    const brew    = forOrg.find(r => r.kind === 'brew360')
-    const { data: org } = await supabase.from('organizations').select('name').eq('id', orgId).maybeSingle()
+    const profile = latest.find(r => r.kind === 'profile')
+    const brew    = latest.find(r => r.kind === 'brew360')
     const lastRun = [profile?.created_at, brew?.created_at].filter(Boolean).sort().reverse()[0] as string | undefined
     setAudit({
-      org_id: orgId,
-      org_name: (org?.name as string) ?? 'Unknown',
+      org_id: activeOrg.id,
+      org_name: activeOrg.name,
       profile_score: (profile?.result as { score?: number } | undefined)?.score ?? null,
       profile_grade: (profile?.result as { grade?: string } | undefined)?.grade ?? null,
       brew_score:    (brew?.result    as { audit?: { overall_score?: number } } | undefined)?.audit?.overall_score ?? null,
       brew_grade:    (brew?.result    as { audit?: { grade?: string }         } | undefined)?.audit?.grade ?? null,
       last_run: lastRun ?? null,
     })
-  }, [])
+  }, [activeOrg?.id, activeOrg?.name])
 
   async function reRunAudits() {
     setRefreshing(true)
