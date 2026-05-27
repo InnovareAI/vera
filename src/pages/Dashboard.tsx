@@ -117,8 +117,38 @@ export default function Dashboard() {
     [audit?.org_id, audit?.profile_score, audit?.brew_score, pendingPosts.length],
   )
 
+  // Empty workspace — no audit, no pending posts. Render a clean
+  // "first run" state instead of a blank canvas.
+  const isEmpty = !loading && !audit && pendingPosts.length === 0
+
   return (
     <div className="p-8 max-w-4xl">
+      {isEmpty && activeOrg && (
+        <section className="py-16 text-center">
+          <p className="text-[12px] font-medium uppercase tracking-wide mb-2" style={{ color: 'var(--ghost)' }}>Welcome to VERA</p>
+          <h1 className="text-[24px] font-semibold mb-2" style={{ color: 'var(--ink)' }}>{activeOrg.name}</h1>
+          <p className="text-[14px] mb-6 max-w-md mx-auto" style={{ color: 'var(--ink-quiet)' }}>
+            Start by auditing your LinkedIn surface — VERA needs to know how the algorithm sees you before drafting content.
+          </p>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={() => navigate(`/onboarding/audit/${activeOrg.id}`)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium hover:opacity-90 transition-opacity"
+              style={{ background: 'var(--ink)', color: 'var(--paper-warm)', borderRadius: 'var(--radius-md)' }}
+            >
+              Run first audit <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
+            </button>
+            <button
+              onClick={() => navigate('/generate')}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium hover:opacity-80 transition-opacity"
+              style={{ color: 'var(--ink-quiet)' }}
+            >
+              Skip — draft a brief
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* Client surface — the one-glance answer. Big scores, single ink   */}
       {/* CTA (Re-run), one quiet secondary (View detail). No padding-on-   */}
       {/* padding chrome.                                                    */}
