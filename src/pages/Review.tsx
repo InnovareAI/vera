@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { LayoutList, LayoutGrid, Calendar as CalendarIcon, X, Layers } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
+import { useProject } from '../lib/projectContext'
 import type { Post, Campaign } from '../lib/supabase'
 import { PlatformChip, StatusChip } from '../components/Chip'
 
@@ -71,25 +72,34 @@ export default function Review() {
     setSearchParams(searchParams, { replace: true })
   }
   const { activeOrg } = useOrg()
+  const { activeProject } = useProject()
   const navigate = useNavigate()
 
   useEffect(() => {
     if (!activeOrg?.id) { setCampaigns([]); return }
-    supabase.from('campaigns')
-      .select('id, name, status, is_pinned, color, theme, start_date, end_date')
+    let q = supabase.from('campaigns')
+      .select('id, name, status, is_pinned, color, theme, start_date, end_date, project_id')
       .eq('org_id', activeOrg.id)
       .order('is_pinned', { ascending: false })
       .order('start_date', { ascending: false, nullsFirst: false })
-      .then(({ data }) => setCampaigns((data as Campaign[]) ?? []))
-  }, [activeOrg?.id])
+    if (activeProject?.id) q = q.eq('project_id', activeProject.id)
+    q.then(({ data }) => setCampaigns((data as Campaign[]) ?? []))
+  }, [activeOrg?.id, activeProject?.id])
 
   const campaignsById = new Map(campaigns.map(c => [c.id, c]))
 
   useEffect(() => { localStorage.setItem('reviewView', view) }, [view])
 
   useEffect(() => {
-    supabase.from('content_posts').select('*').order('created_at', { ascending: false }).limit(100)
-      .then(({ data }) => { setPosts(data || []); setLoading(false) })
+    // Scope posts to active workspace + project. Without the project
+    // filter, switching projects would show all posts from every project
+    // — the feature would feel dead.
+    if (!activeOrg?.id) { setPosts([]); setLoading(false); return }
+    setLoading(true)
+    let q = supabase.from('content_posts').select('*').order('created_at', { ascending: false }).limit(100)
+      .eq('org_id', activeOrg.id)
+    if (activeProject?.id) q = q.eq('project_id', activeProject.id)
+    q.then(({ data }) => { setPosts(data || []); setLoading(false) })
 
     const channel = supabase.channel('review-posts')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'content_posts' }, payload => {
@@ -101,7 +111,7 @@ export default function Review() {
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [])
+  }, [activeOrg?.id, activeProject?.id])
 
   async function moveToTab(postId: string, targetTab: StatusTab) {
     const rule = TAB_DROP_ACTION[targetTab]

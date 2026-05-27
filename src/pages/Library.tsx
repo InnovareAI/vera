@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Star, Users } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
+import { useProject } from '../lib/projectContext'
 import { useRightRail } from '../lib/rightRailContext'
 import type { Post, Campaign, Audience } from '../lib/supabase'
 import { PlatformChip, StatusChip, Chip } from '../components/Chip'
@@ -18,31 +19,39 @@ export default function Library() {
   const [selected, setSelected] = useState<Post | null>(null)
   const [copied, setCopied] = useState(false)
   const { activeOrg } = useOrg()
+  const { activeProject } = useProject()
 
   const platforms = ['All', 'LinkedIn', 'Twitter', 'Instagram', 'Quora', 'Facebook']
   const statuses = ['All', 'Published', 'Approved', 'Scheduled', 'Pending Review', 'Draft', 'Rejected']
 
   useEffect(() => {
-    supabase.from('content_posts').select('*').order('created_at', { ascending: false }).limit(200)
-      .then(({ data }) => { setPosts(data || []); setLoading(false) })
-  }, [])
+    if (!activeOrg?.id) { setPosts([]); setLoading(false); return }
+    setLoading(true)
+    let q = supabase.from('content_posts').select('*').order('created_at', { ascending: false }).limit(200)
+      .eq('org_id', activeOrg.id)
+    if (activeProject?.id) q = q.eq('project_id', activeProject.id)
+    q.then(({ data }) => { setPosts(data || []); setLoading(false) })
+  }, [activeOrg?.id, activeProject?.id])
 
   useEffect(() => {
     if (!activeOrg?.id) { setCampaigns([]); setAudiences([]); return }
     const orgId = activeOrg.id
-    supabase.from('campaigns')
-      .select('id, name, theme, status, is_pinned, post_count, color, start_date, end_date, description')
+    let campQ = supabase.from('campaigns')
+      .select('id, name, theme, status, is_pinned, post_count, color, start_date, end_date, description, project_id')
       .eq('org_id', orgId)
       .order('is_pinned', { ascending: false })
       .order('start_date', { ascending: false, nullsFirst: false })
-      .then(({ data }) => setCampaigns((data as Campaign[]) ?? []))
+    if (activeProject?.id) campQ = campQ.eq('project_id', activeProject.id)
+    campQ.then(({ data }) => setCampaigns((data as Campaign[]) ?? []))
+    // Audiences stay workspace-scoped — they're org-level constants
+    // (ICPs + buyer personas), not project-specific.
     supabase.from('audiences')
       .select('*')
       .eq('org_id', orgId)
       .order('is_primary', { ascending: false })
       .order('kind', { ascending: true })
       .then(({ data }) => setAudiences((data as Audience[]) ?? []))
-  }, [activeOrg?.id])
+  }, [activeOrg?.id, activeProject?.id])
 
   const postCountByCampaign = posts.reduce((acc, p) => {
     if (p.campaign_id) acc[p.campaign_id] = (acc[p.campaign_id] ?? 0) + 1
