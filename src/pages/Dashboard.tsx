@@ -145,35 +145,39 @@ export default function Dashboard() {
   async function actOn(obs: Observation) {
     setActingId(obs.id)
     try {
-      // Route per action_kind. Each route either navigates or fires an
-      // immediate action and updates the observation status.
-      if (obs.action_kind === 'run_audit' && obs.org_id) {
-        // Mark actioned, then navigate to audit setup/score
-        await supabase.from('agent_observations')
-          .update({ status: 'actioned', actioned_at: new Date().toISOString() })
-          .eq('id', obs.id)
-        navigate(`/linkedin-score/${obs.org_id}`)
-        return
-      }
+      // Call vera-act — server-side runner. It marks the observation
+      // actioned, then runs the proposed work in the background:
+      //   run_audit              → fires audit endpoints
+      //   draft_from_campaign    → invokes orchestrator → post in Review
+      //   prompt_knowledge_input → no-op server side; we navigate below
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+      await fetch(`${supabaseUrl}/functions/v1/vera-act`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': anonKey,
+          'Authorization': `Bearer ${anonKey}`,
+        },
+        body: JSON.stringify({ observation_id: obs.id }),
+      }).catch(() => { /* still navigate even if server call fails */ })
+
+      // For "needs operator input" kinds, navigate so VERA can take
+      // their input. For pure-server kinds (audit / draft), stay on
+      // dashboard — operator sees the result land via the observation
+      // refresh + post appearing in Review.
       if (obs.action_kind === 'prompt_knowledge_input') {
-        await supabase.from('agent_observations')
-          .update({ status: 'actioned', actioned_at: new Date().toISOString() })
-          .eq('id', obs.id)
-        // Knowledge tab — works at workspace level or project level
         const slug = activeProject?.slug
         navigate(slug ? `/p/${slug}/knowledge` : '/knowledge')
         return
       }
-      if (obs.action_kind === 'draft_from_campaign') {
-        await supabase.from('agent_observations')
-          .update({ status: 'actioned', actioned_at: new Date().toISOString() })
-          .eq('id', obs.id)
-        const slug = activeProject?.slug
-        navigate(slug ? `/p/${slug}/generate` : '/generate')
+      if (obs.action_kind === 'run_audit' && obs.org_id) {
+        // Take operator to the score page so they see the audit
+        // refreshing live.
+        navigate(`/linkedin-score/${obs.org_id}`)
         return
       }
-      // Unknown action — just dismiss
-      await dismiss(obs)
+      // draft_from_campaign and unknowns: stay on dashboard, refresh list
     } finally {
       setActingId(null)
       loadObservations()
