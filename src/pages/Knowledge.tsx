@@ -377,7 +377,7 @@ export default function Knowledge() {
                 Drop files here, or <span style={{ color: 'var(--ink)', textDecoration: 'underline' }}>browse</span>
               </p>
               <p className="text-[11px] mt-1" style={{ color: 'var(--ghost)' }}>
-                Logos · PDFs · Word · Markdown · Images · Fonts · up to 50 MB
+                PDFs · Word · Markdown · Logos · Images · Fonts · up to 50 MB. Text is extracted automatically.
               </p>
               <input
                 ref={fileInputRef}
@@ -551,8 +551,9 @@ function KnowledgeRightRail({
           <li>· Pasted text — briefs, voice docs, positioning</li>
           <li>· URLs — public web pages (we strip HTML)</li>
           <li>· Text files (.md, .txt, .csv, .json)</li>
+          <li>· PDFs — text extracted server-side, embedded</li>
+          <li>· Word (.docx) — text extracted server-side, embedded</li>
           <li>· Logos / images / fonts (stored, referenced by name)</li>
-          <li style={{ color: 'var(--mist)' }}>· PDFs / Word (stored, no text yet — paste extracted)</li>
         </ul>
       </section>
     </div>
