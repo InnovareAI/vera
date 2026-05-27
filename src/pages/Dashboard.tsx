@@ -12,13 +12,28 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, RotateCw, ArrowRight } from 'lucide-react'
+import { Loader2, RotateCw, ArrowRight, Sparkles } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { StatusChip } from '../components/Chip'
 import { useProject } from '../lib/projectContext'
 import { useOrg } from '../lib/orgContext'
 import { useRightRail } from '../lib/rightRailContext'
+
+interface Observation {
+  id: string
+  org_id: string
+  project_id: string | null
+  kind: string
+  severity: 'low' | 'medium' | 'high'
+  title: string
+  detail: string | null
+  proposed_action: string | null
+  action_kind: string | null
+  action_payload: Record<string, unknown> | null
+  status: string
+  created_at: string
+}
 
 interface LinkedInAuditSummary {
   org_id: string
@@ -39,6 +54,8 @@ export default function Dashboard() {
   const [audit, setAudit] = useState<LinkedInAuditSummary | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
+  const [observations, setObservations] = useState<Observation[]>([])
+  const [actingId, setActingId] = useState<string | null>(null)
 
   const loadAudit = useCallback(async () => {
     // Scope to the active workspace. Previously this pulled the latest
@@ -104,6 +121,72 @@ export default function Dashboard() {
     load()
   }, [loadAudit, activeOrg?.id, activeProject?.id])
 
+  // Observations — what VERA noticed and proposes to do
+  const loadObservations = useCallback(async () => {
+    if (!activeOrg?.id) { setObservations([]); return }
+    let q = supabase
+      .from('agent_observations')
+      .select('id, org_id, project_id, kind, severity, title, detail, proposed_action, action_kind, action_payload, status, created_at')
+      .eq('org_id', activeOrg.id)
+      .eq('status', 'open')
+      .order('severity', { ascending: false }) // high → medium → low (asc on text reverses; we want high first so we'll sort client-side)
+      .order('created_at', { ascending: false })
+      .limit(8)
+    if (activeProject?.id) q = q.eq('project_id', activeProject.id)
+    const { data } = await q
+    const sevOrder = { high: 0, medium: 1, low: 2 } as const
+    const sorted = ((data as Observation[]) ?? []).sort(
+      (a, b) => sevOrder[a.severity] - sevOrder[b.severity],
+    )
+    setObservations(sorted)
+  }, [activeOrg?.id, activeProject?.id])
+  useEffect(() => { loadObservations() }, [loadObservations])
+
+  async function actOn(obs: Observation) {
+    setActingId(obs.id)
+    try {
+      // Route per action_kind. Each route either navigates or fires an
+      // immediate action and updates the observation status.
+      if (obs.action_kind === 'run_audit' && obs.org_id) {
+        // Mark actioned, then navigate to audit setup/score
+        await supabase.from('agent_observations')
+          .update({ status: 'actioned', actioned_at: new Date().toISOString() })
+          .eq('id', obs.id)
+        navigate(`/linkedin-score/${obs.org_id}`)
+        return
+      }
+      if (obs.action_kind === 'prompt_knowledge_input') {
+        await supabase.from('agent_observations')
+          .update({ status: 'actioned', actioned_at: new Date().toISOString() })
+          .eq('id', obs.id)
+        // Knowledge tab — works at workspace level or project level
+        const slug = activeProject?.slug
+        navigate(slug ? `/p/${slug}/knowledge` : '/knowledge')
+        return
+      }
+      if (obs.action_kind === 'draft_from_campaign') {
+        await supabase.from('agent_observations')
+          .update({ status: 'actioned', actioned_at: new Date().toISOString() })
+          .eq('id', obs.id)
+        const slug = activeProject?.slug
+        navigate(slug ? `/p/${slug}/generate` : '/generate')
+        return
+      }
+      // Unknown action — just dismiss
+      await dismiss(obs)
+    } finally {
+      setActingId(null)
+      loadObservations()
+    }
+  }
+
+  async function dismiss(obs: Observation) {
+    await supabase.from('agent_observations')
+      .update({ status: 'dismissed', dismissed_at: new Date().toISOString() })
+      .eq('id', obs.id)
+    loadObservations()
+  }
+
   // ─── Right rail content ───────────────────────────────────────────────
   // "Suggested next" + "This week" stats. Both surface things the
   // operator can act on without leaving the dashboard.
@@ -117,12 +200,77 @@ export default function Dashboard() {
     [audit?.org_id, audit?.profile_score, audit?.brew_score, pendingPosts.length],
   )
 
-  // Empty workspace — no audit, no pending posts. Render a clean
-  // "first run" state instead of a blank canvas.
-  const isEmpty = !loading && !audit && pendingPosts.length === 0
+  // Empty workspace — no audit, no pending posts, no observations.
+  // Renders a clean "first run" state instead of a blank canvas.
+  const isEmpty = !loading && !audit && pendingPosts.length === 0 && observations.length === 0
 
   return (
     <div className="p-8 max-w-4xl">
+      {/* VERA wants to — agentic surface. Shows what VERA noticed since   */}
+      {/* last action and what she proposes. Each row is one-click action  */}
+      {/* + dismiss. Rendered above everything else because this is the    */}
+      {/* "agent-first" entry point — operator sees VERA's intent before   */}
+      {/* the static report views.                                          */}
+      {observations.length > 0 && (
+        <section className="mb-10">
+          <div className="flex items-baseline justify-between mb-3">
+            <p className="text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--accent)' }}>
+              VERA wants to <span className="ml-1.5 font-normal" style={{ color: 'var(--mist)' }}>{observations.length}</span>
+            </p>
+          </div>
+          <div style={{ borderTop: '1px solid var(--paper-edge)' }}>
+            {observations.map(obs => (
+              <div
+                key={obs.id}
+                className="flex items-start gap-3 py-3.5"
+                style={{ borderBottom: '1px solid var(--paper-edge)' }}
+              >
+                <span
+                  className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0"
+                  style={{
+                    background:
+                      obs.severity === 'high'   ? 'var(--accent)' :
+                      obs.severity === 'medium' ? 'var(--accent-soft)' :
+                      'var(--mist)',
+                  }}
+                  title={`${obs.severity} priority`}
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[14px] font-medium leading-snug" style={{ color: 'var(--ink)' }}>{obs.title}</p>
+                  {obs.detail && (
+                    <p className="text-[12.5px] mt-1 leading-snug" style={{ color: 'var(--ink-quiet)' }}>{obs.detail}</p>
+                  )}
+                  {(obs.proposed_action || true) && (
+                    <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+                      {obs.proposed_action && (
+                        <button
+                          onClick={() => actOn(obs)}
+                          disabled={actingId === obs.id}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12.5px] font-medium transition-opacity hover:opacity-90 disabled:opacity-50"
+                          style={{ background: 'var(--ink)', color: 'var(--paper-warm)', borderRadius: 'var(--radius-md)' }}
+                        >
+                          {actingId === obs.id
+                            ? <Loader2 className="w-3 h-3 animate-spin" />
+                            : <Sparkles className="w-3 h-3" strokeWidth={2} />}
+                          {obs.proposed_action}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => dismiss(obs)}
+                        className="text-[12px] px-2 py-1 transition-opacity hover:opacity-70"
+                        style={{ color: 'var(--ghost)' }}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {isEmpty && activeOrg && (
         <section className="py-16 text-center">
           <p className="text-[12px] font-medium uppercase tracking-wide mb-2" style={{ color: 'var(--ghost)' }}>Welcome to VERA</p>
