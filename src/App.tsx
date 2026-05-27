@@ -20,6 +20,7 @@ import LinkedInScore from './pages/LinkedInScore'
 import Clients from './pages/Clients'
 import Calendar from './pages/Calendar'
 import Library from './pages/Library'
+import Knowledge from './pages/Knowledge'
 import Intel from './pages/Intel'
 import Templates from './pages/Templates'
 import Skills from './pages/Skills'
@@ -60,6 +61,7 @@ export default function App() {
                   <Route path="generate"   element={<Generate />} />
                   <Route path="review"     element={<Review />} />
                   <Route path="review/:id" element={<ReviewDetail />} />
+                  <Route path="knowledge"  element={<Knowledge />} />
                 </Route>
 
                 {/* Legacy flat routes — redirect to /p/:slug/* using the
@@ -73,6 +75,7 @@ export default function App() {
 
                 {/* Workspace-level routes — not project-scoped. */}
                 <Route path="audit"      element={<AuditRedirect />} />
+                <Route path="knowledge"  element={<Knowledge />} />
                 <Route path="clients"    element={<Clients />} />
                 <Route path="calendar"   element={<Calendar />} />
                 <Route path="library"    element={<Library />} />

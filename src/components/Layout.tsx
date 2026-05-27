@@ -518,9 +518,10 @@ export default function Layout() {
         <nav className="pt-3 pb-1 space-y-0.5">
           <PrimaryNavItem to={projectPath('dashboard')} icon={Sparkles}    label="Overview" />
           <PrimaryNavItem to={projectPath('review')}    icon={CheckSquare} label="Review" badge={pendingCount} />
+          <PrimaryNavItem to={projectPath('knowledge')} icon={BookOpen}    label="Knowledge" />
           <PrimaryNavItem to="/audit"                   icon={Telescope}   label="Audit" />
           <PrimaryNavItem to="/intel"                   icon={Radar}       label="Intel" />
-          <PrimaryNavItem to="/library"                 icon={BookOpen}    label="Library" />
+          <PrimaryNavItem to="/library"                 icon={Layers}      label="Library" />
         </nav>
 
         {/* Scrolling middle — projects (Claude.ai style) + workspace surfaces */}
