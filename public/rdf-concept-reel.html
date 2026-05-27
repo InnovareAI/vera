@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RDF — Concept Reel · InnovareAI</title>
+<meta name="description" content="A concept reel for RDF Style — a wearable state of calm. Four films exploring the brand's regulation system through breath, touch, scale, and stillness." />
+
+<meta property="og:title"       content="RDF — Concept Reel" />
+<meta property="og:description" content="A wearable state of calm. Four films exploring RDF's regulation system." />
+<meta property="og:image"       content="https://v3b.fal.media/files/b/0a9be4e9/WHA7b32dlklRs3ZYVEFFK_72fa9290b92c41fabbe7af851d12a237.mp4" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..500&family=Inter:wght@300..600&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --paper:    #F6F4EE;   /* warm off-white, RDF tone */
+    --paper-deep: #EEEBE2;
+    --ink:      #1A1614;   /* near-black, soft */
+    --ink-soft: #4A4441;
+    --ghost:    #8B847E;
+    --mist:     #C9C4BC;
+    --rule:     rgba(26,22,20,0.08);
+    --accent:   #9F2B2B;   /* RDF red, restrained */
+    --display:  'Fraunces', Georgia, serif;
+    --body:     'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.55; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  ::selection { background: var(--accent); color: var(--paper); }
+
+  body { padding: 0; min-height: 100vh; }
+
+  .container {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 64px 32px 96px;
+  }
+
+  /* ── Top bar ─────────────────────────────────────── */
+  .topbar {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding-bottom: 56px;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 72px;
+  }
+  .mark {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 17px;
+    letter-spacing: -0.01em;
+    font-variation-settings: 'opsz' 60;
+  }
+  .mark .dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    margin: 0 8px;
+    vertical-align: middle;
+    transform: translateY(-2px);
+  }
+  .topbar .meta {
+    font-size: 11.5px;
+    color: var(--ghost);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+
+  /* ── Hero ────────────────────────────────────────── */
+  .hero {
+    margin-bottom: 96px;
+  }
+  .eyebrow {
+    font-family: var(--body);
+    font-size: 11px;
+    color: var(--ghost);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-weight: 500;
+    margin-bottom: 28px;
+  }
+  h1 {
+    font-family: var(--display);
+    font-size: clamp(40px, 6vw, 68px);
+    line-height: 1.02;
+    letter-spacing: -0.025em;
+    font-weight: 400;
+    font-variation-settings: 'opsz' 144, 'wght' 400;
+    color: var(--ink);
+    margin-bottom: 28px;
+    max-width: 16ch;
+  }
+  h1 .em {
+    font-style: italic;
+    font-variation-settings: 'opsz' 144, 'wght' 400;
+    color: var(--ink-soft);
+  }
+  .hero p {
+    font-size: 17px;
+    line-height: 1.65;
+    color: var(--ink-soft);
+    max-width: 56ch;
+    font-weight: 400;
+  }
+  .hero p + p { margin-top: 16px; }
+
+  /* ── Section divider ─────────────────────────────── */
+  .section-mark {
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    margin-bottom: 36px;
+  }
+  .section-mark .num {
+    font-family: var(--display);
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    font-variation-settings: 'opsz' 14, 'wght' 500;
+  }
+  .section-mark .rule {
+    flex: 1;
+    height: 1px;
+    background: var(--rule);
+  }
+
+  /* ── Post ────────────────────────────────────────── */
+  .post {
+    margin-bottom: 96px;
+  }
+  .post-head {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 24px;
+    margin-bottom: 28px;
+  }
+  @media (min-width: 720px) {
+    .post-head { grid-template-columns: 0.9fr 1.1fr; gap: 48px; }
+  }
+  .post-title {
+    font-family: var(--display);
+    font-size: clamp(28px, 3.5vw, 38px);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    font-weight: 400;
+    font-variation-settings: 'opsz' 96, 'wght' 450;
+    color: var(--ink);
+  }
+  .post-title .em {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--ink-soft);
+  }
+  .post-body {
+    font-size: 15.5px;
+    line-height: 1.7;
+    color: var(--ink-soft);
+  }
+  .post-body strong {
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .post-body p + p { margin-top: 12px; }
+  .post-meta {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--rule);
+    font-size: 12px;
+    color: var(--ghost);
+    letter-spacing: 0.04em;
+    line-height: 1.7;
+  }
+  .post-meta span { display: inline-block; }
+  .post-meta .sep { color: var(--mist); margin: 0 10px; }
+
+  /* ── Video frame ─────────────────────────────────── */
+  .video-frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16/9;
+    background: var(--paper-deep);
+    overflow: hidden;
+    border-radius: 2px;
+    box-shadow: 0 24px 60px -28px rgba(26, 22, 20, 0.18),
+                0 1px 0 rgba(26, 22, 20, 0.05);
+  }
+  .video-frame video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .video-caption {
+    margin-top: 14px;
+    font-size: 11.5px;
+    color: var(--ghost);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+
+  /* ── Footer ──────────────────────────────────────── */
+  .footer {
+    margin-top: 64px;
+    padding-top: 48px;
+    border-top: 1px solid var(--rule);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 24px;
+  }
+  .footer .essence {
+    font-family: var(--display);
+    font-style: italic;
+    font-size: 18px;
+    color: var(--ink-soft);
+    line-height: 1.4;
+    max-width: 30ch;
+    font-variation-settings: 'opsz' 24, 'wght' 400;
+  }
+  .footer .essence::before {
+    content: '—';
+    color: var(--accent);
+    margin-right: 10px;
+    font-style: normal;
+  }
+  .footer .agency {
+    font-size: 11.5px;
+    color: var(--ghost);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 500;
+    text-align: right;
+  }
+  .footer .agency a {
+    color: var(--ink-soft);
+    text-decoration: none;
+    border-bottom: 1px solid var(--mist);
+    transition: border-color .2s;
+  }
+  .footer .agency a:hover { border-color: var(--ink); }
+
+  /* ── Subtle reveal on scroll ─────────────────────── */
+  @media (prefers-reduced-motion: no-preference) {
+    .post, .hero {
+      opacity: 0;
+      transform: translateY(12px);
+      transition: opacity 0.9s ease, transform 0.9s ease;
+    }
+    .post.in, .hero.in {
+      opacity: 1;
+      transform: none;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <header class="topbar">
+    <div class="mark">InnovareAI <span class="dot"></span> for RDF</div>
+    <div class="meta">Concept Reel · May 2026</div>
+  </header>
+
+  <section class="hero">
+    <p class="eyebrow">RDF · A wearable state of calm</p>
+    <h1>Four films <span class="em">on returning<br/>to yourself.</span></h1>
+    <p>The modern world overstimulates. RDF exists to reduce that — not by escaping reality, but by helping you stay stable within it.</p>
+    <p>This reel explores the brand's regulation system through four visual ideas: the dragonfly that pauses time, the breath that finds its rhythm, the touch that brings you home, and the second skin that holds you.</p>
+  </section>
+
+  <!-- ── 01 — Dragonfly ─────────────────────────────────── -->
+  <section class="post" id="post-01">
+    <div class="section-mark">
+      <span class="num">01 · Pause</span>
+      <span class="rule"></span>
+    </div>
+    <div class="post-head">
+      <h2 class="post-title">The dragonfly that <span class="em">stops time.</span></h2>
+      <div class="post-body">
+        <p>A red dragonfly enters frame, lands on white, flutters its wings, and lifts away. A brief moment of reflection — a reminder that life moves quickly, and sometimes we need to slow down.</p>
+        <p class="post-meta">
+          <span>Idea · Beauty, intrigue, presence</span><span class="sep">·</span>
+          <span>Brand role · Logo film</span><span class="sep">·</span>
+          <span>8s · 16:9</span>
+        </p>
+      </div>
+    </div>
+    <div class="video-frame">
+      <video
+        src="https://v3b.fal.media/files/b/0a9be4e9/WHA7b32dlklRs3ZYVEFFK_72fa9290b92c41fabbe7af851d12a237.mp4"
+        autoplay muted loop playsinline preload="metadata"
+        poster=""
+      ></video>
+    </div>
+  </section>
+
+  <!-- ── 02 — Breath ────────────────────────────────────── -->
+  <section class="post" id="post-02">
+    <div class="section-mark">
+      <span class="num">02 · Breath</span>
+      <span class="rule"></span>
+    </div>
+    <div class="post-head">
+      <h2 class="post-title">A breath that <span class="em">finds its rhythm.</span></h2>
+      <div class="post-body">
+        <p>Lower face only — nose, lips, and neck. A woman breathes deeply against a cinematic natural background. Through breath, the brand speaks calm before it ever speaks words.</p>
+        <p class="post-meta">
+          <span>Idea · Communicate ease, build intrigue</span><span class="sep">·</span>
+          <span>Brand role · State setter</span><span class="sep">·</span>
+          <span>8s · 16:9</span>
+        </p>
+      </div>
+    </div>
+    <div class="video-frame">
+      <video
+        src="https://v3b.fal.media/files/b/0a9be4df/0B85CtGOV97NeIPC0w-M3_0752e501bc004bd2bee82fe85f4ef07e.mp4"
+        autoplay muted loop playsinline preload="metadata"
+      ></video>
+    </div>
+  </section>
+
+  <!-- ── 03 — Touch ─────────────────────────────────────── -->
+  <section class="post" id="post-03">
+    <div class="section-mark">
+      <span class="num">03 · Touch</span>
+      <span class="rule"></span>
+    </div>
+    <div class="post-head">
+      <h2 class="post-title">Two hands, <span class="em">one return.</span></h2>
+      <div class="post-body">
+        <p>Hands and fingers softly meeting. The brand's core mechanic — the sensory anchor in the Reset Hoodie pocket — translated into pure visual feeling. Through touch, you return.</p>
+        <p class="post-meta">
+          <span>Idea · Make the sensory experience visible</span><span class="sep">·</span>
+          <span>Brand role · Anchor reveal</span><span class="sep">·</span>
+          <span>8s · 16:9</span>
+        </p>
+      </div>
+    </div>
+    <div class="video-frame">
+      <video
+        src="https://v3b.fal.media/files/b/0a9be4e0/I0N6iprDTsyx2Uy7W5tEX_ebf35f4184e04e69aeff7ebbc51df97f.mp4"
+        autoplay muted loop playsinline preload="metadata"
+      ></video>
+    </div>
+  </section>
+
+  <!-- ── 04 — Second Skin ───────────────────────────────── -->
+  <section class="post" id="post-04">
+    <div class="section-mark">
+      <span class="num">04 · Second Skin</span>
+      <span class="rule"></span>
+    </div>
+    <div class="post-head">
+      <h2 class="post-title">The fabric, <span class="em">made flesh.</span></h2>
+      <div class="post-body">
+        <p>A woman covered in red dragonfly scales, gently embracing herself. The Tee Second Skin as concept — the garment that disappears into you. Sneak peek for the product line.</p>
+        <p class="post-meta">
+          <span>Idea · Product as second skin</span><span class="sep">·</span>
+          <span>Brand role · Tee teaser</span><span class="sep">·</span>
+          <span>8s · 16:9</span>
+        </p>
+      </div>
+    </div>
+    <div class="video-frame">
+      <video
+        src="https://v3b.fal.media/files/b/0a9be4e0/SDbau7arLZuwZREUQs-kJ_ce132f206f824b7d8f87c3738b195fd9.mp4"
+        autoplay muted loop playsinline preload="metadata"
+      ></video>
+    </div>
+  </section>
+
+  <!-- ── Footer ──────────────────────────────────────── -->
+  <footer class="footer">
+    <p class="essence">You don't become someone else in RDF. You return to yourself.</p>
+    <p class="agency">
+      InnovareAI · creative concepts<br/>
+      <a href="mailto:hello@innovareai.com">hello@innovareai.com</a>
+    </p>
+  </footer>
+
+</div>
+
+<script>
+  // Subtle reveal on scroll for sections
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) {
+          e.target.classList.add('in')
+          io.unobserve(e.target)
+        }
+      }
+    }, { threshold: 0.12 })
+    document.querySelectorAll('.hero, .post').forEach(el => io.observe(el))
+  } else {
+    document.querySelectorAll('.hero, .post').forEach(el => el.classList.add('in'))
+  }
+</script>
+
+</body>
+</html>
