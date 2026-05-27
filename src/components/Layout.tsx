@@ -137,17 +137,21 @@ function WorkspaceSwitcher() {
   )
 }
 
-// ─── rail section heading ────────────────────────────────────────────────
-// Quiet uppercase label with subtle letter-spacing — no em-dash, no rule.
-// Modern minimal: hierarchy comes from spacing, not decorative chrome.
+// ─── rail section heading — LIGHT treatment ──────────────────────────────
+// Smaller (10px), tighter letter-spacing, ghost color. Disappears into the
+// background unless you're looking for it. Hierarchy via spacing + type
+// weight, not decoration.
 function RailSection({ label, count }: { label: string; count?: number }) {
   return (
-    <div className="px-4 pt-6 pb-2 flex items-baseline gap-1.5">
-      <span className="text-[11px] font-medium" style={{ color: 'var(--ghost)' }}>
+    <div className="px-4 pt-5 pb-1.5 flex items-baseline gap-1.5">
+      <span
+        className="text-[10px] font-medium uppercase"
+        style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}
+      >
         {label}
       </span>
       {typeof count === 'number' && count > 0 && (
-        <span className="text-[11px]" style={{ color: 'var(--mist)' }}>{count}</span>
+        <span className="text-[10px]" style={{ color: 'var(--mist)' }}>{count}</span>
       )}
     </div>
   )
@@ -456,12 +460,14 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--paper)' }}>
-      {/* Rail */}
+      {/* Rail — LIGHT treatment: same bg as canvas, no border. Separation     */}
+      {/* comes from whitespace, not chrome. The rail recedes; the work        */}
+      {/* foregrounds. (Was border-right + same bg → felt like a panel. Now    */}
+      {/* the rail just blends into the canvas as a sibling region.)           */}
       <aside
         className="w-64 flex-shrink-0 flex flex-col"
         style={{
           background: 'var(--paper)',
-          borderRight: '1px solid var(--paper-edge)',
         }}
       >
         {/* Brand mark */}
@@ -671,10 +677,10 @@ export default function Layout() {
           )}
         </div>
 
-        {/* Footer — Settings + theme + user */}
+        {/* Footer — Settings + theme + user. No border — separation by   */}
+        {/* whitespace alone, matching the light-rails treatment.           */}
         <div
-          className="px-2 py-2 flex items-center gap-1"
-          style={{ borderTop: '1px solid var(--paper-edge)' }}
+          className="px-2 pt-3 pb-2 mt-2 flex items-center gap-1"
         >
           <NavLink
             to="/settings"

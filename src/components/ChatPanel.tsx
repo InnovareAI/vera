@@ -56,10 +56,15 @@ export function ChatPanel() {
   const [input, setInput] = useState('')
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
   const [streaming, setStreaming] = useState(false)
-  // Default to 'default' (60vh) so the canvas above (Dashboard / Review /
-  // Audit) is visible on every page load. Fullscreen is still one click /
-  // ⌘\ away — for when the operator wants chat-only focus.
-  const [mode, setMode] = useState<Mode>('default')
+  // Default to 'minimized' (64px composer-only strip) so the canvas owns
+  // the screen and the chat is reachable as a thin strip at the bottom.
+  // ⌘J expands to 'default' (60vh) when the operator wants to converse;
+  // ⌘\ cycles all three modes (minimized → default → fullscreen).
+  //
+  // The earlier 'default' default ate ~60% of vertical real-estate on every
+  // page — canvas got squeezed even when the operator wasn't actively
+  // chatting. Light rails + minimized chat strip together let pages breathe.
+  const [mode, setMode] = useState<Mode>('minimized')
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const scrollerRef = useRef<HTMLDivElement | null>(null)
