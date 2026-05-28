@@ -1,24 +1,33 @@
-// Dashboard answers ONE question: "What needs my attention right now?"
+// Dashboard — refactored onto the design system primitives.
 //
-// Applied the UX declutter skill (skills.tool.ux_declutter):
-//   · Cut the H1 + date subtitle — rail already labels the page "Overview"
-//   · Cut the 3-stat grid (Awaiting/Active/Recent) — numbers that don't
-//     change meaningfully day-to-day, and the Review nav badge already
-//     surfaces "Awaiting"
-//   · Cut the "Recent activity" card — pure duplication of the rail's
-//     Recent + In-progress sections
-//   · Kept the LinkedIn audit card (the actual answer to client health)
-//   · Kept the pending-approval list, framed as the work surface
+// Answers ONE question: "What needs my attention right now?"
+//
+// Page structure (top → bottom):
+//   1. VERA wants to — open agent_observations (agentic surface)
+//   2. EmptyState — when nothing's loaded for a fresh workspace
+//   3. Client surface — latest audit card with re-run CTA
+//   4. Awaiting your review — pending posts list
+//
+// Right rail: Suggested next + This week stats (see useRightRail call).
 
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, RotateCw, ArrowRight, Sparkles } from 'lucide-react'
+import { ArrowRight, RotateCw, Sparkles, Telescope } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { StatusChip } from '../components/Chip'
 import { useProject } from '../lib/projectContext'
 import { useOrg } from '../lib/orgContext'
 import { useRightRail } from '../lib/rightRailContext'
+import {
+  Button,
+  SectionLabel,
+  EmptyState,
+  color,
+  space,
+  type as t,
+  radius,
+} from '../design'
 
 interface Observation {
   id: string
@@ -58,10 +67,6 @@ export default function Dashboard() {
   const [actingId, setActingId] = useState<string | null>(null)
 
   const loadAudit = useCallback(async () => {
-    // Scope to the active workspace. Previously this pulled the latest
-    // audit from ANY org and surfaced it on every dashboard regardless of
-    // which workspace was active — caused the Dashboard to show one org's
-    // score while /audit (correctly scoped) said no audit existed.
     if (!activeOrg?.id) { setAudit(null); return }
     const { data: latest } = await supabase
       .from('linkedin_audits')
@@ -102,9 +107,6 @@ export default function Dashboard() {
   useEffect(() => {
     async function load() {
       setLoading(true)
-      // Pending list scoped to the active project (and workspace).
-      // When no project is active yet (pre-migration), falls back to
-      // workspace-level — same behavior as before projects shipped.
       let q = supabase
         .from('content_posts')
         .select('*')
@@ -121,7 +123,6 @@ export default function Dashboard() {
     load()
   }, [loadAudit, activeOrg?.id, activeProject?.id])
 
-  // Observations — what VERA noticed and proposes to do
   const loadObservations = useCallback(async () => {
     if (!activeOrg?.id) { setObservations([]); return }
     let q = supabase
@@ -129,7 +130,6 @@ export default function Dashboard() {
       .select('id, org_id, project_id, kind, severity, title, detail, proposed_action, action_kind, action_payload, status, created_at')
       .eq('org_id', activeOrg.id)
       .eq('status', 'open')
-      .order('severity', { ascending: false }) // high → medium → low (asc on text reverses; we want high first so we'll sort client-side)
       .order('created_at', { ascending: false })
       .limit(8)
     if (activeProject?.id) q = q.eq('project_id', activeProject.id)
@@ -145,11 +145,6 @@ export default function Dashboard() {
   async function actOn(obs: Observation) {
     setActingId(obs.id)
     try {
-      // Call vera-act — server-side runner. It marks the observation
-      // actioned, then runs the proposed work in the background:
-      //   run_audit              → fires audit endpoints
-      //   draft_from_campaign    → invokes orchestrator → post in Review
-      //   prompt_knowledge_input → no-op server side; we navigate below
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
       const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
       await fetch(`${supabaseUrl}/functions/v1/vera-act`, {
@@ -160,24 +155,17 @@ export default function Dashboard() {
           'Authorization': `Bearer ${anonKey}`,
         },
         body: JSON.stringify({ observation_id: obs.id }),
-      }).catch(() => { /* still navigate even if server call fails */ })
+      }).catch(() => {})
 
-      // For "needs operator input" kinds, navigate so VERA can take
-      // their input. For pure-server kinds (audit / draft), stay on
-      // dashboard — operator sees the result land via the observation
-      // refresh + post appearing in Review.
       if (obs.action_kind === 'prompt_knowledge_input') {
         const slug = activeProject?.slug
         navigate(slug ? `/p/${slug}/knowledge` : '/knowledge')
         return
       }
       if (obs.action_kind === 'run_audit' && obs.org_id) {
-        // Take operator to the score page so they see the audit
-        // refreshing live.
         navigate(`/linkedin-score/${obs.org_id}`)
         return
       }
-      // draft_from_campaign and unknowns: stay on dashboard, refresh list
     } finally {
       setActingId(null)
       loadObservations()
@@ -191,9 +179,6 @@ export default function Dashboard() {
     loadObservations()
   }
 
-  // ─── Right rail content ───────────────────────────────────────────────
-  // "Suggested next" + "This week" stats. Both surface things the
-  // operator can act on without leaving the dashboard.
   useRightRail(
     <DashboardRightRail
       auditOrgId={audit?.org_id}
@@ -204,70 +189,86 @@ export default function Dashboard() {
     [audit?.org_id, audit?.profile_score, audit?.brew_score, pendingPosts.length],
   )
 
-  // Empty workspace — no audit, no pending posts, no observations.
-  // Renders a clean "first run" state instead of a blank canvas.
   const isEmpty = !loading && !audit && pendingPosts.length === 0 && observations.length === 0
 
   return (
-    <div className="p-8 max-w-4xl">
-      {/* VERA wants to — agentic surface. Shows what VERA noticed since   */}
-      {/* last action and what she proposes. Each row is one-click action  */}
-      {/* + dismiss. Rendered above everything else because this is the    */}
-      {/* "agent-first" entry point — operator sees VERA's intent before   */}
-      {/* the static report views.                                          */}
+    <div style={{ padding: space[8], maxWidth: 980 }}>
+
+      {/* ─── VERA wants to — agentic surface ─────────────────────── */}
       {observations.length > 0 && (
-        <section className="mb-10">
-          <div className="flex items-baseline justify-between mb-3">
-            <p className="text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--accent)' }}>
-              VERA wants to <span className="ml-1.5 font-normal" style={{ color: 'var(--mist)' }}>{observations.length}</span>
-            </p>
-          </div>
-          <div style={{ borderTop: '1px solid var(--paper-edge)' }}>
+        <section style={{ marginBottom: space[10] }}>
+          <SectionLabel tone="accent" count={observations.length} style={{ marginBottom: space[5] }}>
+            VERA wants to
+          </SectionLabel>
+          <div style={{ borderTop: `1px solid ${color.line}` }}>
             {observations.map(obs => (
               <div
                 key={obs.id}
-                className="flex items-start gap-3 py-3.5"
-                style={{ borderBottom: '1px solid var(--paper-edge)' }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: space[5],
+                  padding: `${space[5]} 0`,
+                  borderBottom: `1px solid ${color.line}`,
+                }}
               >
                 <span
-                  className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0"
                   style={{
+                    marginTop: 7,
+                    width: 6,
+                    height: 6,
+                    borderRadius: 999,
                     background:
-                      obs.severity === 'high'   ? 'var(--accent)' :
-                      obs.severity === 'medium' ? 'var(--accent-soft)' :
-                      'var(--mist)',
+                      obs.severity === 'high'   ? color.accent :
+                      obs.severity === 'medium' ? color.accentInk :
+                      color.faint,
+                    flexShrink: 0,
                   }}
                   title={`${obs.severity} priority`}
                 />
-                <div className="flex-1 min-w-0">
-                  <p className="text-[14px] font-medium leading-snug" style={{ color: 'var(--ink)' }}>{obs.title}</p>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{
+                    fontSize: t.size.body,
+                    fontWeight: t.weight.medium,
+                    color: color.ink,
+                    margin: 0,
+                    lineHeight: t.lineHeight.snug,
+                  }}>
+                    {obs.title}
+                  </p>
                   {obs.detail && (
-                    <p className="text-[12.5px] mt-1 leading-snug" style={{ color: 'var(--ink-quiet)' }}>{obs.detail}</p>
+                    <p style={{
+                      fontSize: t.size.cap,
+                      color: color.ink2,
+                      margin: 0,
+                      marginTop: space[2],
+                      lineHeight: t.lineHeight.normal,
+                    }}>
+                      {obs.detail}
+                    </p>
                   )}
-                  {(obs.proposed_action || true) && (
-                    <div className="flex items-center gap-2 mt-2.5 flex-wrap">
-                      {obs.proposed_action && (
-                        <button
-                          onClick={() => actOn(obs)}
-                          disabled={actingId === obs.id}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12.5px] font-medium transition-opacity hover:opacity-90 disabled:opacity-50"
-                          style={{ background: 'var(--ink)', color: 'var(--paper-warm)', borderRadius: 'var(--radius-md)' }}
-                        >
-                          {actingId === obs.id
-                            ? <Loader2 className="w-3 h-3 animate-spin" />
-                            : <Sparkles className="w-3 h-3" strokeWidth={2} />}
-                          {obs.proposed_action}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => dismiss(obs)}
-                        className="text-[12px] px-2 py-1 transition-opacity hover:opacity-70"
-                        style={{ color: 'var(--ghost)' }}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: space[3],
+                    marginTop: space[4],
+                    flexWrap: 'wrap',
+                  }}>
+                    {obs.proposed_action && (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={() => actOn(obs)}
+                        loading={actingId === obs.id}
+                        leading={<Sparkles size={11} strokeWidth={2} />}
                       >
-                        Dismiss
-                      </button>
-                    </div>
-                  )}
+                        {obs.proposed_action}
+                      </Button>
+                    )}
+                    <Button size="sm" variant="ghost" onClick={() => dismiss(obs)}>
+                      Dismiss
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -275,127 +276,180 @@ export default function Dashboard() {
         </section>
       )}
 
+      {/* ─── Empty workspace state ──────────────────────────────── */}
       {isEmpty && activeOrg && (
-        <section className="py-16 text-center">
-          <p className="text-[12px] font-medium uppercase tracking-wide mb-2" style={{ color: 'var(--ghost)' }}>Welcome to VERA</p>
-          <h1 className="text-[24px] font-semibold mb-2" style={{ color: 'var(--ink)' }}>{activeOrg.name}</h1>
-          <p className="text-[14px] mb-6 max-w-md mx-auto" style={{ color: 'var(--ink-quiet)' }}>
-            Start by auditing your LinkedIn surface — VERA needs to know how the algorithm sees you before drafting content.
-          </p>
-          <div className="flex items-center justify-center gap-3">
-            <button
-              onClick={() => navigate(`/onboarding/audit/${activeOrg.id}`)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium hover:opacity-90 transition-opacity"
-              style={{ background: 'var(--ink)', color: 'var(--paper-warm)', borderRadius: 'var(--radius-md)' }}
-            >
-              Run first audit <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
-            </button>
-            <button
-              onClick={() => navigate('/generate')}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium hover:opacity-80 transition-opacity"
-              style={{ color: 'var(--ink-quiet)' }}
-            >
-              Skip — draft a brief
-            </button>
-          </div>
-        </section>
+        <EmptyState
+          icon={<Telescope size={22} strokeWidth={1.5} />}
+          title={`Welcome to VERA · ${activeOrg.name}`}
+          body="Start by auditing your LinkedIn surface — VERA needs to know how the algorithm sees you before drafting content."
+          actions={
+            <>
+              <Button
+                variant="primary"
+                onClick={() => navigate(`/onboarding/audit/${activeOrg.id}`)}
+                trailing={<ArrowRight size={13} strokeWidth={2} />}
+              >
+                Run first audit
+              </Button>
+              <Button variant="ghost" onClick={() => navigate('/generate')}>
+                Skip — draft a brief
+              </Button>
+            </>
+          }
+        />
       )}
 
-      {/* Client surface — the one-glance answer. Big scores, single ink   */}
-      {/* CTA (Re-run), one quiet secondary (View detail). No padding-on-   */}
-      {/* padding chrome.                                                    */}
+      {/* ─── Client surface — audit card ────────────────────────── */}
       {audit && (
-        <section className="mb-10">
-          <div className="flex items-start justify-between gap-6 mb-4">
+        <section style={{ marginBottom: space[10] }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: space[6],
+            marginBottom: space[5],
+          }}>
             <div>
-              <p className="text-[12px] font-medium uppercase tracking-wide mb-1.5" style={{ color: 'var(--ghost)' }}>Client surface</p>
-              <p className="text-[20px] font-semibold leading-tight" style={{ color: 'var(--ink)' }}>{audit.org_name}</p>
-              <p className="text-[12px] mt-1" style={{ color: 'var(--ghost)' }}>
+              <SectionLabel style={{ marginBottom: space[3] }}>Client surface</SectionLabel>
+              <p style={{
+                fontSize: t.size.h3,
+                fontWeight: t.weight.semibold,
+                color: color.ink,
+                margin: 0,
+                lineHeight: t.lineHeight.tight,
+                letterSpacing: t.letterSpacing.snug,
+              }}>
+                {audit.org_name}
+              </p>
+              <p style={{
+                fontSize: t.size.cap,
+                color: color.ghost,
+                marginTop: space[2],
+                marginBottom: 0,
+              }}>
                 {audit.last_run ? `Audited ${relTime(audit.last_run)}` : 'Not yet audited'}
               </p>
             </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <button
+            <div style={{ display: 'flex', alignItems: 'center', gap: space[3], flexShrink: 0 }}>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => navigate(`/linkedin-score/${audit.org_id}`)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[13px] font-medium hover:opacity-80"
-                style={{ color: 'var(--ink-quiet)' }}
+                trailing={<ArrowRight size={13} strokeWidth={1.75} />}
               >
-                Detail <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
-              </button>
-              <button
+                Detail
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={reRunAudits}
-                disabled={refreshing}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium transition-opacity hover:opacity-90 disabled:opacity-50"
-                style={{ background: 'var(--ink)', color: 'var(--paper-warm)', borderRadius: 'var(--radius-md)' }}
+                loading={refreshing}
+                leading={<RotateCw size={13} strokeWidth={2} />}
               >
-                {refreshing
-                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Re-running…</>
-                  : <><RotateCw className="w-3.5 h-3.5" strokeWidth={2} /> Re-run</>}
-              </button>
+                {refreshing ? 'Re-running…' : 'Re-run'}
+              </Button>
             </div>
           </div>
-          <div className="flex gap-10 py-5" style={{ borderTop: '1px solid var(--paper-edge)', borderBottom: '1px solid var(--paper-edge)' }}>
+          <div style={{
+            display: 'flex',
+            gap: space[10],
+            padding: `${space[5]} 0`,
+            borderTop: `1px solid ${color.line}`,
+            borderBottom: `1px solid ${color.line}`,
+          }}>
             <ScoreChip label="Profile" score={audit.profile_score} grade={audit.profile_grade} />
             <ScoreChip label="Brew360" score={audit.brew_score} grade={audit.brew_grade} />
           </div>
           {refreshError && (
-            <p
-              className="mt-3 text-[12px] px-3 py-2"
-              style={{
-                color: 'var(--accent)',
-                background: 'var(--accent-tint)',
-                border: '1px solid var(--accent-rule)',
-                borderRadius: 'var(--radius-sm)',
-              }}
-            >
+            <p style={{
+              marginTop: space[3],
+              fontSize: t.size.cap,
+              padding: `${space[2]} ${space[3]}`,
+              color: color.danger,
+              background: 'rgba(185,28,28,0.06)',
+              border: `1px solid rgba(185,28,28,0.18)`,
+              borderRadius: radius.sm,
+            }}>
               {refreshError}
             </p>
           )}
           {refreshing && (
-            <p className="mt-3 text-[12px]" style={{ color: 'var(--ghost)' }}>
+            <p style={{ marginTop: space[3], fontSize: t.size.cap, color: color.ghost }}>
               Running in the background — new score appears in ~30s.
             </p>
           )}
         </section>
       )}
 
-      {/* Pending approval — the work surface. Empty state hides the      */}
-      {/* whole section per the skill: don't show "Nothing yet" chrome.    */}
+      {/* ─── Awaiting your review ───────────────────────────────── */}
       {(loading || pendingPosts.length > 0) && (
         <section>
-          <div className="flex items-baseline justify-between mb-3">
-            <p className="text-[12px] font-medium uppercase tracking-wide" style={{ color: 'var(--ghost)' }}>
-              Awaiting your review
-              {!loading && pendingPosts.length > 0 && (
-                <span className="ml-1.5 normal-case tracking-normal" style={{ color: 'var(--mist)' }}>{pendingPosts.length}</span>
-              )}
-            </p>
-            {!loading && pendingPosts.length > 0 && (
+          <SectionLabel
+            count={!loading ? pendingPosts.length : undefined}
+            action={!loading && pendingPosts.length > 0 ? (
               <button
                 onClick={() => navigate('/review')}
-                className="text-[12px] font-medium hover:opacity-80 inline-flex items-center gap-1"
-                style={{ color: 'var(--ink-quiet)' }}
+                style={{
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  color: color.ink2, fontSize: t.size.cap, fontWeight: t.weight.medium,
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  fontFamily: t.family.sans,
+                }}
               >
-                Open queue <ArrowRight className="w-3 h-3" strokeWidth={1.75} />
+                Open queue <ArrowRight size={11} strokeWidth={1.75} />
               </button>
-            )}
-          </div>
-          <div style={{ borderTop: '1px solid var(--paper-edge)' }}>
+            ) : undefined}
+            style={{ marginBottom: space[4] }}
+          >
+            Awaiting your review
+          </SectionLabel>
+          <div style={{ borderTop: `1px solid ${color.line}` }}>
             {loading ? (
-              <div className="py-4 text-[13px]" style={{ color: 'var(--ghost)' }}>Loading…</div>
+              <div style={{ padding: `${space[4]} 0`, fontSize: t.size.sm, color: color.ghost }}>
+                Loading…
+              </div>
             ) : pendingPosts.map(post => (
               <button
                 key={post.id}
                 onClick={() => navigate(`/review/${post.id}`)}
-                className="w-full flex items-center gap-3 py-3 text-left hover:bg-[var(--fog)] transition-colors"
-                style={{ borderBottom: '1px solid var(--paper-edge)' }}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: space[5],
+                  padding: `${space[4]} 0`,
+                  borderBottom: `1px solid ${color.line}`,
+                  textAlign: 'left',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  fontFamily: t.family.sans,
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = color.paper2)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
               >
-                <div className="flex-1 min-w-0 px-2">
-                  <p className="text-[14px] truncate" style={{ color: 'var(--ink)' }}>{post.title || 'Untitled post'}</p>
-                  <p className="text-[11.5px] mt-0.5 lowercase" style={{ color: 'var(--ghost)' }}>{post.channel} · {post.format}</p>
+                <div style={{ flex: 1, minWidth: 0, padding: `0 ${space[2]}` }}>
+                  <p style={{
+                    fontSize: t.size.body,
+                    color: color.ink,
+                    margin: 0,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}>
+                    {post.title || 'Untitled post'}
+                  </p>
+                  <p style={{
+                    fontSize: t.size.cap,
+                    color: color.ghost,
+                    margin: 0,
+                    marginTop: 2,
+                    textTransform: 'lowercase',
+                  }}>
+                    {post.channel} · {post.format}
+                  </p>
                 </div>
                 <StatusChip status={post.status} />
-                <ArrowRight className="w-3.5 h-3.5 mr-2 flex-shrink-0" strokeWidth={1.5} style={{ color: 'var(--mist)' }} />
+                <ArrowRight size={13} strokeWidth={1.5} style={{ color: color.faint, marginRight: space[2], flexShrink: 0 }} />
               </button>
             ))}
           </div>
@@ -405,12 +459,27 @@ export default function Dashboard() {
   )
 }
 
+// ─── ScoreChip — kept inline (dashboard-specific layout) ────────────
 function ScoreChip({ label, score, grade }: { label: string; score: number | null; grade: string | null }) {
   return (
-    <div className="flex items-baseline gap-2">
-      <span className="text-[12px] font-medium" style={{ color: 'var(--ghost)' }}>{label}</span>
-      <span className="text-[26px] font-semibold leading-none" style={{ color: 'var(--ink)' }}>{score ?? '—'}</span>
-      {grade && <span className="text-[14px] font-semibold" style={{ color: 'var(--ink-quiet)' }}>{grade}</span>}
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: space[3] }}>
+      <span style={{ fontSize: t.size.cap, fontWeight: t.weight.medium, color: color.ghost }}>
+        {label}
+      </span>
+      <span style={{
+        fontSize: t.size.h2,
+        fontWeight: t.weight.semibold,
+        lineHeight: 1,
+        color: color.ink,
+        fontVariantNumeric: 'tabular-nums',
+      }}>
+        {score ?? '—'}
+      </span>
+      {grade && (
+        <span style={{ fontSize: t.size.lg, fontWeight: t.weight.semibold, color: color.ink2 }}>
+          {grade}
+        </span>
+      )}
     </div>
   )
 }
@@ -424,12 +493,7 @@ function relTime(iso: string): string {
   const d = Math.floor(h / 24); return `${d}d ago`
 }
 
-// ─── Dashboard right rail ──────────────────────────────────────────────
-// "Suggested next" — three contextual prompts derived from current state.
-// "This week" — a tight stats block (counts, not abstract metrics).
-//
-// All numbers update with deps. No "Nothing here yet" empty states — if
-// there's nothing to suggest, the section just doesn't render.
+// ─── Right rail content ─────────────────────────────────────────────
 function DashboardRightRail({
   auditOrgId, profileScore, brewScore, pendingCount,
 }: {
@@ -438,46 +502,47 @@ function DashboardRightRail({
   brewScore: number | null | undefined
   pendingCount: number
 }) {
-  // Build suggestions from the data we have. Each is short, actionable,
-  // and links to a real surface. Empty list → section hides.
   const suggestions: Array<{ id: string; text: React.ReactNode; href?: string }> = []
 
   if (typeof brewScore === 'number' && brewScore < 70) {
     suggestions.push({
       id: 'brew',
-      text: <>Brew360 is at <b style={{ color: 'var(--ink)' }}>{brewScore}</b> — below 70. <span style={{ color: 'var(--accent)' }}>Open audit →</span></>,
+      text: <>Brew360 is at <b style={{ color: color.ink }}>{brewScore}</b> — below 70. <span style={{ color: color.accent }}>Open audit →</span></>,
       href: auditOrgId ? `/linkedin-score/${auditOrgId}` : undefined,
     })
   }
   if (pendingCount > 0) {
     suggestions.push({
       id: 'review',
-      text: <><b style={{ color: 'var(--ink)' }}>{pendingCount}</b> {pendingCount === 1 ? 'post is' : 'posts are'} waiting on you. <span style={{ color: 'var(--accent)' }}>Open queue →</span></>,
+      text: <><b style={{ color: color.ink }}>{pendingCount}</b> {pendingCount === 1 ? 'post is' : 'posts are'} waiting on you. <span style={{ color: color.accent }}>Open queue →</span></>,
       href: '/review',
     })
   }
   if (typeof profileScore === 'number' && profileScore >= 85) {
     suggestions.push({
       id: 'profile',
-      text: <>Profile score <b style={{ color: 'var(--ink)' }}>{profileScore}</b> · {profileScore >= 90 ? 'A+' : 'A'}. Solid foundation — focus next on Brew360 fixes.</>,
+      text: <>Profile score <b style={{ color: color.ink }}>{profileScore}</b> · {profileScore >= 90 ? 'A+' : 'A'}. Solid foundation — focus next on Brew360 fixes.</>,
     })
   }
 
   return (
-    <div className="flex flex-col gap-6 py-6 pr-5 pl-1">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: space[8], padding: `${space[6]} ${space[5]} 0 ${space[2]}` }}>
       {suggestions.length > 0 && (
         <section>
-          <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
-            Suggested next
-          </p>
-          <div className="flex flex-col text-[12.5px] leading-relaxed" style={{ color: 'var(--ink-quiet)' }}>
+          <SectionLabel style={{ marginBottom: space[4] }}>Suggested next</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
             {suggestions.map((s, i) => (
               <a
                 key={s.id}
                 href={s.href}
-                className="block py-2.5 hover:opacity-80 transition-opacity"
                 style={{
-                  borderBottom: i < suggestions.length - 1 ? '1px solid var(--paper-edge)' : 'none',
+                  display: 'block',
+                  padding: `${space[4]} 0`,
+                  fontSize: t.size.cap,
+                  lineHeight: t.lineHeight.relaxed,
+                  color: color.ink2,
+                  textDecoration: 'none',
+                  borderBottom: i < suggestions.length - 1 ? `1px solid ${color.line}` : 'none',
                   cursor: s.href ? 'pointer' : 'default',
                 }}
               >
@@ -489,22 +554,18 @@ function DashboardRightRail({
       )}
 
       <section>
-        <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
-          This week
-        </p>
-        <div className="text-[12px] flex flex-col gap-1.5" style={{ color: 'var(--ink-quiet)' }}>
-          <div className="flex justify-between">
-            <span>Awaiting review</span>
-            <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{pendingCount}</b>
-          </div>
-          <div className="flex justify-between">
-            <span>Profile score</span>
-            <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{profileScore ?? '—'}</b>
-          </div>
-          <div className="flex justify-between">
-            <span>Brew360 fit</span>
-            <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{brewScore ?? '—'}</b>
-          </div>
+        <SectionLabel style={{ marginBottom: space[4] }}>This week</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: space[3], fontSize: t.size.cap, color: color.ink2 }}>
+          {[
+            ['Awaiting review', pendingCount],
+            ['Profile score',  profileScore ?? '—'],
+            ['Brew360 fit',    brewScore ?? '—'],
+          ].map(([label, value]) => (
+            <div key={label as string} style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>{label}</span>
+              <b style={{ color: color.ink, fontVariantNumeric: 'tabular-nums' }}>{value}</b>
+            </div>
+          ))}
         </div>
       </section>
     </div>
