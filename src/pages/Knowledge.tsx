@@ -21,6 +21,18 @@ import { Upload, Link2, FileText, Loader2, Trash2, ExternalLink, FileImage, File
 import { supabase } from '../lib/supabase'
 import { useProject } from '../lib/projectContext'
 import { useRightRail } from '../lib/rightRailContext'
+import {
+  PageHeader,
+  EmptyState,
+  Button,
+  Field,
+  Input,
+  Textarea,
+  color,
+  space,
+  type as t,
+  radius,
+} from '../design'
 
 const INGEST_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-ingest`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -261,16 +273,14 @@ export default function Knowledge() {
   }
 
   return (
-    <div className="p-8 max-w-3xl">
-      <div className="mb-7">
-        <p className="text-[11px] font-medium uppercase tracking-wide mb-1.5" style={{ color: 'var(--ghost)' }}>
-          {activeProject.name}
-        </p>
-        <h1 className="text-[24px] font-semibold leading-tight" style={{ color: 'var(--ink)' }}>Knowledge</h1>
-        <p className="text-[13px] mt-1.5" style={{ color: 'var(--ink-quiet)' }}>
-          Everything in here is in VERA's working memory for this project — pasted text, URLs she should fetch, files you upload. Text is embedded and pulled into chat by relevance; raw assets are referenced by name.
-        </p>
-      </div>
+    <div style={{ padding: space[8], maxWidth: 760 }}>
+      <PageHeader
+        eyebrow={activeProject.name}
+        title="Knowledge"
+        subtitle="Everything in here is in VERA's working memory for this project — pasted text, URLs she should fetch, files you upload. Text is embedded and pulled into chat by relevance; raw assets are referenced by name."
+        size="md"
+        style={{ marginBottom: space[7] }}
+      />
 
       {/* Mode tabs */}
       <div
@@ -300,117 +310,126 @@ export default function Knowledge() {
 
       {/* Input area */}
       <div
-        className="p-4 mb-4"
         style={{
-          background: 'var(--paper-warm)',
-          border: '1px solid var(--paper-edge)',
-          borderRadius: 'var(--radius-md)',
+          background: color.surface,
+          border: `1px solid ${color.line}`,
+          borderRadius: radius.md,
+          padding: space[5],
+          marginBottom: space[5],
         }}
       >
         {mode === 'paste' && (
-          <>
-            <input
-              type="text"
-              placeholder="Title (optional) — e.g. 'Q2 brief'"
-              value={pasteTitle}
-              onChange={e => setPasteTitle(e.target.value)}
-              className="w-full mb-2 px-3 py-1.5 text-[13px] outline-none"
-              style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '4px', color: 'var(--ink)' }}
-            />
-            <textarea
-              placeholder="Paste a brief, brand voice doc, positioning, audience notes, anything VERA should know about this project…"
-              value={pasteText}
-              onChange={e => setPasteText(e.target.value)}
-              rows={8}
-              className="w-full px-3 py-2 text-[13px] outline-none resize-y"
-              style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '4px', color: 'var(--ink)', minHeight: 160 }}
-            />
-            <div className="flex justify-end mt-2.5">
-              <button
+          <div style={{ display: 'flex', flexDirection: 'column', gap: space[4] }}>
+            <Field>
+              <Input
+                type="text"
+                placeholder="Title (optional) — e.g. 'Q2 brief'"
+                value={pasteTitle}
+                onChange={e => setPasteTitle(e.target.value)}
+              />
+            </Field>
+            <Field>
+              <Textarea
+                placeholder="Paste a brief, brand voice doc, positioning, audience notes, anything VERA should know about this project…"
+                value={pasteText}
+                onChange={e => setPasteText(e.target.value)}
+                rows={8}
+                style={{ minHeight: 160 }}
+              />
+            </Field>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button
+                variant="primary"
                 onClick={submitPaste}
-                disabled={busy || pasteText.trim().length < 30}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-[12.5px] font-medium transition-opacity disabled:opacity-40 hover:opacity-90"
-                style={{ background: 'var(--ink)', color: 'var(--paper-warm)', borderRadius: 'var(--radius-md)' }}
+                loading={busy}
+                disabled={pasteText.trim().length < 30}
               >
-                {busy ? <><Loader2 size={13} className="animate-spin" /> Ingesting…</> : 'Ingest'}
-              </button>
+                {busy ? 'Ingesting…' : 'Ingest'}
+              </Button>
             </div>
-          </>
+          </div>
         )}
 
         {mode === 'url' && (
-          <>
-            <input
-              type="url"
-              placeholder="https://innovareai.com/sam"
-              value={urlValue}
-              onChange={e => setUrlValue(e.target.value)}
-              className="w-full mb-2 px-3 py-1.5 text-[13px] outline-none"
-              style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '4px', color: 'var(--ink)' }}
-            />
-            <input
-              type="text"
-              placeholder="Title (optional)"
-              value={urlTitle}
-              onChange={e => setUrlTitle(e.target.value)}
-              className="w-full px-3 py-1.5 text-[13px] outline-none"
-              style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '4px', color: 'var(--ink)' }}
-            />
-            <div className="flex justify-end mt-2.5">
-              <button
+          <div style={{ display: 'flex', flexDirection: 'column', gap: space[4] }}>
+            <Field>
+              <Input
+                type="url"
+                placeholder="https://innovareai.com/sam"
+                value={urlValue}
+                onChange={e => setUrlValue(e.target.value)}
+              />
+            </Field>
+            <Field>
+              <Input
+                type="text"
+                placeholder="Title (optional)"
+                value={urlTitle}
+                onChange={e => setUrlTitle(e.target.value)}
+              />
+            </Field>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button
+                variant="primary"
                 onClick={submitUrl}
-                disabled={busy || !urlValue.trim().startsWith('http')}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-[12.5px] font-medium transition-opacity disabled:opacity-40 hover:opacity-90"
-                style={{ background: 'var(--ink)', color: 'var(--paper-warm)', borderRadius: 'var(--radius-md)' }}
+                loading={busy}
+                disabled={!urlValue.trim().startsWith('http')}
               >
-                {busy ? <><Loader2 size={13} className="animate-spin" /> Fetching…</> : 'Fetch + ingest'}
-              </button>
+                {busy ? 'Fetching…' : 'Fetch + ingest'}
+              </Button>
             </div>
-          </>
+          </div>
         )}
 
         {mode === 'file' && (
-          <>
-            <div
-              onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={e => {
-                e.preventDefault(); setDragOver(false)
-                if (e.dataTransfer.files) uploadFiles(e.dataTransfer.files)
-              }}
-              onClick={() => fileInputRef.current?.click()}
-              className="flex flex-col items-center justify-center py-8 cursor-pointer transition-colors"
-              style={{
-                background: dragOver ? 'var(--fog)' : 'var(--paper)',
-                border: `2px dashed ${dragOver ? 'var(--ink-quiet)' : 'var(--paper-edge)'}`,
-                borderRadius: 'var(--radius-md)',
-              }}
-            >
-              <Upload size={20} style={{ color: 'var(--ghost)' }} strokeWidth={1.5} />
-              <p className="text-[13px] mt-2.5" style={{ color: 'var(--ink-quiet)' }}>
-                Drop files here, or <span style={{ color: 'var(--ink)', textDecoration: 'underline' }}>browse</span>
-              </p>
-              <p className="text-[11px] mt-1" style={{ color: 'var(--ghost)' }}>
-                PDFs · Word · Markdown · Logos · Images · Fonts · up to 50 MB. Text is extracted automatically.
-              </p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={e => { if (e.target.files) uploadFiles(e.target.files); e.target.value = '' }}
-              />
-            </div>
-          </>
+          <div
+            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={e => {
+              e.preventDefault(); setDragOver(false)
+              if (e.dataTransfer.files) uploadFiles(e.dataTransfer.files)
+            }}
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: `${space[9]} 0`,
+              cursor: 'pointer',
+              transition: `background 120ms var(--ease), border-color 120ms var(--ease)`,
+              background: dragOver ? color.paper2 : color.paper,
+              border: `2px dashed ${dragOver ? color.ink2 : color.line}`,
+              borderRadius: radius.md,
+            }}
+          >
+            <Upload size={20} strokeWidth={1.5} style={{ color: color.ghost }} />
+            <p style={{ fontSize: t.size.sm, marginTop: space[3], color: color.ink2 }}>
+              Drop files here, or <span style={{ color: color.ink, textDecoration: 'underline' }}>browse</span>
+            </p>
+            <p style={{ fontSize: t.size.cap, marginTop: space[1], color: color.ghost }}>
+              PDFs · Word · Markdown · Logos · Images · Fonts · up to 50 MB. Text is extracted automatically.
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              style={{ display: 'none' }}
+              onChange={e => { if (e.target.files) uploadFiles(e.target.files); e.target.value = '' }}
+            />
+          </div>
         )}
 
         {(error || report) && (
           <p
-            className="mt-3 text-[12px] px-3 py-2"
             style={{
-              color: error ? 'var(--accent)' : 'var(--ink-quiet)',
-              background: error ? 'var(--accent-tint)' : 'var(--fog)',
-              borderRadius: '4px',
+              marginTop: space[4],
+              fontSize: t.size.cap,
+              padding: `${space[2]} ${space[3]}`,
+              color: error ? color.danger : color.ink2,
+              background: error ? 'rgba(185,28,28,0.06)' : color.paper2,
+              border: error ? `1px solid rgba(185,28,28,0.18)` : 'none',
+              borderRadius: radius.sm,
             }}
           >
             {error || report}
@@ -537,9 +556,11 @@ export default function Knowledge() {
       )}
 
       {knowledge.length === 0 && assets.length === 0 && (
-        <p className="text-[13px] py-8 text-center" style={{ color: 'var(--ghost)' }}>
-          Nothing absorbed yet. Drop your first brief, brand voice doc, or logo above.
-        </p>
+        <EmptyState
+          icon={<FileText size={22} strokeWidth={1.5} />}
+          title="Nothing absorbed yet"
+          body="Drop your first brief, brand voice doc, or logo above. VERA will classify it and pull it into chat by relevance."
+        />
       )}
     </div>
   )
