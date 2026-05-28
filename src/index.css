@@ -67,6 +67,90 @@
   /* Base body size — bumped to read like Notion / Asana (14-15px is the */
   /* modern productivity-tool sweet spot, not 12-13px dashboard density) */
   --text-base:    14px;
+
+  /* ════════════════════════════════════════════════════════════════════ */
+  /* CANONICAL DESIGN SYSTEM TOKENS                                       */
+  /* Source: claude.ai/design VERA Design System v0.1                     */
+  /* Linear + Notion blend — keyboard-first, paper-warm, oxblood accent   */
+  /* used sparingly (max 4 surface moments per screen).                   */
+  /*                                                                      */
+  /* Use these in new components. Legacy --paper-warm / --paper-edge /    */
+  /* --fog / --mist / --ink-quiet still work (above) but are deprecated   */
+  /* in favor of the canonical names below.                               */
+  /* ════════════════════════════════════════════════════════════════════ */
+
+  /* — Color · paper & ink ──────────────────────────────────────────── */
+  --paper-2:      #F5F5F4;            /* subtle fill on paper (rails, hover) */
+  --surface:      #FFFFFF;            /* raised over paper (cards, dropdowns) */
+  --ink-2:        #404040;            /* secondary text */
+  --faint:        #A3A3A3;            /* tertiary text, placeholders */
+  --line:         #EAE7E2;            /* hairline rule */
+  --line-2:       #D9D5CE;            /* stronger hairline */
+
+  /* — Color · accent (use sparingly, max 4 per surface) ────────────── */
+  --accent-ink:   #5C141C;            /* hover state on accent CTA */
+  --accent-line:  rgba(122,31,43,0.18); /* accent hairline */
+
+  /* — Color · status (dots only, never fills) ──────────────────────── */
+  --success:      #2D7A3B;
+  --warn:         #B07A0C;
+  --danger:       #B91C1C;
+  --info:         #2A5DA8;
+
+  /* — Type · sizes ─────────────────────────────────────────────────── */
+  --t-micro:      11px;               /* uppercase section labels */
+  --t-cap:        12px;               /* captions, helper text */
+  --t-sm:         13px;               /* dense body, button labels */
+  --t-body:       14px;               /* primary body */
+  --t-lg:         15px;               /* emphasized body */
+  --t-h4:         17px;
+  --t-h3:         20px;
+  --t-h2:         26px;
+  --t-h1:         34px;
+  --t-display:    44px;
+
+  /* — Spacing · 4px base ───────────────────────────────────────────── */
+  --s-0: 0;
+  --s-1: 2px;
+  --s-2: 4px;
+  --s-3: 6px;
+  --s-4: 8px;
+  --s-5: 12px;
+  --s-6: 16px;
+  --s-7: 20px;
+  --s-8: 24px;
+  --s-9: 32px;
+  --s-10: 40px;
+  --s-11: 56px;
+  --s-12: 80px;
+
+  /* — Radius ───────────────────────────────────────────────────────── */
+  --r-0: 0;
+  --r-1: 3px;        /* chips, keyboard hint pills */
+  --r-2: 5px;        /* buttons, inputs */
+  --r-3: 8px;        /* cards, dropdowns */
+  --r-4: 12px;       /* palette, modal */
+  --r-pill: 999px;
+
+  /* — Motion ───────────────────────────────────────────────────────── */
+  --m-tap:        80ms;               /* button press */
+  --m-fast:       120ms;              /* hover */
+  --m-base:       180ms;              /* focus rings, chip pop-in */
+  --m-slow:       240ms;              /* palette open, toast slide */
+  --ease:         cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* — Z-index ──────────────────────────────────────────────────────── */
+  --z-base:    1;
+  --z-sticky:  10;
+  --z-nav:     100;
+  --z-popover: 200;
+  --z-toast:   300;
+  --z-modal:   400;
+  --z-palette: 500;
+
+  /* — Shadow · only on floating overlays ───────────────────────────── */
+  --shadow-pop:   0 1px 2px rgba(23,23,23,0.04), 0 8px 24px rgba(23,23,23,0.08);
+  --shadow-modal: 0 2px 4px rgba(23,23,23,0.05), 0 24px 64px rgba(23,23,23,0.16);
 }
 
 body[data-theme="dark"] {

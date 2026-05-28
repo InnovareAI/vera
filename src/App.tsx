@@ -5,6 +5,7 @@ import { OrgProvider, useOrg } from './lib/orgContext'
 import { ProjectProvider, useProject } from './lib/projectContext'
 import { RightRailProvider } from './lib/rightRailContext'
 import { ThemeProvider } from './lib/theme'
+import { ToastProvider } from './design'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { setUserContext, setOrgContext } from './lib/sentry'
 import { supabase } from './lib/supabase'
@@ -36,6 +37,7 @@ export default function App() {
   return (
     <ErrorBoundary variant="page">
       <ThemeProvider>
+        <ToastProvider>
         <AuthProvider>
           <OrgProvider>
             <ProjectProvider>
@@ -90,6 +92,7 @@ export default function App() {
             </ProjectProvider>
           </OrgProvider>
         </AuthProvider>
+        </ToastProvider>
       </ThemeProvider>
     </ErrorBoundary>
   )
