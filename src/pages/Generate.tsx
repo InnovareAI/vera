@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Send, Sparkles, Loader2 } from 'lucide-react'
+import {
+  Send, Sparkles, Loader2, Check, RefreshCw, Pencil, ChevronDown, ChevronRight, ExternalLink, X,
+} from 'lucide-react'
 import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
 import { useRightRail } from '../lib/rightRailContext'
 import { supabase } from '../lib/supabase'
-import type { Audience } from '../lib/supabase'
+import type { Audience, Post } from '../lib/supabase'
 
 interface Campaign {
   id: string
@@ -18,295 +20,38 @@ interface Campaign {
 }
 
 const ORCHESTRATOR_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/vera-orchestrator`
+const APPROVAL_WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approval-webhook`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 type AgentName =
-  | 'VERA'
-  | 'Strategist'
-  | 'Researcher'
-  | 'Writer'
-  | 'SEO Agent'
-  | 'Persona Adapter'
-  | 'Brand Guard'
-  | 'Compliance'
-  | 'Publisher'
+  | 'VERA' | 'Strategist' | 'Researcher' | 'Writer' | 'SEO Agent'
+  | 'Persona Adapter' | 'Brand Guard' | 'Compliance' | 'Publisher'
 
-interface Message {
-  id: string
-  role: 'user' | 'agent'
-  agent?: AgentName
-  content: string
-  isStreaming?: boolean
+// The pipeline runs 8 specialist agents. The user shouldn't have to think
+// about any of them — so each maps to a single plain-language line we show
+// in the calm "working" state. The raw agent output is still available
+// behind the "Show VERA's thinking" reveal for anyone who wants it.
+const STEP_CAPTION: Record<AgentName, string> = {
+  VERA: 'Getting started…',
+  Strategist: 'Planning the angle',
+  Researcher: 'Gathering supporting facts',
+  Writer: 'Writing the draft',
+  'SEO Agent': 'Tuning for search',
+  'Persona Adapter': 'Tailoring it to your audience',
+  'Brand Guard': 'Checking it against your brand voice',
+  Compliance: 'Reviewing for compliance',
+  Publisher: 'Finishing up',
 }
 
-// Agent dots — neutral chip background with a small coloured dot prefix.
-// Maps each agent to its CSS dot-* variable (defined in index.css).
-const agentDots: Record<AgentName, string> = {
-  VERA:              'var(--ink)',                  // VERA owns the brand colour
-  Strategist:        'var(--dot-violet)',
-  Researcher:        'var(--dot-sky)',
-  Writer:            'var(--dot-blue)',
-  'SEO Agent':       'var(--dot-indigo)',
-  'Persona Adapter': 'var(--dot-pink)',
-  'Brand Guard':     'var(--dot-amber)',
-  Compliance:        'var(--dot-rose)',
-  Publisher:         'var(--dot-emerald)',
-}
+type Phase = 'idle' | 'working' | 'result' | 'error'
 
-const agentAvatars: Record<AgentName, string> = {
-  VERA: 'V',
-  Strategist: 'ST',
-  Researcher: 'RS',
-  Writer: 'WR',
-  'SEO Agent': 'SE',
-  'Persona Adapter': 'PA',
-  'Brand Guard': 'BG',
-  Compliance: 'CO',
-  Publisher: 'PB',
-}
-
-// The always-visible pipeline agents — optional ones appear dynamically
-const CORE_AGENTS: AgentName[] = ['Strategist', 'Writer', 'Brand Guard', 'Compliance', 'Publisher']
-
-function parsePublisherMessage(content: string): {
-  meta: Record<string, string>
-  status: string
-  postId: string | null
-} {
-  const lines = content.split('\n')
-  const meta: Record<string, string> = {}
-  let status = ''
-  let postId: string | null = null
-
-  for (const line of lines) {
-    const colonIdx = line.indexOf(':')
-    if (colonIdx > 0) {
-      const key = line.slice(0, colonIdx).trim()
-      const val = line.slice(colonIdx + 1).trim()
-      if (['Platform', 'Format', 'Hashtags', 'Suggested schedule'].some(k => key.includes(k))) {
-        meta[key] = val
-      }
-    }
-    if (line.includes('✅ Saved')) {
-      const idMatch = line.match(/ID: ([a-f0-9-]+)/i)
-      if (idMatch) postId = idMatch[1]
-    }
-    if (line.includes('⚠️') || line.includes('All checks passed')) {
-      status += (status ? '\n' : '') + line.trim()
-    }
-  }
-  return { meta, status, postId }
-}
-
-function PublisherBubble({ message }: { message: Message }) {
-  const dot = 'var(--dot-emerald)'
-  if (message.isStreaming) {
-    return (
-      <div className="flex gap-3 items-start">
-        <div
-          className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-semibold relative"
-          style={{ background: 'var(--fog)', color: 'var(--ink)' }}
-        >
-          PB
-          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full" style={{ background: dot, border: '2px solid var(--paper-warm)' }} />
-        </div>
-        <div className="flex-1 max-w-2xl">
-          <p className="text-[12px] font-medium mb-1 inline-flex items-center gap-1.5" style={{ color: 'var(--ink-quiet)' }}>
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: dot }} />
-            Publisher
-          </p>
-          <div
-            className="px-4 py-3 text-[14px] whitespace-pre-wrap"
-            style={{
-              background: 'var(--paper-warm)',
-              border: '1px solid var(--paper-edge)',
-              color: 'var(--ink-quiet)',
-              borderRadius: 'var(--radius-lg)',
-              borderTopLeftRadius: 'var(--radius-sm)',
-            }}
-          >
-            <span>{message.content}<span className="inline-block w-1 h-4 ml-0.5 animate-pulse rounded" style={{ background: 'var(--mist)' }} /></span>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  const { meta, status, postId } = parsePublisherMessage(message.content)
-  const hasIssues = status.includes('⚠️')
-
-  return (
-    <div className="flex gap-3 items-start">
-      <div
-        className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-semibold relative"
-        style={{ background: 'var(--fog)', color: 'var(--ink)' }}
-      >
-        PB
-        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full" style={{ background: dot, border: '2px solid var(--paper-warm)' }} />
-      </div>
-      <div className="flex-1 max-w-2xl">
-        <p className="text-[12px] font-medium mb-1 inline-flex items-center gap-1.5" style={{ color: 'var(--ink-quiet)' }}>
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: dot }} />
-          Publisher
-        </p>
-        <div
-          className="overflow-hidden"
-          style={{
-            background: 'var(--paper-warm)',
-            border: '1px solid var(--paper-edge)',
-            borderRadius: 'var(--radius-lg)',
-            borderTopLeftRadius: 'var(--radius-sm)',
-          }}
-        >
-          <div className="px-4 py-3 space-y-3">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[13px]">
-              {Object.entries(meta).map(([k, v]) => (
-                <div key={k}>
-                  <span style={{ color: 'var(--ghost)' }}>{k}: </span>
-                  <span className="font-medium" style={{ color: 'var(--ink)' }}>{v}</span>
-                </div>
-              ))}
-            </div>
-            {status && (
-              <div
-                className="text-[13px] font-medium px-3 py-2 whitespace-pre-wrap"
-                style={{
-                  background: hasIssues ? 'var(--accent-tint)' : 'var(--fog)',
-                  color: hasIssues ? 'var(--accent)' : 'var(--ink-quiet)',
-                  borderRadius: 'var(--radius-md)',
-                }}
-              >
-                {status}
-              </div>
-            )}
-            {postId && (
-              <p className="text-[12px]" style={{ color: 'var(--ghost)' }}>
-                Post ID: {postId} · <a href={`/review/${postId}`} className="hover:underline" style={{ color: 'var(--ink-quiet)' }}>Go to Review →</a>
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function AgentBubble({ message }: { message: Message }) {
-  const agent = message.agent as AgentName
-  if (agent === 'Publisher') return <PublisherBubble message={message} />
-
-  const dot = agentDots[agent] ?? 'var(--mist)'
-  const avatar = agentAvatars[agent] ?? agent.slice(0, 2).toUpperCase()
-
-  return (
-    <div className="flex gap-3 items-start">
-      <div
-        className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-semibold relative"
-        style={{ background: 'var(--fog)', color: 'var(--ink)' }}
-      >
-        {avatar}
-        <span
-          className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full"
-          style={{ background: dot, border: '2px solid var(--paper-warm)' }}
-        />
-      </div>
-      <div className="flex-1 max-w-2xl">
-        <p className="text-[12px] font-medium mb-1 inline-flex items-center gap-1.5" style={{ color: 'var(--ink-quiet)' }}>
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: dot }} />
-          {agent}
-        </p>
-        <div
-          className="px-4 py-3 text-[14px] leading-relaxed whitespace-pre-wrap"
-          style={{
-            background: 'var(--paper-warm)',
-            border: '1px solid var(--paper-edge)',
-            color: 'var(--ink-quiet)',
-            borderRadius: 'var(--radius-lg)',
-            borderTopLeftRadius: 'var(--radius-sm)',
-          }}
-        >
-          {message.isStreaming ? (
-            <span>{message.content}<span className="inline-block w-1 h-4 ml-0.5 animate-pulse rounded" style={{ background: 'var(--mist)' }} /></span>
-          ) : message.content}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function UserBubble({ content }: { content: string }) {
-  return (
-    <div className="flex justify-end">
-      <div className="max-w-xl bg-gray-900 text-white rounded-2xl rounded-tr-sm px-4 py-3 text-sm leading-relaxed">
-        {content}
-      </div>
-    </div>
-  )
-}
-
-// ─── ContextSelect — inline breadcrumb-style <select> ─────────────────────
-// Native <select> with all visual chrome stripped so it reads as inline
-// text. Click opens the browser-native dropdown (acceptable trade vs.
-// building a custom popover). Hover gets a --fog background so the
-// affordance is discoverable.
-function ContextSelect({
-  value,
-  onChange,
-  disabled,
-  placeholder,
-  children,
-}: {
-  value: string
-  onChange: (v: string) => void
-  disabled?: boolean
-  placeholder?: string
-  children: React.ReactNode
-}) {
-  return (
-    <select
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      disabled={disabled}
-      data-placeholder={placeholder}
-      className="cursor-pointer transition-colors hover:bg-[var(--fog)] focus:bg-[var(--fog)]"
-      style={{
-        appearance: 'none',
-        WebkitAppearance: 'none',
-        MozAppearance: 'none',
-        background: 'transparent',
-        border: 'none',
-        outline: 'none',
-        font: 'inherit',
-        fontWeight: 500,
-        color: value ? 'var(--ink)' : 'var(--ghost)',
-        padding: '2px 6px',
-        borderRadius: '4px',
-        maxWidth: '240px',
-        textOverflow: 'ellipsis',
-      }}
-    >
-      {children}
-    </select>
-  )
-}
-
-function SegmentDivider() {
-  return <span style={{ color: 'var(--mist)', userSelect: 'none' }}>·</span>
-}
-
-const WELCOME: Message = {
-  id: 'welcome',
-  role: 'agent',
-  agent: 'VERA',
-  content: "Hi, I'm VERA. Think of me as your creative partner — I turn ideas into content people actually feel something about. Tell me what you're working on, or just hand me a half-formed thought. I love a half-formed thought.",
-}
-
+// ─── Pipeline runner — unchanged transport, just hands chunks to a callback ──
 async function runAgentPipeline(
   prompt: string,
   orgId: string | undefined,
   campaignId: string | null,
   audienceId: string | null,
-  onChunk: (agent: AgentName, chunk: string, done: boolean) => void
+  onChunk: (agent: AgentName, chunk: string, done: boolean) => void,
 ) {
   const response = await fetch(ORCHESTRATOR_URL, {
     method: 'POST',
@@ -316,10 +61,7 @@ async function runAgentPipeline(
     },
     body: JSON.stringify({ prompt, org_id: orgId, campaign_id: campaignId, audience_id: audienceId }),
   })
-
-  if (!response.ok) {
-    throw new Error(`Orchestrator error: ${response.status} ${response.statusText}`)
-  }
+  if (!response.ok) throw new Error(`Orchestrator error: ${response.status} ${response.statusText}`)
 
   const reader = response.body!.getReader()
   const decoder = new TextDecoder()
@@ -328,27 +70,21 @@ async function runAgentPipeline(
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
-
     buffer += decoder.decode(value, { stream: true })
     const lines = buffer.split('\n')
     buffer = lines.pop() ?? ''
-
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue
       const raw = line.slice(6).trim()
       if (!raw) continue
-
       try {
         const event = JSON.parse(raw)
-        if (event.error) {
-          console.error('Pipeline error:', event.error)
-          onChunk('Strategist', `Error: ${event.error}`, true)
-          return
-        }
+        if (event.error) throw new Error(event.error)
         if (event.agent && event.chunk !== undefined) {
           onChunk(event.agent as AgentName, event.chunk, event.done ?? false)
         }
-      } catch {
+      } catch (e) {
+        if (e instanceof Error && e.message && !e.message.includes('JSON')) throw e
         // ignore malformed SSE lines
       }
     }
@@ -358,29 +94,31 @@ async function runAgentPipeline(
 export default function Generate() {
   const { activeOrg } = useOrg()
   const { activeProject, projects, switchProject } = useProject()
-  const [messages, setMessages] = useState<Message[]>([WELCOME])
+  const [searchParams] = useSearchParams()
+
+  const [phase, setPhase] = useState<Phase>('idle')
   const [input, setInput] = useState('')
-  const [isRunning, setIsRunning] = useState(false)
-  const [activeAgents, setActiveAgents] = useState<AgentName[]>(CORE_AGENTS)
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const [submittedBrief, setSubmittedBrief] = useState('')
+  const [currentStep, setCurrentStep] = useState<AgentName>('VERA')
+  const [agentLog, setAgentLog] = useState<Partial<Record<AgentName, string>>>({})
+  const [showThinking, setShowThinking] = useState(false)
+  const [result, setResult] = useState<Post | null>(null)
+  const [draftCopy, setDraftCopy] = useState('')   // live writer text, shown before the saved post resolves
+  const [errorMsg, setErrorMsg] = useState('')
+
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
   const [audiences, setAudiences] = useState<Audience[]>([])
   const [selectedAudienceId, setSelectedAudienceId] = useState<string | null>(null)
-  const [searchParams] = useSearchParams()
 
-  // When deep-linked from /intel ("Brief a response →"), pre-load the brief
-  // composer with a structured prompt that gives the Strategist the context
-  // it needs to produce a counter-positioning post.
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  // Deep-link from /intel — pre-fill the brief with a counter-positioning prompt.
   useEffect(() => {
     const intelId = searchParams.get('intel')
     if (!intelId) return
     supabase.from('competitor_events')
-      .select(`
-        kind, source_url, title, summary, detected_at,
-        competitor:competitor_id ( name, website_url )
-      `)
+      .select(`kind, source_url, title, summary, detected_at, competitor:competitor_id ( name, website_url )`)
       .eq('id', intelId)
       .maybeSingle()
       .then(({ data }) => {
@@ -392,8 +130,8 @@ export default function Generate() {
           ``,
           `Competitor: ${competitor?.name ?? 'unknown'} (${competitor?.website_url ?? ''})`,
           `URL: ${ev.source_url}`,
-          ev.title    ? `Title: ${ev.title}` : null,
-          ev.summary  ? `Summary: ${ev.summary}` : null,
+          ev.title ? `Title: ${ev.title}` : null,
+          ev.summary ? `Summary: ${ev.summary}` : null,
           ``,
           `Write a post that calls out the weakest claim in their pitch and reinforces our differentiator. Don't mention them by name — just sharpen the contrast.`,
         ].filter(Boolean).join('\n')
@@ -401,314 +139,234 @@ export default function Generate() {
       })
   }, [searchParams])
 
-  // Load this org's campaigns. We surface active + planned ones in the picker
-  // (archived/completed are accessible from Library but rarely the target of
-  // a fresh brief).
+  // Context loads quietly in the background. The user never has to touch it —
+  // VERA picks sensible defaults (pinned active campaign, primary audience)
+  // inside the load callback, so the default-pick rides along with the data
+  // instead of in a second self-referential effect.
   useEffect(() => {
-    if (!activeOrg?.id) { setCampaigns([]); return }
-    supabase
-      .from('campaigns')
+    if (!activeOrg?.id) return   // org→org switch refreshes via .then; org→null unmounts the page
+    supabase.from('campaigns')
       .select('id, name, theme, status, is_pinned, start_date, end_date')
       .eq('org_id', activeOrg.id)
       .in('status', ['active', 'draft', 'planned'])
       .order('is_pinned', { ascending: false })
       .order('start_date', { ascending: false, nullsFirst: false })
-      .then(({ data }) => setCampaigns((data as Campaign[]) ?? []))
+      .then(({ data }) => {
+        const list = (data as Campaign[]) ?? []
+        setCampaigns(list)
+        // Default to the pinned active campaign — but never override a
+        // choice the user has already made (prev !== null).
+        setSelectedCampaignId(prev => prev ?? (list.find(c => c.is_pinned && c.status === 'active')?.id ?? null))
+      })
   }, [activeOrg?.id])
 
-  // Auto-select the pinned active campaign (the one whose date range contains
-  // today) when nothing is explicitly selected. Operators can clear it.
   useEffect(() => {
-    if (selectedCampaignId !== null) return
-    const active = campaigns.find(c => c.is_pinned && c.status === 'active')
-    if (active) setSelectedCampaignId(active.id)
-  }, [campaigns, selectedCampaignId])
-
-  // Load audiences for this org. Sort: primary first, then ICPs, then buyer
-  // personas inside their ICPs.
-  useEffect(() => {
-    if (!activeOrg?.id) { setAudiences([]); return }
-    supabase
-      .from('audiences')
-      .select('*')
+    if (!activeOrg?.id) return   // see campaigns effect — no synchronous clear needed
+    supabase.from('audiences').select('*')
       .eq('org_id', activeOrg.id)
       .order('is_primary', { ascending: false })
-      .order('kind', { ascending: true })   // 'buyer_persona' < 'icp' alphabetically, swap if we add more kinds
-      .then(({ data }) => setAudiences((data as Audience[]) ?? []))
+      .order('kind', { ascending: true })
+      .then(({ data }) => {
+        const list = (data as Audience[]) ?? []
+        setAudiences(list)
+        // Primary buyer persona is the most specific reader; fall back to any
+        // primary, then the first audience. Don't override an explicit pick.
+        const primaryBuyer = list.find(a => a.kind === 'buyer_persona' && a.is_primary)
+        const fallback = list.find(a => a.is_primary) ?? list[0]
+        const def = primaryBuyer?.id ?? fallback?.id ?? null
+        setSelectedAudienceId(prev => prev ?? def)
+      })
   }, [activeOrg?.id])
 
-  // Auto-select the primary buyer persona (it's the most specific reader,
-  // better default than the broader ICP).
-  useEffect(() => {
-    if (selectedAudienceId !== null) return
-    const primaryBuyer = audiences.find(a => a.kind === 'buyer_persona' && a.is_primary)
-    const fallback = audiences.find(a => a.is_primary) ?? audiences[0]
-    if (primaryBuyer) setSelectedAudienceId(primaryBuyer.id)
-    else if (fallback) setSelectedAudienceId(fallback.id)
-  }, [audiences, selectedAudienceId])
+  const campaignName = campaigns.find(c => c.id === selectedCampaignId)?.name ?? null
+  const audienceName = audiences.find(a => a.id === selectedAudienceId)?.name ?? null
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!input.trim() || isRunning) return
-
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: input.trim() }
-    setMessages(prev => [...prev, userMsg])
-    setInput('')
-    setIsRunning(true)
-    setActiveAgents(CORE_AGENTS)
-
-    let currentAgent: AgentName | null = null
-    let currentId: string | null = null
+  async function generate(brief: string) {
+    setPhase('working')
+    setSubmittedBrief(brief)
+    setAgentLog({})
+    setShowThinking(false)
+    setResult(null)
+    setDraftCopy('')
+    setCurrentStep('VERA')
+    setErrorMsg('')
 
     try {
-      await runAgentPipeline(input, activeOrg?.id, selectedCampaignId, selectedAudienceId, (agent, chunk, done) => {
-        // Reveal optional agents as they appear
-        if (!CORE_AGENTS.includes(agent)) {
-          setActiveAgents(prev => prev.includes(agent) ? prev : [...prev, agent])
-        }
-
-        if (agent !== currentAgent) {
-          currentAgent = agent
-          currentId = Date.now().toString() + agent
-          setMessages(prev => [...prev, {
-            id: currentId!,
-            role: 'agent',
-            agent,
-            content: chunk,
-            isStreaming: !done,
-          }])
-        } else {
-          setMessages(prev => prev.map(m =>
-            m.id === currentId ? { ...m, content: chunk, isStreaming: !done } : m
-          ))
-        }
+      await runAgentPipeline(brief, activeOrg?.id, selectedCampaignId, selectedAudienceId, (agent, chunk) => {
+        setCurrentStep(agent)
+        setAgentLog(prev => ({ ...prev, [agent]: chunk }))
+        if (agent === 'Writer') setDraftCopy(chunk)
       })
-    } catch (err) {
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        role: 'agent',
-        agent: 'Strategist',
-        content: `Something went wrong: ${err instanceof Error ? err.message : String(err)}`,
-        isStreaming: false,
-      }])
-    }
 
-    setIsRunning(false)
+      // The orchestrator just saved the post as 'pending'. Fetch the freshly
+      // created record so the result card has a real id (needed to approve)
+      // plus the canonical copy, image, hashtags, and channel.
+      let saved: Post | null = null
+      if (activeOrg?.id) {
+        const { data } = await supabase
+          .from('content_posts').select('*')
+          .eq('org_id', activeOrg.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+        saved = (data?.[0] as Post) ?? null
+      }
+      setResult(saved)
+      setPhase('result')
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err))
+      setPhase('error')
+    }
   }
 
-  // Right rail — context + pipeline status. When idle, shows the active
-  // binding (project / campaign / audience) and a quiet brand voice
-  // reminder. When the pipeline is streaming, shows live agent status.
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!input.trim() || phase === 'working') return
+    generate(input.trim())
+  }
+
+  function reset() {
+    setPhase('idle')
+    setInput('')
+    setResult(null)
+    setDraftCopy('')
+    setAgentLog({})
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
   useRightRail(
-    <GenerateRightRail
-      isRunning={isRunning}
-      activeAgents={activeAgents}
+    <GenerateRail
+      phase={phase}
+      currentStep={currentStep}
       projectName={activeProject?.name ?? null}
-      projectInstructions={activeProject?.instructions ?? null}
-      campaignName={campaigns.find(c => c.id === selectedCampaignId)?.name ?? null}
-      audienceName={audiences.find(a => a.id === selectedAudienceId)?.name ?? null}
+      campaignName={campaignName}
+      audienceName={audienceName}
     />,
-    [isRunning, activeAgents, activeProject?.id, selectedCampaignId, selectedAudienceId],
+    [phase, currentStep, activeProject?.id, campaignName, audienceName],
   )
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div
-        className="px-8 py-5 flex items-center gap-3"
-        style={{ borderBottom: '1px solid var(--paper-edge)', background: 'var(--paper-warm)' }}
-      >
-        <div
-          className="w-7 h-7 flex items-center justify-center"
-          style={{ background: 'var(--fog)', borderRadius: 'var(--radius-md)' }}
-        >
+      {/* Header — quiet, single line. No agent roster on display. */}
+      <div className="px-8 py-5 flex items-center gap-3"
+        style={{ borderBottom: '1px solid var(--paper-edge)', background: 'var(--paper-warm)' }}>
+        <div className="w-7 h-7 flex items-center justify-center"
+          style={{ background: 'var(--fog)', borderRadius: 'var(--radius-md)' }}>
           <Sparkles size={14} style={{ color: 'var(--ink-quiet)' }} strokeWidth={1.75} />
         </div>
         <div>
-          <h1 className="text-[15px] font-semibold" style={{ color: 'var(--ink)' }}>Generate</h1>
-          <p className="text-[12px]" style={{ color: 'var(--ghost)' }}>VERA + her team — Strategist · Researcher · Writer · SEO · Persona · Brand Guard · Compliance · Publisher</p>
+          <h1 className="text-[15px] font-semibold" style={{ color: 'var(--ink)' }}>Create</h1>
+          <p className="text-[12px]" style={{ color: 'var(--ghost)' }}>
+            Tell VERA what you need. She drafts it, checks it, and brings it back for your approval.
+          </p>
         </div>
       </div>
 
-      {/* Agent team pills — neutral chip with coloured dot prefix */}
-      <div
-        className="px-8 py-3 flex gap-2 flex-wrap"
-        style={{ borderBottom: '1px solid var(--paper-edge)', background: 'var(--paper-warm)' }}
-      >
-        {activeAgents.map(a => (
-          <span
-            key={a}
-            className="inline-flex items-center gap-1.5 text-[12px] font-medium px-2 py-0.5"
-            style={{ background: 'var(--fog)', color: 'var(--ink-quiet)', borderRadius: 'var(--radius-sm)' }}
-          >
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: agentDots[a] }} />
-            {a}
-          </span>
-        ))}
-      </div>
+      {/* Stage */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-2xl mx-auto px-8 py-8">
+          {phase === 'idle' && <IdleHint onPick={(s) => { setInput(s); inputRef.current?.focus() }} />}
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-8 py-6 space-y-5">
-        {messages.map(msg =>
-          msg.role === 'user'
-            ? <UserBubble key={msg.id} content={msg.content} />
-            : <AgentBubble key={msg.id} message={msg} />
-        )}
-        {isRunning && messages[messages.length - 1]?.role === 'user' && (
-          <div className="flex gap-3 items-center">
-            <div
-              className="w-7 h-7 rounded-full flex items-center justify-center"
-              style={{ background: 'var(--fog)' }}
-            >
-              <Loader2 size={12} className="animate-spin" style={{ color: 'var(--ink-quiet)' }} strokeWidth={2} />
+          {phase !== 'idle' && (
+            <div className="mb-6">
+              <p className="text-[11px] font-medium uppercase mb-2" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+                Your brief
+              </p>
+              <div className="px-4 py-3 text-[14px] whitespace-pre-wrap"
+                style={{ background: 'var(--fog)', color: 'var(--ink-quiet)', borderRadius: 'var(--radius-md)' }}>
+                {submittedBrief}
+              </div>
             </div>
-            <span className="text-[13px]" style={{ color: 'var(--ghost)' }}>Team is working…</span>
-          </div>
-        )}
-        <div ref={bottomRef} />
+          )}
+
+          {phase === 'working' && (
+            <WorkingState
+              currentStep={currentStep}
+              draftCopy={draftCopy}
+              showThinking={showThinking}
+              setShowThinking={setShowThinking}
+              agentLog={agentLog}
+            />
+          )}
+
+          {phase === 'result' && (
+            <ResultCard
+              result={result}
+              draftCopy={draftCopy}
+              agentLog={agentLog}
+              showThinking={showThinking}
+              setShowThinking={setShowThinking}
+              onRegenerate={() => generate(submittedBrief)}
+              onUpdateCopy={(copy) => setResult(prev => prev ? { ...prev, copy } : prev)}
+              onApproved={(post) => setResult(post)}
+              onReset={reset}
+            />
+          )}
+
+          {phase === 'error' && (
+            <div className="px-4 py-4 text-[14px]"
+              style={{ background: 'var(--accent-tint)', color: 'var(--accent)', borderRadius: 'var(--radius-md)' }}>
+              <p className="font-medium mb-1">Something went wrong.</p>
+              <p className="text-[13px] mb-3" style={{ opacity: 0.85 }}>{errorMsg}</p>
+              <button onClick={() => generate(submittedBrief)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium"
+                style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '3px' }}>
+                <RefreshCw size={12} /> Try again
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Brief composer — auto-growing textarea, Atelier-themed */}
+      {/* Composer — only the input matters. Context is one quiet line below it. */}
       <div className="px-8 py-5" style={{ borderTop: '1px solid var(--paper-edge)', background: 'var(--paper)' }}>
-        <form onSubmit={handleSubmit}>
-          <div
-            className="relative"
-            style={{
-              background: 'var(--paper-warm)',
-              border: '1px solid var(--paper-edge)',
-              borderRadius: '4px',
-              transition: 'border-color 0.15s, box-shadow 0.15s',
-            }}
-          >
-            {/* Single-line context breadcrumb. Project · Campaign · Audience.    */}
-            {/* Each segment is a styled inline <select> — click to swap, no     */}
-            {/* labels, no theme/pain meta. Removes the two-row stacked card     */}
-            {/* that ate vertical space before the writer ever touched the keys. */}
-            <div className="flex items-center gap-1 px-4 py-2 text-[13px] flex-wrap" style={{ borderBottom: '1px solid var(--paper-edge)' }}>
-              <span className="mr-1" style={{ color: 'var(--ghost)' }}>For</span>
-
-              {/* Project segment — only shows when projects are loaded (migration 026 applied) */}
-              {projects.length > 0 && activeProject && (
-                <>
-                  <ContextSelect
-                    value={activeProject.slug}
-                    onChange={slug => switchProject(slug)}
-                    disabled={isRunning}
-                  >
-                    {projects.map(p => (
-                      <option key={p.id} value={p.slug}>
-                        {p.is_starred ? '★ ' : ''}{p.name}
-                      </option>
-                    ))}
-                  </ContextSelect>
-                  <SegmentDivider />
-                </>
-              )}
-
-              {/* Campaign segment */}
-              <ContextSelect
-                value={selectedCampaignId ?? ''}
-                onChange={v => setSelectedCampaignId(v || null)}
-                disabled={isRunning}
-                placeholder="No campaign"
-              >
-                <option value="">No campaign</option>
-                {campaigns.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.is_pinned ? '★ ' : ''}{c.name}{c.status !== 'active' ? ` · ${c.status}` : ''}
-                  </option>
-                ))}
-              </ContextSelect>
-
-              {/* Audience segment — only renders if at least one exists */}
-              {audiences.length > 0 && (
-                <>
-                  <SegmentDivider />
-                  <ContextSelect
-                    value={selectedAudienceId ?? ''}
-                    onChange={v => setSelectedAudienceId(v || null)}
-                    disabled={isRunning}
-                    placeholder="No audience"
-                  >
-                    <option value="">No audience</option>
-                    {audiences.filter(a => a.kind === 'icp').map(icp => (
-                      <optgroup key={icp.id} label={`ICP — ${icp.name}`}>
-                        <option value={icp.id}>{icp.is_primary ? '★ ' : ''}{icp.name}</option>
-                        {audiences
-                          .filter(p => p.parent_id === icp.id)
-                          .map(p => (
-                            <option key={p.id} value={p.id}>
-                              {p.is_primary ? '   ★ ' : '   · '}{p.name}
-                            </option>
-                          ))}
-                      </optgroup>
-                    ))}
-                    {audiences.filter(a => a.kind !== 'icp' && !a.parent_id).length > 0 && (
-                      <optgroup label="Standalone">
-                        {audiences.filter(a => a.kind !== 'icp' && !a.parent_id).map(a => (
-                          <option key={a.id} value={a.id}>{a.is_primary ? '★ ' : ''}{a.name}</option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </ContextSelect>
-                </>
-              )}
-            </div>
-
+        <form onSubmit={handleSubmit} className="max-w-2xl mx-auto">
+          <div className="relative" style={{
+            background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: '4px',
+          }}>
             <textarea
               ref={inputRef}
               value={input}
               onChange={e => {
                 setInput(e.target.value)
-                // Auto-grow: reset to min, then expand to content (capped)
                 const el = e.currentTarget
                 el.style.height = 'auto'
-                el.style.height = Math.min(el.scrollHeight, 240) + 'px'
+                el.style.height = Math.min(el.scrollHeight, 200) + 'px'
               }}
               onKeyDown={e => {
-                // Enter sends; Shift+Enter inserts newline. ⌘/Ctrl+Enter also sends.
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  if (input.trim() && !isRunning) {
-                    handleSubmit(e as unknown as React.FormEvent)
-                  }
+                  if (input.trim() && phase !== 'working') handleSubmit(e as unknown as React.FormEvent)
                 }
               }}
-              rows={3}
-              placeholder="What should the team work on?"
-              disabled={isRunning}
+              rows={2}
+              placeholder="What should VERA create? e.g. “a LinkedIn post about why most onboarding flows lose users in week one”"
+              disabled={phase === 'working'}
               className="w-full px-5 py-4 text-[15px] leading-relaxed outline-none disabled:opacity-50 resize-none"
               style={{
-                background: 'transparent',
-                color: 'var(--ink)',
-                fontFamily: 'var(--font-body)',
-                minHeight: '92px',
-                maxHeight: '240px',
+                background: 'transparent', color: 'var(--ink)', fontFamily: 'var(--font-body)',
+                minHeight: '68px', maxHeight: '200px',
               }}
             />
-
-            {/* Bottom bar — just the Send action. The pre-send "Saved as       */}
-            {/* pending · routed to Review" copy moves to the agent stream      */}
-            {/* after submit (where it's actually true). The "enter to send"    */}
-            {/* hint is conveyed by the button title on hover.                  */}
-            <div className="flex items-center justify-end px-5 py-2.5" style={{ borderTop: '1px solid var(--paper-edge)' }}>
-              <button
-                type="submit"
-                disabled={!input.trim() || isRunning}
-                title="Send brief — Enter (Shift+Enter for newline)"
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-[12px] font-medium transition-all disabled:opacity-40"
-                style={{
-                  background: 'var(--ink)',
-                  color: 'var(--paper)',
-                  borderRadius: '3px',
-                }}
-              >
-                {isRunning ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                {isRunning ? 'Working' : 'Send brief'}
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5"
+              style={{ borderTop: '1px solid var(--paper-edge)' }}>
+              <ContextBar
+                projects={projects}
+                activeProjectSlug={activeProject?.slug ?? null}
+                onSwitchProject={switchProject}
+                campaigns={campaigns}
+                selectedCampaignId={selectedCampaignId}
+                setSelectedCampaignId={setSelectedCampaignId}
+                audiences={audiences}
+                selectedAudienceId={selectedAudienceId}
+                setSelectedAudienceId={setSelectedAudienceId}
+                disabled={phase === 'working'}
+              />
+              <button type="submit" disabled={!input.trim() || phase === 'working'}
+                title="Send to VERA — Enter (Shift+Enter for a new line)"
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-[12px] font-medium transition-all disabled:opacity-40 flex-shrink-0"
+                style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '3px' }}>
+                {phase === 'working' ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                {phase === 'working' ? 'Working' : 'Create'}
               </button>
             </div>
           </div>
@@ -718,97 +376,421 @@ export default function Generate() {
   )
 }
 
-// ─── Generate right rail ───────────────────────────────────────────────
-// Two states:
-//   · Idle — show active binding (project · campaign · audience) +
-//     project's custom instructions quick-reference
-//   · Streaming — show which agents are running, completed, or pending
-function GenerateRightRail({
-  isRunning, activeAgents, projectName, projectInstructions, campaignName, audienceName,
-}: {
-  isRunning: boolean
-  activeAgents: AgentName[]
-  projectName: string | null
-  projectInstructions: string | null
-  campaignName: string | null
-  audienceName: string | null
-}) {
-  if (isRunning) {
-    return (
-      <div className="flex flex-col gap-6 py-6 pr-5 pl-1">
-        <section>
-          <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
-            Pipeline · running
-          </p>
-          <div className="flex flex-col text-[12.5px]" style={{ color: 'var(--ink-quiet)' }}>
-            {activeAgents.map((agent, i) => (
-              <div
-                key={agent}
-                className="flex items-center gap-2 py-2"
-                style={{ borderBottom: i < activeAgents.length - 1 ? '1px solid var(--paper-edge)' : 'none' }}
-              >
-                <span
-                  className="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0"
-                  style={{ background: agentDots[agent] ?? 'var(--mist)' }}
-                />
-                <span style={{ color: 'var(--ink)' }}>{agent}</span>
-                <Loader2 size={11} className="animate-spin ml-auto" style={{ color: 'var(--ghost)' }} />
-              </div>
-            ))}
-          </div>
-        </section>
+// ─── Idle hint — what to do, plus a few starting points ───────────────────
+function IdleHint({ onPick }: { onPick: (s: string) => void }) {
+  const examples = [
+    'A LinkedIn post on a lesson we learned shipping fast',
+    'A short newsletter intro about our new feature',
+    'A contrarian take on a trend in our industry',
+  ]
+  return (
+    <div className="text-center py-10">
+      <div className="w-12 h-12 mx-auto flex items-center justify-center mb-4"
+        style={{ background: 'var(--fog)', borderRadius: 'var(--radius-lg)' }}>
+        <Sparkles size={20} style={{ color: 'var(--ink-quiet)' }} strokeWidth={1.5} />
       </div>
-    )
+      <h2 className="text-[18px] font-semibold mb-1.5" style={{ color: 'var(--ink)' }}>
+        What should we make?
+      </h2>
+      <p className="text-[13.5px] mb-6 max-w-md mx-auto" style={{ color: 'var(--ghost)' }}>
+        Describe it in a sentence. VERA figures out the platform, angle, and format for you —
+        you just approve the result.
+      </p>
+      <div className="flex flex-col gap-2 max-w-md mx-auto">
+        {examples.map(ex => (
+          <button key={ex} onClick={() => onPick(ex)}
+            className="text-left px-4 py-2.5 text-[13px] transition-colors hover:bg-[var(--fog)]"
+            style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', color: 'var(--ink-quiet)', borderRadius: 'var(--radius-md)' }}>
+            {ex}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Working state — one calm line, not eight streaming bubbles ────────────
+function WorkingState({
+  currentStep, draftCopy, showThinking, setShowThinking, agentLog,
+}: {
+  currentStep: AgentName
+  draftCopy: string
+  showThinking: boolean
+  setShowThinking: (v: boolean) => void
+  agentLog: Partial<Record<AgentName, string>>
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-3 px-4 py-4"
+        style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}>
+        <Loader2 size={16} className="animate-spin flex-shrink-0" style={{ color: 'var(--ink-quiet)' }} />
+        <div className="flex-1">
+          <p className="text-[14px] font-medium" style={{ color: 'var(--ink)' }}>VERA is on it</p>
+          <p className="text-[12.5px]" style={{ color: 'var(--ghost)' }}>{STEP_CAPTION[currentStep] ?? 'Working…'}</p>
+        </div>
+      </div>
+
+      {/* As soon as the Writer starts, show the draft taking shape — that's
+          the part the user actually cares about. */}
+      {draftCopy && (
+        <div className="mt-4 px-5 py-4 text-[14px] leading-relaxed whitespace-pre-wrap"
+          style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', color: 'var(--ink-quiet)', borderRadius: 'var(--radius-lg)' }}>
+          {draftCopy}
+          <span className="inline-block w-1 h-4 ml-0.5 animate-pulse rounded align-middle" style={{ background: 'var(--mist)' }} />
+        </div>
+      )}
+
+      <ThinkingReveal show={showThinking} setShow={setShowThinking} agentLog={agentLog} />
+    </div>
+  )
+}
+
+// ─── Result — see it, tweak it, approve it. All in one place. ──────────────
+function ResultCard({
+  result, draftCopy, agentLog, showThinking, setShowThinking, onRegenerate, onUpdateCopy, onApproved, onReset,
+}: {
+  result: Post | null
+  draftCopy: string
+  agentLog: Partial<Record<AgentName, string>>
+  showThinking: boolean
+  setShowThinking: (v: boolean) => void
+  onRegenerate: () => void
+  onUpdateCopy: (copy: string) => void
+  onApproved: (post: Post) => void
+  onReset: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [editCopy, setEditCopy] = useState('')
+  const [busy, setBusy] = useState<'approve' | 'save' | null>(null)
+
+  const copy = result?.copy ?? draftCopy
+  const channel = result?.channel ?? null
+  const format = result?.format ?? null
+  const hashtags = result?.hashtags ?? []
+  const mediaUrl = result?.media_url ?? null
+  const approved = result?.status === 'approved' || result?.status === 'Approved'
+
+  async function approve() {
+    if (!result?.id) return
+    setBusy('approve')
+    try {
+      const res = await fetch(APPROVAL_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ post_id: result.id, action: 'approved' }),
+      })
+      const data = await res.json().catch(() => null)
+      if (res.ok && data?.post) onApproved(data.post as Post)
+      else onApproved({ ...result, status: 'approved' })
+    } catch {
+      onApproved({ ...result, status: 'approved' })
+    }
+    setBusy(null)
+  }
+
+  async function saveEdit() {
+    if (!result?.id) { onUpdateCopy(editCopy); setEditing(false); return }
+    setBusy('save')
+    const { error } = await supabase.from('content_posts').update({ copy: editCopy }).eq('id', result.id)
+    if (!error) onUpdateCopy(editCopy)
+    setBusy(null)
+    setEditing(false)
   }
 
   return (
-    <div className="flex flex-col gap-6 py-6 pr-5 pl-1">
-      <section>
-        <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
-          Binding
-        </p>
-        <div className="text-[12.5px] flex flex-col gap-1.5" style={{ color: 'var(--ink-quiet)' }}>
-          <div>Project · <b style={{ color: 'var(--ink)' }}>{projectName ?? '—'}</b></div>
-          <div>Campaign · <b style={{ color: 'var(--ink)' }}>{campaignName ?? 'None'}</b></div>
-          <div>Audience · <b style={{ color: 'var(--ink)' }}>{audienceName ?? 'None'}</b></div>
-        </div>
-      </section>
+    <div>
+      {/* Meta line */}
+      <div className="flex items-center gap-2 mb-3">
+        {channel && (
+          <span className="text-[11px] font-medium px-2 py-0.5" style={{ background: 'var(--fog)', color: 'var(--ink-quiet)', borderRadius: 'var(--radius-sm)' }}>
+            {channel}
+          </span>
+        )}
+        {format && (
+          <span className="text-[11px] px-2 py-0.5" style={{ background: 'var(--fog)', color: 'var(--ghost)', borderRadius: 'var(--radius-sm)' }}>
+            {format}
+          </span>
+        )}
+        {approved && (
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5"
+            style={{ background: 'var(--fog)', color: 'var(--ink)', borderRadius: 'var(--radius-sm)' }}>
+            <Check size={11} /> Approved · queued for Review
+          </span>
+        )}
+      </div>
 
-      {projectInstructions && (
-        <section>
-          <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
-            Project rules
-          </p>
-          <p
-            className="text-[11.5px] leading-relaxed"
-            style={{ color: 'var(--ink-quiet)', whiteSpace: 'pre-wrap', maxHeight: 220, overflow: 'auto' }}
-          >
-            {projectInstructions}
-          </p>
-        </section>
+      <div className="overflow-hidden"
+        style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}>
+        {mediaUrl && (
+          <img src={mediaUrl} alt="" className="w-full object-cover max-h-72" />
+        )}
+        <div className="p-5">
+          {editing ? (
+            <textarea
+              autoFocus
+              value={editCopy}
+              onChange={e => setEditCopy(e.target.value)}
+              className="w-full text-[14px] leading-relaxed outline-none resize-none"
+              style={{ background: 'transparent', color: 'var(--ink)', minHeight: 220, fontFamily: 'var(--font-body)' }}
+            />
+          ) : (
+            <p className="text-[14px] leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--ink)' }}>{copy}</p>
+          )}
+          {hashtags.length > 0 && !editing && (
+            <p className="text-[12px] mt-3 font-mono" style={{ color: 'var(--oxblood-soft, var(--ghost))' }}>{hashtags.join(' ')}</p>
+          )}
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 mt-4 flex-wrap">
+        {editing ? (
+          <>
+            <button onClick={saveEdit} disabled={busy === 'save'}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium disabled:opacity-50"
+              style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '3px' }}>
+              {busy === 'save' ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Save changes
+            </button>
+            <button onClick={() => setEditing(false)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px]"
+              style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
+              <X size={13} /> Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            {!approved && (
+              <button onClick={approve} disabled={busy === 'approve' || !result?.id}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium disabled:opacity-50"
+                style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '3px' }}>
+                {busy === 'approve' ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Approve
+              </button>
+            )}
+            <button onClick={() => { setEditCopy(copy); setEditing(true) }}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px]"
+              style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
+              <Pencil size={13} /> Tweak
+            </button>
+            <button onClick={onRegenerate}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px]"
+              style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
+              <RefreshCw size={13} /> Regenerate
+            </button>
+            <button onClick={onReset}
+              className="px-4 py-2 text-[13px] ml-auto"
+              style={{ color: 'var(--ghost)' }}>
+              Start another
+            </button>
+          </>
+        )}
+      </div>
+
+      {result?.id && (
+        <a href={`/review/${result.id}`}
+          className="inline-flex items-center gap-1 text-[12px] mt-3 hover:underline"
+          style={{ color: 'var(--ghost)' }}>
+          Open in Review <ExternalLink size={11} />
+        </a>
       )}
 
-      <section>
-        <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
-          Pipeline · idle
-        </p>
-        <div className="flex flex-wrap gap-1.5">
-          {CORE_AGENTS.map(a => (
-            <span
-              key={a}
-              className="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5"
-              style={{
-                background: 'var(--fog)',
-                color: 'var(--ink-quiet)',
-                borderRadius: 'var(--radius-sm)',
-              }}
-            >
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: agentDots[a] }} />
-              {a}
-            </span>
+      <ThinkingReveal show={showThinking} setShow={setShowThinking} agentLog={agentLog} />
+    </div>
+  )
+}
+
+// ─── "Show VERA's thinking" — the 8-agent stream, hidden by default ────────
+function ThinkingReveal({
+  show, setShow, agentLog,
+}: {
+  show: boolean
+  setShow: (v: boolean) => void
+  agentLog: Partial<Record<AgentName, string>>
+}) {
+  const entries = (Object.keys(STEP_CAPTION) as AgentName[]).filter(a => agentLog[a])
+  if (entries.length === 0) return null
+  return (
+    <div className="mt-5">
+      <button onClick={() => setShow(!show)}
+        className="inline-flex items-center gap-1 text-[12px] transition-colors hover:text-[var(--ink-quiet)]"
+        style={{ color: 'var(--ghost)' }}>
+        {show ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        {show ? 'Hide' : 'Show'} VERA’s thinking
+      </button>
+      {show && (
+        <div className="mt-3 flex flex-col gap-3">
+          {entries.map(agent => (
+            <div key={agent}>
+              <p className="text-[11px] font-medium uppercase mb-1" style={{ color: 'var(--ghost)', letterSpacing: '0.05em' }}>{agent}</p>
+              <div className="px-3 py-2 text-[12.5px] leading-relaxed whitespace-pre-wrap"
+                style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', color: 'var(--ink-quiet)', borderRadius: 'var(--radius-md)' }}>
+                {agentLog[agent]}
+              </div>
+            </div>
           ))}
         </div>
-      </section>
+      )}
+    </div>
+  )
+}
+
+// ─── Context bar — one quiet, collapsed line. Defaults already chosen. ─────
+// Collapsed by default to a muted summary. "Change" reveals inline selects
+// for power users; the everyday flow never has to touch it.
+function ContextBar({
+  projects, activeProjectSlug, onSwitchProject,
+  campaigns, selectedCampaignId, setSelectedCampaignId,
+  audiences, selectedAudienceId, setSelectedAudienceId, disabled,
+}: {
+  projects: { id: string; slug: string; name: string; is_starred?: boolean }[]
+  activeProjectSlug: string | null
+  onSwitchProject: (slug: string) => void
+  campaigns: Campaign[]
+  selectedCampaignId: string | null
+  setSelectedCampaignId: (v: string | null) => void
+  audiences: Audience[]
+  selectedAudienceId: string | null
+  setSelectedAudienceId: (v: string | null) => void
+  disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const campaignName = campaigns.find(c => c.id === selectedCampaignId)?.name
+  const audienceName = audiences.find(a => a.id === selectedAudienceId)?.name
+
+  if (!open) {
+    const summary = [campaignName ?? 'your strategy', audienceName].filter(Boolean).join(' · ')
+    return (
+      <button type="button" onClick={() => setOpen(true)} disabled={disabled}
+        className="inline-flex items-center gap-1.5 text-[12px] transition-colors hover:text-[var(--ink-quiet)] disabled:opacity-50 min-w-0"
+        style={{ color: 'var(--ghost)' }}>
+        <span className="truncate">Using <span style={{ color: 'var(--ink-quiet)' }}>{summary}</span></span>
+        <ChevronDown size={12} className="flex-shrink-0" />
+      </button>
+    )
+  }
+
+  const selectStyle: React.CSSProperties = {
+    appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none',
+    background: 'transparent', border: 'none', outline: 'none', font: 'inherit',
+    fontWeight: 500, color: 'var(--ink)', padding: '2px 6px', borderRadius: '4px',
+    maxWidth: 200, textOverflow: 'ellipsis',
+  }
+
+  return (
+    <div className="flex items-center gap-1 text-[12px] flex-wrap min-w-0" style={{ color: 'var(--ghost)' }}>
+      <span className="mr-0.5">Using</span>
+      {projects.length > 0 && activeProjectSlug && (
+        <>
+          <select value={activeProjectSlug} onChange={e => onSwitchProject(e.target.value)} disabled={disabled}
+            className="cursor-pointer hover:bg-[var(--fog)] rounded" style={selectStyle}>
+            {projects.map(p => <option key={p.id} value={p.slug}>{p.is_starred ? '★ ' : ''}{p.name}</option>)}
+          </select>
+          <span style={{ color: 'var(--mist)' }}>·</span>
+        </>
+      )}
+      <select value={selectedCampaignId ?? ''} onChange={e => setSelectedCampaignId(e.target.value || null)} disabled={disabled}
+        className="cursor-pointer hover:bg-[var(--fog)] rounded" style={selectStyle}>
+        <option value="">No campaign</option>
+        {campaigns.map(c => (
+          <option key={c.id} value={c.id}>{c.is_pinned ? '★ ' : ''}{c.name}{c.status !== 'active' ? ` · ${c.status}` : ''}</option>
+        ))}
+      </select>
+      {audiences.length > 0 && (
+        <>
+          <span style={{ color: 'var(--mist)' }}>·</span>
+          <select value={selectedAudienceId ?? ''} onChange={e => setSelectedAudienceId(e.target.value || null)} disabled={disabled}
+            className="cursor-pointer hover:bg-[var(--fog)] rounded" style={selectStyle}>
+            <option value="">No audience</option>
+            {audiences.filter(a => a.kind === 'icp').map(icp => (
+              <optgroup key={icp.id} label={`ICP — ${icp.name}`}>
+                <option value={icp.id}>{icp.is_primary ? '★ ' : ''}{icp.name}</option>
+                {audiences.filter(p => p.parent_id === icp.id).map(p => (
+                  <option key={p.id} value={p.id}>{p.is_primary ? '   ★ ' : '   · '}{p.name}</option>
+                ))}
+              </optgroup>
+            ))}
+            {audiences.filter(a => a.kind !== 'icp' && !a.parent_id).length > 0 && (
+              <optgroup label="Standalone">
+                {audiences.filter(a => a.kind !== 'icp' && !a.parent_id).map(a => (
+                  <option key={a.id} value={a.id}>{a.is_primary ? '★ ' : ''}{a.name}</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        </>
+      )}
+      <button type="button" onClick={() => setOpen(false)} className="ml-1 p-0.5 hover:bg-[var(--fog)] rounded" style={{ color: 'var(--ghost)' }}>
+        <X size={12} />
+      </button>
+    </div>
+  )
+}
+
+// ─── Right rail — quiet status, not a control panel ────────────────────────
+function GenerateRail({
+  phase, currentStep, projectName, campaignName, audienceName,
+}: {
+  phase: Phase
+  currentStep: AgentName
+  projectName: string | null
+  campaignName: string | null
+  audienceName: string | null
+}) {
+  const steps = Object.keys(STEP_CAPTION) as AgentName[]
+  const currentIdx = steps.indexOf(currentStep)
+
+  return (
+    <div className="flex flex-col gap-6 py-6 pr-5 pl-1">
+      {phase === 'working' ? (
+        <section>
+          <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+            VERA is working
+          </p>
+          <div className="flex flex-col text-[12.5px]" style={{ color: 'var(--ink-quiet)' }}>
+            {steps.slice(1).map((agent) => {
+              const idx = steps.indexOf(agent)
+              const done = idx < currentIdx
+              const active = idx === currentIdx
+              return (
+                <div key={agent} className="flex items-center gap-2 py-1.5">
+                  {done ? <Check size={12} style={{ color: 'var(--ink)' }} />
+                    : active ? <Loader2 size={12} className="animate-spin" style={{ color: 'var(--ink-quiet)' }} />
+                    : <span className="w-1.5 h-1.5 rounded-full inline-block ml-[2px]" style={{ background: 'var(--mist)' }} />}
+                  <span style={{ color: done ? 'var(--ink)' : active ? 'var(--ink-quiet)' : 'var(--ghost)' }}>
+                    {STEP_CAPTION[agent]}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      ) : (
+        <>
+          <section>
+            <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+              How it works
+            </p>
+            <ol className="flex flex-col gap-3 text-[12.5px]" style={{ color: 'var(--ink-quiet)' }}>
+              {['Describe what you need', 'VERA drafts & checks it', 'Approve, tweak, or regenerate'].map((s, i) => (
+                <li key={s} className="flex gap-2.5">
+                  <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center text-[10px] font-semibold rounded-full"
+                    style={{ background: 'var(--fog)', color: 'var(--ink-quiet)' }}>{i + 1}</span>
+                  <span>{s}</span>
+                </li>
+              ))}
+            </ol>
+          </section>
+          <section>
+            <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
+              Context
+            </p>
+            <div className="text-[12.5px] flex flex-col gap-1.5" style={{ color: 'var(--ink-quiet)' }}>
+              <div>Project · <b style={{ color: 'var(--ink)' }}>{projectName ?? '—'}</b></div>
+              <div>Campaign · <b style={{ color: 'var(--ink)' }}>{campaignName ?? 'None'}</b></div>
+              <div>Audience · <b style={{ color: 'var(--ink)' }}>{audienceName ?? 'None'}</b></div>
+            </div>
+          </section>
+        </>
+      )}
     </div>
   )
 }
