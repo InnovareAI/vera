@@ -42,12 +42,12 @@ export default function App() {
               <Route path="/login" element={<LoginGuard />} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/" element={<Layout />}>
-                {/* ── Altitude 1: THE SHELF ── */}
-                {/* "/" is Across Clients — the operator's day starts here,    */}
-                {/* every client on one shelf. (Was redirect-to-dashboard.)    */}
-                <Route index element={<AcrossClients />} />
+                {/* "/" lands you IN your active client — no duplicate client  */}
+                {/* list in the canvas (the rail is the switcher). The "all     */}
+                {/* clients" shelf lives at /clients for when it's needed.      */}
+                <Route index element={<RootIndex />} />
 
-                {/* ── Altitude 2: THE DESK ── one client, six loop surfaces. */}
+                {/* ── The DESK ── one client, six loop surfaces. */}
                 <Route path="p/:projectSlug">
                   <Route index element={<Navigate to="dashboard" replace />} />
                   <Route path="dashboard"  element={<Dashboard />} />{/* Home */}
@@ -73,8 +73,8 @@ export default function App() {
                 <Route path="library"    element={<RedirectFlatToProject section="review" />} />{/* Library dissolves → Review */}
                 <Route path="calendar"   element={<RedirectFlatToProject section="review" />} />{/* Calendar → Review's calendar view */}
                 <Route path="templates"  element={<RedirectFlatToProject section="knowledge" />} />{/* Templates fold into Knowledge */}
-                <Route path="clients"    element={<Navigate to="/" replace />} />{/* Clients = the shelf */}
-                <Route path="agency"     element={<Navigate to="/" replace />} />{/* Agency → Across Clients */}
+                <Route path="clients"    element={<AcrossClients />} />{/* the "all clients" shelf — reachable, not the default */}
+                <Route path="agency"     element={<AcrossClients />} />{/* Agency → the shelf */}
 
                 {/* Workspace-level, kept as-is for Phase 0. */}
                 <Route path="skills"     element={<Skills />} />
@@ -99,17 +99,29 @@ function LoginGuard() {
   return <Login />
 }
 
+// Root "/" — land the operator IN their active client's Home. The rail is
+// the client switcher; the canvas should never re-list clients (that was
+// the duplication that made the UI confusing). No project yet → the shelf
+// at /clients, which shows the "add a client" empty state.
+function RootIndex() {
+  const { loading: orgLoading } = useOrg()
+  const { activeProject, projects, loading } = useProject()
+  if (orgLoading || loading) return null   // wait for both to settle — don't race to /clients
+  if (activeProject) return <Navigate to={`/p/${activeProject.slug}/dashboard`} replace />
+  if (projects.length > 0) return <Navigate to={`/p/${projects[0].slug}/dashboard`} replace />
+  return <Navigate to="/clients" replace />
+}
+
 // Flat-route → project-scoped redirect shim. The rail no longer links to
 // flat routes, but bookmarks + deep links must not 404. Reads the active
-// project and rewrites into /p/:slug/<section>. If no project exists yet,
-// falls through to the shelf ("/"), which handles the empty state.
+// project and rewrites into /p/:slug/<section>. No project yet → /clients.
 //
 // `section` may carry a query string (e.g. "measure?tab=audit").
 function RedirectFlatToProject({ section }: { section: string }) {
   const { activeProject, loading } = useProject()
   if (loading) return null
   if (activeProject) return <Navigate to={`/p/${activeProject.slug}/${section}`} replace />
-  return <Navigate to="/" replace />
+  return <Navigate to="/clients" replace />
 }
 
 // /review/:id flat → /p/:slug/review/:id. Same idea, preserves the id.

@@ -46,7 +46,7 @@ const ProjectContext = createContext<ProjectContextType>({
 const ACTIVE_PROJECT_STORAGE = 'vera-active-project'
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
-  const { activeOrg } = useOrg()
+  const { activeOrg, loading: orgLoading } = useOrg()
   const navigate = useNavigate()
   const location = useLocation()
   // URL pattern: /p/:projectSlug/* — when present, the slug in the URL
@@ -64,7 +64,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     if (!activeOrg?.id) {
       setProjects([])
       setActiveSlug(null)
-      setLoading(false)
+      // While the org context is still loading, stay loading too — don't
+      // signal "settled, no projects" prematurely. That false-settle raced
+      // RootIndex into redirecting to /clients on cold load before the org
+      // (and therefore projects) had resolved.
+      setLoading(orgLoading)
       return
     }
     let cancelled = false
@@ -111,7 +115,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     // every time the URL changes; the slug-sync useEffect below handles
     // syncing the active project when the URL changes within a workspace.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeOrg?.id, tick])
+  }, [activeOrg?.id, tick, orgLoading])
 
   // URL → context sync. When the user navigates to /p/:slug/... directly
   // (deep link, back button, switcher click), pick up the slug and make

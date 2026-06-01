@@ -426,14 +426,25 @@ export default function Layout() {
           )}
         </div>
 
-        {/* ── THE DESK — the active client's loop (altitude 2) ──────────── */}
-        {/* Pinned above the footer, always visible. Six surfaces, all      */}
-        {/* under /p/:slug. The "More" drawer is gone; nothing about a      */}
-        {/* client lives outside the client.                                */}
+        {/* ── THE DESK — the active client's loop ───────────────────────── */}
+        {/* Pinned above the footer. The label names the active client so   */}
+        {/* the six items below it read clearly as "this client's loop" —   */}
+        {/* not floating verbs disconnected from the client list above.     */}
         <nav
           className="pt-2 pb-2 space-y-0.5"
           style={{ borderTop: '1px solid var(--paper-edge)' }}
         >
+          {activeProject && (
+            <div className="px-4 pt-1 pb-1.5 flex items-center gap-1.5">
+              <span
+                className="text-[10px] font-medium uppercase truncate"
+                style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}
+                title={activeProject.name}
+              >
+                {activeProject.name}
+              </span>
+            </div>
+          )}
           <PrimaryNavItem to={projectPath('dashboard')} icon={Sparkles}      label="Home" />
           <PrimaryNavItem to={projectPath('vera')}      icon={MessagesSquare} label="VERA" />
           <PrimaryNavItem to={projectPath('review')}    icon={CheckSquare}   label="Review" badge={pendingCount} />
