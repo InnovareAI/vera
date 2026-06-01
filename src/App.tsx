@@ -1,8 +1,8 @@
 import { useEffect } from 'react'
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { OrgProvider, useOrg } from './lib/orgContext'
-import { ProjectProvider, useProject, PROJECTS_ENABLED } from './lib/projectContext'
+import { ProjectProvider, useProject } from './lib/projectContext'
 import { RightRailProvider } from './lib/rightRailContext'
 import { ThemeProvider } from './lib/theme'
 import { ToastProvider } from './design'
@@ -47,61 +47,34 @@ export default function App() {
                 {/* clients" shelf lives at /clients for when it's needed.      */}
                 <Route index element={<RootIndex />} />
 
-                {PROJECTS_ENABLED ? (
-                  <>
-                    {/* ── The DESK ── one client, six loop surfaces. */}
-                    <Route path="p/:projectSlug">
-                      <Route index element={<Navigate to="dashboard" replace />} />
-                      <Route path="dashboard"  element={<Dashboard />} />{/* Home */}
-                      <Route path="vera"       element={<VeraThread />} />
-                      <Route path="review"     element={<Review />} />
-                      <Route path="review/:id" element={<ReviewDetail />} />
-                      <Route path="knowledge"  element={<Knowledge />} />
-                      <Route path="brain"      element={<Brain />} />
-                      <Route path="measure"    element={<Measure />} />
-                    </Route>
+                {/* ── The DESK ── one client, six loop surfaces. */}
+                <Route path="p/:projectSlug">
+                  <Route index element={<Navigate to="dashboard" replace />} />
+                  <Route path="dashboard"  element={<Dashboard />} />{/* Home */}
+                  <Route path="vera"       element={<VeraThread />} />
+                  <Route path="review"     element={<Review />} />
+                  <Route path="review/:id" element={<ReviewDetail />} />
+                  <Route path="knowledge"  element={<Knowledge />} />
+                  <Route path="brain"      element={<Brain />} />
+                  <Route path="measure"    element={<Measure />} />
+                </Route>
 
-                    {/* ── Flat → project redirect shims ──                    */}
-                    {/* Bookmarks + deep links must not 404. Each rewrites     */}
-                    {/* into the project frame (or the shelf).                 */}
-                    <Route path="dashboard"  element={<RedirectFlatToProject section="dashboard" />} />
-                    <Route path="generate"   element={<RedirectFlatToProject section="vera" />} />
-                    <Route path="review"     element={<RedirectFlatToProject section="review" />} />
-                    <Route path="review/:id" element={<RedirectReviewDetailToProject />} />
-                    <Route path="knowledge"  element={<RedirectFlatToProject section="knowledge" />} />
-                    <Route path="audit"      element={<RedirectFlatToProject section="measure" />} />
-                    <Route path="intel"      element={<RedirectFlatToProject section="measure" />} />
-                    <Route path="library"    element={<RedirectFlatToProject section="review" />} />
-                    <Route path="calendar"   element={<RedirectFlatToProject section="review" />} />
-                    <Route path="templates"  element={<RedirectFlatToProject section="knowledge" />} />
-                    <Route path="clients"    element={<AcrossClients />} />
-                    <Route path="agency"     element={<AcrossClients />} />
-                  </>
-                ) : (
-                  <>
-                    {/* ── Single flat workspace (projects hidden) ──          */}
-                    {/* Pages render directly at flat routes; they read the    */}
-                    {/* active scope from context, so no slug is needed.       */}
-                    <Route path="dashboard"  element={<Dashboard />} />{/* Home */}
-                    <Route path="vera"       element={<VeraThread />} />
-                    <Route path="review"     element={<Review />} />
-                    <Route path="review/:id" element={<ReviewDetail />} />
-                    <Route path="knowledge"  element={<Knowledge />} />
-                    <Route path="brain"      element={<Brain />} />
-                    <Route path="measure"    element={<Measure />} />
-
-                    {/* Legacy / project deep links → flat equivalents (no 404). */}
-                    <Route path="p/:projectSlug/*" element={<RedirectProjectToFlat />} />
-                    <Route path="generate"   element={<Navigate to="/vera" replace />} />
-                    <Route path="audit"      element={<Navigate to="/measure" replace />} />
-                    <Route path="intel"      element={<Navigate to="/measure" replace />} />
-                    <Route path="library"    element={<Navigate to="/review" replace />} />
-                    <Route path="calendar"   element={<Navigate to="/review" replace />} />
-                    <Route path="templates"  element={<Navigate to="/knowledge" replace />} />
-                    <Route path="clients"    element={<Navigate to="/dashboard" replace />} />
-                    <Route path="agency"     element={<Navigate to="/dashboard" replace />} />
-                  </>
-                )}
+                {/* ── Flat → project redirect shims ──                        */}
+                {/* The rail no longer links to these, but bookmarks + deep    */}
+                {/* links must not 404. Each rewrites into the project frame   */}
+                {/* (or the shelf) per the blueprint's surface-fate table.     */}
+                <Route path="dashboard"  element={<RedirectFlatToProject section="dashboard" />} />
+                <Route path="generate"   element={<RedirectFlatToProject section="vera" />} />{/* Generate folds into VERA */}
+                <Route path="review"     element={<RedirectFlatToProject section="review" />} />
+                <Route path="review/:id" element={<RedirectReviewDetailToProject />} />
+                <Route path="knowledge"  element={<RedirectFlatToProject section="knowledge" />} />
+                <Route path="audit"      element={<RedirectFlatToProject section="measure" />} />{/* LinkedIn audit removed — land on Measure */}
+                <Route path="intel"      element={<RedirectFlatToProject section="measure" />} />
+                <Route path="library"    element={<RedirectFlatToProject section="review" />} />{/* Library dissolves → Review */}
+                <Route path="calendar"   element={<RedirectFlatToProject section="review" />} />{/* Calendar → Review's calendar view */}
+                <Route path="templates"  element={<RedirectFlatToProject section="knowledge" />} />{/* Templates fold into Knowledge */}
+                <Route path="clients"    element={<AcrossClients />} />{/* the "all clients" shelf — reachable, not the default */}
+                <Route path="agency"     element={<AcrossClients />} />{/* Agency → the shelf */}
 
                 {/* Workspace-level, kept as-is for Phase 0. */}
                 <Route path="skills"     element={<Skills />} />
@@ -133,20 +106,10 @@ function LoginGuard() {
 function RootIndex() {
   const { loading: orgLoading } = useOrg()
   const { activeProject, projects, loading } = useProject()
-  if (orgLoading || loading) return null   // wait for both to settle — don't race
-  // Projects hidden → land straight in the flat workspace Home.
-  if (!PROJECTS_ENABLED) return <Navigate to="/dashboard" replace />
+  if (orgLoading || loading) return null   // wait for both to settle — don't race to /clients
   if (activeProject) return <Navigate to={`/p/${activeProject.slug}/dashboard`} replace />
   if (projects.length > 0) return <Navigate to={`/p/${projects[0].slug}/dashboard`} replace />
   return <Navigate to="/clients" replace />
-}
-
-// /p/:slug/<section> → /<section>. Keeps old project deep links + bookmarks
-// alive while projects are hidden, by stripping the /p/:slug prefix.
-function RedirectProjectToFlat() {
-  const { pathname } = useLocation()
-  const rest = pathname.split('/').slice(3).join('/') || 'dashboard'
-  return <Navigate to={`/${rest}`} replace />
 }
 
 // Flat-route → project-scoped redirect shim. The rail no longer links to

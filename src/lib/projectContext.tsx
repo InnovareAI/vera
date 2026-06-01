@@ -45,16 +45,6 @@ const ProjectContext = createContext<ProjectContextType>({
 
 const ACTIVE_PROJECT_STORAGE = 'vera-active-project'
 
-// ── Projects feature flag ────────────────────────────────────────────────
-// Projects (the Claude.ai-style client shelf + /p/:slug desk) are hidden
-// for now — the app runs as a single flat workspace. The context still
-// quietly selects the org's default project under the hood so every page
-// and VERA keep working at one scope; this flag only governs whether the
-// projects *UI* (shelf, switcher CTA, per-project routing) is surfaced and
-// whether VERA's persona talks about projects. Flip to `true` to restore
-// the full multi-project experience — no data is touched while it's off.
-export const PROJECTS_ENABLED: boolean = false
-
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const { activeOrg, loading: orgLoading } = useOrg()
   const navigate = useNavigate()
