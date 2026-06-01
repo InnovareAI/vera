@@ -27,7 +27,7 @@ import {
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
-import { useRightRailContent } from '../lib/rightRailContext'
+import { useRightRailContent, useRightRailWidth } from '../lib/rightRailContext'
 import { useTheme } from '../lib/theme'
 import { supabase } from '../lib/supabase'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -309,6 +309,7 @@ export default function Layout() {
   const { activeProject, starredProjects, recentProjects, switchProject, refetch: refetchProjects } = useProject()
   const { theme, setTheme } = useTheme()
   const rightRailContent = useRightRailContent()
+  const rightRailWidth = useRightRailWidth()
   const navigate = useNavigate()
   const location = useLocation()
   const [pendingCount, setPendingCount] = useState(0)
@@ -505,11 +506,13 @@ export default function Layout() {
       </div>
 
       {/* Right rail — same light treatment as the left rail. Same bg as    */}
-      {/* canvas, no border. Pages opt in via useRightRail(content, deps).  */}
+      {/* canvas, no border. Pages opt in via useRightRail(content, deps,    */}
+      {/* width). Width is per-consumer: narrow for a count sidebar, wide    */}
+      {/* for the VERA draft artifact.                                       */}
       {rightRailContent && (
         <aside
-          className="w-[296px] flex-shrink-0 overflow-y-auto"
-          style={{ background: 'var(--paper)' }}
+          className="flex-shrink-0 overflow-y-auto"
+          style={{ background: 'var(--paper)', width: rightRailWidth, borderLeft: '1px solid var(--paper-edge)' }}
         >
           {rightRailContent}
         </aside>

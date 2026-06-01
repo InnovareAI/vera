@@ -233,6 +233,9 @@ export default function VeraThread() {
       />
     ) : <ArtifactEmpty />,
     [draft?.id, draft?.media_url, draft?.status, approving],
+    // Wide, readable artifact panel — this is the working surface, not a
+    // skinny sidebar. ~42vw, clamped so it stays sane on small + huge screens.
+    'clamp(420px, 42vw, 660px)',
   )
 
   return (
@@ -363,9 +366,9 @@ function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate }: {
           <video src={draft.media_url} autoPlay muted loop playsInline style={{ width: '100%', borderRadius: radius.md, marginBottom: space[4], border: `1px solid ${color.line}` }} />
         )}
         {draft.title && (
-          <p style={{ fontSize: t.size.body, fontWeight: t.weight.semibold, color: color.ink, margin: 0, marginBottom: space[3] }}>{draft.title}</p>
+          <p style={{ fontSize: t.size.lg, fontWeight: t.weight.semibold, color: color.ink, margin: 0, marginBottom: space[3] }}>{draft.title}</p>
         )}
-        <p style={{ fontSize: t.size.sm, lineHeight: 1.62, color: color.ink, whiteSpace: 'pre-wrap', margin: 0 }}>{draft.copy}</p>
+        <p style={{ fontSize: t.size.body, lineHeight: 1.7, color: color.ink, whiteSpace: 'pre-wrap', margin: 0, maxWidth: '64ch' }}>{draft.copy}</p>
         {Array.isArray(draft.hashtags) && draft.hashtags.length > 0 && (
           <p style={{ fontSize: t.size.cap, color: color.info, marginTop: space[3] }}>
             {draft.hashtags.map(h => h.startsWith('#') ? h : `#${h}`).join(' ')}
