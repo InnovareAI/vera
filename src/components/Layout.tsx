@@ -19,10 +19,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
-  Star, Clock, Sparkles, CheckSquare, Telescope, BookOpen, Plus,
-  Calendar, Layers, Zap, Building2, Settings, LogOut, Sun, Moon,
-  ChevronDown, Check, ChevronRight, Radar, Monitor,
-  Mic2, BarChart3, PenLine, FolderOpen,
+  Star, Sparkles, CheckSquare, BookOpen, Plus,
+  Settings, LogOut, Sun, Moon,
+  ChevronDown, Check, Monitor,
+  BarChart3, FolderOpen, MessagesSquare, Brain,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
@@ -30,7 +30,6 @@ import { useProject } from '../lib/projectContext'
 import { useRightRailContent } from '../lib/rightRailContext'
 import { useTheme } from '../lib/theme'
 import { supabase } from '../lib/supabase'
-import type { Campaign, Post } from '../lib/supabase'
 import { ErrorBoundary } from './ErrorBoundary'
 import { ChatPanel } from './ChatPanel'
 
@@ -252,35 +251,6 @@ function ProjectRailItem({
   )
 }
 
-// ─── rail item (pinned / recent) ─────────────────────────────────────────
-// Quieter than nav items — smaller text, no icon prominence, indent for
-// hierarchy.
-function RailItem({
-  to, icon: Icon, title, meta,
-}: { to: string; icon?: React.ElementType; title: string; meta?: string }) {
-  return (
-    <NavLink
-      to={to}
-      className="group flex items-start gap-2 mx-2 px-2 py-1.5 hover:bg-[var(--fog)] transition-colors"
-      style={{ borderRadius: 'var(--radius-md)' }}
-    >
-      {Icon && (
-        <Icon size={12} style={{ color: 'var(--mist)' }} className="flex-shrink-0 mt-0.5 group-hover:text-[var(--ink-quiet)] transition-colors" strokeWidth={1.75} />
-      )}
-      <div className="flex-1 min-w-0">
-        <div className="text-[12.5px] leading-snug truncate" style={{ color: 'var(--ink-quiet)' }}>
-          {title}
-        </div>
-        {meta && (
-          <div className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--mist)' }}>
-            {meta}
-          </div>
-        )}
-      </div>
-    </NavLink>
-  )
-}
-
 // ─── theme switcher ──────────────────────────────────────────────────────
 // 3-way segmented control: Sun (light) · Monitor (system) · Moon (dark).
 // Active mode gets the pill background; others are quiet. Matches Linear /
@@ -332,118 +302,32 @@ function ThemeSwitcher({
   )
 }
 
-// Relative time formatter for Recent list
-function ago(iso: string): string {
-  const d = new Date(iso).getTime()
-  const diff = Date.now() - d
-  const min = Math.round(diff / 60000)
-  if (min < 1) return 'now'
-  if (min < 60) return `${min}m`
-  const hr = Math.round(min / 60)
-  if (hr < 24) return `${hr}h`
-  const day = Math.round(hr / 24)
-  if (day < 7) return `${day}d`
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
 
 // ─── layout ──────────────────────────────────────────────────────────────
 export default function Layout() {
   const { user, signOut } = useAuth()
-  const { activeOrg, activeRole } = useOrg()
+  const { activeOrg } = useOrg()
   const { activeProject, starredProjects, recentProjects, switchProject, refetch: refetchProjects } = useProject()
   const { theme, setTheme } = useTheme()
   const rightRailContent = useRightRailContent()
   const navigate = useNavigate()
   const location = useLocation()
-  const [moreOpen, setMoreOpen] = useState(false)
-  const [pinnedCampaigns, setPinnedCampaigns] = useState<Campaign[]>([])
-  const [recentPosts, setRecentPosts] = useState<Post[]>([])
   const [pendingCount, setPendingCount] = useState(0)
-  const [hasBrandVoice, setHasBrandVoice] = useState(false)
-  const [hasAudit, setHasAudit] = useState(false)
   const [newProjOpen, setNewProjOpen] = useState(false)
 
-  // Load everything the rail needs for the active workspace + project:
-  //   - Pinned campaigns (operator-flagged campaigns in the active project)
-  //   - Recent posts (split client-side into "In progress" + "Recent")
-  //   - Pending count for the Review nav badge
-  //   - Brand voice existence (anchor — workspace constant for now)
-  //   - Audit existence (anchor — links to latest score)
-  //
-  // When a project is active, all artifact queries also filter by
-  // project_id so the rail reflects that project's state. The brand
-  // voice + audit anchors stay workspace-level (those tables also got
-  // project_id columns but for Phase 2 we keep them org-scoped — a
-  // dedicated project-settings page will scope them per-project later).
+  // The rail now needs exactly one live number: the Review badge —
+  // pending/draft posts in the active project. Everything else the rail
+  // used to load (pinned campaigns, recent posts, anchors) moved to the
+  // Home + Review surfaces per the workflow blueprint.
   useEffect(() => {
-    if (!activeOrg?.id) {
-      setPinnedCampaigns([])
-      setRecentPosts([])
-      setPendingCount(0)
-      setHasBrandVoice(false)
-      setHasAudit(false)
-      return
-    }
-    const orgId = activeOrg.id
-    const projId = activeProject?.id
-
-    const campQ = supabase.from('campaigns')
-      .select('id, name, theme, status, is_pinned, post_count, color, start_date, end_date')
-      .eq('org_id', orgId)
-      .eq('is_pinned', true)
-      .order('start_date', { ascending: false, nullsFirst: false })
-      .limit(6)
-    const recentQ = supabase.from('content_posts')
-      .select('id, title, channel, status, posted_at, updated_at, campaign_id')
-      .eq('org_id', orgId)
-      .order('updated_at', { ascending: false })
-      .limit(12)
-    const pendingQ = supabase.from('content_posts')
+    if (!activeOrg?.id) { setPendingCount(0); return }
+    let q = supabase.from('content_posts')
       .select('id', { count: 'exact', head: true })
-      .eq('org_id', orgId)
+      .eq('org_id', activeOrg.id)
       .in('status', ['Pending Review', 'pending', 'Draft', 'draft'])
-
-    // Layer in project_id filter when one is active. Defensive against
-    // the migration not being applied yet: PostgREST will error if the
-    // column doesn't exist, in which case the Promise.all catches and
-    // we fall back to org-only data.
-    const scopedCampQ    = projId ? campQ.eq('project_id', projId)    : campQ
-    const scopedRecentQ  = projId ? recentQ.eq('project_id', projId)  : recentQ
-    const scopedPendingQ = projId ? pendingQ.eq('project_id', projId) : pendingQ
-
-    Promise.all([
-      scopedCampQ,
-      scopedRecentQ,
-      scopedPendingQ,
-      supabase.from('brand_voice')
-        .select('id', { count: 'exact', head: true })
-        .eq('org_id', orgId),
-      supabase.from('linkedin_audits')
-        .select('id', { count: 'exact', head: true })
-        .eq('org_id', orgId),
-    ]).then(([campRes, postRes, countRes, bvRes, auditRes]) => {
-      setPinnedCampaigns((campRes.data as Campaign[]) ?? [])
-      setRecentPosts((postRes.data as Post[]) ?? [])
-      setPendingCount(countRes.count ?? 0)
-      setHasBrandVoice((bvRes.count ?? 0) > 0)
-      setHasAudit((auditRes.count ?? 0) > 0)
-    }).catch(err => {
-      // eslint-disable-next-line no-console
-      console.warn('[layout] rail queries failed (migration 026 may not be applied yet):', err)
-    })
+    if (activeProject?.id) q = q.eq('project_id', activeProject.id)
+    q.then(({ count, error }) => setPendingCount(error ? 0 : (count ?? 0)))
   }, [activeOrg?.id, activeProject?.id])
-
-  // Split Recent into "In progress" (drafts touched in the last 14 days)
-  // and the rest. Caps each list at 4 so the rail stays compact.
-  const DRAFT_STATUSES = new Set(['Draft', 'draft', 'Pending Review', 'pending'])
-  const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000
-  const inProgressPosts = recentPosts.filter(p =>
-    DRAFT_STATUSES.has(p.status) &&
-    Date.now() - new Date(p.updated_at).getTime() < FOURTEEN_DAYS_MS,
-  ).slice(0, 4)
-  const inProgressIds = new Set(inProgressPosts.map(p => p.id))
-  const activityPosts = recentPosts.filter(p => !inProgressIds.has(p.id)).slice(0, 4)
-  const hasAnchors = hasBrandVoice || hasAudit
 
   async function handleSignOut() {
     await signOut()
@@ -451,7 +335,6 @@ export default function Layout() {
   }
 
   const initials = user?.email?.slice(0, 2).toUpperCase() ?? 'V'
-  const isAgencyAdmin = activeOrg?.org_type === 'agency' || activeRole === 'agency_admin'
 
   // Build the right URL for a project-scoped section. When a project is
   // active, all project-scoped pages live under /p/:slug. Otherwise we
@@ -492,45 +375,25 @@ export default function Layout() {
         {/* Workspace switcher */}
         <WorkspaceSwitcher />
 
-        {/* + Brief CTA — ink-filled primary action, Notion style. Routes  */}
-        {/* through the active project slug when one exists so the resulting */}
-        {/* draft gets tagged to it.                                        */}
+        {/* + New client — primary CTA. Opens the project-create modal.    */}
+        {/* (Was "New brief"; briefing now happens in the VERA thread.)    */}
         <div className="px-2 pt-3">
           <button
-            onClick={() => navigate(projectPath('generate'))}
-            className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 transition-opacity hover:opacity-90"
+            onClick={() => setNewProjOpen(true)}
+            className="w-full inline-flex items-center gap-2 px-3 py-2 transition-opacity hover:opacity-90"
             style={{
               background: 'var(--ink)',
               color: 'var(--paper-warm)',
               borderRadius: 'var(--radius-md)',
             }}
           >
-            <span className="inline-flex items-center gap-2">
-              <Plus size={14} strokeWidth={2.25} />
-              <span className="text-[13px] font-medium">New brief</span>
-            </span>
-            <span className="text-[11px] opacity-60">⌘N</span>
+            <Plus size={14} strokeWidth={2.25} />
+            <span className="text-[13px] font-medium">New client</span>
           </button>
         </div>
 
-        {/* Primary nav — project-scoped surfaces use the active project's */}
-        {/* slug; workspace-level surfaces (Audit, Intel, Library) don't.  */}
-        <nav className="pt-3 pb-1 space-y-0.5">
-          <PrimaryNavItem to={projectPath('dashboard')} icon={Sparkles}    label="Overview" />
-          <PrimaryNavItem to={projectPath('review')}    icon={CheckSquare} label="Review" badge={pendingCount} />
-          <PrimaryNavItem to={projectPath('knowledge')} icon={BookOpen}    label="Knowledge" />
-          <PrimaryNavItem to="/audit"                   icon={Telescope}   label="Audit" />
-          <PrimaryNavItem to="/intel"                   icon={Radar}       label="Intel" />
-          <PrimaryNavItem to="/library"                 icon={Layers}      label="Library" />
-        </nav>
-
-        {/* Scrolling middle — projects (Claude.ai style) + workspace surfaces */}
-        <div className="flex-1 overflow-y-auto">
-          {/* Starred projects — Claude.ai-style primary nav inside the    */}
-          {/* workspace. Operator stars projects they want fast access to. */}
-          {/* Renders only if projects exist (migration 026 applied AND at */}
-          {/* least one project starred). Pre-migration this stays hidden  */}
-          {/* so the rail doesn't show empty sections.                     */}
+        {/* ── THE SHELF — clients scroll here (altitude 1) ──────────────── */}
+        <div className="flex-1 overflow-y-auto pt-2">
           {starredProjects.length > 0 && (
             <>
               <RailSection label="Starred" count={starredProjects.length} />
@@ -541,17 +404,14 @@ export default function Layout() {
                   description={p.description}
                   isStarred={true}
                   isActive={activeProject?.id === p.id}
-                  onClick={() => switchProject(p.slug)}
+                  onClick={() => { switchProject(p.slug); navigate(`/p/${p.slug}/dashboard`) }}
                 />
               ))}
             </>
           )}
-
-          {/* Recent projects — last-touched projects (non-starred) for     */}
-          {/* quick switching. Capped at 6 by the context provider.         */}
           {recentProjects.length > 0 && (
             <>
-              <RailSection label="Recent projects" />
+              <RailSection label="Recent" />
               {recentProjects.map(p => (
                 <ProjectRailItem
                   key={p.id}
@@ -559,126 +419,28 @@ export default function Layout() {
                   description={p.description}
                   isStarred={false}
                   isActive={activeProject?.id === p.id}
-                  onClick={() => switchProject(p.slug)}
+                  onClick={() => { switchProject(p.slug); navigate(`/p/${p.slug}/dashboard`) }}
                 />
               ))}
             </>
-          )}
-
-          {/* + New project — shown once at least one project exists. Hidden  */}
-          {/* pre-migration so we don't tease an affordance that errors.     */}
-          {(starredProjects.length > 0 || recentProjects.length > 0) && (
-            <button
-              onClick={() => setNewProjOpen(true)}
-              className="group w-full flex items-center gap-2 mx-2 px-2 py-1.5 mt-1 transition-colors text-left hover:bg-[var(--fog)]"
-              style={{
-                borderRadius: 'var(--radius-md)',
-                width: 'calc(100% - 1rem)',
-              }}
-            >
-              <Plus size={12} className="flex-shrink-0" style={{ color: 'var(--ghost)' }} strokeWidth={2} />
-              <span className="text-[12.5px]" style={{ color: 'var(--ink-quiet)' }}>New project</span>
-            </button>
-          )}
-
-          {/* Anchors — workspace constants. Brand voice + latest audit.    */}
-          {/* Auto-populated, never curated by the operator. Hidden when    */}
-          {/* the org hasn't run audit or set brand voice yet (new clients).*/}
-          {hasAnchors && (
-            <>
-              <RailSection label="Anchors" />
-              {hasBrandVoice && (
-                <RailItem
-                  to="/settings"
-                  icon={Mic2}
-                  title="Brand voice"
-                  meta="reference"
-                />
-              )}
-              {hasAudit && activeOrg && (
-                <RailItem
-                  to={`/linkedin-score/${activeOrg.id}`}
-                  icon={BarChart3}
-                  title="LinkedIn audit"
-                  meta="latest score"
-                />
-              )}
-            </>
-          )}
-
-          <RailSection label="Pinned" count={pinnedCampaigns.length} />
-          {pinnedCampaigns.length === 0 ? (
-            <div className="px-4 py-1 text-[12px]" style={{ color: 'var(--mist)' }}>
-              No pinned campaigns
-            </div>
-          ) : pinnedCampaigns.map(c => (
-            <RailItem
-              key={c.id}
-              to={`${projectPath('review')}?campaign=${c.id}`}
-              icon={Star}
-              title={c.name}
-              meta={[
-                c.status !== 'active' ? c.status : null,
-                typeof c.post_count === 'number' ? `${c.post_count} posts` : null,
-              ].filter(Boolean).join(' · ') || undefined}
-            />
-          ))}
-
-          {/* In progress — draft/pending posts touched in last 14 days.    */}
-          {/* Catches long-running drafts that would otherwise fall off the */}
-          {/* general Recent list when the operator gets pulled into other  */}
-          {/* work for a few days.                                          */}
-          {inProgressPosts.length > 0 && (
-            <>
-              <RailSection label="In progress" count={inProgressPosts.length} />
-              {inProgressPosts.map(p => (
-                <RailItem
-                  key={p.id}
-                  to={`${projectPath('review')}/${p.id}`}
-                  icon={PenLine}
-                  title={p.title || 'Untitled post'}
-                  meta={`${(p.channel ?? 'post').toLowerCase()} · ${ago(p.updated_at)}`}
-                />
-              ))}
-            </>
-          )}
-
-          <RailSection label="Recent" />
-          {activityPosts.length === 0 ? (
-            <div className="px-4 py-1 text-[12px]" style={{ color: 'var(--mist)' }}>
-              Nothing here yet
-            </div>
-          ) : activityPosts.map(p => (
-            <RailItem
-              key={p.id}
-              to={`${projectPath('review')}/${p.id}`}
-              icon={Clock}
-              title={p.title || 'Untitled post'}
-              meta={`${(p.channel ?? 'post').toLowerCase()} · ${ago(p.updated_at)}`}
-            />
-          ))}
-
-          {/* More — collapsed secondary routes */}
-          <div className="px-4 pt-5 pb-1">
-            <button
-              onClick={() => setMoreOpen(o => !o)}
-              className="flex items-center gap-1 text-[11px] font-medium transition-opacity hover:opacity-80"
-              style={{ color: 'var(--ghost)' }}
-            >
-              <ChevronRight size={11} className={`transition-transform ${moreOpen ? 'rotate-90' : ''}`} strokeWidth={2} />
-              More
-            </button>
-          </div>
-          {moreOpen && (
-            <div className="pb-2 space-y-0.5 pt-1">
-              <RailItem to="/clients"   icon={Building2} title="Clients" />
-              <RailItem to="/calendar"  icon={Calendar}  title="Calendar" />
-              <RailItem to="/templates" icon={Layers}    title="Templates" />
-              <RailItem to="/skills"    icon={Zap}       title="Skills" />
-              {isAgencyAdmin && <RailItem to="/agency" icon={Building2} title="Agency" />}
-            </div>
           )}
         </div>
+
+        {/* ── THE DESK — the active client's loop (altitude 2) ──────────── */}
+        {/* Pinned above the footer, always visible. Six surfaces, all      */}
+        {/* under /p/:slug. The "More" drawer is gone; nothing about a      */}
+        {/* client lives outside the client.                                */}
+        <nav
+          className="pt-2 pb-2 space-y-0.5"
+          style={{ borderTop: '1px solid var(--paper-edge)' }}
+        >
+          <PrimaryNavItem to={projectPath('dashboard')} icon={Sparkles}      label="Home" />
+          <PrimaryNavItem to={projectPath('vera')}      icon={MessagesSquare} label="VERA" />
+          <PrimaryNavItem to={projectPath('review')}    icon={CheckSquare}   label="Review" badge={pendingCount} />
+          <PrimaryNavItem to={projectPath('knowledge')} icon={BookOpen}      label="Knowledge" />
+          <PrimaryNavItem to={projectPath('brain')}     icon={Brain}         label="Brain" />
+          <PrimaryNavItem to={projectPath('measure')}   icon={BarChart3}     label="Measure" />
+        </nav>
 
         {/* Footer — Settings + theme + user. No border — separation by   */}
         {/* whitespace alone, matching the light-rails treatment.           */}
@@ -732,7 +494,7 @@ export default function Layout() {
             <Outlet />
           </ErrorBoundary>
         </main>
-        {!location.pathname.endsWith('/generate') && <ChatPanel />}
+        <ChatPanel />{/* one conversational surface; /generate retired (Phase 1 folds it into the VERA tab) */}
       </div>
 
       {/* Right rail — same light treatment as the left rail. Same bg as    */}

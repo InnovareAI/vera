@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { OrgProvider, useOrg } from './lib/orgContext'
@@ -8,25 +8,22 @@ import { ThemeProvider } from './lib/theme'
 import { ToastProvider } from './design'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { setUserContext, setOrgContext } from './lib/sentry'
-import { supabase } from './lib/supabase'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
-import Generate from './pages/Generate'
 import Review from './pages/Review'
 import ReviewDetail from './pages/ReviewDetail'
 import Onboarding from './pages/Onboarding'
 import OnboardingAudit from './pages/OnboardingAudit'
 import LinkedInScore from './pages/LinkedInScore'
-import Clients from './pages/Clients'
-import Calendar from './pages/Calendar'
-import Library from './pages/Library'
 import Knowledge from './pages/Knowledge'
-import Intel from './pages/Intel'
-import Templates from './pages/Templates'
 import Skills from './pages/Skills'
 import Settings from './pages/Settings'
-import Agency from './pages/Agency'
+// ── Phase 0 surfaces (UX_BLUEPRINT.md): the two-altitude IA ──────────
+import AcrossClients from './pages/AcrossClients'   // "/" — the shelf
+import VeraThread from './pages/VeraThread'          // /p/:slug/vera
+import Brain from './pages/Brain'                    // /p/:slug/brain
+import Measure from './pages/Measure'                // /p/:slug/measure
 
 export default function App() {
   // Top-level boundary catches anything that escapes a route boundary —
@@ -48,44 +45,47 @@ export default function App() {
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/onboarding/audit/:orgId" element={<OnboardingAudit />} />
               <Route path="/" element={<Layout />}>
-                {/* /linkedin-score moved INSIDE Layout so it picks up the     */}
-                {/* rails (the standalone version had no left rail / chat dock */}
-                {/* / right rail). Still works during onboarding — rails just  */}
-                {/* have less content for a brand-new workspace.               */}
+                {/* /linkedin-score stays a real route — Measure's Audit tab  */}
+                {/* links here (Phase 5 re-scopes it per-project inline).      */}
                 <Route path="linkedin-score/:orgId" element={<LinkedInScore />} />
-                <Route index element={<RedirectToProjectDashboard />} />
 
-                {/* Project-scoped routes — preferred. URL carries the
-                    active project's slug; pages filter by that project. */}
+                {/* ── Altitude 1: THE SHELF ── */}
+                {/* "/" is Across Clients — the operator's day starts here,    */}
+                {/* every client on one shelf. (Was redirect-to-dashboard.)    */}
+                <Route index element={<AcrossClients />} />
+
+                {/* ── Altitude 2: THE DESK ── one client, six loop surfaces. */}
                 <Route path="p/:projectSlug">
                   <Route index element={<Navigate to="dashboard" replace />} />
-                  <Route path="dashboard"  element={<Dashboard />} />
-                  <Route path="generate"   element={<Generate />} />
+                  <Route path="dashboard"  element={<Dashboard />} />{/* Home */}
+                  <Route path="vera"       element={<VeraThread />} />
                   <Route path="review"     element={<Review />} />
                   <Route path="review/:id" element={<ReviewDetail />} />
                   <Route path="knowledge"  element={<Knowledge />} />
+                  <Route path="brain"      element={<Brain />} />
+                  <Route path="measure"    element={<Measure />} />
                 </Route>
 
-                {/* Legacy flat routes — redirect to /p/:slug/* using the
-                    active project (or fall through to dashboard if no
-                    project context yet). Kept working so existing links,
-                    bookmarks, and rail items don't 404. */}
+                {/* ── Flat → project redirect shims ──                        */}
+                {/* The rail no longer links to these, but bookmarks + deep    */}
+                {/* links must not 404. Each rewrites into the project frame   */}
+                {/* (or the shelf) per the blueprint's surface-fate table.     */}
                 <Route path="dashboard"  element={<RedirectFlatToProject section="dashboard" />} />
-                <Route path="generate"   element={<RedirectFlatToProject section="generate" />} />
+                <Route path="generate"   element={<RedirectFlatToProject section="vera" />} />{/* Generate folds into VERA */}
                 <Route path="review"     element={<RedirectFlatToProject section="review" />} />
                 <Route path="review/:id" element={<RedirectReviewDetailToProject />} />
+                <Route path="knowledge"  element={<RedirectFlatToProject section="knowledge" />} />
+                <Route path="audit"      element={<RedirectFlatToProject section="measure?tab=audit" />} />
+                <Route path="intel"      element={<RedirectFlatToProject section="measure?tab=intel" />} />
+                <Route path="library"    element={<RedirectFlatToProject section="review" />} />{/* Library dissolves → Review */}
+                <Route path="calendar"   element={<RedirectFlatToProject section="review" />} />{/* Calendar → Review's calendar view */}
+                <Route path="templates"  element={<RedirectFlatToProject section="knowledge" />} />{/* Templates fold into Knowledge */}
+                <Route path="clients"    element={<Navigate to="/" replace />} />{/* Clients = the shelf */}
+                <Route path="agency"     element={<Navigate to="/" replace />} />{/* Agency → Across Clients */}
 
-                {/* Workspace-level routes — not project-scoped. */}
-                <Route path="audit"      element={<AuditRedirect />} />
-                <Route path="knowledge"  element={<Knowledge />} />
-                <Route path="clients"    element={<Clients />} />
-                <Route path="calendar"   element={<Calendar />} />
-                <Route path="library"    element={<Library />} />
-                <Route path="intel"      element={<Intel />} />
-                <Route path="templates"  element={<Templates />} />
+                {/* Workspace-level, kept as-is for Phase 0. */}
                 <Route path="skills"     element={<Skills />} />
                 <Route path="settings"   element={<Settings />} />
-                <Route path="agency"     element={<Agency />} />
               </Route>
             </Routes>
             </RightRailProvider>
@@ -98,79 +98,24 @@ export default function App() {
   )
 }
 
-// Redirect to dashboard if already logged in
+// Already logged in → the shelf ("/"), the operator's start surface.
 function LoginGuard() {
   const { session, loading } = useAuth()
   if (loading) return null
-  if (session) return <Navigate to="/dashboard" replace />
+  if (session) return <Navigate to="/" replace />
   return <Login />
 }
 
-// /audit picks the right destination for the active workspace:
-//   - no org              → /onboarding (first-time signup)
-//   - org, no audit yet   → /onboarding/audit/:orgId (run the first audit)
-//   - org, audit exists   → /linkedin-score/:orgId (the actual report)
+// Flat-route → project-scoped redirect shim. The rail no longer links to
+// flat routes, but bookmarks + deep links must not 404. Reads the active
+// project and rewrites into /p/:slug/<section>. If no project exists yet,
+// falls through to the shelf ("/"), which handles the empty state.
 //
-// Waits for the org context to finish loading before deciding — earlier
-// version raced the load and always fired '/onboarding' on first paint
-// because activeOrg was null while the OrgProvider's query was in flight.
-function AuditRedirect() {
-  const { activeOrg, loading: orgLoading } = useOrg()
-  const [target, setTarget] = useState<string | null>(null)
-
-  useEffect(() => {
-    // Hold redirect until the org context has settled. Without this gate,
-    // the component fires Navigate('/onboarding') on first paint and we
-    // never see activeOrg even when one exists.
-    if (orgLoading) return
-    if (!activeOrg?.id) {
-      setTarget('/onboarding')
-      return
-    }
-    let cancelled = false
-    supabase
-      .from('linkedin_audits')
-      .select('id', { count: 'exact', head: true })
-      .eq('org_id', activeOrg.id)
-      .then(({ count }) => {
-        if (cancelled) return
-        const hasAudit = (count ?? 0) > 0
-        setTarget(hasAudit
-          ? `/linkedin-score/${activeOrg.id}`
-          : `/onboarding/audit/${activeOrg.id}`)
-      })
-    return () => { cancelled = true }
-  }, [activeOrg?.id, orgLoading])
-
-  if (!target) return null
-  return <Navigate to={target} replace />
-}
-
-// Root index — picks the right landing URL once project context loads.
-// Default project gets us /p/[default-slug]/dashboard; no project
-// context (pre-migration) falls back to the flat /dashboard route.
-function RedirectToProjectDashboard() {
-  const { activeProject, loading } = useProject()
-  if (loading) return null
-  if (activeProject) return <Navigate to={`/p/${activeProject.slug}/dashboard`} replace />
-  return <Navigate to="/dashboard" replace />
-}
-
-// Flat-route → project-scoped redirect. Used when somebody hits
-// /dashboard / /generate / /review without a project slug in the URL.
-// Reads the active project from context and rewrites. If no project
-// is loaded yet (pre-migration), renders the flat page so nothing
-// breaks visually.
+// `section` may carry a query string (e.g. "measure?tab=audit").
 function RedirectFlatToProject({ section }: { section: string }) {
   const { activeProject, loading } = useProject()
   if (loading) return null
   if (activeProject) return <Navigate to={`/p/${activeProject.slug}/${section}`} replace />
-  // Pre-migration fallback — render the underlying page directly so
-  // operators don't see a redirect loop. We re-route via the projects
-  // path once one exists.
-  if (section === 'dashboard') return <Dashboard />
-  if (section === 'generate')  return <Generate />
-  if (section === 'review')    return <Review />
   return <Navigate to="/" replace />
 }
 
