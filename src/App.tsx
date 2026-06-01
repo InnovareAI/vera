@@ -14,8 +14,6 @@ import Dashboard from './pages/Dashboard'
 import Review from './pages/Review'
 import ReviewDetail from './pages/ReviewDetail'
 import Onboarding from './pages/Onboarding'
-import OnboardingAudit from './pages/OnboardingAudit'
-import LinkedInScore from './pages/LinkedInScore'
 import Knowledge from './pages/Knowledge'
 import Skills from './pages/Skills'
 import Settings from './pages/Settings'
@@ -43,12 +41,7 @@ export default function App() {
             <Routes>
               <Route path="/login" element={<LoginGuard />} />
               <Route path="/onboarding" element={<Onboarding />} />
-              <Route path="/onboarding/audit/:orgId" element={<OnboardingAudit />} />
               <Route path="/" element={<Layout />}>
-                {/* /linkedin-score stays a real route — Measure's Audit tab  */}
-                {/* links here (Phase 5 re-scopes it per-project inline).      */}
-                <Route path="linkedin-score/:orgId" element={<LinkedInScore />} />
-
                 {/* ── Altitude 1: THE SHELF ── */}
                 {/* "/" is Across Clients — the operator's day starts here,    */}
                 {/* every client on one shelf. (Was redirect-to-dashboard.)    */}
@@ -75,8 +68,8 @@ export default function App() {
                 <Route path="review"     element={<RedirectFlatToProject section="review" />} />
                 <Route path="review/:id" element={<RedirectReviewDetailToProject />} />
                 <Route path="knowledge"  element={<RedirectFlatToProject section="knowledge" />} />
-                <Route path="audit"      element={<RedirectFlatToProject section="measure?tab=audit" />} />
-                <Route path="intel"      element={<RedirectFlatToProject section="measure?tab=intel" />} />
+                <Route path="audit"      element={<RedirectFlatToProject section="measure" />} />{/* LinkedIn audit removed — land on Measure */}
+                <Route path="intel"      element={<RedirectFlatToProject section="measure" />} />
                 <Route path="library"    element={<RedirectFlatToProject section="review" />} />{/* Library dissolves → Review */}
                 <Route path="calendar"   element={<RedirectFlatToProject section="review" />} />{/* Calendar → Review's calendar view */}
                 <Route path="templates"  element={<RedirectFlatToProject section="knowledge" />} />{/* Templates fold into Knowledge */}

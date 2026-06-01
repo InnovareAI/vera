@@ -9,16 +9,14 @@
 // the active project's current instructions if any. The editors (voice,
 // audiences, channels, instruction-save) land in Phase 2.
 
-import { useNavigate } from 'react-router-dom'
-import { Brain as BrainIcon, Mic2, Users, Radio, Telescope } from 'lucide-react'
+import { Brain as BrainIcon, Mic2, Users, Radio } from 'lucide-react'
 import { useProject } from '../lib/projectContext'
 import {
-  PageHeader, SectionLabel, Card, EmptyState, Button,
+  PageHeader, SectionLabel, Card, EmptyState,
   color, space, type as t,
 } from '../design'
 
 export default function Brain() {
-  const navigate = useNavigate()
   const { activeProject } = useProject()
 
   if (!activeProject) {
@@ -46,16 +44,6 @@ export default function Brain() {
         eyebrow={activeProject.name}
         title="Brain"
         subtitle="Everything that makes this client a bounded scope — the ground truth VERA reasons from. Editors land in Phase 2; this is the shape."
-        actions={
-          <Button
-            variant="secondary"
-            size="sm"
-            leading={<Telescope size={13} strokeWidth={1.75} />}
-            onClick={() => navigate('/audit')}
-          >
-            Run grounding audit
-          </Button>
-        }
       />
 
       {activeProject.instructions && (

@@ -38,6 +38,7 @@ export default function AcrossClients() {
       .select('project_id')
       .eq('org_id', activeOrg.id)
       .eq('status', 'open')
+      .neq('kind', 'stale_audit')   // LinkedIn audit removed — don't count its proposals
       .then(({ data }) => {
         if (cancelled) return
         const counts: Record<string, number> = {}
