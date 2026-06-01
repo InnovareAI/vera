@@ -32,6 +32,7 @@ interface Message {
   pending?: boolean
   tools?: ToolEvent[]
   images?: string[]
+  videos?: string[]
 }
 
 const TOOL_LABEL: Record<string, string> = {
@@ -163,7 +164,10 @@ export default function VeraThread() {
             // attach to the open draft if there is one
             setDraft(prev => prev ? { ...prev, media_url: url, media_type: 'image' } : prev)
           } else if (ev.type === 'video' && typeof ev.url === 'string') {
-            setDraft(prev => prev ? { ...prev, media_url: ev.url as string, media_type: 'video' } : prev)
+            const vurl = ev.url as string
+            setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, videos: [...(m.videos ?? []), vurl] } : m))
+            // attach to the open draft if there is one
+            setDraft(prev => prev ? { ...prev, media_url: vurl, media_type: 'video' } : prev)
           } else if (ev.type === 'draft' && ev.post) {
             setDraft(ev.post as Post)
           } else if (ev.type === 'error') {
@@ -325,6 +329,9 @@ function Bubble({ m }: { m: Message }) {
           <a key={i} href={url} target="_blank" rel="noreferrer" style={{ display: 'block', maxWidth: 320, border: `1px solid ${color.line}`, borderRadius: radius.md, overflow: 'hidden' }}>
             <img src={url} alt="" style={{ width: '100%', display: 'block' }} />
           </a>
+        ))}
+        {m.videos?.map((url, i) => (
+          <video key={i} src={url} controls autoPlay muted loop playsInline style={{ display: 'block', maxWidth: 320, border: `1px solid ${color.line}`, borderRadius: radius.md, overflow: 'hidden' }} />
         ))}
         {(m.content || m.pending) && (
           <div style={{ fontSize: t.size.lg, lineHeight: 1.62, color: color.ink, whiteSpace: 'pre-wrap' }}>

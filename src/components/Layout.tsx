@@ -31,7 +31,6 @@ import { useRightRailContent } from '../lib/rightRailContext'
 import { useTheme } from '../lib/theme'
 import { supabase } from '../lib/supabase'
 import { ErrorBoundary } from './ErrorBoundary'
-import { ChatPanel } from './ChatPanel'
 
 // ─── workspace switcher ──────────────────────────────────────────────────
 // Single-line top-of-rail. Glyph + name + chevron. Click expands an overlay
@@ -492,20 +491,17 @@ export default function Layout() {
         </div>
       </aside>
 
-      {/* Center + right rail. Center column holds the canvas + chat dock.   */}
-      {/* Right rail renders only when a page provides content via the       */}
-      {/* useRightRail() hook — otherwise the canvas takes its width.        */}
-      {/*                                                                    */}
-      {/* Chat exception: /generate has its OWN brief composer (the 9-agent  */}
-      {/* pipeline) so we hide the chat dock there. Rule: never two          */}
-      {/* composers on one page.                                              */}
+      {/* Center + right rail. The center column is just the canvas — there  */}
+      {/* is NO global chat dock. Conversation lives on the VERA tab as the   */}
+      {/* 3-pane surface (rail · thread · draft artifact), so we never get    */}
+      {/* two composers on one page. Right rail renders only when a page      */}
+      {/* provides content via the useRightRail() hook.                       */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <main className="flex-1 overflow-y-auto min-h-0" style={{ background: 'var(--paper)' }}>
           <ErrorBoundary variant="route" resetKey={location.pathname}>
             <Outlet />
           </ErrorBoundary>
         </main>
-        <ChatPanel />{/* one conversational surface; /generate retired (Phase 1 folds it into the VERA tab) */}
       </div>
 
       {/* Right rail — same light treatment as the left rail. Same bg as    */}
