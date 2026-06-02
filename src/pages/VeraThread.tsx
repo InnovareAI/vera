@@ -59,6 +59,7 @@ export default function VeraThread() {
   const [draft, setDraft] = useState<Post | null>(null)
   const [approving, setApproving] = useState(false)
   const [observations, setObservations] = useState<{ id: string; title: string; proposed_action: string | null }[]>([])
+  const [stats, setStats] = useState<{ pending: number; campaigns: number }>({ pending: 0, campaigns: 0 })
 
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
@@ -99,6 +100,17 @@ export default function VeraThread() {
     q.then(({ data }) => setObservations((data ?? []) as { id: string; title: string; proposed_action: string | null }[]))
   }, [activeOrg?.id, activeProject?.id])
 
+  // Live counts for the launcher quick-action descriptions (SAM-style).
+  useEffect(() => {
+    if (!activeOrg?.id) { setStats({ pending: 0, campaigns: 0 }); return }
+    let pq = supabase.from('content_posts').select('id', { count: 'exact', head: true })
+      .eq('org_id', activeOrg.id).in('status', ['Pending Review', 'pending', 'Draft', 'draft'])
+    if (activeProject?.id) pq = pq.eq('project_id', activeProject.id)
+    const cq = supabase.from('campaigns').select('id', { count: 'exact', head: true }).eq('org_id', activeOrg.id)
+    Promise.all([pq, cq]).then(([pr, cr]) =>
+      setStats({ pending: pr.error ? 0 : (pr.count ?? 0), campaigns: cr.error ? 0 : (cr.count ?? 0) }))
+  }, [activeOrg?.id, activeProject?.id])
+
   // Auto-scroll
   useEffect(() => {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: 'smooth' })
@@ -112,8 +124,8 @@ export default function VeraThread() {
     el.style.height = `${Math.min(Math.max(el.scrollHeight, 52), 180)}px`
   }, [input])
 
-  const send = useCallback(async () => {
-    const text = input.trim()
+  const send = useCallback(async (override?: string) => {
+    const text = (override ?? input).trim()
     if (!text || streaming || !activeOrg?.id) return
 
     const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text }
@@ -261,7 +273,7 @@ export default function VeraThread() {
         {!historyLoaded ? (
           <Centered>Loading thread…</Centered>
         ) : messages.length === 0 ? (
-          <Idle onPick={s => { setInput(s); taRef.current?.focus() }} observations={observations} />
+          <Idle onRun={pr => send(pr)} observations={observations} actions={buildLaunchActions(stats)} />
         ) : (
           <div style={{ maxWidth: 680, margin: '0 auto', padding: `0 ${space[8]}`, display: 'flex', flexDirection: 'column', gap: space[7] }}>
             {messages.map(m => <Bubble key={m.id} m={m} />)}
@@ -289,7 +301,7 @@ export default function VeraThread() {
                 <Square size={12} fill="currentColor" />
               </button>
             ) : (
-              <button onClick={send} disabled={!input.trim() || !activeProject} title="Send"
+              <button onClick={() => send()} disabled={!input.trim() || !activeProject} title="Send"
                 style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', cursor: input.trim() ? 'pointer' : 'not-allowed', background: input.trim() ? color.accent : color.ink, color: '#fff', opacity: input.trim() ? 1 : 0.35, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: input.trim() ? 'var(--shadow-glow)' : 'none', transition: 'background 120ms, box-shadow 120ms' }}>
                 <ArrowUp size={16} strokeWidth={2.25} />
               </button>
@@ -442,17 +454,30 @@ function ArtifactEmpty() {
   )
 }
 
-// ─── launcher (SAM-style) — avatar + heading + action-card grid ───────
-const LAUNCH_CARDS = [
-  { icon: PenLine,       title: 'Draft a Post',     sub: 'Copy + a matching image',     prompt: 'Draft a punchy LinkedIn post for this brand — one sharp hook, three crisp points, a soft CTA, and a matching image.' },
-  { icon: ListChecks,    title: 'Review Drafts',    sub: "See what's pending approval",  prompt: "Show me what's pending in Review and summarize each draft in a line." },
-  { icon: Megaphone,     title: 'Plan a Campaign',  sub: 'Map a content series',        prompt: 'Help me plan a 4-post content campaign for this brand — themes, angles, and a posting cadence.' },
-  { icon: MessageCircle, title: 'Create Messaging', sub: 'Draft campaign-ready copy',   prompt: 'Draft 3 message variations for our latest offer, each with a different angle.' },
-  { icon: Lightbulb,     title: 'Content Ideas',    sub: 'Fresh angles for this brand', prompt: "Give me 5 content ideas grounded in this brand's voice and recent themes." },
-  { icon: Target,        title: 'Strategy Ideas',   sub: 'Find the next best move',     prompt: "What's the highest-leverage content move for this brand right now? Be specific." },
-] as const
+// ─── launcher quick actions (SAM-style) — dynamic, count-aware, send-on-click ──
+// Mirrors SAM's welcome actions: each is a complete prompt that RUNS on click
+// (not a fill-the-box starter), and descriptions carry live workspace counts.
+type LaunchAction = { icon: React.ElementType; title: string; sub: string; prompt: string }
+function buildLaunchActions(stats: { pending: number; campaigns: number }): LaunchAction[] {
+  const a: LaunchAction[] = []
+  a.push({ icon: PenLine, title: 'Draft a Post', sub: 'Copy + a matching image', prompt: 'Draft a punchy LinkedIn post for this brand — one sharp hook, three crisp points, a soft CTA, and a matching image.' })
+  if (stats.pending > 0) {
+    a.push({ icon: ListChecks, title: 'Review Drafts', sub: `${stats.pending} draft${stats.pending === 1 ? '' : 's'} waiting`, prompt: `Summarize the ${stats.pending} draft${stats.pending === 1 ? '' : 's'} pending review — flag which to publish first and why.` })
+  }
+  a.push(stats.campaigns > 0
+    ? { icon: Megaphone, title: 'Improve Campaign Plan', sub: `${stats.campaigns} campaign${stats.campaigns === 1 ? '' : 's'} in workspace`, prompt: "Review this brand's campaigns and suggest the highest-impact improvement to theme, angle, cadence, or channel mix." }
+    : { icon: Megaphone, title: 'Plan a Campaign', sub: 'Map a content series', prompt: 'Help me plan a 4-post content campaign for this brand — themes, angles, and a posting cadence.' })
+  a.push({ icon: MessageCircle, title: 'Create Messaging', sub: 'Draft campaign-ready copy', prompt: 'Draft 3 message variations for our latest offer, each with a different angle.' })
+  a.push({ icon: Lightbulb, title: 'Content Ideas', sub: 'Fresh angles for this brand', prompt: "Give me 5 content ideas grounded in this brand's voice and recent themes." })
+  a.push({ icon: Target, title: 'Strategy Ideas', sub: 'Find the next best move', prompt: "What's the highest-leverage content move for this brand right now? Be specific." })
+  return a.slice(0, 6)
+}
 
-function Idle({ onPick, observations }: { onPick: (s: string) => void; observations: { id: string; title: string; proposed_action: string | null }[] }) {
+function Idle({ onRun, observations, actions }: {
+  onRun: (prompt: string) => void
+  observations: { id: string; title: string; proposed_action: string | null }[]
+  actions: LaunchAction[]
+}) {
   return (
     <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: space[8] }}>
       <span style={{ width: 56, height: 56, borderRadius: radius.lg, background: 'var(--accent-tint)', color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 700, marginBottom: space[5] }}>V</span>
@@ -469,7 +494,7 @@ function Idle({ onPick, observations }: { onPick: (s: string) => void; observati
           <div style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.accent, marginBottom: space[3] }}>VERA wants to</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
             {observations.map(o => (
-              <button key={o.id} onClick={() => onPick(o.proposed_action || o.title)}
+              <button key={o.id} onClick={() => onRun(o.proposed_action || o.title)}
                 style={{ display: 'flex', alignItems: 'center', gap: space[3], textAlign: 'left', padding: `${space[3]} ${space[4]}`, background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.md, cursor: 'pointer', fontFamily: t.family.sans, color: color.ink, fontSize: t.size.sm }}>
                 <Sparkles size={15} style={{ color: color.accent, flexShrink: 0 }} />
                 <span style={{ flex: 1, minWidth: 0 }}>{o.title}</span>
@@ -481,10 +506,10 @@ function Idle({ onPick, observations }: { onPick: (s: string) => void; observati
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[3], width: '100%', maxWidth: 640 }}>
-        {LAUNCH_CARDS.map(c => {
+        {actions.map(c => {
           const Icn = c.icon
           return (
-            <button key={c.title} onClick={() => onPick(c.prompt)}
+            <button key={c.title} onClick={() => onRun(c.prompt)}
               style={{ display: 'flex', alignItems: 'flex-start', gap: space[4], textAlign: 'left', padding: `${space[4]} ${space[5]}`, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, cursor: 'pointer', fontFamily: t.family.sans, transition: 'border-color 120ms, box-shadow 120ms' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-line)'; e.currentTarget.style.boxShadow = 'var(--shadow-pop)' }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--line)'; e.currentTarget.style.boxShadow = 'none' }}>
