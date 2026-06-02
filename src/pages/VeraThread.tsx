@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -240,23 +240,12 @@ export default function VeraThread() {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: color.paper }}>
-      {/* header */}
-      <div style={{ padding: `${space[4]} ${space[8]}`, borderBottom: `1px solid ${color.line}`, display: 'flex', alignItems: 'center', gap: space[3] }}>
-        <span style={{ width: 24, height: 24, borderRadius: radius.md, background: color.ink, color: color.surface, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }}>V</span>
-        <div>
-          <div style={{ fontSize: t.size.body, fontWeight: t.weight.semibold, color: color.ink }}>VERA</div>
-          <div style={{ fontSize: t.size.cap, color: color.ghost }}>
-            {activeProject?.name ?? activeOrg?.name ?? 'Workspace'} · your creative partner
-          </div>
-        </div>
-      </div>
-
-      {/* thread */}
+      {/* thread (no header bar — SAM-clean; the rail identifies "Vera") */}
       <div ref={scrollerRef} style={{ flex: 1, overflowY: 'auto', padding: `${space[7]} 0` }}>
         {!historyLoaded ? (
           <Centered>Loading thread…</Centered>
         ) : messages.length === 0 ? (
-          <Idle onPick={s => { setInput(s); taRef.current?.focus() }} project={activeProject?.name ?? null} />
+          <Idle onPick={s => { setInput(s); taRef.current?.focus() }} />
         ) : (
           <div style={{ maxWidth: 680, margin: '0 auto', padding: `0 ${space[8]}`, display: 'flex', flexDirection: 'column', gap: space[7] }}>
             {messages.map(m => <Bubble key={m.id} m={m} />)}
@@ -266,23 +255,15 @@ export default function VeraThread() {
 
       {/* composer */}
       <div style={{ padding: `${space[5]} ${space[8]} ${space[7]}` }}>
-        <div style={{ maxWidth: 680, margin: '0 auto' }}>
-          {activeProject && (
-            <div style={{ display: 'flex', gap: space[2], marginBottom: space[3], fontSize: t.size.cap, color: color.ghost, alignItems: 'center' }}>
-              <span style={{ background: color.paper2, padding: '2px 8px', borderRadius: radius.sm, color: color.ink2, fontWeight: t.weight.medium }}>
-                {activeProject.name}
-              </span>
-              <span>· VERA drafts in this client's voice</span>
-            </div>
-          )}
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: space[3], padding: `${space[3]} ${space[4]}`, background: color.surface, border: `1px solid ${color.line2}`, borderRadius: radius.lg, boxShadow: '0 1px 3px rgba(0,0,0,.04)' }}>
+        <div style={{ maxWidth: 720, margin: '0 auto' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: space[3], padding: `${space[3]} ${space[4]}`, background: color.surface, border: `1px solid ${color.line2}`, borderRadius: radius.lg, boxShadow: 'var(--shadow-pop)' }}>
             <textarea
               ref={taRef}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={onKey}
               rows={1}
-              placeholder="Brief a post, ask VERA anything, or paste a source…"
+              placeholder="Ask Vera anything…"
               disabled={!activeProject}
               style={{ flex: 1, resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontFamily: t.family.sans, fontSize: t.size.lg, lineHeight: 1.5, color: color.ink, minHeight: 52, maxHeight: 180, paddingTop: 6 }}
             />
@@ -445,27 +426,44 @@ function ArtifactEmpty() {
   )
 }
 
-// ─── idle / helpers ─────────────────────────────────────────────────
-function Idle({ onPick, project }: { onPick: (s: string) => void; project: string | null }) {
-  const examples = [
-    'Draft a LinkedIn post on why most AI pilots stall at week six.',
-    'Write 3 hooks for our hero product, lead with the feeling.',
-    'Turn our latest case study into a short post + a hero image.',
-  ]
+// ─── launcher (SAM-style) — avatar + heading + action-card grid ───────
+const LAUNCH_CARDS = [
+  { icon: PenLine,       title: 'Draft a Post',     sub: 'Copy + a matching image',     prompt: 'Draft a punchy LinkedIn post for this brand — one sharp hook, three crisp points, a soft CTA, and a matching image.' },
+  { icon: ListChecks,    title: 'Review Drafts',    sub: "See what's pending approval",  prompt: "Show me what's pending in Review and summarize each draft in a line." },
+  { icon: Megaphone,     title: 'Plan a Campaign',  sub: 'Map a content series',        prompt: 'Help me plan a 4-post content campaign for this brand — themes, angles, and a posting cadence.' },
+  { icon: MessageCircle, title: 'Create Messaging', sub: 'Draft campaign-ready copy',   prompt: 'Draft 3 message variations for our latest offer, each with a different angle.' },
+  { icon: Lightbulb,     title: 'Content Ideas',    sub: 'Fresh angles for this brand', prompt: "Give me 5 content ideas grounded in this brand's voice and recent themes." },
+  { icon: Target,        title: 'Strategy Ideas',   sub: 'Find the next best move',     prompt: "What's the highest-leverage content move for this brand right now? Be specific." },
+] as const
+
+function Idle({ onPick }: { onPick: (s: string) => void }) {
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: space[8] }}>
-      <span style={{ width: 40, height: 40, borderRadius: radius.lg, background: color.ink, color: color.surface, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 600, marginBottom: space[5] }}>V</span>
-      <p style={{ fontSize: t.size.h3, fontWeight: t.weight.semibold, color: color.ink, marginBottom: space[2] }}>
-        What should we make{project ? ` for ${project}` : ''}?
+    <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: space[8] }}>
+      <span style={{ width: 56, height: 56, borderRadius: radius.lg, background: 'var(--accent-tint)', color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 700, marginBottom: space[5] }}>V</span>
+      <h1 style={{ fontSize: t.size.h2, fontWeight: t.weight.semibold, color: color.ink, marginBottom: space[2], textAlign: 'center' }}>
+        What should we create today?
+      </h1>
+      <p style={{ fontSize: t.size.body, color: color.ghost, marginBottom: space[7], textAlign: 'center', maxWidth: '44ch' }}>
+        Bring Vera a brief, a question, or an idea you want to move forward.
       </p>
-      <p style={{ fontSize: t.size.cap, color: color.ghost, marginBottom: space[6] }}>Brief it in a line — VERA's team drafts it, you steer.</p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: space[2], width: '100%', maxWidth: 440 }}>
-        {examples.map(ex => (
-          <button key={ex} onClick={() => onPick(ex)}
-            style={{ textAlign: 'left', padding: `10px 14px`, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, fontSize: t.size.sm, color: color.ink2, cursor: 'pointer', fontFamily: t.family.sans }}>
-            {ex}
-          </button>
-        ))}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[3], width: '100%', maxWidth: 640 }}>
+        {LAUNCH_CARDS.map(c => {
+          const Icn = c.icon
+          return (
+            <button key={c.title} onClick={() => onPick(c.prompt)}
+              style={{ display: 'flex', alignItems: 'flex-start', gap: space[4], textAlign: 'left', padding: `${space[4]} ${space[5]}`, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, cursor: 'pointer', fontFamily: t.family.sans, transition: 'border-color 120ms, box-shadow 120ms' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-line)'; e.currentTarget.style.boxShadow = 'var(--shadow-pop)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--line)'; e.currentTarget.style.boxShadow = 'none' }}>
+              <span style={{ width: 36, height: 36, borderRadius: radius.md, background: 'var(--accent-tint)', color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Icn size={18} strokeWidth={1.9} />
+              </span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink }}>{c.title}</span>
+                <span style={{ display: 'block', fontSize: t.size.cap, color: color.ghost, marginTop: 2 }}>{c.sub}</span>
+              </span>
+            </button>
+          )
+        })}
       </div>
     </div>
   )
