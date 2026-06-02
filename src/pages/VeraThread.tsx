@@ -236,7 +236,7 @@ export default function VeraThread() {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [input, streaming, activeOrg?.id, activeProject?.id, user?.id, messages, location.pathname])
+  }, [input, streaming, activeOrg?.id, activeProject?.id, user?.id, messages, location.pathname, sessionId])
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
