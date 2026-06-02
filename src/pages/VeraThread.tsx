@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target, SquarePen } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target, SquarePen, Clock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -60,25 +60,33 @@ export default function VeraThread() {
   const [approving, setApproving] = useState(false)
   const [observations, setObservations] = useState<{ id: string; title: string; proposed_action: string | null }[]>([])
   const [stats, setStats] = useState<{ pending: number; campaigns: number }>({ pending: 0, campaigns: 0 })
+  const [sessionId, setSessionId] = useState<string>('')
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [sessions, setSessions] = useState<{ session_id: string; title: string | null; last_at: string; message_count: number }[]>([])
 
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
-  // Load this project's thread
+  // Establish the active chat session per client (persisted in localStorage).
   useEffect(() => {
-    if (!activeProject?.id) { setMessages([]); setHistoryLoaded(true); return }
+    if (!activeProject?.id) { setSessionId(''); return }
+    const key = `vera-session:${activeProject.id}`
+    let sid = localStorage.getItem(key)
+    if (!sid) { sid = crypto.randomUUID(); try { localStorage.setItem(key, sid) } catch { /* ignore */ } }
+    setSessionId(sid)
+  }, [activeProject?.id])
+
+  // Load the current session's messages (re-runs on session switch / New chat).
+  useEffect(() => {
+    if (!activeProject?.id || !sessionId) { setMessages([]); setHistoryLoaded(!!activeProject?.id); return }
     let cancelled = false
     setHistoryLoaded(false)
-    // Only load messages from the current chat session. "New chat" stamps a
-    // boundary timestamp per client; everything before it is a past chat.
-    const since = localStorage.getItem(`vera-chat-since:${activeProject.id}`)
-    let query = supabase.from('chat_messages')
+    supabase.from('chat_messages')
       .select('id, role, content')
       .eq('project_id', activeProject.id)
+      .eq('session_id', sessionId)
       .in('role', ['user', 'assistant'])
-    if (since) query = query.gte('created_at', since)
-    query
       .order('created_at', { ascending: false })
       .limit(HISTORY_LIMIT)
       .then(({ data }) => {
@@ -88,7 +96,7 @@ export default function VeraThread() {
         setHistoryLoaded(true)
       })
     return () => { cancelled = true }
-  }, [activeProject?.id])
+  }, [activeProject?.id, sessionId])
 
   // "VERA wants to" — open observations, surfaced in the launcher (moved here
   // from the old Home/Dashboard so nothing is lost when Home goes away).
@@ -155,6 +163,7 @@ export default function VeraThread() {
           org_id: activeOrg.id,
           user_id: user?.id ?? null,
           project_id: activeProject?.id ?? null,
+          session_id: sessionId || null,
           route: location.pathname,
         }),
       })
@@ -226,17 +235,27 @@ export default function VeraThread() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
 
-  // New chat — stamp a boundary so past messages drop out of this session
-  // (and out of the AI's context), clear the canvas, back to the launcher.
+  // New chat — start a fresh session (new id). The load effect clears the
+  // thread; the AI's context resets because we only send this session's msgs.
   function newChat() {
     if (streaming) abortRef.current?.abort()
-    if (activeProject?.id) {
-      try { localStorage.setItem(`vera-chat-since:${activeProject.id}`, new Date().toISOString()) } catch { /* ignore */ }
-    }
-    setMessages([])
-    setDraft(null)
-    setInput('')
+    const sid = crypto.randomUUID()
+    if (activeProject?.id) { try { localStorage.setItem(`vera-session:${activeProject.id}`, sid) } catch { /* ignore */ } }
+    setDraft(null); setInput(''); setHistoryOpen(false)
+    setMessages([]); setSessionId(sid)
     setTimeout(() => taRef.current?.focus(), 0)
+  }
+
+  // History — list this client's past chats; reopen one by switching session.
+  async function openHistory() {
+    if (!activeProject?.id) return
+    setHistoryOpen(o => !o)
+    const { data } = await supabase.rpc('list_chat_sessions', { p_project_id: activeProject.id })
+    setSessions((data ?? []) as typeof sessions)
+  }
+  function pickSession(sid: string) {
+    if (activeProject?.id) { try { localStorage.setItem(`vera-session:${activeProject.id}`, sid) } catch { /* ignore */ } }
+    setDraft(null); setHistoryOpen(false); setSessionId(sid)
   }
 
   // ─── Draft actions ──────────────────────────────────────────────
@@ -286,15 +305,34 @@ export default function VeraThread() {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: color.paper }}>
-      {/* New chat — only once a conversation exists (launcher is already fresh) */}
-      {messages.length > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: `${space[4]} ${space[8]} 0` }}>
-          <button onClick={newChat} title="Start a new chat"
+      {/* History + New chat — past chats live under the active client. */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: space[2], padding: `${space[4]} ${space[8]} 0` }}>
+        <div style={{ position: 'relative' }}>
+          <button onClick={openHistory} title="Chat history"
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: t.size.cap, fontWeight: t.weight.medium, color: color.ink2, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.pill, cursor: 'pointer' }}>
-            <SquarePen size={13} /> New chat
+            <Clock size={13} /> History
           </button>
+          {historyOpen && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 30 }} onClick={() => setHistoryOpen(false)} />
+              <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 6, zIndex: 40, width: 300, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, boxShadow: 'var(--shadow-pop)', padding: 4, maxHeight: 400, overflowY: 'auto' }}>
+                {sessions.length === 0 && <div style={{ padding: '12px', fontSize: t.size.cap, color: color.ghost }}>No past chats for this client yet.</div>}
+                {sessions.map(s => (
+                  <button key={s.session_id} onClick={() => pickSession(s.session_id)}
+                    style={{ width: '100%', textAlign: 'left', display: 'block', padding: '8px 10px', borderRadius: radius.sm, border: 'none', background: s.session_id === sessionId ? 'var(--accent-tint)' : 'transparent', cursor: 'pointer' }}>
+                    <span style={{ display: 'block', fontSize: t.size.sm, color: color.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: s.session_id === sessionId ? 600 : 400 }}>{(s.title || 'Untitled chat').slice(0, 64)}</span>
+                    <span style={{ display: 'block', fontSize: t.size.micro, color: color.faint, marginTop: 1 }}>{relTime(s.last_at)} · {s.message_count} msg{s.message_count === 1 ? '' : 's'}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
-      )}
+        <button onClick={newChat} title="Start a new chat"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: t.size.cap, fontWeight: t.weight.medium, color: color.ink2, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.pill, cursor: 'pointer' }}>
+          <SquarePen size={13} /> New chat
+        </button>
+      </div>
       {/* thread (no header bar — SAM-clean; the rail identifies "Vera") */}
       <div ref={scrollerRef} style={{ flex: 1, overflowY: 'auto', padding: `${space[6]} 0 ${space[7]}` }}>
         {!historyLoaded ? (
@@ -553,6 +591,18 @@ function Idle({ onRun, observations, actions }: {
       </div>
     </div>
   )
+}
+
+function relTime(iso: string): string {
+  const d = Date.now() - new Date(iso).getTime()
+  const m = Math.round(d / 60000)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h}h ago`
+  const dd = Math.round(h / 24)
+  if (dd < 7) return `${dd}d ago`
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
