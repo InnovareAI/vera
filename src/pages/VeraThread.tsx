@@ -33,6 +33,7 @@ interface Message {
   tools?: ToolEvent[]
   images?: string[]
   videos?: string[]
+  videoPending?: boolean   // a fal video job is rendering in the background
 }
 
 const TOOL_LABEL: Record<string, string> = {
@@ -217,6 +218,13 @@ export default function VeraThread() {
             setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, videos: [...(m.videos ?? []), vurl] } : m))
             // attach to the open draft if there is one
             setDraft(prev => prev ? { ...prev, media_url: vurl, media_type: 'video' } : prev)
+          } else if (ev.type === 'video_pending' && typeof ev.request_id === 'string') {
+            // Video renders for 60-120s — too long to hold this connection open.
+            // The backend already submitted the fal job; poll for the result
+            // with short requests so nothing times out. Fire-and-forget: this
+            // keeps running after the SSE stream below closes.
+            setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, videoPending: true } : m))
+            void pollVideo(ev.request_id as string, (ev.slug as string) ?? 'veo-3', assistantId)
           } else if (ev.type === 'draft' && ev.post) {
             setDraft(ev.post as Post)
           } else if (ev.type === 'error') {
@@ -237,6 +245,48 @@ export default function VeraThread() {
       abortRef.current = null
     }
   }, [input, streaming, activeOrg?.id, activeProject?.id, user?.id, messages, location.pathname, sessionId])
+
+  // Poll a backgrounded fal video job (submitted by vera-chat) until the MP4
+  // is ready, then drop it into the chat and the open draft. Short polling
+  // requests only — nothing is held open long enough for the gateway to kill
+  // it, which is what produced the "network error" at ~47s. Runs after the
+  // chat SSE stream has already closed.
+  async function pollVideo(requestId: string, slug: string, assistantId: string) {
+    const INTERVAL = 5000
+    const MAX_TRIES = 72 // 72 × 5s = 6 min ceiling
+    for (let i = 0; i < MAX_TRIES; i++) {
+      await new Promise(r => setTimeout(r, INTERVAL))
+      let data: { status?: string; video_url?: string | null }
+      try {
+        const res = await fetch(`${SUPA}/functions/v1/generate-video`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON}`, 'apikey': ANON },
+          body: JSON.stringify({ action: 'status', request_id: requestId, slug }),
+        })
+        if (!res.ok) continue
+        data = await res.json()
+      } catch { continue } // transient blip — keep polling
+
+      if (data.status === 'COMPLETED' && data.video_url) {
+        const vurl = data.video_url
+        setMessages(prev => prev.map(m => m.id === assistantId
+          ? { ...m, videoPending: false, videos: [...(m.videos ?? []), vurl] } : m))
+        setDraft(prev => {
+          if (prev?.id) void supabase.from('content_posts').update({ media_url: vurl, media_type: 'video' }).eq('id', prev.id)
+          return prev ? { ...prev, media_url: vurl, media_type: 'video' } : prev
+        })
+        return
+      }
+      if (data.status === 'FAILED' || data.status === 'CANCELLED' || data.status === 'ERROR') {
+        setMessages(prev => prev.map(m => m.id === assistantId
+          ? { ...m, videoPending: false, content: (m.content ? m.content + '\n\n' : '') + `⚠ Video rendering failed (${(data.status ?? '').toLowerCase()}). Try again or tweak the prompt.` } : m))
+        return
+      }
+      // IN_QUEUE / IN_PROGRESS → keep polling
+    }
+    setMessages(prev => prev.map(m => m.id === assistantId
+      ? { ...m, videoPending: false, content: (m.content ? m.content + '\n\n' : '') + '⚠ Video is taking longer than usual — it may still be rendering. Try again shortly.' } : m))
+  }
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
@@ -427,6 +477,13 @@ function Bubble({ m }: { m: Message }) {
         {m.videos?.map((url, i) => (
           <video key={i} src={url} controls autoPlay muted loop playsInline style={{ display: 'block', maxWidth: 320, border: `1px solid ${color.line}`, borderRadius: radius.md, overflow: 'hidden' }} />
         ))}
+        {m.videoPending && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: 320, padding: '12px 14px', border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2, color: color.ink2, fontSize: t.size.sm }}>
+            <Clapperboard size={15} style={{ color: color.accent }} />
+            <span>Rendering video… this runs in the background (~1–2 min) and will appear here automatically.</span>
+            <span style={{ marginLeft: 'auto', width: 9, height: 9, borderRadius: '50%', background: color.accent, animation: 'vera-pulse 1.2s ease-in-out infinite', flexShrink: 0 }} />
+          </div>
+        )}
         {(m.content || m.pending) && (
           <div style={{ fontSize: t.size.lg, lineHeight: 1.62, color: color.ink, whiteSpace: 'pre-wrap' }}>
             {m.content || <Dots />}
