@@ -12,7 +12,7 @@ import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   MessageSquare, CheckSquare, BookOpen, Brain,
-  BarChart3, Building2, Zap, Settings, LogOut,
+  BarChart3, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
@@ -64,6 +64,53 @@ function RailItem({
   )
 }
 
+// ─── client switcher ──────────────────────────────────────────────────────
+// Top-of-rail workspace switcher (Slack/Linear pattern). For an agency tool
+// the active CLIENT must always be visible — you never draft for the wrong
+// brand. Shows the active client + a dropdown to switch; "View all clients"
+// opens the shelf.
+function ClientSwitcher() {
+  const { activeProject, projects, switchProject } = useProject()
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const name = activeProject?.name ?? 'Select client'
+  const glyph = (s: string) => (s.trim()[0] ?? 'C').toUpperCase()
+
+  return (
+    <div style={{ position: 'relative', padding: '12px 8px 4px' }}>
+      <button onClick={() => setOpen(o => !o)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '7px 9px', borderRadius: 'var(--radius-md)', border: '1px solid var(--line)', background: 'var(--surface)', cursor: 'pointer' }}>
+        <span style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{glyph(name)}</span>
+        <span style={{ flex: 1, minWidth: 0, textAlign: 'left', fontSize: 13, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+        <ChevronsUpDown size={14} style={{ color: 'var(--ghost)', flexShrink: 0 }} />
+      </button>
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 30 }} onClick={() => setOpen(false)} />
+          <div style={{ position: 'absolute', left: 8, right: 8, top: '100%', marginTop: 4, zIndex: 40, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-pop)', padding: 4, maxHeight: 380, overflowY: 'auto' }}>
+            {projects.map(p => {
+              const active = p.id === activeProject?.id
+              return (
+                <button key={p.id} onClick={() => { switchProject(p.slug); setOpen(false) }}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '7px 9px', borderRadius: 'var(--radius-sm)', border: 'none', background: active ? 'var(--accent-tint)' : 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+                  <span style={{ width: 20, height: 20, borderRadius: 5, background: active ? 'var(--accent)' : 'var(--fog)', color: active ? '#fff' : 'var(--ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{glyph(p.name)}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                  {active && <Check size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
+                </button>
+              )
+            })}
+            <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
+            <button onClick={() => { setOpen(false); navigate('/clients') }}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 'var(--radius-sm)', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontSize: 12.5, color: 'var(--ghost)' }}>
+              <LayoutGrid size={13} /> View all clients
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ─── layout ──────────────────────────────────────────────────────────────
 export default function Layout() {
   const { user, signOut } = useAuth()
@@ -107,8 +154,11 @@ export default function Layout() {
         className="flex-shrink-0 flex flex-col"
         style={{ width: 212, background: 'var(--paper-warm)', borderRight: '1px solid var(--paper-edge)' }}
       >
+        {/* Active client — top-of-rail switcher (always-visible context). */}
+        <ClientSwitcher />
+
         {/* Primary nav — the AI ("Vera") sits first, like SAM's "Sam". */}
-        <nav className="pt-3 space-y-0.5">
+        <nav className="pt-1 space-y-0.5">
           <RailItem to={p('vera')}      icon={MessageSquare}   label="Vera" />
           <RailItem to={p('review')}    icon={CheckSquare}     label="Review" badge={pendingCount} />
           <RailItem to={p('knowledge')} icon={BookOpen}        label="Knowledge" />
@@ -120,7 +170,6 @@ export default function Layout() {
 
         {/* Utility group — mirrors SAM's AI Settings · Settings · user. */}
         <nav className="space-y-0.5 pb-1">
-          <RailItem to="/clients"  icon={Building2} label="Clients" />
           <RailItem to="/skills"   icon={Zap}       label="AI Settings" />
           <RailItem to="/settings" icon={Settings}  label="Settings" />
         </nav>
