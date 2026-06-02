@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target, SquarePen } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -70,10 +70,15 @@ export default function VeraThread() {
     if (!activeProject?.id) { setMessages([]); setHistoryLoaded(true); return }
     let cancelled = false
     setHistoryLoaded(false)
-    supabase.from('chat_messages')
+    // Only load messages from the current chat session. "New chat" stamps a
+    // boundary timestamp per client; everything before it is a past chat.
+    const since = localStorage.getItem(`vera-chat-since:${activeProject.id}`)
+    let query = supabase.from('chat_messages')
       .select('id, role, content')
       .eq('project_id', activeProject.id)
       .in('role', ['user', 'assistant'])
+    if (since) query = query.gte('created_at', since)
+    query
       .order('created_at', { ascending: false })
       .limit(HISTORY_LIMIT)
       .then(({ data }) => {
@@ -221,6 +226,19 @@ export default function VeraThread() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
 
+  // New chat — stamp a boundary so past messages drop out of this session
+  // (and out of the AI's context), clear the canvas, back to the launcher.
+  function newChat() {
+    if (streaming) abortRef.current?.abort()
+    if (activeProject?.id) {
+      try { localStorage.setItem(`vera-chat-since:${activeProject.id}`, new Date().toISOString()) } catch { /* ignore */ }
+    }
+    setMessages([])
+    setDraft(null)
+    setInput('')
+    setTimeout(() => taRef.current?.focus(), 0)
+  }
+
   // ─── Draft actions ──────────────────────────────────────────────
   async function approveDraft() {
     if (!draft?.id) return
@@ -268,8 +286,17 @@ export default function VeraThread() {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: color.paper }}>
+      {/* New chat — only once a conversation exists (launcher is already fresh) */}
+      {messages.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: `${space[4]} ${space[8]} 0` }}>
+          <button onClick={newChat} title="Start a new chat"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: t.size.cap, fontWeight: t.weight.medium, color: color.ink2, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.pill, cursor: 'pointer' }}>
+            <SquarePen size={13} /> New chat
+          </button>
+        </div>
+      )}
       {/* thread (no header bar — SAM-clean; the rail identifies "Vera") */}
-      <div ref={scrollerRef} style={{ flex: 1, overflowY: 'auto', padding: `${space[7]} 0` }}>
+      <div ref={scrollerRef} style={{ flex: 1, overflowY: 'auto', padding: `${space[6]} 0 ${space[7]}` }}>
         {!historyLoaded ? (
           <Centered>Loading thread…</Centered>
         ) : messages.length === 0 ? (
