@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { Copy, Check, ExternalLink, ArrowLeft, ThumbsUp, MessageCircle, Repeat2, Send } from 'lucide-react'
+import { Copy, Check, ExternalLink, ArrowLeft, ThumbsUp, MessageCircle, Repeat2, Send, Sparkles, Loader2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { PublishToConnectedBlog } from '../components/PublishToConnectedBlog'
@@ -63,6 +63,9 @@ export default function ReviewDetail() {
   const [postedUrl, setPostedUrl] = useState('')
   const [marking, setMarking] = useState(false)
   const [emailRecipients, setEmailRecipients] = useState('')
+  const [refineText, setRefineText] = useState('')
+  const [refining, setRefining] = useState(false)
+  const [refineStatus, setRefineStatus] = useState('')
 
   useEffect(() => {
     if (!id) {
@@ -78,6 +81,55 @@ export default function ReviewDetail() {
         setLoading(false)
       })
   }, [id])
+
+  // Refine with VERA — the reviewer's feedback goes straight to VERA, who
+  // edits the copy / image / video on THIS post in place (refine_post tool).
+  async function refineWithVera() {
+    if (!post || !refineText.trim() || refining) return
+    setRefining(true); setError(null); setRefineStatus('VERA is revising…')
+    const SUPA = import.meta.env.VITE_SUPABASE_URL as string
+    const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+    const p = post as unknown as { org_id: string; project_id: string | null }
+    const hasVideo = post.media_type === 'video'
+    const msg =
+      `Refine this existing post using the refine_post tool with post_id "${post.id}". ` +
+      `Apply ONLY what the feedback asks — rewrite the copy, regenerate the image, or regenerate the video.\n\n` +
+      `Channel: ${post.channel}\nCurrent copy:\n${post.copy ?? ''}\n\n` +
+      `The post ${post.media_url ? `has ${hasVideo ? 'a video' : 'an image'}` : 'has no media'}.\n\n` +
+      `Operator feedback: "${refineText.trim()}"`
+    try {
+      const res = await fetch(`${SUPA}/functions/v1/vera-chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON}`, 'apikey': ANON },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: msg }],
+          org_id: p.org_id,
+          project_id: p.project_id ?? null,
+          user_id: null,
+          route: window.location.pathname,
+        }),
+      })
+      if (!res.ok || !res.body) throw new Error(`Refine failed (HTTP ${res.status})`)
+      const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ''
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break
+        buf += dec.decode(value, { stream: true }); let i
+        while ((i = buf.indexOf('\n\n')) !== -1) {
+          const fr = buf.slice(0, i); buf = buf.slice(i + 2)
+          const ln = fr.split('\n').find(l => l.startsWith('data: ')); if (!ln) continue
+          try { const ev = JSON.parse(ln.slice(6)); if (ev.type === 'tool_progress' && ev.status) setRefineStatus(String(ev.status)) } catch { /* skip */ }
+        }
+      }
+      const { data } = await supabase.from('content_posts').select('*').eq('id', post.id).maybeSingle()
+      if (data) setPost(data as Post)
+      setRefineText(''); setRefineStatus('Updated ✓')
+      setTimeout(() => setRefineStatus(''), 2500)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e)); setRefineStatus('')
+    } finally {
+      setRefining(false)
+    }
+  }
 
   async function updateStatus(newStatus: string, fb?: string) {
     if (!post) return
@@ -300,7 +352,9 @@ export default function ReviewDetail() {
         </div>
         {post.media_url && (
           <div className="mt-3">
-            <img src={post.media_url} alt="Post media" className="w-full block" />
+            {post.media_type === 'video'
+              ? <video src={post.media_url} controls autoPlay muted loop playsInline className="w-full block" />
+              : <img src={post.media_url} alt="Post media" className="w-full block" />}
           </div>
         )}
         <div className="flex gap-1 px-2 py-1 mt-3 border-t border-gray-100">
@@ -309,6 +363,36 @@ export default function ReviewDetail() {
               <Icon className="w-4 h-4" /> {label}
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* Refine with VERA — feedback → in-place revision of copy/image/video */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 mt-4">
+        <div className="flex items-center gap-2 mb-1">
+          <Sparkles className="w-4 h-4" style={{ color: 'var(--accent)' }} />
+          <p className="text-xs font-semibold text-gray-900">Refine with VERA</p>
+        </div>
+        <p className="text-[11px] text-gray-400 mb-3">Tell VERA what to improve — she edits the copy, image, or video on this post in place.</p>
+        <textarea
+          value={refineText}
+          onChange={e => setRefineText(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) refineWithVera() }}
+          placeholder="e.g. punch up the hook · make the image warmer, less corporate · tighten to 3 lines"
+          rows={2}
+          disabled={refining}
+          className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-[var(--accent-line)] bg-gray-50 disabled:opacity-60"
+        />
+        <div className="flex items-center justify-between mt-2">
+          <span className="text-[11px] text-gray-400">{refineStatus}</span>
+          <button
+            onClick={refineWithVera}
+            disabled={refining || !refineText.trim()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg text-white disabled:opacity-50"
+            style={{ background: 'var(--accent)' }}
+          >
+            {refining ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            {refining ? 'Revising…' : 'Refine'}
+          </button>
         </div>
       </div>
 
