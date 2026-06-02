@@ -20,6 +20,7 @@ import { useProject } from '../lib/projectContext'
 import { useRightRailContent, useRightRailWidth } from '../lib/rightRailContext'
 import { supabase } from '../lib/supabase'
 import { ErrorBoundary } from './ErrorBoundary'
+import { SettingsModal } from './SettingsModal'
 
 // ─── rail item ────────────────────────────────────────────────────────────
 // SAM treatment: icon + label, generous padding. Active = solid coral fill
@@ -121,6 +122,7 @@ export default function Layout() {
   const navigate = useNavigate()
   const location = useLocation()
   const [pendingCount, setPendingCount] = useState(0)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // One live number in the rail: the Review badge (pending/draft posts in the
   // active project).
@@ -169,9 +171,17 @@ export default function Layout() {
         <div className="flex-1" />
 
         {/* Utility group — mirrors SAM's AI Settings · Settings · user. */}
+        {/* Settings opens as a modal (SAM pattern), not a page nav. */}
         <nav className="space-y-0.5 pb-1">
-          <RailItem to="/skills"   icon={Zap}       label="AI Settings" />
-          <RailItem to="/settings" icon={Settings}  label="Settings" />
+          <RailItem to="/skills" icon={Zap} label="AI Settings" />
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="w-full flex items-center gap-2.5 px-2.5 py-2 mx-2 transition-colors hover:bg-[var(--fog)]"
+            style={{ background: 'transparent', color: 'var(--ink-quiet)', fontWeight: 450, fontSize: 14, borderRadius: 'var(--radius-md)', width: 'calc(100% - 1rem)' }}
+          >
+            <Settings size={17} strokeWidth={1.75} style={{ color: 'var(--ghost)', flexShrink: 0 }} />
+            <span className="flex-1 text-left truncate">Settings</span>
+          </button>
         </nav>
 
         {/* Signed-in user — avatar + name, sign-out on hover (SAM pattern). */}
@@ -212,6 +222,8 @@ export default function Layout() {
           {rightRailContent}
         </aside>
       )}
+
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }

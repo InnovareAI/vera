@@ -3,7 +3,18 @@ import { createClient } from '@supabase/supabase-js'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+// Auth config mirrors SAM (app/lib/supabase.ts): PKCE + detect-session-in-URL
+// so Google/Microsoft SSO and magic links actually complete. VERA is a SPA
+// (no server /auth/callback), so the client itself exchanges the ?code= on
+// load — which only works with flowType 'pkce' + detectSessionInUrl.
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    flowType: 'pkce',
+  },
+})
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
