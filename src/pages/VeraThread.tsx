@@ -293,7 +293,7 @@ export default function VeraThread() {
               </button>
             ) : (
               <button onClick={send} disabled={!input.trim() || !activeProject} title="Send"
-                style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', cursor: input.trim() ? 'pointer' : 'not-allowed', background: color.ink, color: color.surface, opacity: input.trim() ? 1 : 0.35, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', cursor: input.trim() ? 'pointer' : 'not-allowed', background: input.trim() ? color.accent : color.ink, color: '#fff', opacity: input.trim() ? 1 : 0.35, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: input.trim() ? 'var(--shadow-glow)' : 'none', transition: 'background 120ms, box-shadow 120ms' }}>
                 <ArrowUp size={16} strokeWidth={2.25} />
               </button>
             )}

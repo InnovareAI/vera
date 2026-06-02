@@ -1,7 +1,8 @@
-/* ─── Typography — single sans-serif (Geist), no serif display ───────────── */
-/* Geist for body + headings. Geist Mono kept but used sparingly (IDs only). */
+/* ─── Typography — Inter, matching SAM's design language ─────────────────── */
+/* SAM uses Inter as its single sans family; VERA mirrors it so the two       */
+/* products read as one family. Mono falls back to the system stack.          */
 /* @imports must precede all other rules per CSS spec.                       */
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300..700&display=swap');
 @import "tailwindcss";
 
 * { box-sizing: border-box; }
@@ -26,13 +27,13 @@
   --ghost:        #8E8E8C;
   --mist:         #C4C4C2;
 
-  /* Brand accent — InnovareAI oxblood. Used sparingly: workspace dot,    */
-  /* unread indicators, never as a CTA fill. Aliased here for callers     */
-  /* that need a brand touchpoint.                                        */
-  --accent:       #7A1F2B;
-  --accent-soft:  #A04050;
-  --accent-tint:  rgba(122, 31, 43, 0.06);
-  --accent-rule:  rgba(122, 31, 43, 0.16);
+  /* Brand accent — SAM coral-red (SAM ships hsl(0 83% 68%) ≈ #EF6A6A).   */
+  /* The solid --accent is deepened just enough to carry white CTA text   */
+  /* on a light base; --accent-soft is SAM's exact coral for icons/dots.  */
+  --accent:       #DD4B50;            /* solid CTA fill (white text ~3.8:1) */
+  --accent-soft:  #EF6A6A;            /* SAM's coral — softer accents, icons */
+  --accent-tint:  rgba(239, 106, 106, 0.08);  /* pale coral wash */
+  --accent-rule:  rgba(239, 106, 106, 0.20);   /* coral hairline */
 
   /* Legacy oxblood aliases — still exported so old usages don't break,   */
   /* but the practical visual contract is "rare brand accent" now.        */
@@ -55,14 +56,14 @@
   --dot-indigo:   #6366F1;        /* facebook */
 
   /* Type — single family */
-  --font-display: 'Geist', system-ui, -apple-system, sans-serif;
-  --font-body:    'Geist', system-ui, -apple-system, sans-serif;
-  --font-mono:    'Geist Mono', 'SF Mono', ui-monospace, monospace;
+  --font-display: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-body:    'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono:    'SF Mono', ui-monospace, 'Menlo', monospace;
 
-  /* Radii */
-  --radius-sm:    6px;
-  --radius-md:    8px;
-  --radius-lg:    12px;
+  /* Radii — rounded to match SAM (SAM: 1rem lg / 12 md / 10 sm) */
+  --radius-sm:    8px;
+  --radius-md:    12px;
+  --radius-lg:    16px;
 
   /* Base body size — bumped to read like Notion / Asana (14-15px is the */
   /* modern productivity-tool sweet spot, not 12-13px dashboard density) */
@@ -88,8 +89,8 @@
   --line-2:       #D9D5CE;            /* stronger hairline */
 
   /* — Color · accent (use sparingly, max 4 per surface) ────────────── */
-  --accent-ink:   #5C141C;            /* hover state on accent CTA */
-  --accent-line:  rgba(122,31,43,0.18); /* accent hairline */
+  --accent-ink:   #8A2A2E;            /* deep coral — text/hover on light */
+  --accent-line:  rgba(239,106,106,0.22); /* accent hairline */
 
   /* — Color · status (dots only, never fills) ──────────────────────── */
   --success:      #2D7A3B;
@@ -126,10 +127,10 @@
 
   /* — Radius ───────────────────────────────────────────────────────── */
   --r-0: 0;
-  --r-1: 3px;        /* chips, keyboard hint pills */
-  --r-2: 5px;        /* buttons, inputs */
-  --r-3: 8px;        /* cards, dropdowns */
-  --r-4: 12px;       /* palette, modal */
+  --r-1: 6px;        /* chips, keyboard hint pills (rounded, SAM-style) */
+  --r-2: 10px;       /* buttons, inputs */
+  --r-3: 12px;       /* cards, dropdowns */
+  --r-4: 16px;       /* palette, modal */
   --r-pill: 999px;
 
   /* — Motion ───────────────────────────────────────────────────────── */
@@ -151,6 +152,8 @@
   /* — Shadow · only on floating overlays ───────────────────────────── */
   --shadow-pop:   0 1px 2px rgba(23,23,23,0.04), 0 8px 24px rgba(23,23,23,0.08);
   --shadow-modal: 0 2px 4px rgba(23,23,23,0.05), 0 24px 64px rgba(23,23,23,0.16);
+  /* Coral glow — SAM's brand-moment shadow (SAM: 0 24px 64px primary/0.12) */
+  --shadow-glow:  0 18px 48px rgba(221, 75, 80, 0.18);
 }
 
 body[data-theme="dark"] {
@@ -164,10 +167,10 @@ body[data-theme="dark"] {
   --ghost:        #737373;
   --mist:         #404040;
 
-  --accent:       #D44C5B;
-  --accent-soft:  #E58088;
-  --accent-tint:  rgba(212, 76, 91, 0.10);
-  --accent-rule:  rgba(212, 76, 91, 0.20);
+  --accent:       #EF6A6A;            /* SAM coral, lifted for dark surfaces */
+  --accent-soft:  #F58C8C;
+  --accent-tint:  rgba(239, 106, 106, 0.14);
+  --accent-rule:  rgba(239, 106, 106, 0.26);
 
   --oxblood:      var(--accent);
   --oxblood-deep: var(--accent);
@@ -183,7 +186,14 @@ body {
   font-size: var(--text-base);
   line-height: 1.5;
   font-feature-settings: 'tnum' 1, 'cv11' 1;  /* tabular figures, single-storey a */
-  background: var(--paper);
+  /* SAM-style soft radial glow atmosphere: faint coral wash at the top      */
+  /* corners over the paper base. Surfaces (cards, content) sit opaque on    */
+  /* top; the glow reads through the rails + margins.                        */
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(62% 48% at 16% -4%, rgba(239, 106, 106, 0.07), transparent 72%),
+    radial-gradient(48% 38% at 102% -2%, rgba(239, 106, 106, 0.045), transparent 70%);
+  background-attachment: fixed;
   color: var(--ink);
   transition: background 0.2s, color 0.2s;
 }

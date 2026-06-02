@@ -348,7 +348,7 @@ function ListView({
                   background: 'var(--paper)',
                   border: `1px solid ${selected?.id === post.id ? 'var(--oxblood)' : 'var(--paper-edge)'}`,
                   borderRadius: 'var(--radius-lg)',
-                  boxShadow: selected?.id === post.id ? '0 1px 3px rgba(122,31,43,0.10)' : 'none',
+                  boxShadow: selected?.id === post.id ? '0 1px 3px rgba(239,106,106,0.16)' : 'none',
                 }}
               >
                 {/* Campaign tint — left edge bar */}

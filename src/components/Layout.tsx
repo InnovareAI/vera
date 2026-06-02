@@ -172,22 +172,23 @@ function PrimaryNavItem({
         }`
       }
       style={({ isActive }) => ({
-        background: isActive ? 'var(--fog)' : 'transparent',
-        color: isActive ? 'var(--ink)' : 'var(--ink-quiet)',
-        fontWeight: isActive ? 500 : 400,
+        // Active item carries SAM's coral: soft coral wash + coral text/icon.
+        background: isActive ? 'var(--accent-tint)' : 'transparent',
+        color: isActive ? 'var(--accent)' : 'var(--ink-quiet)',
+        fontWeight: isActive ? 600 : 400,
         borderRadius: 'var(--radius-md)',
       })}
     >
       {({ isActive }) => (
         <>
-          <Icon size={15} style={{ color: isActive ? 'var(--ink)' : 'var(--ghost)' }} className="flex-shrink-0" strokeWidth={isActive ? 2 : 1.75} />
+          <Icon size={15} style={{ color: isActive ? 'var(--accent)' : 'var(--ghost)' }} className="flex-shrink-0" strokeWidth={isActive ? 2.25 : 1.75} />
           <span className="flex-1">{label}</span>
           {typeof badge === 'number' && badge > 0 && (
             <span
               className="text-[11px] px-1.5 leading-tight py-px"
               style={{
-                background: isActive ? 'var(--ink)' : 'var(--paper-edge)',
-                color: isActive ? 'var(--paper-warm)' : 'var(--ink-quiet)',
+                background: isActive ? 'var(--accent)' : 'var(--paper-edge)',
+                color: isActive ? '#fff' : 'var(--ink-quiet)',
                 borderRadius: 'var(--radius-sm)',
                 fontWeight: 500,
               }}
@@ -344,15 +345,13 @@ export default function Layout() {
     activeProject ? `/p/${activeProject.slug}/${section}` : `/${section}`
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: 'var(--paper)' }}>
-      {/* Rail — LIGHT treatment: same bg as canvas, no border. Separation     */}
-      {/* comes from whitespace, not chrome. The rail recedes; the work        */}
-      {/* foregrounds. (Was border-right + same bg → felt like a panel. Now    */}
-      {/* the rail just blends into the canvas as a sibling region.)           */}
+    <div className="flex h-screen overflow-hidden" style={{ background: 'transparent' }}>
+      {/* Rail — transparent so the body's coral glow (SAM atmosphere) reads   */}
+      {/* through it. Content surfaces (cards, main) stay opaque paper.         */}
       <aside
         className="w-64 flex-shrink-0 flex flex-col"
         style={{
-          background: 'var(--paper)',
+          background: 'transparent',
         }}
       >
         {/* Brand mark */}
@@ -512,7 +511,7 @@ export default function Layout() {
       {rightRailContent && (
         <aside
           className="flex-shrink-0 overflow-y-auto"
-          style={{ background: 'var(--paper)', width: rightRailWidth, borderLeft: '1px solid var(--paper-edge)' }}
+          style={{ background: 'transparent', width: rightRailWidth, borderLeft: '1px solid var(--paper-edge)' }}
         >
           {rightRailContent}
         </aside>
