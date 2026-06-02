@@ -10,7 +10,6 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { setUserContext, setOrgContext } from './lib/sentry'
 import Layout from './components/Layout'
 import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
 import Review from './pages/Review'
 import ReviewDetail from './pages/ReviewDetail'
 import Onboarding from './pages/Onboarding'
@@ -49,8 +48,8 @@ export default function App() {
 
                 {/* ── The DESK ── one client, six loop surfaces. */}
                 <Route path="p/:projectSlug">
-                  <Route index element={<Navigate to="dashboard" replace />} />
-                  <Route path="dashboard"  element={<Dashboard />} />{/* Home */}
+                  <Route index element={<Navigate to="vera" replace />} />{/* Vera is home-base (SAM-style) */}
+                  <Route path="dashboard"  element={<RedirectFlatToProject section="vera" />} />{/* Home removed → Vera */}
                   <Route path="vera"       element={<VeraThread />} />
                   <Route path="review"     element={<Review />} />
                   <Route path="review/:id" element={<ReviewDetail />} />
@@ -63,7 +62,7 @@ export default function App() {
                 {/* The rail no longer links to these, but bookmarks + deep    */}
                 {/* links must not 404. Each rewrites into the project frame   */}
                 {/* (or the shelf) per the blueprint's surface-fate table.     */}
-                <Route path="dashboard"  element={<RedirectFlatToProject section="dashboard" />} />
+                <Route path="dashboard"  element={<RedirectFlatToProject section="vera" />} />{/* Home removed → Vera */}
                 <Route path="generate"   element={<RedirectFlatToProject section="vera" />} />{/* Generate folds into VERA */}
                 <Route path="review"     element={<RedirectFlatToProject section="review" />} />
                 <Route path="review/:id" element={<RedirectReviewDetailToProject />} />
@@ -107,8 +106,8 @@ function RootIndex() {
   const { loading: orgLoading } = useOrg()
   const { activeProject, projects, loading } = useProject()
   if (orgLoading || loading) return null   // wait for both to settle — don't race to /clients
-  if (activeProject) return <Navigate to={`/p/${activeProject.slug}/dashboard`} replace />
-  if (projects.length > 0) return <Navigate to={`/p/${projects[0].slug}/dashboard`} replace />
+  if (activeProject) return <Navigate to={`/p/${activeProject.slug}/vera`} replace />
+  if (projects.length > 0) return <Navigate to={`/p/${projects[0].slug}/vera`} replace />
   return <Navigate to="/clients" replace />
 }
 

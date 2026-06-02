@@ -11,7 +11,7 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
-  MessageSquare, LayoutDashboard, CheckSquare, BookOpen, Brain,
+  MessageSquare, CheckSquare, BookOpen, Brain,
   BarChart3, Building2, Zap, Settings, LogOut,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
@@ -110,7 +110,6 @@ export default function Layout() {
         {/* Primary nav — the AI ("Vera") sits first, like SAM's "Sam". */}
         <nav className="pt-3 space-y-0.5">
           <RailItem to={p('vera')}      icon={MessageSquare}   label="Vera" />
-          <RailItem to={p('dashboard')} icon={LayoutDashboard} label="Home" />
           <RailItem to={p('review')}    icon={CheckSquare}     label="Review" badge={pendingCount} />
           <RailItem to={p('knowledge')} icon={BookOpen}        label="Knowledge" />
           <RailItem to={p('brain')}     icon={Brain}           label="Brain" />

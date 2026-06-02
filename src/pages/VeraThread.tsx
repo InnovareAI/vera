@@ -58,6 +58,7 @@ export default function VeraThread() {
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [draft, setDraft] = useState<Post | null>(null)
   const [approving, setApproving] = useState(false)
+  const [observations, setObservations] = useState<{ id: string; title: string; proposed_action: string | null }[]>([])
 
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
@@ -82,6 +83,21 @@ export default function VeraThread() {
       })
     return () => { cancelled = true }
   }, [activeProject?.id])
+
+  // "VERA wants to" — open observations, surfaced in the launcher (moved here
+  // from the old Home/Dashboard so nothing is lost when Home goes away).
+  useEffect(() => {
+    if (!activeOrg?.id) { setObservations([]); return }
+    let q = supabase.from('agent_observations')
+      .select('id, title, proposed_action')
+      .eq('org_id', activeOrg.id)
+      .eq('status', 'open')
+      .neq('kind', 'stale_audit')
+      .order('created_at', { ascending: false })
+      .limit(4)
+    if (activeProject?.id) q = q.eq('project_id', activeProject.id)
+    q.then(({ data }) => setObservations((data ?? []) as { id: string; title: string; proposed_action: string | null }[]))
+  }, [activeOrg?.id, activeProject?.id])
 
   // Auto-scroll
   useEffect(() => {
@@ -245,7 +261,7 @@ export default function VeraThread() {
         {!historyLoaded ? (
           <Centered>Loading thread…</Centered>
         ) : messages.length === 0 ? (
-          <Idle onPick={s => { setInput(s); taRef.current?.focus() }} />
+          <Idle onPick={s => { setInput(s); taRef.current?.focus() }} observations={observations} />
         ) : (
           <div style={{ maxWidth: 680, margin: '0 auto', padding: `0 ${space[8]}`, display: 'flex', flexDirection: 'column', gap: space[7] }}>
             {messages.map(m => <Bubble key={m.id} m={m} />)}
@@ -436,7 +452,7 @@ const LAUNCH_CARDS = [
   { icon: Target,        title: 'Strategy Ideas',   sub: 'Find the next best move',     prompt: "What's the highest-leverage content move for this brand right now? Be specific." },
 ] as const
 
-function Idle({ onPick }: { onPick: (s: string) => void }) {
+function Idle({ onPick, observations }: { onPick: (s: string) => void; observations: { id: string; title: string; proposed_action: string | null }[] }) {
   return (
     <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: space[8] }}>
       <span style={{ width: 56, height: 56, borderRadius: radius.lg, background: 'var(--accent-tint)', color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 700, marginBottom: space[5] }}>V</span>
@@ -446,6 +462,24 @@ function Idle({ onPick }: { onPick: (s: string) => void }) {
       <p style={{ fontSize: t.size.body, color: color.ghost, marginBottom: space[7], textAlign: 'center', maxWidth: '44ch' }}>
         Bring Vera a brief, a question, or an idea you want to move forward.
       </p>
+
+      {/* "VERA wants to" — proactive observations (moved from the old Home). */}
+      {observations.length > 0 && (
+        <div style={{ width: '100%', maxWidth: 640, marginBottom: space[5] }}>
+          <div style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.accent, marginBottom: space[3] }}>VERA wants to</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
+            {observations.map(o => (
+              <button key={o.id} onClick={() => onPick(o.proposed_action || o.title)}
+                style={{ display: 'flex', alignItems: 'center', gap: space[3], textAlign: 'left', padding: `${space[3]} ${space[4]}`, background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.md, cursor: 'pointer', fontFamily: t.family.sans, color: color.ink, fontSize: t.size.sm }}>
+                <Sparkles size={15} style={{ color: color.accent, flexShrink: 0 }} />
+                <span style={{ flex: 1, minWidth: 0 }}>{o.title}</span>
+                <ArrowUp size={13} style={{ color: color.accent, transform: 'rotate(45deg)', flexShrink: 0 }} />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[3], width: '100%', maxWidth: 640 }}>
         {LAUNCH_CARDS.map(c => {
           const Icn = c.icon
