@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -346,45 +346,85 @@ function Bubble({ m }: { m: Message }) {
   )
 }
 
-// ─── right-rail artifact: the draft being assembled ────────────────
+// ─── right rail: a FULL preview of the post, as it will appear once live ──
+// A realistic LinkedIn-style card (author, body, media, reaction bar) so the
+// operator sees the actual post — plus the approve / tweak / regenerate bar.
 function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate }: {
   draft: Post; approving: boolean; onApprove: () => void; onTweak: () => void; onRegenerate: () => void
 }) {
+  const d = draft as unknown as Record<string, unknown>
   const isApproved = (draft.status ?? '').toLowerCase() === 'approved'
+  const channel = (draft.channel ?? 'LinkedIn') as string
+  const author = ((d.profile_name as string) || 'InnovareAI').trim()
+  const headline = ((d.profile_title as string) || 'Sponsored · Draft preview').trim()
+  const aInitials = author.split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'IN'
+  const tags = Array.isArray(draft.hashtags) ? draft.hashtags.filter(Boolean) : []
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: `${space[6]} ${space[5]} ${space[5]}` }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: isApproved ? color.success : color.accent, marginBottom: space[4] }}>
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: isApproved ? color.success : color.accent }} />
-        {isApproved ? 'Approved' : 'Draft'} · {(draft.channel ?? 'post')}
-      </div>
-
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {draft.media_url && draft.media_type === 'image' && (
-          <img src={draft.media_url} alt="" style={{ width: '100%', borderRadius: radius.md, marginBottom: space[4], border: `1px solid ${color.line}` }} />
-        )}
-        {draft.media_url && draft.media_type === 'video' && (
-          <video src={draft.media_url} autoPlay muted loop playsInline style={{ width: '100%', borderRadius: radius.md, marginBottom: space[4], border: `1px solid ${color.line}` }} />
-        )}
-        {draft.title && (
-          <p style={{ fontSize: t.size.lg, fontWeight: t.weight.semibold, color: color.ink, margin: 0, marginBottom: space[3] }}>{draft.title}</p>
-        )}
-        <p style={{ fontSize: t.size.body, lineHeight: 1.7, color: color.ink, whiteSpace: 'pre-wrap', margin: 0, maxWidth: '64ch' }}>{draft.copy}</p>
-        {Array.isArray(draft.hashtags) && draft.hashtags.length > 0 && (
-          <p style={{ fontSize: t.size.cap, color: color.info, marginTop: space[3] }}>
-            {draft.hashtags.map(h => h.startsWith('#') ? h : `#${h}`).join(' ')}
-          </p>
-        )}
-      </div>
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: space[2], paddingTop: space[4], borderTop: `1px solid ${color.line}`, marginTop: space[4] }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Toolbar — label + the decision actions, always in reach. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: space[2], padding: `${space[5]} ${space[5]} ${space[3]}`, flexShrink: 0 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: isApproved ? color.success : color.accent }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: isApproved ? color.success : color.accent }} />
+          {isApproved ? 'Approved' : 'Preview'} · {channel}
+        </span>
+        <div style={{ flex: 1 }} />
         {!isApproved && (
-          <button onClick={onApprove} disabled={approving}
-            style={btn(color.accent, '#fff', approving)}>
+          <button onClick={onApprove} disabled={approving} style={{ ...btn(color.accent, '#fff', approving), boxShadow: approving ? 'none' : 'var(--shadow-glow)' }}>
             {approving ? '…' : <><Check size={13} strokeWidth={2.25} /> Send to review</>}
           </button>
         )}
-        <button onClick={onTweak} style={btn(color.paper2, color.ink, false)}><Pencil size={12} /> Tweak</button>
-        <button onClick={onRegenerate} style={btn(color.paper2, color.ink, false)}><RefreshCw size={12} /> Regenerate</button>
+      </div>
+
+      {/* The post preview card. */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: `0 ${space[5]} ${space[5]}` }}>
+        <div style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, overflow: 'hidden', boxShadow: 'var(--shadow-pop)' }}>
+          {/* author header */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: `${space[5]} ${space[5]} ${space[3]}` }}>
+            <span style={{ width: 44, height: 44, borderRadius: '50%', flexShrink: 0, background: 'var(--accent-tint)', color: color.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700 }}>{aInitials}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: color.ink, lineHeight: 1.2 }}>{author}</div>
+              <div style={{ fontSize: 12, color: color.ghost, lineHeight: 1.3, marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{headline}</div>
+              <div style={{ fontSize: 11.5, color: color.faint, display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>now · <Globe size={11} /></div>
+            </div>
+            <MoreHorizontal size={18} style={{ color: color.faint, flexShrink: 0 }} />
+          </div>
+
+          {/* body copy + hashtags */}
+          <div style={{ padding: `0 ${space[5]} ${space[4]}` }}>
+            <p style={{ fontSize: 14, lineHeight: 1.55, color: color.ink, whiteSpace: 'pre-wrap', margin: 0 }}>{draft.copy}</p>
+            {tags.length > 0 && (
+              <p style={{ fontSize: 14, color: color.accent, marginTop: space[3], marginBottom: 0, fontWeight: 500 }}>
+                {tags.map(h => (h.startsWith('#') ? h : `#${h}`)).join(' ')}
+              </p>
+            )}
+          </div>
+
+          {/* media — edge to edge, like a real post */}
+          {draft.media_url && draft.media_type === 'video'
+            ? <video src={draft.media_url} autoPlay muted loop playsInline style={{ width: '100%', display: 'block', borderTop: `1px solid ${color.line}` }} />
+            : draft.media_url && (
+              <img src={draft.media_url} alt="" style={{ width: '100%', display: 'block', borderTop: `1px solid ${color.line}` }} />
+            )}
+
+          {/* reaction bar — static, for realism */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: `${space[2]} ${space[3]}`, borderTop: `1px solid ${color.line}` }}>
+            {[[ThumbsUp, 'Like'], [MessageCircle, 'Comment'], [Repeat2, 'Repost'], [Send, 'Send']].map(([Ic, lbl], i) => {
+              const Icn = Ic as React.ElementType
+              return (
+                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 500, color: color.ghost, padding: '6px 8px' }}>
+                  <Icn size={16} strokeWidth={1.75} /> {lbl as string}
+                </span>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* secondary actions under the preview */}
+        <div style={{ display: 'flex', gap: space[2], marginTop: space[4] }}>
+          <button onClick={onTweak} style={{ ...btn(color.paper2, color.ink, false), flex: 1, justifyContent: 'center', border: `1px solid ${color.line}` }}><Pencil size={12} /> Tweak</button>
+          <button onClick={onRegenerate} style={{ ...btn(color.paper2, color.ink, false), flex: 1, justifyContent: 'center', border: `1px solid ${color.line}` }}><RefreshCw size={12} /> Regenerate</button>
+        </div>
       </div>
     </div>
   )
