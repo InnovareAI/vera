@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target, SquarePen, Clock, ImagePlus, Clapperboard, Shuffle } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target, SquarePen, Clock, ImagePlus, Clapperboard, Shuffle, Zap, CalendarDays, BookPlus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -526,19 +526,22 @@ type LaunchAction = { icon: React.ElementType; title: string; sub: string; promp
 function buildLaunchActions(stats: { pending: number; campaigns: number }): LaunchAction[] {
   const a: LaunchAction[] = []
   a.push({ icon: PenLine, title: 'Draft a Post', sub: 'Copy + a matching image', prompt: 'Draft a punchy LinkedIn post for this brand — one sharp hook, three crisp points, a soft CTA, and a matching image.' })
-  a.push({ icon: ImagePlus, title: 'Image Prompt', sub: 'Craft a scroll-stopping visual', prompt: "Help me craft a strong image prompt for a post. Ask me the subject and mood if you need them, compose a vivid, specific, on-brand image prompt (no text in the image), then generate it." })
+  a.push({ icon: ImagePlus, title: 'Image Prompt', sub: 'Craft a scroll-stopping visual', prompt: "Help me craft a scroll-stopping image prompt for a post, then generate it. Build it in layers: subject + a clear metaphor, composition/framing, a named style (e.g. editorial photo-illustration, 3D render, flat vector), lighting, an on-brand color palette (lead with coral #EF6A6A plus a neutral), mood, and setting — and end with 'no text, no words, no logos'. Ask me the subject/mood only if you can't infer it from the brand context, then generate the image." })
   a.push({ icon: Clapperboard, title: 'Make a Video', sub: 'Short motion clip for a post', prompt: 'Create a short video clip for a post — ask me the concept and vibe, then generate it.' })
+  a.push({ icon: Zap, title: 'Write Hooks', sub: '5 sharp opening lines', prompt: "Write 5 scroll-stopping opening hooks in this brand's voice for a topic I'll give you — punchy, specific, no clichés." })
   if (stats.pending > 0) {
     a.push({ icon: ListChecks, title: 'Review Drafts', sub: `${stats.pending} draft${stats.pending === 1 ? '' : 's'} waiting`, prompt: `Summarize the ${stats.pending} draft${stats.pending === 1 ? '' : 's'} pending review — flag which to publish first and why.` })
   }
   a.push(stats.campaigns > 0
     ? { icon: Megaphone, title: 'Improve Campaign Plan', sub: `${stats.campaigns} campaign${stats.campaigns === 1 ? '' : 's'} in workspace`, prompt: "Review this brand's campaigns and suggest the highest-impact improvement to theme, angle, cadence, or channel mix." }
     : { icon: Megaphone, title: 'Plan a Campaign', sub: 'Map a content series', prompt: 'Help me plan a 4-post content campaign for this brand — themes, angles, and a posting cadence.' })
-  a.push({ icon: MessageCircle, title: 'Create Messaging', sub: 'Draft campaign-ready copy', prompt: 'Draft 3 message variations for our latest offer, each with a different angle.' })
+  a.push({ icon: CalendarDays, title: 'Plan the Week', sub: 'A week of posts, mapped', prompt: "Plan this week's content for this brand — 5 posts across the week with angles, formats, and the best day to publish each." })
   a.push({ icon: Lightbulb, title: 'Content Ideas', sub: 'Fresh angles for this brand', prompt: "Give me 5 content ideas grounded in this brand's voice and recent themes." })
+  a.push({ icon: MessageCircle, title: 'Create Messaging', sub: 'Draft campaign-ready copy', prompt: 'Draft 3 message variations for our latest offer, each with a different angle.' })
   a.push({ icon: Shuffle, title: 'Repurpose', sub: 'One post → many formats', prompt: 'Take my latest draft (or a topic I give you) and repurpose it into a LinkedIn thread, a carousel outline, and a short email.' })
+  a.push({ icon: BookPlus, title: 'Add Brand Knowledge', sub: 'Teach Vera about this brand', prompt: 'I want to add brand knowledge. Ask me what to capture — positioning, proof points, voice, and what to avoid — then save it to the knowledge base.' })
   a.push({ icon: Target, title: 'Strategy Ideas', sub: 'Find the next best move', prompt: "What's the highest-leverage content move for this brand right now? Be specific." })
-  return a.slice(0, 9)
+  return a.slice(0, 12)
 }
 
 function Idle({ onRun, observations, actions }: {
