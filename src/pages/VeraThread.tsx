@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target, SquarePen, Clock } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target, SquarePen, Clock, ImagePlus, Clapperboard, Shuffle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -526,6 +526,8 @@ type LaunchAction = { icon: React.ElementType; title: string; sub: string; promp
 function buildLaunchActions(stats: { pending: number; campaigns: number }): LaunchAction[] {
   const a: LaunchAction[] = []
   a.push({ icon: PenLine, title: 'Draft a Post', sub: 'Copy + a matching image', prompt: 'Draft a punchy LinkedIn post for this brand — one sharp hook, three crisp points, a soft CTA, and a matching image.' })
+  a.push({ icon: ImagePlus, title: 'Image Prompt', sub: 'Craft a scroll-stopping visual', prompt: "Help me craft a strong image prompt for a post. Ask me the subject and mood if you need them, compose a vivid, specific, on-brand image prompt (no text in the image), then generate it." })
+  a.push({ icon: Clapperboard, title: 'Make a Video', sub: 'Short motion clip for a post', prompt: 'Create a short video clip for a post — ask me the concept and vibe, then generate it.' })
   if (stats.pending > 0) {
     a.push({ icon: ListChecks, title: 'Review Drafts', sub: `${stats.pending} draft${stats.pending === 1 ? '' : 's'} waiting`, prompt: `Summarize the ${stats.pending} draft${stats.pending === 1 ? '' : 's'} pending review — flag which to publish first and why.` })
   }
@@ -534,8 +536,9 @@ function buildLaunchActions(stats: { pending: number; campaigns: number }): Laun
     : { icon: Megaphone, title: 'Plan a Campaign', sub: 'Map a content series', prompt: 'Help me plan a 4-post content campaign for this brand — themes, angles, and a posting cadence.' })
   a.push({ icon: MessageCircle, title: 'Create Messaging', sub: 'Draft campaign-ready copy', prompt: 'Draft 3 message variations for our latest offer, each with a different angle.' })
   a.push({ icon: Lightbulb, title: 'Content Ideas', sub: 'Fresh angles for this brand', prompt: "Give me 5 content ideas grounded in this brand's voice and recent themes." })
+  a.push({ icon: Shuffle, title: 'Repurpose', sub: 'One post → many formats', prompt: 'Take my latest draft (or a topic I give you) and repurpose it into a LinkedIn thread, a carousel outline, and a short email.' })
   a.push({ icon: Target, title: 'Strategy Ideas', sub: 'Find the next best move', prompt: "What's the highest-leverage content move for this brand right now? Be specific." })
-  return a.slice(0, 6)
+  return a.slice(0, 9)
 }
 
 function Idle({ onRun, observations, actions }: {
