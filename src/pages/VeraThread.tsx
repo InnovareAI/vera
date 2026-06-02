@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target, SquarePen, Clock, ImagePlus, Clapperboard, Shuffle, Zap, CalendarDays, BookPlus } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target, SquarePen, Clock, ImagePlus, Clapperboard, Shuffle, Zap, CalendarDays, BookPlus, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -110,7 +110,14 @@ export default function VeraThread() {
       .order('created_at', { ascending: false })
       .limit(4)
     if (activeProject?.id) q = q.eq('project_id', activeProject.id)
-    q.then(({ data }) => setObservations((data ?? []) as { id: string; title: string; proposed_action: string | null }[]))
+    q.then(({ data }) => {
+      // Dedupe by title — duplicate/same-named campaigns can fire the same
+      // nudge more than once; show each only once.
+      const seen = new Set<string>()
+      const deduped = ((data ?? []) as { id: string; title: string; proposed_action: string | null }[])
+        .filter(o => (seen.has(o.title) ? false : (seen.add(o.title), true)))
+      setObservations(deduped)
+    })
   }, [activeOrg?.id, activeProject?.id])
 
   // Live counts for the launcher quick-action descriptions (SAM-style).
@@ -258,6 +265,16 @@ export default function VeraThread() {
     setDraft(null); setHistoryOpen(false); setSessionId(sid)
   }
 
+  // Dismiss a "VERA wants to" nudge — clears every dupe of it (by title).
+  async function dismissObservation(o: { title: string }) {
+    setObservations(prev => prev.filter(x => x.title !== o.title))
+    if (!activeOrg?.id) return
+    let q = supabase.from('agent_observations').update({ status: 'dismissed' })
+      .eq('org_id', activeOrg.id).eq('title', o.title)
+    if (activeProject?.id) q = q.eq('project_id', activeProject.id)
+    await q
+  }
+
   // ─── Draft actions ──────────────────────────────────────────────
   async function approveDraft() {
     if (!draft?.id) return
@@ -338,7 +355,7 @@ export default function VeraThread() {
         {!historyLoaded ? (
           <Centered>Loading thread…</Centered>
         ) : messages.length === 0 ? (
-          <Idle onRun={pr => send(pr)} observations={observations} actions={buildLaunchActions(stats)} />
+          <Idle onRun={pr => send(pr)} observations={observations} actions={buildLaunchActions(stats)} onDismiss={dismissObservation} />
         ) : (
           <div style={{ maxWidth: 680, margin: '0 auto', padding: `0 ${space[8]}`, display: 'flex', flexDirection: 'column', gap: space[7] }}>
             {messages.map(m => <Bubble key={m.id} m={m} />)}
@@ -544,10 +561,11 @@ function buildLaunchActions(stats: { pending: number; campaigns: number }): Laun
   return a.slice(0, 12)
 }
 
-function Idle({ onRun, observations, actions }: {
+function Idle({ onRun, observations, actions, onDismiss }: {
   onRun: (prompt: string) => void
   observations: { id: string; title: string; proposed_action: string | null }[]
   actions: LaunchAction[]
+  onDismiss: (o: { title: string }) => void
 }) {
   return (
     <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: space[8] }}>
@@ -565,12 +583,18 @@ function Idle({ onRun, observations, actions }: {
           <div style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.accent, marginBottom: space[3] }}>VERA wants to</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
             {observations.map(o => (
-              <button key={o.id} onClick={() => onRun(o.proposed_action || o.title)}
-                style={{ display: 'flex', alignItems: 'center', gap: space[3], textAlign: 'left', padding: `${space[3]} ${space[4]}`, background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.md, cursor: 'pointer', fontFamily: t.family.sans, color: color.ink, fontSize: t.size.sm }}>
-                <Sparkles size={15} style={{ color: color.accent, flexShrink: 0 }} />
-                <span style={{ flex: 1, minWidth: 0 }}>{o.title}</span>
-                <ArrowUp size={13} style={{ color: color.accent, transform: 'rotate(45deg)', flexShrink: 0 }} />
-              </button>
+              <div key={o.id} style={{ display: 'flex', alignItems: 'stretch', background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.md, overflow: 'hidden' }}>
+                <button onClick={() => onRun(o.proposed_action || o.title)} title="Ask VERA to handle this"
+                  style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: space[3], textAlign: 'left', padding: `${space[3]} ${space[4]}`, background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: t.family.sans, color: color.ink, fontSize: t.size.sm }}>
+                  <Sparkles size={15} style={{ color: color.accent, flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0 }}>{o.title}</span>
+                  <ArrowUp size={13} style={{ color: color.accent, transform: 'rotate(45deg)', flexShrink: 0 }} />
+                </button>
+                <button onClick={() => onDismiss(o)} title="Dismiss"
+                  style={{ flexShrink: 0, padding: `0 ${space[3]}`, background: 'transparent', border: 'none', borderLeft: `1px solid var(--accent-line)`, cursor: 'pointer', color: color.ghost, display: 'flex', alignItems: 'center' }}>
+                  <X size={14} />
+                </button>
+              </div>
             ))}
           </div>
         </div>
