@@ -123,6 +123,7 @@ export default function Layout() {
   const location = useLocation()
   const [pendingCount, setPendingCount] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
 
   // One live number in the rail: the Review badge (pending/draft posts in the
   // active project).
@@ -184,23 +185,32 @@ export default function Layout() {
           </button>
         </nav>
 
-        {/* Signed-in user — avatar + name, sign-out on hover (SAM pattern). */}
-        <div className="px-2 pb-3 pt-1">
-          <div className="group relative flex items-center gap-2.5 px-2.5 py-2 transition-colors hover:bg-[var(--fog)]"
-            style={{ borderRadius: 'var(--radius-md)' }}>
+        {/* Signed-in user — click for an always-visible menu with Log out. */}
+        <div className="px-2 pb-3 pt-1" style={{ position: 'relative' }}>
+          {userMenuOpen && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 30 }} onClick={() => setUserMenuOpen(false)} />
+              <div style={{ position: 'absolute', left: 8, right: 8, bottom: '100%', marginBottom: 6, zIndex: 40, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-pop)', padding: 4 }}>
+                <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--ghost)', borderBottom: '1px solid var(--line)', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {user?.email ?? 'Not signed in'}
+                </div>
+                <button onClick={handleSignOut}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 'var(--radius-sm)', border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--danger)', fontSize: 13, fontWeight: 500, textAlign: 'left' }}>
+                  <LogOut size={14} /> Log out
+                </button>
+              </div>
+            </>
+          )}
+          <button onClick={() => setUserMenuOpen(o => !o)}
+            className="w-full flex items-center gap-2.5 px-2.5 py-2 transition-colors hover:bg-[var(--fog)]"
+            style={{ borderRadius: 'var(--radius-md)', background: 'transparent', border: 'none', cursor: 'pointer' }}>
             <span className="w-7 h-7 flex items-center justify-center text-[11px] font-semibold flex-shrink-0"
               style={{ background: 'var(--accent-tint)', color: 'var(--accent)', borderRadius: '50%' }}>
               {initials}
             </span>
-            <span className="flex-1 truncate text-[13.5px]" style={{ color: 'var(--ink)' }}>{displayName}</span>
-            {user && (
-              <button onClick={handleSignOut} title="Sign out"
-                className="opacity-0 group-hover:opacity-100 p-1 transition-opacity"
-                style={{ color: 'var(--ghost)' }}>
-                <LogOut size={14} />
-              </button>
-            )}
-          </div>
+            <span className="flex-1 truncate text-[13.5px] text-left" style={{ color: 'var(--ink)' }}>{displayName}</span>
+            <ChevronsUpDown size={14} style={{ color: 'var(--ghost)', flexShrink: 0 }} />
+          </button>
         </div>
       </aside>
 
