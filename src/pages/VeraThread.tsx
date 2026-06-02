@@ -554,7 +554,7 @@ function buildLaunchActions(stats: { pending: number; campaigns: number }): Laun
     : { icon: Megaphone, title: 'Plan a Campaign', sub: 'Map a content series', prompt: 'Help me plan a 4-post content campaign for this brand — themes, angles, and a posting cadence.' })
   a.push({ icon: CalendarDays, title: 'Plan the Week', sub: 'A week of posts, mapped', prompt: "Plan this week's content for this brand — 5 posts across the week with angles, formats, and the best day to publish each." })
   a.push({ icon: Lightbulb, title: 'Content Ideas', sub: 'Fresh angles for this brand', prompt: "Give me 5 content ideas grounded in this brand's voice and recent themes." })
-  a.push({ icon: MessageCircle, title: 'Create Messaging', sub: 'Draft campaign-ready copy', prompt: 'Draft 3 message variations for our latest offer, each with a different angle.' })
+  a.push({ icon: MessageCircle, title: 'Variations', sub: 'Three takes on one idea', prompt: 'Write 3 variations of a post on a topic I give you — each a different angle, in the brand voice.' })
   a.push({ icon: Shuffle, title: 'Repurpose', sub: 'One post → many formats', prompt: 'Take my latest draft (or a topic I give you) and repurpose it into a LinkedIn thread, a carousel outline, and a short email.' })
   a.push({ icon: BookPlus, title: 'Add Brand Knowledge', sub: 'Teach Vera about this brand', prompt: 'I want to add brand knowledge. Ask me what to capture — positioning, proof points, voice, and what to avoid — then save it to the knowledge base.' })
   a.push({ icon: Target, title: 'Strategy Ideas', sub: 'Find the next best move', prompt: "What's the highest-leverage content move for this brand right now? Be specific." })
