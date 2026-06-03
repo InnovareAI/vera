@@ -87,8 +87,34 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       .from('org_members')
       .select('org_id, role, organizations(id, name, slug, org_type, logo_url, plan)')
       .eq('user_id', user.id)
-      .then(({ data }) => {
+      .then(async ({ data }) => {
         const members = (data as unknown as OrgMember[]) || []
+        if (members.length === 0) {
+          // Authenticated but UNPROVISIONED — the domain-join trigger never ran
+          // for this user, or they signed in with an external email (e.g. a
+          // 3cubed.ai Google account). Don't strand them on an empty workspace:
+          // load all orgs + a project tally and land on the most-populated one,
+          // exactly like the no-session fallback.
+          const [orgRes, projRes] = await Promise.all([
+            supabase.from('organizations').select('id, name').order('name').limit(50),
+            supabase.from('projects').select('org_id'),
+          ])
+          const synthetic: OrgMember[] = ((orgRes.data ?? []) as Array<{ id: string } & Record<string, unknown>>).map(o => ({
+            org_id: o.id, role: 'dev' as const, organizations: o as unknown as OrgMember['organizations'],
+          }))
+          const counts = new Map<string, number>()
+          for (const r of (projRes.data ?? []) as Array<{ org_id: string }>) counts.set(r.org_id, (counts.get(r.org_id) ?? 0) + 1)
+          const richest = synthetic.map(m => ({ id: m.org_id, n: counts.get(m.org_id) ?? 0 })).sort((a, b) => b.n - a.n)[0]
+          const stored = localStorage.getItem('activeOrgId')
+          setOrgs(synthetic)
+          setActiveOrgId(prev => {
+            if (prev && synthetic.find(m => m.org_id === prev)) return prev
+            if (stored && synthetic.find(m => m.org_id === stored)) return stored
+            return (richest && richest.n > 0 ? richest.id : synthetic[0]?.org_id) ?? null
+          })
+          setLoading(false)
+          return
+        }
         setOrgs(members)
         setActiveOrgId(prev => {
           // Keep current selection if still valid
