@@ -12,7 +12,7 @@ import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   MessageSquare, CheckSquare, Brain,
-  BarChart3, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid, CalendarDays, Library, Plus, Clock,
+  BarChart3, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid, CalendarDays, Library, Plus, Clock, ChevronRight, ChevronLeft,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
@@ -242,6 +242,10 @@ export default function Layout() {
   const [pendingCount, setPendingCount] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  // Right rail can be collapsed (e.g. to give the conversation full width);
+  // the choice persists across navigations + reloads.
+  const [railOpen, setRailOpen] = useState(() => { try { return localStorage.getItem('vera-rail-open') !== '0' } catch { return true } })
+  const toggleRail = (open: boolean) => { setRailOpen(open); try { localStorage.setItem('vera-rail-open', open ? '1' : '0') } catch { /* ignore */ } }
 
   // One live number in the rail: the Review badge (pending/draft posts in the
   // active project).
@@ -350,14 +354,28 @@ export default function Layout() {
         </main>
       </div>
 
-      {/* ── Right rail ── a full post preview, supplied via useRightRail. */}
-      {rightRailContent && (
+      {/* ── Right rail ── a full post preview, supplied via useRightRail.
+          Collapsible: a handle on the rail edge hides it; a handle on the
+          screen edge brings it back. The choice persists. */}
+      {rightRailContent && railOpen && (
         <aside
-          className="flex-shrink-0 overflow-y-auto"
-          style={{ background: 'transparent', width: rightRailWidth, borderLeft: '1px solid var(--paper-edge)' }}
+          className="flex-shrink-0"
+          style={{ background: 'transparent', width: rightRailWidth, borderLeft: '1px solid var(--paper-edge)', position: 'relative' }}
         >
-          {rightRailContent}
+          <button onClick={() => toggleRail(false)} title="Hide panel"
+            style={{ position: 'absolute', left: -13, top: '50%', transform: 'translateY(-50%)', zIndex: 25, width: 26, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', borderRadius: 999, background: 'var(--surface)', color: 'var(--ghost)', cursor: 'pointer', boxShadow: 'var(--shadow-pop)' }}>
+            <ChevronRight size={15} />
+          </button>
+          <div className="overflow-y-auto" style={{ height: '100%' }}>
+            {rightRailContent}
+          </div>
         </aside>
+      )}
+      {rightRailContent && !railOpen && (
+        <button onClick={() => toggleRail(true)} title="Show panel"
+          style={{ position: 'fixed', right: 0, top: '50%', transform: 'translateY(-50%)', zIndex: 25, width: 24, height: 46, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', borderRight: 'none', borderTopLeftRadius: 8, borderBottomLeftRadius: 8, background: 'var(--surface)', color: 'var(--ink-quiet)', cursor: 'pointer', boxShadow: 'var(--shadow-pop)' }}>
+          <ChevronLeft size={16} />
+        </button>
       )}
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
