@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target, SquarePen, Clock, ImagePlus, Clapperboard, Shuffle, Zap, CalendarDays, BookPlus, Users, Tag, X } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target, SquarePen, Clock, ImagePlus, Images, Quote, Clapperboard, Shuffle, Zap, CalendarDays, BookPlus, Users, Tag, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -757,8 +757,10 @@ function ArtifactEmpty() {
 type LaunchAction = { icon: React.ElementType; title: string; sub: string; prompt: string }
 function buildLaunchActions(stats: { pending: number; campaigns: number }): LaunchAction[] {
   const a: LaunchAction[] = []
-  a.push({ icon: PenLine, title: 'Draft a Post', sub: 'Copy + a matching image', prompt: 'Draft a punchy LinkedIn post for this brand — one sharp hook, three crisp points, a soft CTA, and a matching image.' })
-  a.push({ icon: ImagePlus, title: 'Image Prompt', sub: 'Craft a scroll-stopping visual', prompt: "Help me craft a scroll-stopping image prompt for a post, then generate it. Build it in layers: subject + a clear metaphor, composition/framing, a named style (e.g. editorial photo-illustration, 3D render, flat vector), lighting, an on-brand color palette (lead with coral #EF6A6A plus a neutral), mood, and setting — and end with 'no text, no words, no logos'. Ask me the subject/mood only if you can't infer it from the brand context, then generate the image." })
+  a.push({ icon: PenLine, title: 'Draft a Post', sub: 'Sharp copy, text first', prompt: 'Draft a punchy LinkedIn post for this brand: one sharp hook, three crisp points, a soft CTA. Text only for now, then ask if I want a matching image.' })
+  a.push({ icon: ImagePlus, title: 'Infographic', sub: 'Data or steps, visualized', prompt: 'Create an infographic-style visual for a post. Ask me the topic or data points if you need them, then build a tight image prompt and generate it. Keep it clean, not text-heavy.' })
+  a.push({ icon: Images, title: 'Carousel', sub: 'A multi-slide sequence', prompt: 'Help me build a carousel: outline the slides for a topic I give you, then generate the lead visual.' })
+  a.push({ icon: Quote, title: 'Quote Card', sub: 'A punchy line, designed', prompt: 'Create a quote-card visual. Pull a strong line from my latest draft, or ask me for the quote, then generate an on-brand quote card.' })
   a.push({ icon: Clapperboard, title: 'Make a Video', sub: 'Short motion clip for a post', prompt: 'Create a short video clip for a post — ask me the concept and vibe, then generate it.' })
   a.push({ icon: Zap, title: 'Write Hooks', sub: '5 sharp opening lines', prompt: "Write 5 scroll-stopping opening hooks in this brand's voice for a topic I'll give you — punchy, specific, no clichés." })
   if (stats.pending > 0) {
