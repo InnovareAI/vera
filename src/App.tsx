@@ -53,6 +53,7 @@ export default function App() {
                   <Route path="vera"       element={<VeraThread />} />
                   <Route path="review"     element={<Review />} />
                   <Route path="review/:id" element={<ReviewDetail />} />
+                  <Route path="calendar"   element={<Review initialView="calendar" />} />{/* scheduled posts on a month grid */}
                   <Route path="knowledge"  element={<Knowledge />} />
                   <Route path="brain"      element={<Brain />} />
                   <Route path="measure"    element={<Measure />} />
@@ -70,7 +71,7 @@ export default function App() {
                 <Route path="audit"      element={<RedirectFlatToProject section="measure" />} />{/* LinkedIn audit removed — land on Measure */}
                 <Route path="intel"      element={<RedirectFlatToProject section="measure" />} />
                 <Route path="library"    element={<RedirectFlatToProject section="review" />} />{/* Library dissolves → Review */}
-                <Route path="calendar"   element={<RedirectFlatToProject section="review" />} />{/* Calendar → Review's calendar view */}
+                <Route path="calendar"   element={<RedirectFlatToProject section="calendar" />} />{/* flat → project calendar */}
                 <Route path="templates"  element={<RedirectFlatToProject section="knowledge" />} />{/* Templates fold into Knowledge */}
                 <Route path="clients"    element={<AcrossClients />} />{/* the "all clients" shelf — reachable, not the default */}
                 <Route path="agency"     element={<AcrossClients />} />{/* Agency → the shelf */}

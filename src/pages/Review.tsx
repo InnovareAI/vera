@@ -52,13 +52,13 @@ function relativeTime(iso?: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-export default function Review() {
+export default function Review({ initialView }: { initialView?: 'list' | 'board' | 'calendar' } = {}) {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<StatusTab>('Pending Review')
   const [selected, setSelected] = useState<Post | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
-  const [view, setView] = useState<View>(() => (localStorage.getItem('reviewView') as View) ?? 'list')
+  const [view, setView] = useState<View>(() => initialView ?? (localStorage.getItem('reviewView') as View) ?? 'list')
   const [dragOverTab, setDragOverTab] = useState<StatusTab | null>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [searchParams, setSearchParams] = useSearchParams()

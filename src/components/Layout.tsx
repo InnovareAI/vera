@@ -12,7 +12,7 @@ import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   MessageSquare, CheckSquare, BookOpen, Brain,
-  BarChart3, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid,
+  BarChart3, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid, CalendarDays,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
@@ -164,6 +164,7 @@ export default function Layout() {
         <nav className="pt-1 space-y-0.5">
           <RailItem to={p('vera')}      icon={MessageSquare}   label="Vera" />
           <RailItem to={p('review')}    icon={CheckSquare}     label="Review" badge={pendingCount} />
+          <RailItem to={p('calendar')}  icon={CalendarDays}    label="Calendar" />
           <RailItem to={p('knowledge')} icon={BookOpen}        label="Knowledge" />
           <RailItem to={p('brain')}     icon={Brain}           label="Brain" />
           <RailItem to={p('measure')}   icon={BarChart3}       label="Measure" />
