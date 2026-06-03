@@ -199,7 +199,7 @@ export default function VeraThread() {
     const el = taRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(Math.max(el.scrollHeight, 52), 180)}px`
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 100), 220)}px`
   }, [input])
 
   // "Go home" — clicking the Vera item in the rail (while already here) returns
@@ -555,7 +555,7 @@ export default function VeraThread() {
               rows={1}
               placeholder="Ask Vera anything…"
               disabled={!activeProject}
-              style={{ flex: 1, resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontFamily: t.family.sans, fontSize: t.size.lg, lineHeight: 1.5, color: color.ink, minHeight: 52, maxHeight: 180, paddingTop: 6 }}
+              style={{ flex: 1, resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontFamily: t.family.sans, fontSize: t.size.lg, lineHeight: 1.5, color: color.ink, minHeight: 100, maxHeight: 220, paddingTop: 6 }}
             />
             {streaming ? (
               <button onClick={() => abortRef.current?.abort()} title="Stop"
