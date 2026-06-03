@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Loader2, Check, AlertCircle, Sparkles } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
@@ -179,6 +179,10 @@ export default function OnboardingAudit() {
       await supabase.from('audit_runs').update({ applied_at: now }).eq('id', result.audit_id)
 
       setAppliedAt(now)
+      // Make the newly-onboarded org the active workspace, so "Start creating"
+      // lands in THIS client (not the previously-active one). orgContext reads
+      // activeOrgId on a fresh load.
+      try { localStorage.setItem('activeOrgId', orgId) } catch { /* ignore */ }
     } catch (e) {
       setApplyError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -392,10 +396,10 @@ export default function OnboardingAudit() {
 
           <div className="flex justify-end gap-2 pt-2">
             {appliedAt ? (
-              <Link to="/dashboard"
+              <button onClick={() => { window.location.href = '/' }}
                 className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-sm font-semibold">
-                <Check className="w-4 h-4" /> Continue to dashboard
-              </Link>
+                <Check className="w-4 h-4" /> Start creating in Vera
+              </button>
             ) : (
               <button onClick={applyAudit} disabled={applying}
                 className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white rounded-lg text-sm font-semibold">

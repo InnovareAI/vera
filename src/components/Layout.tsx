@@ -12,7 +12,7 @@ import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   MessageSquare, CheckSquare, Brain,
-  BarChart3, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid, CalendarDays, Library,
+  BarChart3, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid, CalendarDays, Library, Plus,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
@@ -101,6 +101,10 @@ function ClientSwitcher() {
               )
             })}
             <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
+            <button onClick={() => { setOpen(false); navigate('/onboarding') }}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 'var(--radius-sm)', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontSize: 12.5, color: 'var(--accent)', fontWeight: 600 }}>
+              <Plus size={13} /> New client
+            </button>
             <button onClick={() => { setOpen(false); navigate('/clients') }}
               style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 'var(--radius-sm)', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontSize: 12.5, color: 'var(--ghost)' }}>
               <LayoutGrid size={13} /> View all clients
