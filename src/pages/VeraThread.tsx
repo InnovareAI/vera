@@ -84,6 +84,7 @@ export default function VeraThread() {
   const [streaming, setStreaming] = useState(false)
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [draft, setDraft] = useState<Post | null>(null)
+  const [draftHistory, setDraftHistory] = useState<Post[]>([])
   const [campaign, setCampaign] = useState<CampaignData | null>(null)
   const [approving, setApproving] = useState(false)
   const [observations, setObservations] = useState<{ id: string; title: string; proposed_action: string | null }[]>([])
@@ -213,6 +214,18 @@ export default function VeraThread() {
     return () => window.removeEventListener('vera:home', h)
   }, [])
 
+  // Resume a chat from the rail's Recents (when already mounted on Vera).
+  const pickSessionRef = useRef<(sid: string) => void>(() => {})
+  useEffect(() => { pickSessionRef.current = pickSession })
+  useEffect(() => {
+    const h = (e: Event) => {
+      const sid = (e as CustomEvent).detail?.sid
+      if (sid) pickSessionRef.current(sid)
+    }
+    window.addEventListener('vera:session', h)
+    return () => window.removeEventListener('vera:session', h)
+  }, [])
+
   const send = useCallback(async (override?: string) => {
     const text = (override ?? input).trim()
     if (!text || streaming || !activeOrg?.id) return
@@ -311,7 +324,11 @@ export default function VeraThread() {
             } : m))
             void pollVideo(ev.request_id as string, (ev.slug as string) ?? 'veo-3', assistantId)
           } else if (ev.type === 'draft' && ev.post) {
-            setDraft(ev.post as Post)
+            const post = ev.post as Post
+            setDraft(post)
+            // Keep every version so the operator can flip back through drafts
+            // (tester: tweaking made the previous draft vanish).
+            setDraftHistory(prev => [...prev, post])
           } else if (ev.type === 'campaign' && ev.campaign) {
             // The agent ran plan_campaign — a whole batch of scheduled posts.
             // Show the calendar in the rail; clicking a post opens it.
@@ -398,7 +415,7 @@ export default function VeraThread() {
     if (streaming) abortRef.current?.abort()
     const sid = crypto.randomUUID()
     if (activeProject?.id) { try { localStorage.setItem(`vera-session:${activeProject.id}`, sid) } catch { /* ignore */ } }
-    setDraft(null); setCampaign(null); setInput(''); setHistoryOpen(false)
+    setDraft(null); setDraftHistory([]); setCampaign(null); setInput(''); setHistoryOpen(false)
     setMessages([]); setSessionId(sid)
     setTimeout(() => taRef.current?.focus(), 0)
   }
@@ -412,7 +429,7 @@ export default function VeraThread() {
   }
   function pickSession(sid: string) {
     if (activeProject?.id) { try { localStorage.setItem(`vera-session:${activeProject.id}`, sid) } catch { /* ignore */ } }
-    setDraft(null); setCampaign(null); setHistoryOpen(false); setSessionId(sid)
+    setDraft(null); setDraftHistory([]); setCampaign(null); setHistoryOpen(false); setSessionId(sid)
   }
 
   // Dismiss a "VERA wants to" nudge — clears every dupe of it (by title).
@@ -454,6 +471,7 @@ export default function VeraThread() {
   }
 
   // Push the draft artifact into the right rail
+  const draftIdx = draft ? draftHistory.indexOf(draft) : -1
   useRightRail(
     draft ? (
       <DraftArtifact
@@ -463,11 +481,15 @@ export default function VeraThread() {
         onTweak={tweakDraft}
         onRegenerate={regenerateDraft}
         onBack={campaign ? () => setDraft(null) : undefined}
+        versionIdx={draftIdx}
+        versionTotal={draftHistory.length}
+        onPrevVersion={draftIdx > 0 ? () => setDraft(draftHistory[draftIdx - 1]) : undefined}
+        onNextVersion={draftIdx >= 0 && draftIdx < draftHistory.length - 1 ? () => setDraft(draftHistory[draftIdx + 1]) : undefined}
       />
     ) : campaign ? (
       <CampaignArtifact campaign={campaign} onOpenPost={p => setDraft(p as unknown as Post)} />
     ) : <ArtifactEmpty />,
-    [draft?.id, draft?.media_url, draft?.status, approving, campaign?.id, campaign?.posts?.length],
+    [draft?.id, draft?.media_url, draft?.status, approving, campaign?.id, campaign?.posts?.length, draftIdx, draftHistory.length],
     // Wide, readable artifact panel — this is the working surface, not a
     // skinny sidebar. ~42vw, clamped so it stays sane on small + huge screens.
     'clamp(420px, 42vw, 660px)',
@@ -602,8 +624,9 @@ function Bubble({ m }: { m: Message }) {
 // ─── right rail: a FULL preview of the post, as it will appear once live ──
 // A realistic LinkedIn-style card (author, body, media, reaction bar) so the
 // operator sees the actual post — plus the approve / tweak / regenerate bar.
-function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate, onBack }: {
+function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate, onBack, versionIdx, versionTotal, onPrevVersion, onNextVersion }: {
   draft: Post; approving: boolean; onApprove: () => void; onTweak: () => void; onRegenerate: () => void; onBack?: () => void
+  versionIdx: number; versionTotal: number; onPrevVersion?: () => void; onNextVersion?: () => void
 }) {
   const d = draft as unknown as Record<string, unknown>
   const isApproved = (draft.status ?? '').toLowerCase() === 'approved'
@@ -626,6 +649,15 @@ function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate, onB
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: isApproved ? color.success : color.accent }} />
           {isApproved ? 'Approved' : 'Preview'} · {channel}
         </span>
+        {versionTotal > 1 && versionIdx >= 0 && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: space[2] }}>
+            <button onClick={onPrevVersion} disabled={!onPrevVersion} title="Previous version"
+              style={{ width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${color.line}`, borderRadius: radius.sm, background: color.surface, color: onPrevVersion ? color.ink2 : color.faint, cursor: onPrevVersion ? 'pointer' : 'default', fontSize: 14, lineHeight: 1 }}>‹</button>
+            <span style={{ fontSize: t.size.micro, color: color.ghost, fontWeight: t.weight.medium, minWidth: 32, textAlign: 'center' }} title="Draft version — flip back through edits">v{versionIdx + 1}/{versionTotal}</span>
+            <button onClick={onNextVersion} disabled={!onNextVersion} title="Next version"
+              style={{ width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${color.line}`, borderRadius: radius.sm, background: color.surface, color: onNextVersion ? color.ink2 : color.faint, cursor: onNextVersion ? 'pointer' : 'default', fontSize: 14, lineHeight: 1 }}>›</button>
+          </span>
+        )}
         <div style={{ flex: 1 }} />
         {!isApproved && (
           <button onClick={onApprove} disabled={approving} style={{ ...btn(color.accent, '#fff', approving), boxShadow: approving ? 'none' : 'var(--shadow-glow)' }}>

@@ -12,7 +12,7 @@ import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   MessageSquare, CheckSquare, Brain,
-  BarChart3, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid, CalendarDays, Library, Plus,
+  BarChart3, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid, CalendarDays, Library, Plus, Clock,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
@@ -76,6 +76,54 @@ function RailItem({
 function RailLabel({ children }: { children: string }) {
   return (
     <div style={{ padding: '12px 14px 3px', fontSize: 10, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--ghost)' }}>{children}</div>
+  )
+}
+
+// Recents — the active client's past chats, surfaced in the rail (tester
+// request). Clicking one resumes that session: set the per-client session key,
+// route to Vera, and signal VeraThread (already-mounted case) to switch.
+type RailSession = { session_id: string; title: string | null; last_at: string; message_count: number }
+function RailRecents() {
+  const { activeProject } = useProject()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [sessions, setSessions] = useState<RailSession[]>([])
+
+  useEffect(() => {
+    const pid = activeProject?.id
+    if (!pid) { setSessions([]); return }
+    let cancelled = false
+    const load = () => supabase.rpc('list_chat_sessions', { p_project_id: pid }).then(({ data }) => {
+      if (!cancelled) setSessions(((data ?? []) as RailSession[]).slice(0, 5))
+    })
+    load()
+    // Refresh when a chat is started/saved or switched.
+    window.addEventListener('vera:home', load)
+    window.addEventListener('vera:session', load)
+    return () => { cancelled = true; window.removeEventListener('vera:home', load); window.removeEventListener('vera:session', load) }
+  }, [activeProject?.id])
+
+  if (!activeProject || sessions.length === 0) return null
+
+  const open = (sid: string) => {
+    const target = `/p/${activeProject.slug}/vera`
+    try { localStorage.setItem(`vera-session:${activeProject.id}`, sid) } catch { /* ignore */ }
+    if (location.pathname !== target) navigate(target)
+    window.dispatchEvent(new CustomEvent('vera:session', { detail: { sid } }))
+  }
+
+  return (
+    <nav className="space-y-0.5 mt-1">
+      <RailLabel>Recents</RailLabel>
+      {sessions.map(s => (
+        <button key={s.session_id} onClick={() => open(s.session_id)} title={s.title ?? 'Untitled chat'}
+          className="w-full flex items-center gap-2.5 px-2.5 py-1.5 mx-2 transition-colors hover:bg-[var(--fog)]"
+          style={{ background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 'var(--radius-md)', width: 'calc(100% - 1rem)' }}>
+          <Clock size={14} style={{ color: 'var(--ghost)', flexShrink: 0 }} />
+          <span className="flex-1 truncate text-left" style={{ fontSize: 13, color: 'var(--ink-quiet)' }}>{s.title || 'Untitled chat'}</span>
+        </button>
+      ))}
+    </nav>
   )
 }
 
@@ -245,6 +293,8 @@ export default function Layout() {
           <RailItem to={p('brain')}     icon={Brain}           label="Brain" />
           <RailItem to={p('measure')}   icon={BarChart3}       label="Measure" />
         </nav>
+
+        <RailRecents />
 
         <div className="flex-1" />
 
