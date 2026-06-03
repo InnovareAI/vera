@@ -9,8 +9,8 @@
 // to the artifact. This matches SAM's chat+artifact model.
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useLocation } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target, SquarePen, Clock, ImagePlus, Clapperboard, Shuffle, Zap, CalendarDays, BookPlus, X } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target, SquarePen, Clock, ImagePlus, Clapperboard, Shuffle, Zap, CalendarDays, BookPlus, Users, Tag, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -77,6 +77,7 @@ export default function VeraThread() {
   const { user } = useAuth()
   const { push } = useToast()
   const location = useLocation()
+  const navigate = useNavigate()
 
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -90,6 +91,7 @@ export default function VeraThread() {
   const [sessionId, setSessionId] = useState<string>('')
   const [historyOpen, setHistoryOpen] = useState(false)
   const [sessions, setSessions] = useState<{ session_id: string; title: string | null; last_at: string; message_count: number }[]>([])
+  const [setup, setSetup] = useState<{ audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null>(null)
 
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
@@ -157,6 +159,34 @@ export default function VeraThread() {
     Promise.all([pq, cq]).then(([pr, cr]) =>
       setStats({ pending: pr.error ? 0 : (pr.count ?? 0), campaigns: cr.error ? 0 : (cr.count ?? 0) }))
   }, [activeOrg?.id, activeProject?.id])
+
+  // Brain readiness — VERA writes sharper when the client's brain is set up, so
+  // when it's thin we make "set up the brain" the obvious first step (the spine
+  // starts at the brain, persona-first). Cheap count probes per client; guards
+  // on errors so a missing table reads as "not done" rather than crashing idle.
+  useEffect(() => {
+    if (!activeProject?.id || !activeOrg?.id) { setSetup(null); return }
+    let cancelled = false
+    const pid = activeProject.id, oid = activeOrg.id
+    const instr = (activeProject.instructions ?? '').trim()
+    Promise.all([
+      supabase.from('audiences').select('id', { count: 'exact', head: true }).eq('org_id', oid),
+      supabase.from('brand_voice').select('tone, system_prompt, sample_posts').or(`project_id.eq.${pid},and(project_id.is.null,org_id.eq.${oid})`).limit(6),
+      supabase.from('content_categories').select('id', { count: 'exact', head: true }).eq('project_id', pid),
+      supabase.from('project_knowledge').select('id', { count: 'exact', head: true }).eq('project_id', pid),
+    ]).then(([aud, voice, cat, kb]) => {
+      if (cancelled) return
+      const vr = (voice.data ?? []) as { tone?: string[] | null; system_prompt?: string | null; sample_posts?: string[] | null }[]
+      const voiceReady = vr.some(v => (v.tone?.length ?? 0) > 0 || (v.system_prompt ?? '').trim().length > 0 || (v.sample_posts?.length ?? 0) > 0)
+      setSetup({
+        audience: !aud.error && (aud.count ?? 0) > 0,
+        voice: voiceReady,
+        categories: !cat.error && (cat.count ?? 0) > 0,
+        knowledge: (!kb.error && (kb.count ?? 0) > 0) || instr.length > 0,
+      })
+    })
+    return () => { cancelled = true }
+  }, [activeProject?.id, activeOrg?.id, activeProject?.instructions])
 
   // Auto-scroll
   useEffect(() => {
@@ -449,7 +479,9 @@ export default function VeraThread() {
         {!historyLoaded ? (
           <Centered>Loading thread…</Centered>
         ) : messages.length === 0 ? (
-          <Idle onRun={pr => send(pr)} observations={observations} actions={buildLaunchActions(stats)} onDismiss={dismissObservation} />
+          <Idle onRun={pr => send(pr)} observations={observations} actions={buildLaunchActions(stats)} onDismiss={dismissObservation}
+            setup={setup} projectName={activeProject?.name ?? 'this client'}
+            onOpenBrain={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/brain`) }} />
         ) : (
           <div style={{ maxWidth: 680, margin: '0 auto', padding: `0 ${space[8]}`, display: 'flex', flexDirection: 'column', gap: space[7] }}>
             {messages.map(m => <Bubble key={m.id} m={m} />)}
@@ -715,12 +747,16 @@ function buildLaunchActions(stats: { pending: number; campaigns: number }): Laun
   return a.slice(0, 12)
 }
 
-function Idle({ onRun, observations, actions, onDismiss }: {
+function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain }: {
   onRun: (prompt: string) => void
   observations: { id: string; title: string; proposed_action: string | null }[]
   actions: LaunchAction[]
   onDismiss: (o: { title: string }) => void
+  setup: { audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null
+  projectName: string
+  onOpenBrain: () => void
 }) {
+  const setupDone = !!setup && setup.audience && setup.voice && setup.categories && setup.knowledge
   return (
     <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: space[8] }}>
       <span style={{ width: 56, height: 56, borderRadius: radius.lg, background: 'var(--accent-tint)', color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 700, marginBottom: space[5] }}>V</span>
@@ -730,6 +766,42 @@ function Idle({ onRun, observations, actions, onDismiss }: {
       <p style={{ fontSize: t.size.body, color: color.ghost, marginBottom: space[7], textAlign: 'center', maxWidth: '44ch' }}>
         Bring Vera a brief, a question, or an idea you want to move forward.
       </p>
+
+      {/* Persona-first setup — when the client's brain is thin, this is the
+          obvious step 1 (the spine starts at the brain). Disappears once set. */}
+      {setup && !setupDone && (
+        <div style={{ width: '100%', maxWidth: 640, marginBottom: space[5], background: color.surface, border: `1px solid var(--accent-line)`, borderRadius: radius.lg, overflow: 'hidden' }}>
+          <div style={{ padding: `${space[4]} ${space[5]}`, borderBottom: `1px solid ${color.line}` }}>
+            <div style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.accent, marginBottom: 4 }}>Set up {projectName} first</div>
+            <div style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5 }}>Vera writes sharper when it knows who you're talking to and how you sound. Start here — a few minutes now pays off on every post.</div>
+          </div>
+          <div>
+            {([
+              { key: 'audience', icon: Users, label: 'Audience', sub: "Who you're talking to" },
+              { key: 'voice', icon: Megaphone, label: 'Brand voice', sub: 'How you sound' },
+              { key: 'categories', icon: Tag, label: 'Content categories', sub: 'Your reusable buckets' },
+              { key: 'knowledge', icon: BookPlus, label: 'Brand knowledge', sub: 'Positioning, proof points' },
+            ] as const).map((it, i, arr) => {
+              const done = setup?.[it.key] ?? false
+              const Icn = it.icon
+              return (
+                <div key={it.key} style={{ display: 'flex', alignItems: 'center', gap: space[3], padding: `${space[3]} ${space[5]}`, borderBottom: i < arr.length - 1 ? `1px solid ${color.line}` : 'none' }}>
+                  <span style={{ width: 30, height: 30, borderRadius: radius.md, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: done ? 'var(--accent-tint)' : color.paper2, color: done ? color.success : color.ghost }}>
+                    {done ? <Check size={15} strokeWidth={2.5} /> : <Icn size={15} />}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: t.size.sm, fontWeight: t.weight.medium, color: done ? color.ghost : color.ink, textDecoration: done ? 'line-through' : 'none' }}>{it.label}</span>
+                    <span style={{ display: 'block', fontSize: t.size.micro, color: color.faint }}>{it.sub}</span>
+                  </span>
+                  {!done && (
+                    <button onClick={onOpenBrain} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 11px', fontSize: t.size.cap, fontWeight: t.weight.medium, color: color.accent, background: 'var(--accent-tint)', border: 'none', borderRadius: radius.pill, cursor: 'pointer' }}>Add →</button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* "VERA wants to" — proactive observations (moved from the old Home). */}
       {observations.length > 0 && (
