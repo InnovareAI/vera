@@ -534,7 +534,7 @@ function Bubble({ m }: { m: Message }) {
   }
   return (
     <div style={{ display: 'flex', gap: space[3] }}>
-      <span style={{ marginTop: 2, display: 'inline-flex', flexShrink: 0 }}><VeraAvatar size={26} /></span>
+      <span style={{ marginTop: 2, display: 'inline-flex', flexShrink: 0 }}><VeraAvatar size={40} /></span>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: space[3] }}>
         {m.tools?.map((tl, i) => (
           <div key={`${tl.id ?? tl.tool}-${i}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: `5px 11px`, background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, fontSize: t.size.cap, color: color.ink2, alignSelf: 'flex-start' }}>
