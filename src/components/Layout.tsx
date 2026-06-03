@@ -26,12 +26,13 @@ import { SettingsModal } from './SettingsModal'
 // SAM treatment: icon + label, generous padding. Active = solid coral fill
 // with white text/icon (the screenshot's "Sam" item). Inactive = quiet gray.
 function RailItem({
-  to, icon: Icon, label, badge,
-}: { to: string; icon: React.ElementType; label: string; badge?: number }) {
+  to, icon: Icon, label, badge, onClick,
+}: { to: string; icon: React.ElementType; label: string; badge?: number; onClick?: () => void }) {
   return (
     <NavLink
       to={to}
       end={to === '/dashboard'}
+      onClick={onClick}
       className="flex items-center gap-2.5 px-2.5 py-2 mx-2 transition-colors"
       style={({ isActive }) => ({
         background: isActive ? 'var(--accent)' : 'transparent',
@@ -233,7 +234,7 @@ export default function Layout() {
             Vera → move it through the Pipeline (approve → schedule → archive) →
             the Client's brain + how it's landing. Kills the flat-peer trap. */}
         <nav className="pt-1 space-y-0.5">
-          <RailItem to={p('vera')}      icon={MessageSquare}   label="Vera" />
+          <RailItem to={p('vera')}      icon={MessageSquare}   label="Vera" onClick={() => window.dispatchEvent(new CustomEvent('vera:home'))} />
 
           <RailLabel>Pipeline</RailLabel>
           <RailItem to={p('review')}    icon={CheckSquare}     label="Review" badge={pendingCount} />

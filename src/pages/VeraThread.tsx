@@ -201,6 +201,18 @@ export default function VeraThread() {
     el.style.height = `${Math.min(Math.max(el.scrollHeight, 52), 180)}px`
   }, [input])
 
+  // "Go home" — clicking the Vera item in the rail (while already here) returns
+  // to the launcher, the way people expect the logo/home to behave. The prior
+  // chat is saved (Recents/History). A ref keeps the latest closure so the
+  // listener never goes stale.
+  const newChatRef = useRef<() => void>(() => {})
+  useEffect(() => { newChatRef.current = newChat })
+  useEffect(() => {
+    const h = () => newChatRef.current()
+    window.addEventListener('vera:home', h)
+    return () => window.removeEventListener('vera:home', h)
+  }, [])
+
   const send = useCallback(async (override?: string) => {
     const text = (override ?? input).trim()
     if (!text || streaming || !activeOrg?.id) return
@@ -214,6 +226,17 @@ export default function VeraThread() {
     setStreaming(true)
 
     const wire = next.map(m => ({ role: m.role, content: m.content }))
+    // Keep the open draft in Vera's context — otherwise "tweak the draft" makes
+    // the user re-paste it (the draft lives in the right-rail artifact, not
+    // necessarily in the message text). Appended to the outgoing turn only; the
+    // message shown in the thread stays clean.
+    if (draft?.copy && wire.length) {
+      const last = wire[wire.length - 1]
+      wire[wire.length - 1] = {
+        ...last,
+        content: `${last.content}\n\n---\n[The draft currently open in the preview${draft.id ? ` (id: ${draft.id})` : ''}. If I ask you to tweak, edit, refine, shorten, or change "the draft/copy/post", revise THIS exact text in place and return the full updated post — do not ask me to paste it again:]\n${draft.copy}`,
+      }
+    }
     const controller = new AbortController()
     abortRef.current = controller
 
@@ -279,7 +302,13 @@ export default function VeraThread() {
             // The backend already submitted the fal job; poll for the result
             // with short requests so nothing times out. Fire-and-forget: this
             // keeps running after the SSE stream below closes.
-            setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, videoPending: true } : m))
+            setMessages(prev => prev.map(m => m.id === assistantId ? {
+              ...m, videoPending: true,
+              // Don't let the tool flip to ✓ — it's still rendering. Keep it
+              // "running" so the caption + pulse match reality (tester saw a
+              // misleading checkmark on a video that couldn't play yet).
+              tools: (m.tools ?? []).map(tl => tl.tool === 'generate_video' ? { ...tl, status: 'running' as const } : tl),
+            } : m))
             void pollVideo(ev.request_id as string, (ev.slug as string) ?? 'veo-3', assistantId)
           } else if (ev.type === 'draft' && ev.post) {
             setDraft(ev.post as Post)
@@ -315,7 +344,7 @@ export default function VeraThread() {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [input, streaming, activeOrg?.id, activeProject?.id, user?.id, messages, location.pathname, sessionId])
+  }, [input, streaming, activeOrg?.id, activeProject?.id, user?.id, messages, location.pathname, sessionId, draft])
 
   // Poll a backgrounded fal video job (submitted by vera-chat) until the MP4
   // is ready, then drop it into the chat and the open draft. Short polling
@@ -341,7 +370,7 @@ export default function VeraThread() {
       if (data.status === 'COMPLETED' && data.video_url) {
         const vurl = data.video_url
         setMessages(prev => prev.map(m => m.id === assistantId
-          ? { ...m, videoPending: false, videos: [...(m.videos ?? []), vurl] } : m))
+          ? { ...m, videoPending: false, videos: [...(m.videos ?? []), vurl], tools: (m.tools ?? []).map(tl => tl.tool === 'generate_video' ? { ...tl, status: 'done' as const } : tl) } : m))
         setDraft(prev => {
           if (prev?.id) void supabase.from('content_posts').update({ media_url: vurl, media_type: 'video' }).eq('id', prev.id)
           return prev ? { ...prev, media_url: vurl, media_type: 'video' } : prev
