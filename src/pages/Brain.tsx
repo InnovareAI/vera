@@ -79,6 +79,29 @@ export default function Brain() {
   }, [activeOrg?.id])
   useEffect(() => { reloadAudiences() }, [reloadAudiences])
 
+  // ── content categories (per-client buckets — Vera tags posts, Calendar/Artifacts filter) ──
+  const [categories, setCategories] = useState<{ id: string; name: string; color: string | null }[]>([])
+  const [catName, setCatName] = useState('')
+  const reloadCategories = useCallback(() => {
+    if (!activeProject?.id) return
+    supabase.from('content_categories').select('id, name, color').eq('project_id', activeProject.id).order('sort_order')
+      .then(({ data }) => setCategories((data ?? []) as { id: string; name: string; color: string | null }[]))
+  }, [activeProject?.id])
+  useEffect(() => { reloadCategories() }, [reloadCategories])
+  const CAT_COLORS = ['#16a34a', '#2563eb', '#7c3aed', '#EF6A6A', '#d97706', '#db2777', '#0891b2', '#65a30d']
+  async function addCategory(name: string) {
+    if (!name.trim() || !activeProject?.id) return
+    await supabase.from('content_categories').insert({ project_id: activeProject.id, org_id: activeOrg?.id ?? null, name: name.trim(), color: CAT_COLORS[categories.length % CAT_COLORS.length], sort_order: categories.length })
+    setCatName(''); reloadCategories()
+  }
+  async function deleteCategory(id: string) { await supabase.from('content_categories').delete().eq('id', id); reloadCategories() }
+  async function seedDefaultCategories() {
+    if (!activeProject?.id) return
+    const defaults = ['Evergreen', 'Educational', 'Product', 'Founder POV', 'News', 'Engagement']
+    await supabase.from('content_categories').insert(defaults.map((name, i) => ({ project_id: activeProject.id, org_id: activeOrg?.id ?? null, name, color: CAT_COLORS[i % CAT_COLORS.length], sort_order: i })))
+    reloadCategories()
+  }
+
   if (!activeProject) {
     return <div style={{ padding: space[8], maxWidth: 760 }}><EmptyState icon={<BrainIcon size={22} strokeWidth={1.5} />} title="No active project" body="Pick a client in the left rail to set its brain — instructions, voice, audiences." /></div>
   }
@@ -147,6 +170,35 @@ export default function Brain() {
           {audiences.length === 0 && !addingAudience && (
             <p style={{ fontSize: t.size.cap, color: color.ghost }}>No audiences yet — add one so VERA writes toward a specific reader.</p>
           )}
+        </div>
+      </section>
+
+      {/* Content categories */}
+      <section style={{ marginBottom: space[9] }}>
+        <SectionLabel style={{ marginBottom: space[2] }}>Content categories</SectionLabel>
+        <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `0 0 ${space[3]}` }}>
+          Reusable buckets for this client's content. Vera tags every post with one; Calendar &amp; Artifacts filter by them.
+        </p>
+        {categories.length === 0 ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[3], marginBottom: space[3] }}>
+            <span style={{ fontSize: t.size.cap, color: color.ghost }}>No categories yet.</span>
+            <Button variant="secondary" size="sm" onClick={seedDefaultCategories}><Plus size={13} /> Add a starter set</Button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: space[3] }}>
+            {categories.map(c => (
+              <span key={c.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '5px 10px', fontSize: t.size.cap, color: color.ink, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.pill }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: c.color ?? color.ghost, flexShrink: 0 }} />
+                {c.name}
+                <button onClick={() => deleteCategory(c.id)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: color.faint, display: 'flex', padding: 0 }}><X size={12} /></button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: space[2], maxWidth: 360 }}>
+          <Input value={catName} placeholder="Add a category (e.g. Case study)" onChange={e => setCatName(e.target.value)}
+            onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { e.preventDefault(); addCategory(catName) } }} />
+          <Button variant="secondary" size="md" onClick={() => addCategory(catName)}><Plus size={14} /></Button>
         </div>
       </section>
 
