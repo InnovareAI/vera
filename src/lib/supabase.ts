@@ -44,6 +44,7 @@ export interface Post {
   format: string
   channel: string
   status: string
+  category?: string | null        // content category (à la SocialBee) — set by Vera
   publish_date?: string
   scheduled_at?: string
   published_at?: string

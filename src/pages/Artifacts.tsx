@@ -76,6 +76,7 @@ export default function Artifacts() {
   const [posts, setPosts] = useState<Post[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [assets, setAssets] = useState<ProjectAsset[]>([])
+  const [contentCats, setContentCats] = useState<{ name: string; color: string | null }[]>([])
   const [signed, setSigned] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [cat, setCat] = useState<Cat>('all')
@@ -87,13 +88,15 @@ export default function Artifacts() {
   const load = useCallback(async () => {
     if (!activeProject?.id) { setPosts([]); setCampaigns([]); setAssets([]); setLoading(false); return }
     setLoading(true)
-    const [p, c, a] = await Promise.all([
+    const [p, c, a, cat] = await Promise.all([
       supabase.from('content_posts').select('*').eq('project_id', activeProject.id).order('created_at', { ascending: false }),
       supabase.from('campaigns').select('*').eq('project_id', activeProject.id).order('created_at', { ascending: false }),
       supabase.from('project_assets').select('id, project_id, name, kind, mime_type, storage_path, file_size, metadata, created_at').eq('project_id', activeProject.id).order('created_at', { ascending: false }),
+      supabase.from('content_categories').select('name, color').eq('project_id', activeProject.id).order('sort_order'),
     ])
     setPosts((p.data ?? []) as Post[])
     setCampaigns((c.data ?? []) as Campaign[])
+    setContentCats((cat.data ?? []) as { name: string; color: string | null }[])
     const aRows = (a.data ?? []) as ProjectAsset[]
     setAssets(aRows)
     setLoading(false)
@@ -113,6 +116,7 @@ export default function Artifacts() {
 
   const images = useMemo(() => posts.filter(p => p.media_url && (p.media_type ?? 'image') !== 'video'), [posts])
   const videos = useMemo(() => posts.filter(p => p.media_url && p.media_type === 'video'), [posts])
+  const catColor = useMemo(() => { const m = new Map<string, string>(); for (const c of contentCats) if (c.color) m.set(c.name, c.color); return m }, [contentCats])
   const brandAssets = useCallback((c: Cat) => assets.filter(a => a.metadata?.category === BRAND_CAT[c]), [assets])
 
   const open = (postId: string) => activeProject && navigate(`/p/${activeProject.slug}/review/${postId}`)
@@ -314,6 +318,12 @@ export default function Artifacts() {
                     <span style={{ fontSize: t.size.cap, fontWeight: t.weight.semibold, color: color.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 360 }}>{p.title || 'Untitled'}</span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: t.size.micro, color: color.ghost }}><Globe size={10} /> {p.channel}</span>
                     <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: t.weight.semibold, color: statusColor(p.status), border: `1px solid ${statusColor(p.status)}`, borderRadius: radius.pill, padding: '1px 7px' }}>{p.status}</span>
+                    {p.category && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: t.size.micro, color: color.ink2, whiteSpace: 'nowrap' }}>
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: catColor.get(p.category) ?? color.ghost, flexShrink: 0 }} />
+                        {p.category}
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: t.size.micro, color: color.ink2, lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{p.copy}</div>
                 </div>
