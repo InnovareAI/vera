@@ -36,6 +36,31 @@ interface Message {
   videoPending?: boolean   // a fal video job is rendering in the background
 }
 
+// A campaign = a batch of scheduled posts produced by the agent's plan_campaign
+// capability (one ask → the whole arc). Rendered as a calendar in the right rail.
+interface CampaignPost {
+  id: string
+  title: string | null
+  copy: string
+  channel: string
+  status: string
+  scheduled_at: string | null
+  hashtags?: string[] | null
+  image_prompt?: string | null
+  campaign_id?: string
+  media_url?: string
+  media_type?: string
+}
+interface CampaignData {
+  id: string
+  name: string
+  theme: string | null
+  channel: string
+  cadence: string
+  count: number
+  posts: CampaignPost[]
+}
+
 const TOOL_LABEL: Record<string, string> = {
   run_pipeline: 'Drafting with the team',
   generate_image: 'Generating image',
@@ -58,6 +83,7 @@ export default function VeraThread() {
   const [streaming, setStreaming] = useState(false)
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [draft, setDraft] = useState<Post | null>(null)
+  const [campaign, setCampaign] = useState<CampaignData | null>(null)
   const [approving, setApproving] = useState(false)
   const [observations, setObservations] = useState<{ id: string; title: string; proposed_action: string | null }[]>([])
   const [stats, setStats] = useState<{ pending: number; campaigns: number }>({ pending: 0, campaigns: 0 })
@@ -227,6 +253,21 @@ export default function VeraThread() {
             void pollVideo(ev.request_id as string, (ev.slug as string) ?? 'veo-3', assistantId)
           } else if (ev.type === 'draft' && ev.post) {
             setDraft(ev.post as Post)
+          } else if (ev.type === 'campaign' && ev.campaign) {
+            // The agent ran plan_campaign — a whole batch of scheduled posts.
+            // Show the calendar in the rail; clicking a post opens it.
+            const meta = ev.campaign as Record<string, unknown>
+            const posts = (ev.posts as CampaignPost[]) ?? []
+            setDraft(null)
+            setCampaign({
+              id: meta.id as string,
+              name: (meta.name as string) ?? 'Campaign',
+              theme: (meta.theme as string) ?? null,
+              channel: (meta.channel as string) ?? 'LinkedIn',
+              cadence: (meta.cadence as string) ?? 'weekly',
+              count: posts.length,
+              posts,
+            })
           } else if (ev.type === 'error') {
             throw new Error((ev.message as string) ?? 'stream error')
           }
@@ -298,7 +339,7 @@ export default function VeraThread() {
     if (streaming) abortRef.current?.abort()
     const sid = crypto.randomUUID()
     if (activeProject?.id) { try { localStorage.setItem(`vera-session:${activeProject.id}`, sid) } catch { /* ignore */ } }
-    setDraft(null); setInput(''); setHistoryOpen(false)
+    setDraft(null); setCampaign(null); setInput(''); setHistoryOpen(false)
     setMessages([]); setSessionId(sid)
     setTimeout(() => taRef.current?.focus(), 0)
   }
@@ -312,7 +353,7 @@ export default function VeraThread() {
   }
   function pickSession(sid: string) {
     if (activeProject?.id) { try { localStorage.setItem(`vera-session:${activeProject.id}`, sid) } catch { /* ignore */ } }
-    setDraft(null); setHistoryOpen(false); setSessionId(sid)
+    setDraft(null); setCampaign(null); setHistoryOpen(false); setSessionId(sid)
   }
 
   // Dismiss a "VERA wants to" nudge — clears every dupe of it (by title).
@@ -362,9 +403,12 @@ export default function VeraThread() {
         onApprove={approveDraft}
         onTweak={tweakDraft}
         onRegenerate={regenerateDraft}
+        onBack={campaign ? () => setDraft(null) : undefined}
       />
+    ) : campaign ? (
+      <CampaignArtifact campaign={campaign} onOpenPost={p => setDraft(p as unknown as Post)} />
     ) : <ArtifactEmpty />,
-    [draft?.id, draft?.media_url, draft?.status, approving],
+    [draft?.id, draft?.media_url, draft?.status, approving, campaign?.id, campaign?.posts?.length],
     // Wide, readable artifact panel — this is the working surface, not a
     // skinny sidebar. ~42vw, clamped so it stays sane on small + huge screens.
     'clamp(420px, 42vw, 660px)',
@@ -497,8 +541,8 @@ function Bubble({ m }: { m: Message }) {
 // ─── right rail: a FULL preview of the post, as it will appear once live ──
 // A realistic LinkedIn-style card (author, body, media, reaction bar) so the
 // operator sees the actual post — plus the approve / tweak / regenerate bar.
-function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate }: {
-  draft: Post; approving: boolean; onApprove: () => void; onTweak: () => void; onRegenerate: () => void
+function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate, onBack }: {
+  draft: Post; approving: boolean; onApprove: () => void; onTweak: () => void; onRegenerate: () => void; onBack?: () => void
 }) {
   const d = draft as unknown as Record<string, unknown>
   const isApproved = (draft.status ?? '').toLowerCase() === 'approved'
@@ -512,6 +556,11 @@ function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate }: {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Toolbar — label + the decision actions, always in reach. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: space[2], padding: `${space[5]} ${space[5]} ${space[3]}`, flexShrink: 0 }}>
+        {onBack && (
+          <button onClick={onBack} title="Back to the campaign calendar" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 9px', fontSize: t.size.cap, fontWeight: t.weight.medium, color: color.ink2, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.pill, cursor: 'pointer' }}>
+            ← Calendar
+          </button>
+        )}
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: isApproved ? color.success : color.accent }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: isApproved ? color.success : color.accent }} />
           {isApproved ? 'Approved' : 'Preview'} · {channel}
@@ -582,6 +631,54 @@ function btn(bg: string, fg: string, busy: boolean): React.CSSProperties {
   return { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', fontSize: t.size.cap, fontWeight: t.weight.medium, borderRadius: radius.sm, border: 'none', cursor: busy ? 'default' : 'pointer', background: bg, color: fg, opacity: busy ? 0.6 : 1 }
 }
 
+// The campaign calendar — the artifact for a plan_campaign batch. A header
+// (name · theme · count) over a dated list of post cards; click one to open it
+// in the draft preview for Approve / Tweak / Regenerate.
+function CampaignArtifact({ campaign, onOpenPost }: {
+  campaign: CampaignData; onOpenPost: (p: CampaignPost) => void
+}) {
+  const fmt = (iso: string | null) => {
+    if (!iso) return { dow: '', md: '' }
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return { dow: '', md: '' }
+    return {
+      dow: d.toLocaleDateString('en-US', { weekday: 'short' }),
+      md: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    }
+  }
+  const posts = [...campaign.posts].sort((a, b) => (a.scheduled_at ?? '').localeCompare(b.scheduled_at ?? ''))
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: `${space[5]} ${space[5]} ${space[3]}`, flexShrink: 0 }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.accent }}>
+          <CalendarDays size={13} /> Campaign · {campaign.channel}
+        </div>
+        <h2 style={{ fontSize: t.size.lg, fontWeight: t.weight.semibold, color: color.ink, margin: `${space[2]} 0 2px`, lineHeight: 1.25 }}>{campaign.name}</h2>
+        {campaign.theme && <p style={{ fontSize: t.size.cap, color: color.ink2, margin: 0, lineHeight: 1.45 }}>{campaign.theme}</p>}
+        <p style={{ fontSize: t.size.micro, color: color.ghost, margin: `${space[2]} 0 0` }}>{posts.length} posts · {campaign.cadence} · all pending review</p>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: `0 ${space[5]} ${space[5]}`, display: 'flex', flexDirection: 'column', gap: space[2] }}>
+        {posts.map((p, i) => {
+          const d = fmt(p.scheduled_at)
+          return (
+            <button key={p.id ?? i} onClick={() => onOpenPost(p)}
+              style={{ textAlign: 'left', display: 'flex', gap: space[3], padding: space[3], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, cursor: 'pointer', width: '100%' }}>
+              <div style={{ flexShrink: 0, width: 46, textAlign: 'center' }}>
+                <div style={{ fontSize: t.size.micro, fontWeight: t.weight.semibold, color: color.accent, lineHeight: 1.2 }}>{d.dow}</div>
+                <div style={{ fontSize: t.size.cap, color: color.ink, fontWeight: t.weight.medium }}>{d.md}</div>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: t.size.cap, fontWeight: t.weight.semibold, color: color.ink, marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title || `Post ${i + 1}`}</div>
+                <div style={{ fontSize: t.size.micro, color: color.ink2, lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{p.copy}</div>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function ArtifactEmpty() {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: space[7], gap: space[3] }}>
@@ -608,8 +705,8 @@ function buildLaunchActions(stats: { pending: number; campaigns: number }): Laun
   }
   a.push(stats.campaigns > 0
     ? { icon: Megaphone, title: 'Improve Campaign Plan', sub: `${stats.campaigns} campaign${stats.campaigns === 1 ? '' : 's'} in workspace`, prompt: "Review this brand's campaigns and suggest the highest-impact improvement to theme, angle, cadence, or channel mix." }
-    : { icon: Megaphone, title: 'Plan a Campaign', sub: 'Map a content series', prompt: 'Help me plan a 4-post content campaign for this brand — themes, angles, and a posting cadence.' })
-  a.push({ icon: CalendarDays, title: 'Plan the Week', sub: 'A week of posts, mapped', prompt: "Plan this week's content for this brand — 5 posts across the week with angles, formats, and the best day to publish each." })
+    : { icon: Megaphone, title: 'Plan a Campaign', sub: 'A drafted, scheduled series', prompt: 'Plan and draft a content campaign for this brand — write all the posts and schedule them across the next few weeks.' })
+  a.push({ icon: CalendarDays, title: 'Plan the Month', sub: 'A month of posts, drafted', prompt: "Plan and draft this brand's next month of LinkedIn content — write every post and schedule them weekly." })
   a.push({ icon: Lightbulb, title: 'Content Ideas', sub: 'Fresh angles for this brand', prompt: "Give me 5 content ideas grounded in this brand's voice and recent themes." })
   a.push({ icon: MessageCircle, title: 'Variations', sub: 'Three takes on one idea', prompt: 'Write 3 variations of a post on a topic I give you — each a different angle, in the brand voice.' })
   a.push({ icon: Shuffle, title: 'Repurpose', sub: 'One post → many formats', prompt: 'Take my latest draft (or a topic I give you) and repurpose it into a LinkedIn thread, a carousel outline, and a short email.' })
