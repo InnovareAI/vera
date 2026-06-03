@@ -27,13 +27,13 @@
   --ghost:        #8E8E8C;
   --mist:         #C4C4C2;
 
-  /* Brand accent — SAM coral-red (SAM ships hsl(0 83% 68%) ≈ #EF6A6A).   */
-  /* The solid --accent is deepened just enough to carry white CTA text   */
-  /* on a light base; --accent-soft is SAM's exact coral for icons/dots.  */
-  --accent:       #DD4B50;            /* solid CTA fill (white text ~3.8:1) */
-  --accent-soft:  #EF6A6A;            /* SAM's coral — softer accents, icons */
-  --accent-tint:  rgba(239, 106, 106, 0.08);  /* pale coral wash */
-  --accent-rule:  rgba(239, 106, 106, 0.20);   /* coral hairline */
+  /* Brand accent — Vera blue (distinct from SAM's coral).                */
+  /* The solid --accent carries white CTA text on a light base;           */
+  /* --accent-soft is the brighter brand blue for icons/dots.             */
+  --accent:       #2563EB;            /* solid CTA fill (white text ~5:1) */
+  --accent-soft:  #3B82F6;            /* brand blue — softer accents, icons */
+  --accent-tint:  rgba(59, 130, 246, 0.08);  /* pale blue wash */
+  --accent-rule:  rgba(59, 130, 246, 0.20);   /* blue hairline */
 
   /* Legacy oxblood aliases — still exported so old usages don't break,   */
   /* but the practical visual contract is "rare brand accent" now.        */
@@ -89,8 +89,8 @@
   --line-2:       #D9D5CE;            /* stronger hairline */
 
   /* — Color · accent (use sparingly, max 4 per surface) ────────────── */
-  --accent-ink:   #8A2A2E;            /* deep coral — text/hover on light */
-  --accent-line:  rgba(239,106,106,0.22); /* accent hairline */
+  --accent-ink:   #1E40AF;            /* deep blue — text/hover on light */
+  --accent-line:  rgba(59,130,246,0.22); /* accent hairline */
 
   /* — Color · status (dots only, never fills) ──────────────────────── */
   --success:      #2D7A3B;
@@ -152,8 +152,8 @@
   /* — Shadow · only on floating overlays ───────────────────────────── */
   --shadow-pop:   0 1px 2px rgba(23,23,23,0.04), 0 8px 24px rgba(23,23,23,0.08);
   --shadow-modal: 0 2px 4px rgba(23,23,23,0.05), 0 24px 64px rgba(23,23,23,0.16);
-  /* Coral glow — SAM's brand-moment shadow (SAM: 0 24px 64px primary/0.12) */
-  --shadow-glow:  0 18px 48px rgba(221, 75, 80, 0.18);
+  /* Blue glow — brand-moment shadow */
+  --shadow-glow:  0 18px 48px rgba(37, 99, 235, 0.18);
 }
 
 body[data-theme="dark"] {
@@ -167,10 +167,10 @@ body[data-theme="dark"] {
   --ghost:        #737373;
   --mist:         #404040;
 
-  --accent:       #EF6A6A;            /* SAM coral, lifted for dark surfaces */
-  --accent-soft:  #F58C8C;
-  --accent-tint:  rgba(239, 106, 106, 0.14);
-  --accent-rule:  rgba(239, 106, 106, 0.26);
+  --accent:       #60A5FA;            /* brand blue, lifted for dark surfaces */
+  --accent-soft:  #93C5FD;
+  --accent-tint:  rgba(96, 165, 250, 0.14);
+  --accent-rule:  rgba(96, 165, 250, 0.26);
 
   --oxblood:      var(--accent);
   --oxblood-deep: var(--accent);
@@ -191,8 +191,8 @@ body {
   /* top; the glow reads through the rails + margins.                        */
   background-color: var(--paper);
   background-image:
-    radial-gradient(62% 48% at 16% -4%, rgba(239, 106, 106, 0.07), transparent 72%),
-    radial-gradient(48% 38% at 102% -2%, rgba(239, 106, 106, 0.045), transparent 70%);
+    radial-gradient(62% 48% at 16% -4%, rgba(59, 130, 246, 0.07), transparent 72%),
+    radial-gradient(48% 38% at 102% -2%, rgba(59, 130, 246, 0.045), transparent 70%);
   background-attachment: fixed;
   color: var(--ink);
   transition: background 0.2s, color 0.2s;
