@@ -48,6 +48,18 @@ export default function Measure() {
     return { total: posts.length, pending, approved, scheduledAhead, posted, campaigns: campaigns.length, perWeek: (recent / 4).toFixed(1) }
   }, [posts, campaigns])
 
+  const channelMix = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const p of posts) { const ch = (p.channel || 'Unknown').trim() || 'Unknown'; m.set(ch, (m.get(ch) ?? 0) + 1) }
+    return [...m.entries()].sort((a, b) => b[1] - a[1])
+  }, [posts])
+
+  const campaignRollup = useMemo(
+    () => campaigns.map(c => ({ id: c.id, name: c.name, status: c.status, count: posts.filter(p => p.campaign_id === c.id).length }))
+      .sort((a, b) => b.count - a.count),
+    [campaigns, posts],
+  )
+
   const tiles = [
     { label: 'Total posts', value: stats.total, icon: FileText, tone: color.ink },
     { label: 'Pending review', value: stats.pending, icon: Clock, tone: color.accent },
@@ -78,9 +90,41 @@ export default function Measure() {
           )
         })}
       </div>
-      <p style={{ fontSize: t.size.micro, color: color.ghost, marginBottom: space[9] }}>
-        ≈ {stats.perWeek} posts/week created over the last 4 weeks.
+      <p style={{ fontSize: t.size.micro, color: color.ghost, marginBottom: space[8] }}>
+        ≈ {stats.perWeek} posts/week created over the last 4 weeks. Engagement (reach, likes, CTR) appears here once publishing captures per-post metrics.
       </p>
+
+      {channelMix.length > 0 && (
+        <>
+          <SectionLabel style={{ marginBottom: space[3] }}>Channel mix</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: space[2], marginBottom: space[8], maxWidth: 520 }}>
+            {channelMix.map(([ch, n]) => (
+              <div key={ch} style={{ display: 'flex', alignItems: 'center', gap: space[3] }}>
+                <span style={{ width: 96, fontSize: t.size.cap, color: color.ink2, textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ch}</span>
+                <div style={{ flex: 1, height: 8, background: color.paper2, borderRadius: radius.pill, overflow: 'hidden' }}>
+                  <div style={{ width: `${(n / (channelMix[0][1] || 1)) * 100}%`, height: '100%', background: color.accent, borderRadius: radius.pill }} />
+                </div>
+                <span style={{ width: 26, fontSize: t.size.cap, color: color.ink, fontWeight: t.weight.semibold, textAlign: 'right' }}>{n}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {campaignRollup.length > 0 && (
+        <>
+          <SectionLabel style={{ marginBottom: space[3] }}>Campaigns</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: space[2], marginBottom: space[8], maxWidth: 640 }}>
+            {campaignRollup.map(c => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: space[3], padding: space[3], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
+                <span style={{ flex: 1, fontSize: t.size.cap, fontWeight: t.weight.medium, color: color.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</span>
+                <span style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.04em', color: color.ghost }}>{c.status}</span>
+                <span style={{ fontSize: t.size.cap, color: color.ink, fontWeight: t.weight.semibold }}>{c.count} posts</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       <SectionLabel style={{ marginBottom: space[3] }}>Competitor intel</SectionLabel>
       <div style={{ margin: `0 -${space[8]}` }}>

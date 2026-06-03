@@ -8,9 +8,9 @@
 // · Knowledge — link to the client's searchable sources (managed in Knowledge;
 //   brand-kit files live in Artifacts).
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Brain as BrainIcon, BookOpen, Check, Plus, X, Loader2 } from 'lucide-react'
+import { Brain as BrainIcon, BookOpen, Check, Plus, X, Loader2, Trash2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { BrandVoice, Audience } from '../lib/supabase'
 import { useProject } from '../lib/projectContext'
@@ -70,12 +70,14 @@ export default function Brain() {
   const addTo = (key: keyof BrandVoice, val: string) => { if (val.trim()) setBv(p => ({ ...p, [key]: [...((p[key] as string[]) || []), val.trim()] })) }
   const rmFrom = (key: keyof BrandVoice, i: number) => setBv(p => ({ ...p, [key]: ((p[key] as string[]) || []).filter((_, x) => x !== i) }))
 
-  // ── audiences (read) ──
+  // ── audiences (editable) ──
   const [audiences, setAudiences] = useState<Audience[]>([])
-  useEffect(() => {
+  const [addingAudience, setAddingAudience] = useState(false)
+  const reloadAudiences = useCallback(() => {
     if (!activeOrg?.id) return
-    supabase.from('audiences').select('*').eq('org_id', activeOrg.id).then(({ data }) => setAudiences((data ?? []) as Audience[]))
+    supabase.from('audiences').select('*').eq('org_id', activeOrg.id).order('created_at').then(({ data }) => setAudiences((data ?? []) as Audience[]))
   }, [activeOrg?.id])
+  useEffect(() => { reloadAudiences() }, [reloadAudiences])
 
   if (!activeProject) {
     return <div style={{ padding: space[8], maxWidth: 760 }}><EmptyState icon={<BrainIcon size={22} strokeWidth={1.5} />} title="No active project" body="Pick a client in the left rail to set its brain — instructions, voice, audiences." /></div>
@@ -126,21 +128,26 @@ export default function Brain() {
         </div>
       </section>
 
-      {/* Audiences (read) */}
+      {/* Audiences (editable) */}
       <section style={{ marginBottom: space[9] }}>
-        <SectionLabel style={{ marginBottom: space[3] }}>Audiences</SectionLabel>
-        {audiences.length === 0 ? (
-          <p style={{ fontSize: t.size.cap, color: color.ghost }}>No audiences defined yet — editing audiences lands next. For now VERA infers the audience from your instructions + brand voice.</p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
-            {audiences.map(a => (
-              <div key={a.id} style={{ padding: space[3], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
-                <div style={{ fontSize: t.size.cap, fontWeight: t.weight.semibold, color: color.ink }}>{a.name}{a.is_primary ? ' · primary' : ''}</div>
-                {Array.isArray(a.pain_points) && a.pain_points.length > 0 && <div style={{ fontSize: t.size.micro, color: color.ink2, marginTop: 2 }}>Pains: {a.pain_points.join(', ')}</div>}
-              </div>
-            ))}
-          </div>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: space[2] }}>
+          <SectionLabel>Audiences</SectionLabel>
+          {activeOrg?.id && !addingAudience && (
+            <Button variant="secondary" size="sm" onClick={() => setAddingAudience(true)}><Plus size={13} /> Add audience</Button>
+          )}
+        </div>
+        <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `0 0 ${space[3]}` }}>
+          Who VERA writes toward — drives register, proof points, and which pains to hit.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: space[3] }}>
+          {addingAudience && activeOrg?.id && (
+            <AudienceEditor initial={{}} orgId={activeOrg.id} onSaved={() => { setAddingAudience(false); reloadAudiences() }} onCancel={() => setAddingAudience(false)} />
+          )}
+          {audiences.map(a => <AudienceEditor key={a.id} initial={a} orgId={activeOrg?.id ?? ''} onSaved={reloadAudiences} />)}
+          {audiences.length === 0 && !addingAudience && (
+            <p style={{ fontSize: t.size.cap, color: color.ghost }}>No audiences yet — add one so VERA writes toward a specific reader.</p>
+          )}
+        </div>
       </section>
 
       {/* Knowledge link */}
@@ -183,6 +190,45 @@ function TagInput({ label, placeholder, items, onAdd, onRemove, danger }: {
         <Input value={val} placeholder={placeholder} onChange={e => setVal(e.target.value)}
           onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { e.preventDefault(); commit() } }} />
         <Button variant="secondary" size="md" onClick={commit}><Plus size={14} /></Button>
+      </div>
+    </div>
+  )
+}
+
+// Inline editor for one audience — name, primary flag, pain points, goals.
+function AudienceEditor({ initial, orgId, onSaved, onCancel }: {
+  initial: Partial<Audience>; orgId: string; onSaved: () => void; onCancel?: () => void
+}) {
+  const [a, setA] = useState<Partial<Audience>>(initial)
+  const [saving, setSaving] = useState(false)
+  const addArr = (key: 'pain_points' | 'goals', v: string) => { if (v.trim()) setA(p => ({ ...p, [key]: [...((p[key] as string[]) || []), v.trim()] })) }
+  const rmArr = (key: 'pain_points' | 'goals', i: number) => setA(p => ({ ...p, [key]: ((p[key] as string[]) || []).filter((_, x) => x !== i) }))
+  async function save() {
+    if (!a.name?.trim() || !orgId) return
+    setSaving(true)
+    const payload = { org_id: orgId, name: a.name.trim(), kind: a.kind || 'audience', is_primary: !!a.is_primary, pain_points: a.pain_points ?? [], goals: a.goals ?? [] }
+    if (a.id) await supabase.from('audiences').update(payload).eq('id', a.id)
+    else await supabase.from('audiences').insert(payload)
+    setSaving(false); onSaved()
+  }
+  async function del() {
+    if (!a.id) { onCancel?.(); return }
+    if (!confirm(`Delete audience "${a.name}"?`)) return
+    await supabase.from('audiences').delete().eq('id', a.id); onSaved()
+  }
+  return (
+    <div style={{ padding: space[4], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, display: 'flex', flexDirection: 'column', gap: space[3] }}>
+      <div style={{ display: 'flex', gap: space[3], alignItems: 'center' }}>
+        <Input value={a.name ?? ''} placeholder="Audience name (e.g. VP of Sales)" onChange={e => setA(p => ({ ...p, name: e.target.value }))} style={{ flex: 1 }} />
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: t.size.cap, color: color.ink2, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          <input type="checkbox" checked={!!a.is_primary} onChange={e => setA(p => ({ ...p, is_primary: e.target.checked }))} /> Primary
+        </label>
+      </div>
+      <TagInput label="Pain points" placeholder="e.g. Forecast credibility with the board" items={(a.pain_points as string[]) ?? []} onAdd={v => addArr('pain_points', v)} onRemove={i => rmArr('pain_points', i)} />
+      <TagInput label="Goals" placeholder="e.g. Hit pipeline targets without more headcount" items={(a.goals as string[]) ?? []} onAdd={v => addArr('goals', v)} onRemove={i => rmArr('goals', i)} />
+      <div style={{ display: 'flex', gap: space[2] }}>
+        <Button variant="primary" size="sm" onClick={save} disabled={saving || !a.name?.trim()}>{saving ? <Loader2 size={13} /> : <Check size={13} />} Save</Button>
+        <Button variant="ghost" size="sm" onClick={del}><Trash2 size={13} /> {a.id ? 'Delete' : 'Cancel'}</Button>
       </div>
     </div>
   )
