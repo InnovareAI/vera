@@ -534,7 +534,7 @@ function Bubble({ m }: { m: Message }) {
   }
   return (
     <div style={{ display: 'flex', gap: space[3] }}>
-      <span style={{ width: 26, height: 26, borderRadius: radius.md, background: color.ink, color: color.surface, fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2 }}>V</span>
+      <span style={{ marginTop: 2, display: 'inline-flex', flexShrink: 0 }}><VeraAvatar size={26} /></span>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: space[3] }}>
         {m.tools?.map((tl, i) => (
           <div key={`${tl.id ?? tl.tool}-${i}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: `5px 11px`, background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, fontSize: t.size.cap, color: color.ink2, alignSelf: 'flex-start' }}>
@@ -759,7 +759,7 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
   const setupDone = !!setup && setup.audience && setup.voice && setup.categories && setup.knowledge
   return (
     <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: space[8] }}>
-      <span style={{ width: 56, height: 56, borderRadius: radius.lg, background: 'var(--accent-tint)', color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 700, marginBottom: space[5] }}>V</span>
+      <span style={{ marginBottom: space[5], display: 'inline-flex' }}><VeraAvatar size={56} hero /></span>
       <h1 style={{ fontSize: t.size.h2, fontWeight: t.weight.semibold, color: color.ink, marginBottom: space[2], textAlign: 'center' }}>
         What should we create today?
       </h1>
@@ -859,6 +859,28 @@ function relTime(iso: string): string {
   const dd = Math.round(h / 24)
   if (dd < 7) return `${dd}d ago`
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+// Vera's face — served from /vera-avatar.png; falls back to the "V" monogram
+// if the asset is missing so the UI never shows a broken image. Drop the file
+// in content-studio/public/ to give her a face everywhere she appears.
+function VeraAvatar({ size, hero = false }: { size: number; hero?: boolean }) {
+  const [broken, setBroken] = useState(false)
+  const frame: React.CSSProperties = {
+    width: size, height: size, borderRadius: '50%', flexShrink: 0, overflow: 'hidden',
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  }
+  if (broken) {
+    return (
+      <span style={{ ...frame, background: hero ? 'var(--accent-tint)' : color.ink, color: hero ? color.accent : color.surface, fontSize: hero ? 24 : 11, fontWeight: hero ? 700 : 600 }}>V</span>
+    )
+  }
+  return (
+    <span style={{ ...frame, background: hero ? 'var(--accent-tint)' : color.paper2 }}>
+      <img src="/vera-avatar.png" alt="Vera" onError={() => setBroken(true)}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', display: 'block' }} />
+    </span>
+  )
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
