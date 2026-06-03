@@ -246,6 +246,13 @@ export default function Layout() {
   // the choice persists across navigations + reloads.
   const [railOpen, setRailOpen] = useState(() => { try { return localStorage.getItem('vera-rail-open') !== '0' } catch { return true } })
   const toggleRail = (open: boolean) => { setRailOpen(open); try { localStorage.setItem('vera-rail-open', open ? '1' : '0') } catch { /* ignore */ } }
+  // When Vera produces an artifact (draft/campaign), reveal the rail so the
+  // output is visible even if the operator had collapsed it.
+  useEffect(() => {
+    const open = () => toggleRail(true)
+    window.addEventListener('vera:rail-open', open)
+    return () => window.removeEventListener('vera:rail-open', open)
+  }, [])
 
   // One live number in the rail: the Review badge (pending/draft posts in the
   // active project).

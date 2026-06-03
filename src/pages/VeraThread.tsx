@@ -329,6 +329,8 @@ export default function VeraThread() {
             // Keep every version so the operator can flip back through drafts
             // (tester: tweaking made the previous draft vanish).
             setDraftHistory(prev => [...prev, post])
+            // Reveal the rail so the new draft is visible even if collapsed.
+            window.dispatchEvent(new CustomEvent('vera:rail-open'))
           } else if (ev.type === 'campaign' && ev.campaign) {
             // The agent ran plan_campaign — a whole batch of scheduled posts.
             // Show the calendar in the rail; clicking a post opens it.
@@ -344,6 +346,7 @@ export default function VeraThread() {
               count: posts.length,
               posts,
             })
+            window.dispatchEvent(new CustomEvent('vera:rail-open'))
           } else if (ev.type === 'error') {
             throw new Error((ev.message as string) ?? 'stream error')
           }
