@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, ListChecks, Megaphone, Lightbulb, Target, SquarePen, Clock, ImagePlus, Images, Quote, Clapperboard, Shuffle, Zap, CalendarDays, BookPlus, Users, Tag, X } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, Megaphone, Lightbulb, SquarePen, Clock, ImagePlus, Clapperboard, Zap, CalendarDays, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -786,28 +786,21 @@ function ArtifactEmpty() {
 // ─── launcher quick actions (SAM-style) — dynamic, count-aware, send-on-click ──
 // Mirrors SAM's welcome actions: each is a complete prompt that RUNS on click
 // (not a fill-the-box starter), and descriptions carry live workspace counts.
-type LaunchAction = { icon: React.ElementType; title: string; sub: string; prompt: string }
+type LaunchAction = { icon: React.ElementType; title: string; sub: string; prompt: string; action?: 'brain' }
+// SAM-clean: a tight, fixed set of six core content jobs. State-aware subtexts,
+// no overflowing grid. Less-common moves (variations, repurpose, hooks-to-post,
+// add-knowledge) are reachable by just typing in the composer.
 function buildLaunchActions(stats: { pending: number; campaigns: number }): LaunchAction[] {
   const a: LaunchAction[] = []
   a.push({ icon: PenLine, title: 'Draft a Post', sub: 'Sharp copy, text first', prompt: 'Draft a punchy LinkedIn post for this brand: one sharp hook, three crisp points, a soft CTA. Text only for now, then ask if I want a matching image.' })
-  a.push({ icon: ImagePlus, title: 'Infographic', sub: 'Data or steps, visualized', prompt: 'Create an infographic-style visual for a post. Ask me the topic or data points if you need them, then build a tight image prompt and generate it. Keep it clean, not text-heavy.' })
-  a.push({ icon: Images, title: 'Carousel', sub: 'A multi-slide sequence', prompt: 'Help me build a carousel: outline the slides for a topic I give you, then generate the lead visual.' })
-  a.push({ icon: Quote, title: 'Quote Card', sub: 'A punchy line, designed', prompt: 'Create a quote-card visual. Pull a strong line from my latest draft, or ask me for the quote, then generate an on-brand quote card.' })
-  a.push({ icon: Clapperboard, title: 'Make a Video', sub: 'Short motion clip for a post', prompt: 'Create a short video clip for a post — ask me the concept and vibe, then generate it.' })
-  a.push({ icon: Zap, title: 'Write Hooks', sub: '5 sharp opening lines', prompt: "Write 5 scroll-stopping opening hooks in this brand's voice for a topic I'll give you — punchy, specific, no clichés." })
-  if (stats.pending > 0) {
-    a.push({ icon: ListChecks, title: 'Review Drafts', sub: `${stats.pending} draft${stats.pending === 1 ? '' : 's'} waiting`, prompt: `Summarize the ${stats.pending} draft${stats.pending === 1 ? '' : 's'} pending review — flag which to publish first and why.` })
-  }
+  a.push({ icon: ImagePlus, title: 'Create a Visual', sub: 'Image, infographic, or carousel', prompt: 'I want to create a visual for a post. Offer me the options (infographic, carousel, quote card, or a custom image), or let me describe my own, then build a tight image prompt and generate it.' })
+  a.push({ icon: Clapperboard, title: 'Make a Video', sub: 'A short motion clip', prompt: 'Create a short video clip for a post. Ask me the concept and vibe, then generate it.' })
+  a.push({ icon: Zap, title: 'Write Hooks', sub: '5 sharp opening lines', prompt: "Write 5 scroll-stopping opening hooks in this brand's voice for a topic I give you. Punchy, specific, no cliches." })
   a.push(stats.campaigns > 0
-    ? { icon: Megaphone, title: 'Improve Campaign Plan', sub: `${stats.campaigns} campaign${stats.campaigns === 1 ? '' : 's'} in workspace`, prompt: "Review this brand's campaigns and suggest the highest-impact improvement to theme, angle, cadence, or channel mix." }
-    : { icon: Megaphone, title: 'Plan a Campaign', sub: 'A drafted, scheduled series', prompt: 'Plan and draft a content campaign for this brand — write all the posts and schedule them across the next few weeks.' })
-  a.push({ icon: CalendarDays, title: 'Plan the Month', sub: 'A month of posts, drafted', prompt: "Plan and draft this brand's next month of LinkedIn content — write every post and schedule them weekly." })
+    ? { icon: Megaphone, title: 'Improve Campaign', sub: `${stats.campaigns} in this workspace`, prompt: "Review this brand's campaigns and suggest the highest-impact improvement to theme, angle, cadence, or channel mix." }
+    : { icon: Megaphone, title: 'Plan a Campaign', sub: 'A drafted, scheduled series', prompt: 'Plan and draft a content campaign for this brand: write the posts and schedule them across the next few weeks.' })
   a.push({ icon: Lightbulb, title: 'Content Ideas', sub: 'Fresh angles for this brand', prompt: "Give me 5 content ideas grounded in this brand's voice and recent themes." })
-  a.push({ icon: MessageCircle, title: 'Variations', sub: 'Three takes on one idea', prompt: 'Write 3 variations of a post on a topic I give you — each a different angle, in the brand voice.' })
-  a.push({ icon: Shuffle, title: 'Repurpose', sub: 'One post → many formats', prompt: 'Take my latest draft (or a topic I give you) and repurpose it into a LinkedIn thread, a carousel outline, and a short email.' })
-  a.push({ icon: BookPlus, title: 'Add Brand Knowledge', sub: 'Teach Vera about this brand', prompt: 'I want to add brand knowledge. Ask me what to capture — positioning, proof points, voice, and what to avoid — then save it to the knowledge base.' })
-  a.push({ icon: Target, title: 'Strategy Ideas', sub: 'Find the next best move', prompt: "What's the highest-leverage content move for this brand right now? Be specific." })
-  return a.slice(0, 12)
+  return a.slice(0, 6)
 }
 
 function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain }: {
@@ -820,6 +813,10 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
   onOpenBrain: () => void
 }) {
   const setupDone = !!setup && setup.audience && setup.voice && setup.categories && setup.knowledge
+  // Persona-first, SAM-clean: when the brain is thin, the FIRST card is "set up
+  // the client" (routes to Brain). No separate checklist block.
+  const setupCard: LaunchAction = { icon: Sparkles, title: `Set up ${projectName}`, sub: 'Audience, voice, categories', prompt: '', action: 'brain' }
+  const grid = (setup && !setupDone ? [setupCard, ...actions] : actions).slice(0, 6)
   return (
     <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: space[8] }}>
       <span style={{ marginBottom: space[5], display: 'inline-flex' }}><VeraAvatar size={56} hero /></span>
@@ -829,42 +826,6 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
       <p style={{ fontSize: t.size.body, color: color.ghost, marginBottom: space[7], textAlign: 'center', maxWidth: '44ch' }}>
         Bring Vera a brief, a question, or an idea you want to move forward.
       </p>
-
-      {/* Persona-first setup — when the client's brain is thin, this is the
-          obvious step 1 (the spine starts at the brain). Disappears once set. */}
-      {setup && !setupDone && (
-        <div style={{ width: '100%', maxWidth: 640, marginBottom: space[5], background: color.surface, border: `1px solid var(--accent-line)`, borderRadius: radius.lg, overflow: 'hidden' }}>
-          <div style={{ padding: `${space[4]} ${space[5]}`, borderBottom: `1px solid ${color.line}` }}>
-            <div style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.accent, marginBottom: 4 }}>Set up {projectName} first</div>
-            <div style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5 }}>Vera writes sharper when it knows who you're talking to and how you sound. Start here — a few minutes now pays off on every post.</div>
-          </div>
-          <div>
-            {([
-              { key: 'audience', icon: Users, label: 'Audience', sub: "Who you're talking to" },
-              { key: 'voice', icon: Megaphone, label: 'Brand voice', sub: 'How you sound' },
-              { key: 'categories', icon: Tag, label: 'Content categories', sub: 'Your reusable buckets' },
-              { key: 'knowledge', icon: BookPlus, label: 'Brand knowledge', sub: 'Positioning, proof points' },
-            ] as const).map((it, i, arr) => {
-              const done = setup?.[it.key] ?? false
-              const Icn = it.icon
-              return (
-                <div key={it.key} style={{ display: 'flex', alignItems: 'center', gap: space[3], padding: `${space[3]} ${space[5]}`, borderBottom: i < arr.length - 1 ? `1px solid ${color.line}` : 'none' }}>
-                  <span style={{ width: 30, height: 30, borderRadius: radius.md, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: done ? 'var(--accent-tint)' : color.paper2, color: done ? color.success : color.ghost }}>
-                    {done ? <Check size={15} strokeWidth={2.5} /> : <Icn size={15} />}
-                  </span>
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: 'block', fontSize: t.size.sm, fontWeight: t.weight.medium, color: done ? color.ghost : color.ink, textDecoration: done ? 'line-through' : 'none' }}>{it.label}</span>
-                    <span style={{ display: 'block', fontSize: t.size.micro, color: color.faint }}>{it.sub}</span>
-                  </span>
-                  {!done && (
-                    <button onClick={onOpenBrain} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 11px', fontSize: t.size.cap, fontWeight: t.weight.medium, color: color.accent, background: 'var(--accent-tint)', border: 'none', borderRadius: radius.pill, cursor: 'pointer' }}>Add →</button>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
 
       {/* "VERA wants to" — proactive observations (moved from the old Home). */}
       {observations.length > 0 && (
@@ -890,10 +851,10 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[3], width: '100%', maxWidth: 640 }}>
-        {actions.map(c => {
+        {grid.map(c => {
           const Icn = c.icon
           return (
-            <button key={c.title} onClick={() => onRun(c.prompt)}
+            <button key={c.title} onClick={() => c.action === 'brain' ? onOpenBrain() : onRun(c.prompt)}
               style={{ display: 'flex', alignItems: 'flex-start', gap: space[4], textAlign: 'left', padding: `${space[4]} ${space[5]}`, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, cursor: 'pointer', fontFamily: t.family.sans, transition: 'border-color 120ms, box-shadow 120ms' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-line)'; e.currentTarget.style.boxShadow = 'var(--shadow-pop)' }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--line)'; e.currentTarget.style.boxShadow = 'none' }}>
