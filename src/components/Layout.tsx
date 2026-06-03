@@ -11,7 +11,7 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
-  MessageSquare, CheckSquare, BookOpen, Brain,
+  MessageSquare, CheckSquare, Brain,
   BarChart3, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid, CalendarDays, Library,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
