@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { LayoutList, LayoutGrid, Calendar as CalendarIcon, X, Layers } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -58,7 +58,14 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
   const [activeTab, setActiveTab] = useState<StatusTab>('Pending Review')
   const [selected, setSelected] = useState<Post | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
-  const [view, setView] = useState<View>(() => initialView ?? (localStorage.getItem('reviewView') as View) ?? 'list')
+  // Review is the pending inbox (list/board). Calendar is its own rail surface,
+  // reached via initialView='calendar'. The inbox never opens in calendar — even
+  // if a stale 'calendar' is in localStorage from a prior Calendar visit.
+  const [view, setView] = useState<View>(() => {
+    if (initialView) return initialView
+    const stored = localStorage.getItem('reviewView') as View | null
+    return stored && stored !== 'calendar' ? stored : 'list'
+  })
   const [dragOverTab, setDragOverTab] = useState<StatusTab | null>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [searchParams, setSearchParams] = useSearchParams()
@@ -211,6 +218,9 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
           >
             <LayoutList size={13} /> List
           </button>
+          {/* Calendar is its own rail surface — only offer the toggle there, */}
+          {/* so plain Review stays a pure pending inbox (list/board). */}
+          {initialView === 'calendar' && (
           <button
             onClick={() => setView('calendar')}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition-all"
@@ -224,6 +234,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
           >
             <CalendarIcon size={13} /> Calendar
           </button>
+          )}
           <button
             onClick={() => setView('board')}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition-all"
@@ -662,6 +673,23 @@ function CalendarView({
   onOpen: (p: Post) => void
 }) {
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()))
+
+  // Open on the week of the next upcoming scheduled post (content is usually
+  // planned ahead, so the current week is often empty). Once, after posts load,
+  // and never fighting subsequent user navigation.
+  const jumpedRef = useRef(false)
+  useEffect(() => {
+    if (jumpedRef.current || posts.length === 0) return
+    jumpedRef.current = true
+    const todayKey = isoDay(new Date())
+    const upcoming = posts
+      .map(p => p.scheduled_at || p.publish_date || p.posted_at)
+      .filter((d): d is string => !!d)
+      .map(d => new Date(d))
+      .filter(d => !isNaN(d.getTime()) && isoDay(d) >= todayKey)
+      .sort((a, b) => a.getTime() - b.getTime())[0]
+    if (upcoming) setWeekStart(mondayOf(upcoming))
+  }, [posts])
 
   const days: Date[] = []
   for (let i = 0; i < 7; i++) {
