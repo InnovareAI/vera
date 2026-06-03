@@ -70,6 +70,14 @@ function RailItem({
 // the active CLIENT must always be visible — you never draft for the wrong
 // brand. Shows the active client + a dropdown to switch; "View all clients"
 // opens the shelf.
+// Tiny uppercase group label — gives the rail a felt sequence instead of a flat
+// row of equal peers, so a new user can see the order of the work.
+function RailLabel({ children }: { children: string }) {
+  return (
+    <div style={{ padding: '12px 14px 3px', fontSize: 10, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--ghost)' }}>{children}</div>
+  )
+}
+
 function ClientSwitcher() {
   const { activeProject, projects, switchProject } = useProject()
   const navigate = useNavigate()
@@ -164,12 +172,18 @@ export default function Layout() {
         {/* Active client — top-of-rail switcher (always-visible context). */}
         <ClientSwitcher />
 
-        {/* Primary nav — the AI ("Vera") sits first, like SAM's "Sam". */}
+        {/* Primary nav — grouped into the felt sequence of the work: create in
+            Vera → move it through the Pipeline (approve → schedule → archive) →
+            the Client's brain + how it's landing. Kills the flat-peer trap. */}
         <nav className="pt-1 space-y-0.5">
           <RailItem to={p('vera')}      icon={MessageSquare}   label="Vera" />
+
+          <RailLabel>Pipeline</RailLabel>
           <RailItem to={p('review')}    icon={CheckSquare}     label="Review" badge={pendingCount} />
           <RailItem to={p('calendar')}  icon={CalendarDays}    label="Calendar" />
           <RailItem to={p('artifacts')} icon={Library}         label="Artifacts" />
+
+          <RailLabel>Client</RailLabel>
           <RailItem to={p('brain')}     icon={Brain}           label="Brain" />
           <RailItem to={p('measure')}   icon={BarChart3}       label="Measure" />
         </nav>
