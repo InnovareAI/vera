@@ -14,6 +14,7 @@ import Review from './pages/Review'
 import ReviewDetail from './pages/ReviewDetail'
 import Onboarding from './pages/Onboarding'
 import Knowledge from './pages/Knowledge'
+import Artifacts from './pages/Artifacts'
 import Skills from './pages/Skills'
 import Settings from './pages/Settings'
 // ── Phase 0 surfaces (UX_BLUEPRINT.md): the two-altitude IA ──────────
@@ -54,7 +55,8 @@ export default function App() {
                   <Route path="review"     element={<Review />} />
                   <Route path="review/:id" element={<ReviewDetail />} />
                   <Route path="calendar"   element={<Review initialView="calendar" />} />{/* scheduled posts on a month grid */}
-                  <Route path="knowledge"  element={<Knowledge />} />
+                  <Route path="artifacts"  element={<Artifacts />} />{/* the client's content library */}
+                  <Route path="knowledge"  element={<Knowledge />} />{/* legacy KB — folds into Brain next */}
                   <Route path="brain"      element={<Brain />} />
                   <Route path="measure"    element={<Measure />} />
                 </Route>
