@@ -44,85 +44,65 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
-    // No-auth fallback: load all orgs directly so the UI works without a
-    // session. Was DEV-only before, but auth is deferred per "Internal
-    // first — external later", so production needs the same fallback
-    // until GoTrue lands. Tighten when auth wiring runs.
-    if (!user) {
-      setLoading(true)
-      // Load all orgs + a project tally so we land on a POPULATED workspace.
-      // The old fallback picked an unordered synthetic[0], which sometimes
-      // resolved to a project-less org → "No clients yet" / stuck "Loading
-      // thread…". Prefer: prior selection → stored selection → org with the
-      // most projects → first org.
-      Promise.all([
-        supabase.from('organizations').select('id, name').order('name').limit(50),
-        supabase.from('projects').select('org_id'),
-      ]).then(([orgRes, projRes]) => {
-        const synthetic: OrgMember[] = ((orgRes.data ?? []) as Array<{ id: string } & Record<string, unknown>>).map(o => ({
-          org_id: o.id,
-          role: 'dev' as const,
-          organizations: o as unknown as OrgMember['organizations'],
-        }))
-        const counts = new Map<string, number>()
-        for (const r of (projRes.data ?? []) as Array<{ org_id: string }>) {
-          counts.set(r.org_id, (counts.get(r.org_id) ?? 0) + 1)
-        }
-        const richest = synthetic
-          .map(m => ({ id: m.org_id, n: counts.get(m.org_id) ?? 0 }))
-          .sort((a, b) => b.n - a.n)[0]
-        const stored = localStorage.getItem('activeOrgId')
-        setOrgs(synthetic)
-        setActiveOrgId(prev => {
-          if (prev && synthetic.find(m => m.org_id === prev)) return prev
-          if (stored && synthetic.find(m => m.org_id === stored)) return stored
-          return (richest && richest.n > 0 ? richest.id : synthetic[0]?.org_id) ?? null
-        })
-        setLoading(false)
-      })
-      return
-    }
+    let cancelled = false
     setLoading(true)
+
+    // Build the workspace list from the PROJECTS table — which is readable in
+    // every case — rather than `organizations`. An authenticated non-member is
+    // blocked by RLS from reading `organizations` (returns []), which used to
+    // strand them on "No clients yet" even though their projects are visible.
+    // We enrich names from `organizations` where visible, then land on the org
+    // with the most projects (never an empty one). Used for both no-session and
+    // authenticated-but-unprovisioned users.
+    const loadFromProjects = async () => {
+      const [orgRes, projRes] = await Promise.all([
+        supabase.from('organizations').select('id, name').limit(50),
+        supabase.from('projects').select('org_id').eq('is_archived', false),
+      ])
+      if (cancelled) return
+      const names = new Map<string, string>()
+      for (const o of (orgRes.data ?? []) as Array<{ id: string; name: string }>) names.set(o.id, o.name)
+      const counts = new Map<string, number>()
+      for (const r of (projRes.data ?? []) as Array<{ org_id: string }>) counts.set(r.org_id, (counts.get(r.org_id) ?? 0) + 1)
+      const ids = new Set<string>([...counts.keys(), ...names.keys()])
+      const synthetic: OrgMember[] = [...ids].map(id => ({
+        org_id: id,
+        role: 'dev' as const,
+        organizations: { id, name: names.get(id) ?? 'Workspace' } as unknown as OrgMember['organizations'],
+      }))
+      const richest = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]
+      const stored = localStorage.getItem('activeOrgId')
+      setOrgs(synthetic)
+      setActiveOrgId(prev => {
+        if (prev && synthetic.find(m => m.org_id === prev)) return prev
+        if (stored && synthetic.find(m => m.org_id === stored)) return stored
+        return (richest ? richest[0] : synthetic[0]?.org_id) ?? null
+      })
+      setLoading(false)
+    }
+
+    // No session → fallback (auth deferred per "internal first — external later").
+    if (!user) { loadFromProjects(); return () => { cancelled = true } }
+
+    // Authenticated: use real memberships; if the user has none (domain-join
+    // never provisioned them), fall back to the project-derived list so they
+    // still land in a usable workspace instead of an empty one.
     supabase
       .from('org_members')
       .select('org_id, role, organizations(id, name, slug, org_type, logo_url, plan)')
       .eq('user_id', user.id)
-      .then(async ({ data }) => {
+      .then(({ data }) => {
+        if (cancelled) return
         const members = (data as unknown as OrgMember[]) || []
-        if (members.length === 0) {
-          // Authenticated but UNPROVISIONED — the domain-join trigger never ran
-          // for this user, or they signed in with an external email (e.g. a
-          // 3cubed.ai Google account). Don't strand them on an empty workspace:
-          // load all orgs + a project tally and land on the most-populated one,
-          // exactly like the no-session fallback.
-          const [orgRes, projRes] = await Promise.all([
-            supabase.from('organizations').select('id, name').order('name').limit(50),
-            supabase.from('projects').select('org_id'),
-          ])
-          const synthetic: OrgMember[] = ((orgRes.data ?? []) as Array<{ id: string } & Record<string, unknown>>).map(o => ({
-            org_id: o.id, role: 'dev' as const, organizations: o as unknown as OrgMember['organizations'],
-          }))
-          const counts = new Map<string, number>()
-          for (const r of (projRes.data ?? []) as Array<{ org_id: string }>) counts.set(r.org_id, (counts.get(r.org_id) ?? 0) + 1)
-          const richest = synthetic.map(m => ({ id: m.org_id, n: counts.get(m.org_id) ?? 0 })).sort((a, b) => b.n - a.n)[0]
-          const stored = localStorage.getItem('activeOrgId')
-          setOrgs(synthetic)
-          setActiveOrgId(prev => {
-            if (prev && synthetic.find(m => m.org_id === prev)) return prev
-            if (stored && synthetic.find(m => m.org_id === stored)) return stored
-            return (richest && richest.n > 0 ? richest.id : synthetic[0]?.org_id) ?? null
-          })
-          setLoading(false)
-          return
-        }
+        if (members.length === 0) { loadFromProjects(); return }
         setOrgs(members)
         setActiveOrgId(prev => {
-          // Keep current selection if still valid
           if (prev && members.find(m => m.org_id === prev)) return prev
           return members[0]?.org_id ?? null
         })
         setLoading(false)
       })
+    return () => { cancelled = true }
   }, [user, tick])
 
   // Persist the active org so a reload — or a new deploy forcing a fresh load —
