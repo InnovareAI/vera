@@ -37,22 +37,35 @@ export default function Brain() {
     refetch()
   }
 
-  // ── brand voice (workspace-level — same row vera-chat reads) ──
+  // ── brand voice (per-client — vera-chat now reads the project row first) ──
   const [bv, setBv] = useState<Partial<BrandVoice>>({})
+  const [bvInherited, setBvInherited] = useState(false) // showing workspace default (no client row yet)
   const [bvSaving, setBvSaving] = useState(false)
   const [bvSaved, setBvSaved] = useState(false)
   useEffect(() => {
-    if (!activeOrg?.id) return
-    supabase.from('brand_voice').select('*').eq('org_id', activeOrg.id).maybeSingle()
-      .then(({ data }) => { if (data) setBv(data as BrandVoice) })
-  }, [activeOrg?.id])
+    if (!activeProject?.id || !activeOrg?.id) return
+    let cancelled = false
+    ;(async () => {
+      // a client-specific row?
+      const { data: proj } = await supabase.from('brand_voice').select('*').eq('project_id', activeProject.id).limit(1)
+      if (cancelled) return
+      if (proj && proj.length) { setBv(proj[0] as BrandVoice); setBvInherited(false); return }
+      // none yet — pre-fill from the workspace default (project_id null) so the
+      // editor isn't blank; drop id so Save creates a client-specific row.
+      const { data: org } = await supabase.from('brand_voice').select('*').eq('org_id', activeOrg.id).order('project_id', { nullsFirst: true }).limit(1)
+      if (cancelled) return
+      if (org && org.length) { setBv({ ...(org[0] as BrandVoice), id: undefined }); setBvInherited(true) }
+      else { setBv({}); setBvInherited(false) }
+    })()
+    return () => { cancelled = true }
+  }, [activeProject?.id, activeOrg?.id])
   async function saveBv() {
-    if (!activeOrg?.id) return
+    if (!activeOrg?.id || !activeProject?.id) return
     setBvSaving(true)
-    const payload = { ...bv, org_id: activeOrg.id }
+    const payload = { ...bv, org_id: activeOrg.id, project_id: activeProject.id }
     if (bv.id) await supabase.from('brand_voice').update(payload).eq('id', bv.id)
     else { const { data } = await supabase.from('brand_voice').insert(payload).select().single(); if (data) setBv(data as BrandVoice) }
-    setBvSaving(false); setBvSaved(true); setTimeout(() => setBvSaved(false), 2500)
+    setBvSaving(false); setBvInherited(false); setBvSaved(true); setTimeout(() => setBvSaved(false), 2500)
   }
   const addTo = (key: keyof BrandVoice, val: string) => { if (val.trim()) setBv(p => ({ ...p, [key]: [...((p[key] as string[]) || []), val.trim()] })) }
   const rmFrom = (key: keyof BrandVoice, i: number) => setBv(p => ({ ...p, [key]: ((p[key] as string[]) || []).filter((_, x) => x !== i) }))
@@ -93,7 +106,10 @@ export default function Brain() {
       <section style={{ marginBottom: space[9] }}>
         <SectionLabel style={{ marginBottom: space[2] }}>Brand voice</SectionLabel>
         <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `0 0 ${space[4]}` }}>
-          The persona, tone, and rules VERA writes by. <span style={{ color: color.ghost }}>Workspace-level — shared across this client's projects.</span>
+          The persona, tone, and rules VERA writes by for {activeProject.name}.{' '}
+          {bvInherited
+            ? <span style={{ color: color.ghost }}>Showing the workspace default — saving creates a voice specific to this client.</span>
+            : <span style={{ color: color.ghost }}>Specific to this client.</span>}
         </p>
         <div style={{ display: 'grid', gap: space[4] }}>
           <Field label="Persona name"><Input value={bv.persona_name ?? ''} onChange={e => setBv(f => ({ ...f, persona_name: e.target.value }))} placeholder="e.g. Alex" /></Field>

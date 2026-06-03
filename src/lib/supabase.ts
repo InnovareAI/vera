@@ -151,6 +151,7 @@ export interface ContentBrief {
 export interface BrandVoice {
   id: string
   org_id: string
+  project_id?: string | null   // per-client voice; null = workspace default
   tone?: string[]
   writing_rules?: string[]
   forbidden_phrases?: string[]
