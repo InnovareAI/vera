@@ -50,20 +50,36 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     // until GoTrue lands. Tighten when auth wiring runs.
     if (!user) {
       setLoading(true)
-      supabase
-        .from('organizations')
-        .select('id, name')
-        .limit(10)
-        .then(({ data }) => {
-          const synthetic: OrgMember[] = ((data ?? []) as Array<{ id: string } & Record<string, unknown>>).map(o => ({
-            org_id: o.id,
-            role: 'dev' as const,
-            organizations: o as unknown as OrgMember['organizations'],
-          }))
-          setOrgs(synthetic)
-          setActiveOrgId(prev => prev && synthetic.find(m => m.org_id === prev) ? prev : (localStorage.getItem('activeOrgId') ?? synthetic[0]?.org_id) ?? null)
-          setLoading(false)
+      // Load all orgs + a project tally so we land on a POPULATED workspace.
+      // The old fallback picked an unordered synthetic[0], which sometimes
+      // resolved to a project-less org → "No clients yet" / stuck "Loading
+      // thread…". Prefer: prior selection → stored selection → org with the
+      // most projects → first org.
+      Promise.all([
+        supabase.from('organizations').select('id, name').order('name').limit(50),
+        supabase.from('projects').select('org_id'),
+      ]).then(([orgRes, projRes]) => {
+        const synthetic: OrgMember[] = ((orgRes.data ?? []) as Array<{ id: string } & Record<string, unknown>>).map(o => ({
+          org_id: o.id,
+          role: 'dev' as const,
+          organizations: o as unknown as OrgMember['organizations'],
+        }))
+        const counts = new Map<string, number>()
+        for (const r of (projRes.data ?? []) as Array<{ org_id: string }>) {
+          counts.set(r.org_id, (counts.get(r.org_id) ?? 0) + 1)
+        }
+        const richest = synthetic
+          .map(m => ({ id: m.org_id, n: counts.get(m.org_id) ?? 0 }))
+          .sort((a, b) => b.n - a.n)[0]
+        const stored = localStorage.getItem('activeOrgId')
+        setOrgs(synthetic)
+        setActiveOrgId(prev => {
+          if (prev && synthetic.find(m => m.org_id === prev)) return prev
+          if (stored && synthetic.find(m => m.org_id === stored)) return stored
+          return (richest && richest.n > 0 ? richest.id : synthetic[0]?.org_id) ?? null
         })
+        setLoading(false)
+      })
       return
     }
     setLoading(true)
@@ -82,6 +98,12 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         setLoading(false)
       })
   }, [user, tick])
+
+  // Persist the active org so a reload — or a new deploy forcing a fresh load —
+  // returns to the same workspace instead of re-resolving to a random one.
+  useEffect(() => {
+    if (activeOrgId) { try { localStorage.setItem('activeOrgId', activeOrgId) } catch { /* ignore */ } }
+  }, [activeOrgId])
 
   function switchOrg(orgId: string) {
     setActiveOrgId(orgId)
