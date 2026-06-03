@@ -82,6 +82,7 @@ function ClientSwitcher() {
   const { activeProject, projects, switchProject } = useProject()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
+  const [newClientOpen, setNewClientOpen] = useState(false)
   const name = activeProject?.name ?? 'Select client'
   const glyph = (s: string) => (s.trim()[0] ?? 'C').toUpperCase()
 
@@ -109,7 +110,7 @@ function ClientSwitcher() {
               )
             })}
             <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
-            <button onClick={() => { setOpen(false); navigate('/onboarding') }}
+            <button onClick={() => { setOpen(false); setNewClientOpen(true) }}
               style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 'var(--radius-sm)', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontSize: 12.5, color: 'var(--accent)', fontWeight: 600 }}>
               <Plus size={13} /> New client
             </button>
@@ -120,6 +121,62 @@ function ClientSwitcher() {
           </div>
         </>
       )}
+      {newClientOpen && <NewClientModal onClose={() => setNewClientOpen(false)} />}
+    </div>
+  )
+}
+
+// New client = a sub-workspace (project) under the current tenant (org). Projects
+// are writable, so this sidesteps the organizations-RLS wall the old org-per-
+// client wizard hit. (Inviting a client user, or a new tenant owner, is the
+// separate access layer.) Lands in the client's Brain to set it up.
+function NewClientModal({ onClose }: { onClose: () => void }) {
+  const { activeOrg } = useOrg()
+  const { refetch } = useProject()
+  const navigate = useNavigate()
+  const [name, setName] = useState('')
+  const [website, setWebsite] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function create() {
+    if (!name.trim() || !activeOrg?.id || saving) return
+    setSaving(true); setErr(null)
+    const base = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'client'
+    const slug = `${base}-${Math.random().toString(36).slice(2, 6)}`
+    const { error } = await supabase.from('projects').insert({
+      org_id: activeOrg.id, name: name.trim(), slug,
+      description: website.trim() || null, is_default: false, is_starred: false, is_archived: false,
+    })
+    if (error) { setErr(error.message); setSaving(false); return }
+    refetch()
+    onClose()
+    navigate(`/p/${slug}/brain`)
+  }
+
+  const inputStyle: React.CSSProperties = { width: '100%', padding: '9px 11px', fontSize: 14, color: 'var(--ink)', background: 'var(--paper)', border: '1px solid var(--line)', borderRadius: 'var(--radius-md)', boxSizing: 'border-box' }
+  return (
+    <div onClick={onClose}
+      style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(20,20,22,0.42)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ width: 'min(440px, 94vw)', background: 'var(--surface)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--line)', boxShadow: 'var(--shadow-modal)', padding: 22 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--ink)', margin: '0 0 4px' }}>New client</h2>
+        <p style={{ fontSize: 12.5, color: 'var(--ink-2)', margin: '0 0 16px', lineHeight: 1.5 }}>A sub-workspace under {activeOrg?.name ?? 'your workspace'} — its own brain, content, and calendar.</p>
+        <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--ink-2)', marginBottom: 5 }}>Client name</label>
+        <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="Acme Corp"
+          onKeyDown={e => { if (e.key === 'Enter') create() }} style={{ ...inputStyle, marginBottom: 12 }} />
+        <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--ink-2)', marginBottom: 5 }}>Website <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
+        <input value={website} onChange={e => setWebsite(e.target.value)} placeholder="https://acme.com"
+          onKeyDown={e => { if (e.key === 'Enter') create() }} style={inputStyle} />
+        {err && <p style={{ fontSize: 12, color: 'var(--danger)', margin: '8px 0 0' }}>{err}</p>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+          <button onClick={onClose} style={{ padding: '8px 14px', fontSize: 13, fontWeight: 500, color: 'var(--ink-2)', background: 'transparent', border: '1px solid var(--line)', borderRadius: 'var(--radius-md)', cursor: 'pointer' }}>Cancel</button>
+          <button onClick={create} disabled={saving || !name.trim()}
+            style={{ padding: '8px 16px', fontSize: 13, fontWeight: 600, color: '#fff', background: 'var(--accent)', border: 'none', borderRadius: 'var(--radius-md)', cursor: saving ? 'wait' : 'pointer', opacity: (!name.trim() || saving) ? 0.6 : 1, boxShadow: 'var(--shadow-glow)' }}>
+            {saving ? 'Creating…' : 'Create client'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
