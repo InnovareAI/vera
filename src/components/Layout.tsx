@@ -253,6 +253,20 @@ export default function Layout() {
     window.addEventListener('vera:rail-open', open)
     return () => window.removeEventListener('vera:rail-open', open)
   }, [])
+  // Responsive: on narrow / half-screen viewports the 3-pane layout cramps, so
+  // collapse the rail by default (conversation gets full width) and overlay it
+  // when opened. Restore the saved preference when there's room again.
+  const [vw, setVw] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1280))
+  useEffect(() => {
+    const onResize = () => setVw(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  const narrowRail = vw < 1100
+  useEffect(() => {
+    if (narrowRail) setRailOpen(false)
+    else { try { setRailOpen(localStorage.getItem('vera-rail-open') !== '0') } catch { setRailOpen(true) } }
+  }, [narrowRail])
 
   // One live number in the rail: the Review badge (pending/draft posts in the
   // active project).
@@ -365,18 +379,23 @@ export default function Layout() {
           Collapsible: a handle on the rail edge hides it; a handle on the
           screen edge brings it back. The choice persists. */}
       {rightRailContent && railOpen && (
-        <aside
-          className="flex-shrink-0"
-          style={{ background: 'transparent', width: rightRailWidth, borderLeft: '1px solid var(--paper-edge)', position: 'relative' }}
-        >
-          <button onClick={() => toggleRail(false)} title="Hide panel"
-            style={{ position: 'absolute', left: -13, top: '50%', transform: 'translateY(-50%)', zIndex: 25, width: 26, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', borderRadius: 999, background: 'var(--surface)', color: 'var(--ghost)', cursor: 'pointer', boxShadow: 'var(--shadow-pop)' }}>
-            <ChevronRight size={15} />
-          </button>
-          <div className="overflow-y-auto" style={{ height: '100%' }}>
-            {rightRailContent}
-          </div>
-        </aside>
+        <>
+          {narrowRail && <div onClick={() => toggleRail(false)} style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(20,20,20,0.18)' }} />}
+          <aside
+            className="flex-shrink-0"
+            style={narrowRail
+              ? { position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 41, width: 'clamp(320px, 90vw, 460px)', background: 'var(--paper)', borderLeft: '1px solid var(--paper-edge)', boxShadow: 'var(--shadow-modal)' }
+              : { background: 'transparent', width: rightRailWidth, borderLeft: '1px solid var(--paper-edge)', position: 'relative' }}
+          >
+            <button onClick={() => toggleRail(false)} title="Hide panel"
+              style={{ position: 'absolute', left: -13, top: '50%', transform: 'translateY(-50%)', zIndex: 25, width: 26, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', borderRadius: 999, background: 'var(--surface)', color: 'var(--ghost)', cursor: 'pointer', boxShadow: 'var(--shadow-pop)' }}>
+              <ChevronRight size={15} />
+            </button>
+            <div className="overflow-y-auto" style={{ height: '100%' }}>
+              {rightRailContent}
+            </div>
+          </aside>
+        </>
       )}
       {rightRailContent && !railOpen && (
         <button onClick={() => toggleRail(true)} title="Show panel"

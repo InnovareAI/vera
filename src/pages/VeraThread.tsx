@@ -613,15 +613,22 @@ function Bubble({ m }: { m: Message }) {
     <div style={{ display: 'flex', gap: space[3] }}>
       <span style={{ marginTop: 2, display: 'inline-flex', flexShrink: 0 }}><VeraAvatar size={40} /></span>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: space[3] }}>
-        {m.tools?.map((tl, i) => (
-          <div key={`${tl.id ?? tl.tool}-${i}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: `5px 11px`, background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, fontSize: t.size.cap, color: color.ink2, alignSelf: 'flex-start' }}>
-            {tl.status === 'running'
-              ? <span style={{ width: 9, height: 9, borderRadius: '50%', background: color.accent, animation: 'vera-pulse 1.2s ease-in-out infinite' }} />
-              : <Check size={12} style={{ color: color.accent }} />}
-            <span style={{ color: color.ink, fontWeight: 500 }}>{TOOL_LABEL[tl.tool] ?? tl.tool}</span>
-            {tl.message && <span style={{ color: color.ghost }}>· {tl.message}</span>}
+        {/* Floating, ephemeral commentary — shown only while the turn is
+            working, then it vanishes so the thread keeps just the result.
+            Light text, no boxes (Gemini-style). */}
+        {m.pending && m.tools && m.tools.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, alignSelf: 'flex-start' }}>
+            {m.tools.map((tl, i) => (
+              <div key={`${tl.id ?? tl.tool}-${i}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: t.size.cap, color: color.ghost }}>
+                {tl.status === 'running'
+                  ? <span style={{ width: 8, height: 8, borderRadius: '50%', background: color.accent, animation: 'vera-pulse 1.2s ease-in-out infinite', flexShrink: 0 }} />
+                  : <Check size={12} style={{ color: color.accent, flexShrink: 0 }} />}
+                <span style={{ color: color.ink2 }}>{TOOL_LABEL[tl.tool] ?? tl.tool}</span>
+                {tl.message && <span>· {tl.message}</span>}
+              </div>
+            ))}
           </div>
-        ))}
+        )}
         {m.images?.map((url, i) => (
           <a key={i} href={url} target="_blank" rel="noreferrer" style={{ display: 'block', maxWidth: 320, border: `1px solid ${color.line}`, borderRadius: radius.md, overflow: 'hidden' }}>
             <img src={url} alt="" style={{ width: '100%', display: 'block' }} />
