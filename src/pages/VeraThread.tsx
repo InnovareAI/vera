@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, Megaphone, Lightbulb, SquarePen, Clock, ImagePlus, Clapperboard, Zap, CalendarDays, X } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -90,8 +90,9 @@ export default function VeraThread() {
   const [observations, setObservations] = useState<{ id: string; title: string; proposed_action: string | null }[]>([])
   const [stats, setStats] = useState<{ pending: number; campaigns: number }>({ pending: 0, campaigns: 0 })
   const [sessionId, setSessionId] = useState<string>('')
-  const [historyOpen, setHistoryOpen] = useState(false)
-  const [sessions, setSessions] = useState<{ session_id: string; title: string | null; last_at: string; message_count: number }[]>([])
+  const [attachments, setAttachments] = useState<{ kind: 'image' | 'file'; url: string; name: string; mime: string }[]>([])
+  const [uploading, setUploading] = useState(false)
+  const fileRef = useRef<HTMLInputElement | null>(null)
   const [setup, setSetup] = useState<{ audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null>(null)
 
   const scrollerRef = useRef<HTMLDivElement | null>(null)
@@ -228,27 +229,34 @@ export default function VeraThread() {
 
   const send = useCallback(async (override?: string) => {
     const text = (override ?? input).trim()
-    if (!text || streaming || !activeOrg?.id) return
+    if ((!text && attachments.length === 0) || streaming || !activeOrg?.id) return
 
-    const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text }
+    const atts = attachments
+    const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text, images: atts.length ? atts.map(a => a.url) : undefined }
     const assistantId = crypto.randomUUID()
     const placeholder: Message = { id: assistantId, role: 'assistant', content: '', pending: true }
     const next = [...messages, userMsg]
     setMessages([...next, placeholder])
     setInput('')
+    setAttachments([])
     setStreaming(true)
 
-    const wire = next.map(m => ({ role: m.role, content: m.content }))
-    // Keep the open draft in Vera's context — otherwise "tweak the draft" makes
-    // the user re-paste it (the draft lives in the right-rail artifact, not
-    // necessarily in the message text). Appended to the outgoing turn only; the
-    // message shown in the thread stays clean.
-    if (draft?.copy && wire.length) {
-      const last = wire[wire.length - 1]
-      wire[wire.length - 1] = {
-        ...last,
-        content: `${last.content}\n\n---\n[The draft currently open in the preview${draft.id ? ` (id: ${draft.id})` : ''}. If I ask you to tweak, edit, refine, shorten, or change "the draft/copy/post", revise THIS exact text in place and return the full updated post — do not ask me to paste it again:]\n${draft.copy}`,
+    const wire: Array<{ role: string; content: unknown }> = next.map(m => ({ role: m.role, content: m.content }))
+    // Compose the outgoing user turn: typed text + the open draft as context
+    // (so "tweak the draft" doesn't force a re-paste) + any image attachments
+    // as vision blocks (the model sees them; the backend persists them). Only
+    // the outgoing turn is enriched; the thread copy stays clean.
+    if (wire.length) {
+      let outText = text
+      if (draft?.copy) {
+        outText += `\n\n---\n[The draft currently open in the preview${draft.id ? ` (id: ${draft.id})` : ''}. If I ask you to tweak, edit, refine, shorten, or change "the draft/copy/post", revise THIS exact text in place and return the full updated post — do not ask me to paste it again:]\n${draft.copy}`
       }
+      wire[wire.length - 1] = atts.length
+        ? { role: 'user', content: [
+            { type: 'text', text: outText },
+            ...atts.map(a => ({ type: 'image', source: { type: 'base64', media_type: a.mime, data: a.url.split(',')[1] ?? '' } })),
+          ] }
+        : { role: 'user', content: outText }
     }
     const controller = new AbortController()
     abortRef.current = controller
@@ -364,7 +372,7 @@ export default function VeraThread() {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [input, streaming, activeOrg?.id, activeProject?.id, user?.id, messages, location.pathname, sessionId, draft])
+  }, [input, streaming, activeOrg?.id, activeProject?.id, user?.id, messages, location.pathname, sessionId, draft, attachments])
 
   // Poll a backgrounded fal video job (submitted by vera-chat) until the MP4
   // is ready, then drop it into the chat and the open draft. Short polling
@@ -418,22 +426,34 @@ export default function VeraThread() {
     if (streaming) abortRef.current?.abort()
     const sid = crypto.randomUUID()
     if (activeProject?.id) { try { localStorage.setItem(`vera-session:${activeProject.id}`, sid) } catch { /* ignore */ } }
-    setDraft(null); setDraftHistory([]); setCampaign(null); setInput(''); setHistoryOpen(false)
+    setDraft(null); setDraftHistory([]); setCampaign(null); setInput('')
     setMessages([]); setSessionId(sid)
     setTimeout(() => taRef.current?.focus(), 0)
   }
 
-  // History — list this client's past chats; reopen one by switching session.
-  async function openHistory() {
-    if (!activeProject?.id) return
-    setHistoryOpen(o => !o)
-    const { data } = await supabase.rpc('list_chat_sessions', { p_project_id: activeProject.id })
-    setSessions((data ?? []) as typeof sessions)
-  }
   function pickSession(sid: string) {
     if (activeProject?.id) { try { localStorage.setItem(`vera-session:${activeProject.id}`, sid) } catch { /* ignore */ } }
-    setDraft(null); setDraftHistory([]); setCampaign(null); setHistoryOpen(false); setSessionId(sid)
+    setDraft(null); setDraftHistory([]); setCampaign(null); setSessionId(sid)
   }
+
+  // Attachments — read picked images as data URLs and send them as vision
+  // blocks (the model sees them; vera-chat persists them). Images only for now.
+  async function handleFiles(files: FileList | null) {
+    if (!files || !files.length) return
+    setUploading(true)
+    const picked: { kind: 'image' | 'file'; url: string; name: string; mime: string }[] = []
+    for (const f of Array.from(files).slice(0, 6)) {
+      if (!f.type.startsWith('image/')) continue
+      try {
+        const url = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(f) })
+        picked.push({ kind: 'image', url, name: f.name, mime: f.type })
+      } catch { /* skip unreadable file */ }
+    }
+    setAttachments(prev => [...prev, ...picked].slice(0, 6))
+    setUploading(false)
+    if (fileRef.current) fileRef.current.value = ''
+  }
+  function removeAttachment(i: number) { setAttachments(prev => prev.filter((_, idx) => idx !== i)) }
 
   // Dismiss a "VERA wants to" nudge — clears every dupe of it (by title).
   async function dismissObservation(o: { title: string }) {
@@ -500,35 +520,8 @@ export default function VeraThread() {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: color.paper }}>
-      {/* History + New chat — past chats live under the active client. */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: space[2], padding: `${space[4]} ${space[8]} 0` }}>
-        <div style={{ position: 'relative' }}>
-          <button onClick={openHistory} title="Chat history"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: t.size.cap, fontWeight: t.weight.medium, color: color.ink2, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.pill, cursor: 'pointer' }}>
-            <Clock size={13} /> History
-          </button>
-          {historyOpen && (
-            <>
-              <div style={{ position: 'fixed', inset: 0, zIndex: 30 }} onClick={() => setHistoryOpen(false)} />
-              <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 6, zIndex: 40, width: 300, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, boxShadow: 'var(--shadow-pop)', padding: 4, maxHeight: 400, overflowY: 'auto' }}>
-                {sessions.length === 0 && <div style={{ padding: '12px', fontSize: t.size.cap, color: color.ghost }}>No past chats for this client yet.</div>}
-                {sessions.map(s => (
-                  <button key={s.session_id} onClick={() => pickSession(s.session_id)}
-                    style={{ width: '100%', textAlign: 'left', display: 'block', padding: '8px 10px', borderRadius: radius.sm, border: 'none', background: s.session_id === sessionId ? 'var(--accent-tint)' : 'transparent', cursor: 'pointer' }}>
-                    <span style={{ display: 'block', fontSize: t.size.sm, color: color.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: s.session_id === sessionId ? 600 : 400 }}>{(s.title || 'Untitled chat').slice(0, 64)}</span>
-                    <span style={{ display: 'block', fontSize: t.size.micro, color: color.faint, marginTop: 1 }}>{relTime(s.last_at)} · {s.message_count} msg{s.message_count === 1 ? '' : 's'}</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-        <button onClick={newChat} title="Start a new chat"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: t.size.cap, fontWeight: t.weight.medium, color: color.ink2, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.pill, cursor: 'pointer' }}>
-          <SquarePen size={13} /> New chat
-        </button>
-      </div>
-      {/* thread (no header bar — SAM-clean; the rail identifies "Vera") */}
+      {/* thread (no header bar — SAM-clean; rail identifies "Vera", Recents
+          lists past chats, the Vera rail item starts a new chat) */}
       <div ref={scrollerRef} style={{ flex: 1, overflowY: 'auto', padding: `${space[6]} 0 ${space[7]}` }}>
         {!historyLoaded ? (
           <Centered>Loading thread…</Centered>
@@ -546,7 +539,20 @@ export default function VeraThread() {
       {/* composer */}
       <div style={{ padding: `${space[5]} ${space[8]} ${space[7]}` }}>
         <div style={{ maxWidth: 720, margin: '0 auto' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: space[3], padding: `${space[3]} ${space[4]}`, background: color.surface, border: `1px solid ${color.line2}`, borderRadius: radius.lg, boxShadow: 'var(--shadow-pop)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: space[2], padding: `${space[3]} ${space[4]}`, background: color.surface, border: `1px solid ${color.line2}`, borderRadius: radius.lg, boxShadow: 'var(--shadow-pop)' }}>
+            {attachments.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: space[2] }}>
+                {attachments.map((a, i) => (
+                  <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px 4px 4px', background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, fontSize: t.size.micro, color: color.ink2 }}>
+                    {a.kind === 'image'
+                      ? <img src={a.url} alt="" style={{ width: 26, height: 26, borderRadius: radius.sm, objectFit: 'cover', display: 'block' }} />
+                      : <FileText size={15} style={{ color: color.ghost }} />}
+                    <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+                    <button onClick={() => removeAttachment(i)} title="Remove" style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: color.ghost, display: 'inline-flex', padding: 0 }}><X size={13} /></button>
+                  </span>
+                ))}
+              </div>
+            )}
             <textarea
               ref={taRef}
               value={input}
@@ -555,19 +561,27 @@ export default function VeraThread() {
               rows={1}
               placeholder="Ask Vera anything…"
               disabled={!activeProject}
-              style={{ flex: 1, resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontFamily: t.family.sans, fontSize: t.size.lg, lineHeight: 1.5, color: color.ink, minHeight: 100, maxHeight: 220, paddingTop: 6 }}
+              style={{ width: '100%', resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontFamily: t.family.sans, fontSize: t.size.lg, lineHeight: 1.5, color: color.ink, minHeight: 100, maxHeight: 220, paddingTop: 2 }}
             />
-            {streaming ? (
-              <button onClick={() => abortRef.current?.abort()} title="Stop"
-                style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', cursor: 'pointer', background: color.ink, color: color.surface, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Square size={12} fill="currentColor" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: space[2] }}>
+              <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => handleFiles(e.target.files)} />
+              <button onClick={() => fileRef.current?.click()} disabled={uploading || !activeProject} title="Attach an image"
+                style={{ width: 32, height: 32, borderRadius: '50%', border: `1px solid ${color.line}`, background: color.surface, color: color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'default' : 'pointer', flexShrink: 0 }}>
+                <Paperclip size={15} />
               </button>
-            ) : (
-              <button onClick={() => send()} disabled={!input.trim() || !activeProject} title="Send"
-                style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', cursor: input.trim() ? 'pointer' : 'not-allowed', background: input.trim() ? color.accent : color.ink, color: '#fff', opacity: input.trim() ? 1 : 0.35, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: input.trim() ? 'var(--shadow-glow)' : 'none', transition: 'background 120ms, box-shadow 120ms' }}>
-                <ArrowUp size={16} strokeWidth={2.25} />
-              </button>
-            )}
+              <div style={{ flex: 1 }} />
+              {streaming ? (
+                <button onClick={() => abortRef.current?.abort()} title="Stop"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: radius.pill, border: 'none', cursor: 'pointer', background: color.ink, color: '#fff', fontSize: t.size.sm, fontWeight: t.weight.medium }}>
+                  <Square size={11} fill="currentColor" /> Stop
+                </button>
+              ) : (
+                <button onClick={() => send()} disabled={(!input.trim() && attachments.length === 0) || !activeProject} title="Send"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: radius.pill, border: 'none', cursor: (input.trim() || attachments.length) ? 'pointer' : 'not-allowed', background: (input.trim() || attachments.length) ? color.accent : color.paper2, color: (input.trim() || attachments.length) ? '#fff' : color.ghost, fontSize: t.size.sm, fontWeight: t.weight.medium, boxShadow: (input.trim() || attachments.length) ? 'var(--shadow-glow)' : 'none', transition: 'background 120ms, box-shadow 120ms' }}>
+                  <Send size={14} /> Send
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -579,10 +593,19 @@ export default function VeraThread() {
 function Bubble({ m }: { m: Message }) {
   if (m.role === 'user') {
     return (
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <div style={{ maxWidth: '78%', padding: `10px 15px`, background: color.paper2, borderRadius: 14, borderTopRightRadius: radius.sm, fontSize: t.size.lg, lineHeight: 1.5, color: color.ink, whiteSpace: 'pre-wrap' }}>
-          {m.content}
-        </div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: space[2] }}>
+        {m.images && m.images.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: space[2], justifyContent: 'flex-end', maxWidth: '78%' }}>
+            {m.images.map((src, i) => (
+              <img key={i} src={src} alt="" style={{ maxWidth: 160, maxHeight: 160, borderRadius: radius.md, border: `1px solid ${color.line}`, objectFit: 'cover', display: 'block' }} />
+            ))}
+          </div>
+        )}
+        {m.content && (
+          <div style={{ maxWidth: '78%', padding: `10px 15px`, background: color.paper2, borderRadius: 14, borderTopRightRadius: radius.sm, fontSize: t.size.lg, lineHeight: 1.5, color: color.ink, whiteSpace: 'pre-wrap' }}>
+            {m.content}
+          </div>
+        )}
       </div>
     )
   }
@@ -876,17 +899,6 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
   )
 }
 
-function relTime(iso: string): string {
-  const d = Date.now() - new Date(iso).getTime()
-  const m = Math.round(d / 60000)
-  if (m < 1) return 'just now'
-  if (m < 60) return `${m}m ago`
-  const h = Math.round(m / 60)
-  if (h < 24) return `${h}h ago`
-  const dd = Math.round(h / 24)
-  if (dd < 7) return `${dd}d ago`
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
 
 // Vera's face — served from /vera-avatar.png; falls back to the "V" monogram
 // if the asset is missing so the UI never shows a broken image. Drop the file
