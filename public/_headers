@@ -12,7 +12,7 @@
   # script-src (no inline scripts, no eval, only same-origin) and
   # explicitly allow the Supabase + FAL endpoints we hit from JS.
   # If a new endpoint is needed, add to connect-src below.
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.fal.media https://*.supabase.co https://supabase-content-eu.innovareai.com; connect-src 'self' https://supabase-content-eu.innovareai.com https://*.supabase.co wss://*.supabase.co https://*.ingest.sentry.io https://o*.ingest.sentry.io https://api.openai.com; frame-ancestors 'none'; base-uri 'self'; object-src 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.fal.media https://*.supabase.co https://supabase-content-eu.innovareai.com; media-src 'self' blob: data: https://*.fal.media https://*.supabase.co https://supabase-content-eu.innovareai.com https://commondatastorage.googleapis.com; connect-src 'self' https://supabase-content-eu.innovareai.com https://*.supabase.co wss://*.supabase.co https://*.ingest.sentry.io https://o*.ingest.sentry.io https://api.openai.com; frame-ancestors 'none'; base-uri 'self'; object-src 'none'
 
   # Sends the origin only (not the full path) when navigating to
   # other sites — leaks less in referrer headers.
