@@ -115,15 +115,23 @@ export default function ReviewLink() {
 
   return (
     <div style={page}>
-      <div style={{ maxWidth: 980, margin: '0 auto' }}>
+      <div style={{ maxWidth: 1240, margin: '0 auto' }}>
         <div style={{ marginBottom: space[5] }}>
           <div style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: t.weight.semibold, color: color.accent }}>Review request</div>
           <div style={{ fontSize: t.size.cap, color: color.ghost, marginTop: 2 }}>Take a look, then approve or leave feedback on the right.</div>
         </div>
 
         <div style={{ display: 'flex', gap: space[5], flexWrap: 'wrap', alignItems: 'flex-start' }}>
-          {/* LEFT — the asset */}
-          <div style={{ flex: '1 1 460px', minWidth: 300 }}>
+          {/* LEFT — the original prompt */}
+          <div style={{ flex: '1 1 280px', minWidth: 260 }}>
+            <div style={cardStyle}>
+              <div style={{ padding: `${space[3]} ${space[5]}`, borderBottom: `1px solid ${color.line}`, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.ink2 }}>Original prompt</div>
+              <div style={{ padding: space[5], maxHeight: '70vh', overflowY: 'auto', fontSize: t.size.cap, lineHeight: 1.55, color: color.ink2, whiteSpace: 'pre-wrap' }}>{prompt || 'No prompt recorded for this asset.'}</div>
+            </div>
+          </div>
+
+          {/* CENTER — the output (asset) */}
+          <div style={{ flex: '1 1 380px', minWidth: 300 }}>
             <div style={cardStyle}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: `${space[5]} ${space[5]} ${space[3]}` }}>
                 <span style={{ width: 44, height: 44, borderRadius: '50%', flexShrink: 0, background: 'var(--accent-tint)', color: color.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700 }}>{initials}</span>
@@ -142,8 +150,8 @@ export default function ReviewLink() {
             </div>
           </div>
 
-          {/* RIGHT — original prompt + large feedback box */}
-          <div style={{ flex: '1 1 360px', minWidth: 280, display: 'flex', flexDirection: 'column', gap: space[3] }}>
+          {/* RIGHT — feedback */}
+          <div style={{ flex: '1 1 300px', minWidth: 260, display: 'flex', flexDirection: 'column', gap: space[3] }}>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
               <span style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.ink2 }}>Your feedback</span>
               <span style={{ fontSize: t.size.micro, color: saved ? color.success : color.faint }}>{saved ? 'Saved on this device' : 'Auto-saves as you type'}</span>
@@ -163,12 +171,6 @@ export default function ReviewLink() {
               </button>
             </div>
             <p style={{ fontSize: t.size.micro, color: color.faint, margin: 0, lineHeight: 1.5 }}>Approving with notes sends both. Your draft is kept until it's safely submitted.</p>
-            {prompt && (
-              <div style={{ ...cardStyle, marginTop: space[2] }}>
-                <div style={{ padding: `${space[3]} ${space[5]}`, borderBottom: `1px solid ${color.line}`, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.ink2 }}>Original prompt</div>
-                <div style={{ padding: space[5], maxHeight: 220, overflowY: 'auto', fontSize: t.size.cap, lineHeight: 1.55, color: color.ink2, whiteSpace: 'pre-wrap' }}>{prompt}</div>
-              </div>
-            )}
           </div>
         </div>
       </div>
