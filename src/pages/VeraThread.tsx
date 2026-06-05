@@ -114,7 +114,7 @@ export default function VeraThread() {
     let cancelled = false
     setHistoryLoaded(false)
     supabase.from('chat_messages')
-      .select('id, role, content')
+      .select('id, role, content, attachments')
       .eq('project_id', activeProject.id)
       .eq('session_id', sessionId)
       .in('role', ['user', 'assistant'])
@@ -122,8 +122,15 @@ export default function VeraThread() {
       .limit(HISTORY_LIMIT)
       .then(({ data }) => {
         if (cancelled) return
-        const rows = (data ?? []) as Array<{ id: string; role: 'user' | 'assistant'; content: string }>
-        setMessages(rows.reverse().map(r => ({ id: r.id, role: r.role, content: r.content })))
+        const rows = (data ?? []) as Array<{ id: string; role: 'user' | 'assistant'; content: string; attachments?: { kind?: string; url?: string }[] }>
+        setMessages(rows.reverse().map(r => {
+          // Rehydrate generated media from the attachments sidecar so images +
+          // videos survive a refresh (not just the message text).
+          const atts = Array.isArray(r.attachments) ? r.attachments : []
+          const images = atts.filter(a => a.kind === 'image' && a.url).map(a => a.url as string)
+          const videos = atts.filter(a => a.kind === 'video' && a.url).map(a => a.url as string)
+          return { id: r.id, role: r.role, content: r.content, images: images.length ? images : undefined, videos: videos.length ? videos : undefined }
+        }))
         setHistoryLoaded(true)
       })
     return () => { cancelled = true }
@@ -403,6 +410,23 @@ export default function VeraThread() {
           if (prev?.id) void supabase.from('content_posts').update({ media_url: vurl, media_type: 'video' }).eq('id', prev.id)
           return prev ? { ...prev, media_url: vurl, media_type: 'video' } : prev
         })
+        // Persist the clip so it survives a refresh: it finishes AFTER the
+        // assistant message was saved, so it isn't in attachments yet. Append
+        // it to this session's latest assistant message.
+        if (activeProject?.id && sessionId) {
+          void (async () => {
+            const { data: last } = await supabase.from('chat_messages')
+              .select('id, attachments')
+              .eq('project_id', activeProject.id).eq('session_id', sessionId).eq('role', 'assistant')
+              .order('created_at', { ascending: false }).limit(1).maybeSingle()
+            if (last) {
+              const prevAtts = Array.isArray((last as { attachments?: unknown }).attachments) ? (last as { attachments: unknown[] }).attachments : []
+              await supabase.from('chat_messages')
+                .update({ attachments: [...prevAtts, { kind: 'video', url: vurl }] })
+                .eq('id', (last as { id: string }).id)
+            }
+          })()
+        }
         return
       }
       if (data.status === 'FAILED' || data.status === 'CANCELLED' || data.status === 'ERROR') {
