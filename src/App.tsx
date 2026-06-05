@@ -22,6 +22,7 @@ import AcrossClients from './pages/AcrossClients'   // "/" — the shelf
 import VeraThread from './pages/VeraThread'          // /p/:slug/vera
 import Brain from './pages/Brain'                    // /p/:slug/brain
 import Measure from './pages/Measure'                // /p/:slug/measure
+import ReviewLink from './pages/ReviewLink'          // /r/:postId — public, no-login review link
 
 export default function App() {
   // Top-level boundary catches anything that escapes a route boundary —
@@ -41,6 +42,8 @@ export default function App() {
             <Routes>
               <Route path="/login" element={<LoginGuard />} />
               <Route path="/onboarding" element={<Onboarding />} />
+              {/* Public, no-login review link — a reviewer approves / leaves feedback. */}
+              <Route path="/r/:postId" element={<ReviewLink />} />
               <Route path="/" element={<Layout />}>
                 {/* "/" lands you IN your active client — no duplicate client  */}
                 {/* list in the canvas (the rail is the switcher). The "all     */}

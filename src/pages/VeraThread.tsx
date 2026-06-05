@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, X } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Link2, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -686,6 +686,13 @@ function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate, onB
   versionIdx: number; versionTotal: number; onPrevVersion?: () => void; onNextVersion?: () => void
 }) {
   const d = draft as unknown as Record<string, unknown>
+  const [copied, setCopied] = useState(false)
+  const copyReviewLink = () => {
+    if (!draft.id) return
+    const url = `${window.location.origin}/r/${draft.id}`
+    void navigator.clipboard?.writeText(url)
+    setCopied(true); setTimeout(() => setCopied(false), 1800)
+  }
   const isApproved = (draft.status ?? '').toLowerCase() === 'approved'
   const channel = (draft.channel ?? 'LinkedIn') as string
   const author = ((d.profile_name as string) || 'InnovareAI').trim()
@@ -772,6 +779,12 @@ function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate, onB
           <button onClick={onTweak} style={{ ...btn(color.paper2, color.ink, false), flex: 1, justifyContent: 'center', border: `1px solid ${color.line}` }}><Pencil size={12} /> Tweak</button>
           <button onClick={onRegenerate} style={{ ...btn(color.paper2, color.ink, false), flex: 1, justifyContent: 'center', border: `1px solid ${color.line}` }}><RefreshCw size={12} /> Regenerate</button>
         </div>
+        {draft.id && (
+          <button onClick={copyReviewLink} title="Copy a no-login link a reviewer can approve or comment on"
+            style={{ ...btn(color.paper2, copied ? color.success : color.ink, false), width: '100%', justifyContent: 'center', border: `1px solid ${copied ? color.success : color.line}`, marginTop: space[2] }}>
+            {copied ? <><Check size={12} /> Review link copied</> : <><Link2 size={12} /> Copy review link</>}
+          </button>
+        )}
       </div>
     </div>
   )
