@@ -10,13 +10,16 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Brain as BrainIcon, BookOpen, Check, Plus, X, Loader2, Trash2 } from 'lucide-react'
+import { Brain as BrainIcon, BookOpen, Check, Plus, X, Loader2, Trash2, Sparkles } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { BrandVoice, Audience } from '../lib/supabase'
 import { useProject } from '../lib/projectContext'
 import { useOrg } from '../lib/orgContext'
 import { useRightRail } from '../lib/rightRailContext'
 import { PageHeader, SectionLabel, Field, Input, Textarea, Button, EmptyState, color, space, type as t, radius } from '../design'
+
+const SUPA = import.meta.env.VITE_SUPABASE_URL as string
+const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
 export default function Brain() {
   const { activeProject, refetch } = useProject()
@@ -70,6 +73,56 @@ export default function Brain() {
   const addTo = (key: keyof BrandVoice, val: string) => { if (val.trim()) setBv(p => ({ ...p, [key]: [...((p[key] as string[]) || []), val.trim()] })) }
   const rmFrom = (key: keyof BrandVoice, i: number) => setBv(p => ({ ...p, [key]: ((p[key] as string[]) || []).filter((_, x) => x !== i) }))
 
+  // ── agentic draft: Vera reads the client's content (content-audit) and
+  // proposes the brand voice; the operator reviews + Saves (HITL). Chat/
+  // agentic-first — the brain shouldn't start as a blank form. ──
+  const [drafting, setDrafting] = useState(false)
+  const [draftStatus, setDraftStatus] = useState('')
+  async function runDraft() {
+    if (!activeOrg?.id || drafting) return
+    setDrafting(true); setDraftStatus("Reading this client's content…")
+    try {
+      const res = await fetch(`${SUPA}/functions/v1/content-audit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: `Bearer ${ANON}` },
+        body: JSON.stringify({ org_id: activeOrg.id }),
+      })
+      if (!res.body) throw new Error('no response from the audit')
+      const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ''
+      while (true) {
+        const { value, done } = await reader.read(); if (done) break
+        buf += dec.decode(value, { stream: true })
+        const lines = buf.split('\n\n'); buf = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const json = line.slice(6).trim(); if (!json) continue
+          let ev: { event?: string; message?: string; proposal?: { brand_voice?: Record<string, string[]>; personas?: unknown[] } }
+          try { ev = JSON.parse(json) } catch { continue }
+          if (ev.event === 'started' || ev.event === 'fetching') setDraftStatus("Reading this client's content…")
+          else if (ev.event === 'synthesising') setDraftStatus('Drafting the brand voice…')
+          else if (ev.event === 'done') {
+            const v = ev.proposal?.brand_voice ?? {}
+            const n = ev.proposal?.personas?.length ?? 0
+            setBv(prev => ({
+              ...prev,
+              tone: v.tone ?? prev.tone,
+              writing_rules: v.writing_rules ?? prev.writing_rules,
+              forbidden_phrases: v.forbidden_phrases ?? prev.forbidden_phrases,
+              required_phrases: v.required_phrases ?? prev.required_phrases,
+            }))
+            setBvInherited(false)
+            setDraftStatus(`Drafted from this client's content — review the brand voice below and Save.${n ? ` Vera also spotted ${n} audience${n === 1 ? '' : 's'}; add the ones that fit.` : ''}`)
+          }
+          else if (ev.event === 'error') throw new Error(ev.message ?? 'audit failed')
+        }
+      }
+    } catch (e) {
+      setDraftStatus(`Couldn't draft automatically (${(e as Error).message}). You can still fill the brain by hand below.`)
+    } finally {
+      setDrafting(false)
+    }
+  }
+
   // ── audiences (editable) ──
   const [audiences, setAudiences] = useState<Audience[]>([])
   const [addingAudience, setAddingAudience] = useState(false)
@@ -110,6 +163,17 @@ export default function Brain() {
     <div style={{ padding: `${space[8]} ${space[8]} 0`, maxWidth: 760 }}>
       <PageHeader eyebrow={activeProject.name} title="Brain"
         subtitle="The ground truth VERA reasons from for this client — instructions it reads every turn, the brand voice, audiences, and knowledge." />
+
+      {/* Agentic-first: let Vera draft the brain from the client's content
+          instead of starting blank. Prefills the brand voice for review. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: space[3], flexWrap: 'wrap', marginBottom: space[8], padding: `${space[4]} ${space[5]}`, background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.lg }}>
+        <Button variant="primary" size="sm" onClick={runDraft} disabled={drafting || !activeOrg}>
+          {drafting ? <><Loader2 size={14} className="animate-spin" /> Drafting…</> : <><Sparkles size={14} /> Draft this brain with Vera</>}
+        </Button>
+        <span style={{ flex: 1, minWidth: 200, fontSize: t.size.cap, color: draftStatus ? color.ink2 : color.ghost, lineHeight: 1.5 }}>
+          {draftStatus || "Vera reads this client's content and drafts the brand voice — you review and save. Beats filling a blank form."}
+        </span>
+      </div>
 
       {/* Custom instructions */}
       <section style={{ marginBottom: space[9] }}>
