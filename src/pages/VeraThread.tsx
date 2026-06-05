@@ -685,7 +685,6 @@ function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate, onB
   draft: Post; approving: boolean; onApprove: () => void; onTweak: () => void; onRegenerate: () => void; onBack?: () => void
   versionIdx: number; versionTotal: number; onPrevVersion?: () => void; onNextVersion?: () => void
 }) {
-  const d = draft as unknown as Record<string, unknown>
   const [copied, setCopied] = useState(false)
   const copyReviewLink = () => {
     if (!draft.id) return
@@ -695,9 +694,8 @@ function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate, onB
   }
   const isApproved = (draft.status ?? '').toLowerCase() === 'approved'
   const channel = (draft.channel ?? 'LinkedIn') as string
-  const author = ((d.profile_name as string) || 'InnovareAI').trim()
-  const headline = ((d.profile_title as string) || 'Sponsored · Draft preview').trim()
-  const aInitials = author.split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'IN'
+  const author = 'Jennifer Fleming'   // synthetic poster persona (preview only; real publish uses the connected account)
+  const headline = 'Founder & CEO'
   const tags = Array.isArray(draft.hashtags) ? draft.hashtags.filter(Boolean) : []
 
   return (
@@ -735,7 +733,7 @@ function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate, onB
         <div style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, overflow: 'hidden', boxShadow: 'var(--shadow-pop)' }}>
           {/* author header */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: `${space[5]} ${space[5]} ${space[3]}` }}>
-            <span style={{ width: 44, height: 44, borderRadius: '50%', flexShrink: 0, background: 'var(--accent-tint)', color: color.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700 }}>{aInitials}</span>
+            <img src="/poster-jennifer.png" alt="Jennifer Fleming" style={{ width: 44, height: 44, borderRadius: '50%', flexShrink: 0, objectFit: 'cover', display: 'block' }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: color.ink, lineHeight: 1.2 }}>{author}</div>
               <div style={{ fontSize: 12, color: color.ghost, lineHeight: 1.3, marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{headline}</div>

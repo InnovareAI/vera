@@ -107,8 +107,7 @@ export default function ReviewLink() {
     )
   }
 
-  const author = (post.profile_name || 'InnovareAI').trim()
-  const initials = author.split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'IN'
+  const author = 'Jennifer Fleming'   // synthetic poster persona (preview only)
   const tags = Array.isArray(post.hashtags) ? post.hashtags.filter(Boolean) : []
   const prompt = (post as unknown as { media_metadata?: { prompt?: string } }).media_metadata?.prompt
   const inputStyle: React.CSSProperties = { padding: '9px 12px', fontSize: t.size.sm, border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.surface, color: color.ink, outline: 'none', fontFamily: t.family.sans }
@@ -134,10 +133,10 @@ export default function ReviewLink() {
           <div style={{ flex: '1 1 380px', minWidth: 300 }}>
             <div style={cardStyle}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: `${space[5]} ${space[5]} ${space[3]}` }}>
-                <span style={{ width: 44, height: 44, borderRadius: '50%', flexShrink: 0, background: 'var(--accent-tint)', color: color.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700 }}>{initials}</span>
+                <img src="/poster-jennifer.png" alt="Jennifer Fleming" style={{ width: 44, height: 44, borderRadius: '50%', flexShrink: 0, objectFit: 'cover', display: 'block' }} />
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: color.ink, lineHeight: 1.2 }}>{author}</div>
-                  <div style={{ fontSize: 12, color: color.ghost, marginTop: 1 }}>{(post.profile_title || `Draft · ${post.channel || 'LinkedIn'}`)}</div>
+                  <div style={{ fontSize: 12, color: color.ghost, marginTop: 1 }}>Founder &amp; CEO</div>
                 </div>
               </div>
               <div style={{ padding: `0 ${space[5]} ${space[4]}` }}>
