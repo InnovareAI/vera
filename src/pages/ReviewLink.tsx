@@ -122,14 +122,8 @@ export default function ReviewLink() {
         </div>
 
         <div style={{ display: 'flex', gap: space[5], flexWrap: 'wrap', alignItems: 'flex-start' }}>
-          {/* LEFT — the original prompt + the asset */}
-          <div style={{ flex: '1 1 460px', minWidth: 300, display: 'flex', flexDirection: 'column', gap: space[4] }}>
-            {prompt && (
-              <div style={cardStyle}>
-                <div style={{ padding: `${space[3]} ${space[5]}`, borderBottom: `1px solid ${color.line}`, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.ink2 }}>Original prompt</div>
-                <div style={{ padding: space[5], maxHeight: 300, overflowY: 'auto', fontSize: t.size.cap, lineHeight: 1.55, color: color.ink2, whiteSpace: 'pre-wrap' }}>{prompt}</div>
-              </div>
-            )}
+          {/* LEFT — the asset */}
+          <div style={{ flex: '1 1 460px', minWidth: 300 }}>
             <div style={cardStyle}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: `${space[5]} ${space[5]} ${space[3]}` }}>
                 <span style={{ width: 44, height: 44, borderRadius: '50%', flexShrink: 0, background: 'var(--accent-tint)', color: color.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700 }}>{initials}</span>
@@ -148,8 +142,8 @@ export default function ReviewLink() {
             </div>
           </div>
 
-          {/* RIGHT — large feedback box */}
-          <div style={{ flex: '1 1 360px', minWidth: 280, position: 'sticky', top: space[7], display: 'flex', flexDirection: 'column', gap: space[3] }}>
+          {/* RIGHT — original prompt + large feedback box */}
+          <div style={{ flex: '1 1 360px', minWidth: 280, display: 'flex', flexDirection: 'column', gap: space[3] }}>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
               <span style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.ink2 }}>Your feedback</span>
               <span style={{ fontSize: t.size.micro, color: saved ? color.success : color.faint }}>{saved ? 'Saved on this device' : 'Auto-saves as you type'}</span>
@@ -169,6 +163,12 @@ export default function ReviewLink() {
               </button>
             </div>
             <p style={{ fontSize: t.size.micro, color: color.faint, margin: 0, lineHeight: 1.5 }}>Approving with notes sends both. Your draft is kept until it's safely submitted.</p>
+            {prompt && (
+              <div style={{ ...cardStyle, marginTop: space[2] }}>
+                <div style={{ padding: `${space[3]} ${space[5]}`, borderBottom: `1px solid ${color.line}`, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.ink2 }}>Original prompt</div>
+                <div style={{ padding: space[5], maxHeight: 220, overflowY: 'auto', fontSize: t.size.cap, lineHeight: 1.55, color: color.ink2, whiteSpace: 'pre-wrap' }}>{prompt}</div>
+              </div>
+            )}
           </div>
         </div>
       </div>
