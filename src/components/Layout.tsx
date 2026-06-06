@@ -83,6 +83,14 @@ function RailLabel({ children }: { children: string }) {
 // request). Clicking one resumes that session: set the per-client session key,
 // route to Vera, and signal VeraThread (already-mounted case) to switch.
 type RailSession = { session_id: string; title: string | null; last_at: string; message_count: number }
+const RECENT_TITLE_MAX = 42
+function compactRecentTitle(raw: string | null) {
+  const title = (raw ?? '').replace(/\s+/g, ' ').trim()
+  if (!title) return 'Untitled chat'
+  if (title.length <= RECENT_TITLE_MAX) return title
+  return `${title.slice(0, RECENT_TITLE_MAX - 3).trimEnd()}...`
+}
+
 function RailRecents() {
   const { activeProject } = useProject()
   const navigate = useNavigate()
@@ -115,14 +123,17 @@ function RailRecents() {
   return (
     <nav className="space-y-0.5 mt-1">
       <RailLabel>Recents</RailLabel>
-      {sessions.map(s => (
-        <button key={s.session_id} onClick={() => open(s.session_id)} title={s.title ?? 'Untitled chat'}
-          className="w-full flex items-center gap-2.5 px-2.5 py-1.5 mx-2 transition-colors hover:bg-[var(--fog)]"
-          style={{ background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 'var(--radius-md)', width: 'calc(100% - 1rem)' }}>
-          <Clock size={14} style={{ color: 'var(--ghost)', flexShrink: 0 }} />
-          <span className="flex-1 truncate text-left" style={{ fontSize: 13, color: 'var(--ink-quiet)' }}>{s.title || 'Untitled chat'}</span>
-        </button>
-      ))}
+      {sessions.map(s => {
+        const title = compactRecentTitle(s.title)
+        return (
+          <button key={s.session_id} onClick={() => open(s.session_id)} title={title} aria-label={`Open recent chat: ${title}`}
+            className="w-full flex items-center gap-2.5 px-2.5 py-1.5 mx-2 transition-colors hover:bg-[var(--fog)]"
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 'var(--radius-md)', width: 'calc(100% - 1rem)' }}>
+            <Clock size={14} style={{ color: 'var(--ghost)', flexShrink: 0 }} />
+            <span className="flex-1 truncate text-left" style={{ fontSize: 13, color: 'var(--ink-quiet)' }}>{title}</span>
+          </button>
+        )
+      })}
     </nav>
   )
 }

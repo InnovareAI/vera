@@ -23,6 +23,7 @@ import VeraThread from './pages/VeraThread'          // /p/:slug/vera
 import Brain from './pages/Brain'                    // /p/:slug/brain
 import Measure from './pages/Measure'                // /p/:slug/measure
 import ReviewLink from './pages/ReviewLink'          // /r/:reviewToken — public, tokened review link
+import ApprovalIndex from './pages/ApprovalIndex'
 
 export default function App() {
   // Top-level boundary catches anything that escapes a route boundary —
@@ -44,9 +45,9 @@ export default function App() {
               <Route path="/onboarding" element={<Onboarding />} />
               {/* Public, no-login review link, scoped by a revocable review token. */}
               <Route path="/r/:reviewToken" element={<ReviewLink />} />
-              <Route path="/approvals/:projectId" element={<Navigate to="/login" replace />} />
               <Route element={<RequireAuth />}>
-              <Route path="/" element={<Layout />}>
+                <Route path="approvals/:projectRef" element={<ApprovalIndex />} />
+                <Route path="/" element={<Layout />}>
                 {/* "/" lands you IN your active client — no duplicate client  */}
                 {/* list in the canvas (the rail is the switcher). The "all     */}
                 {/* clients" shelf lives at /clients for when it's needed.      */}
@@ -86,7 +87,7 @@ export default function App() {
                 {/* Workspace-level, kept as-is for Phase 0. */}
                 <Route path="skills"     element={<Skills />} />
                 <Route path="settings"   element={<Settings />} />
-              </Route>
+                </Route>
               </Route>
             </Routes>
             </RightRailProvider>
