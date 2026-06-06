@@ -36,6 +36,7 @@ export interface Organisation {
 export interface Post {
   id: string
   org_id?: string
+  project_id?: string | null
   campaign_id?: string
   brief_id?: string
   persona_id?: string

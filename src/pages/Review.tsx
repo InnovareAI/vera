@@ -108,13 +108,39 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
     if (activeProject?.id) q = q.eq('project_id', activeProject.id)
     q.then(({ data }) => { setPosts(data || []); setLoading(false) })
 
+    const matchesScope = (post: Post) => (
+      post.org_id === activeOrg.id &&
+      (!activeProject?.id || post.project_id === activeProject.id)
+    )
+
     const channel = supabase.channel('review-posts')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'content_posts' }, payload => {
-        if (payload.eventType === 'UPDATE') {
-          setPosts(prev => prev.map(p => p.id === (payload.new as Post).id ? payload.new as Post : p))
-          setSelected(prev => prev?.id === (payload.new as Post).id ? payload.new as Post : prev)
+        if (payload.eventType === 'DELETE') {
+          const oldPost = payload.old as Post
+          setPosts(prev => prev.filter(p => p.id !== oldPost.id))
+          setSelected(prev => prev?.id === oldPost.id ? null : prev)
+          return
         }
-        if (payload.eventType === 'INSERT') setPosts(prev => [payload.new as Post, ...prev])
+
+        const nextPost = payload.new as Post
+        const inScope = matchesScope(nextPost)
+
+        if (payload.eventType === 'UPDATE') {
+          setPosts(prev => {
+            const exists = prev.some(p => p.id === nextPost.id)
+            if (!inScope) return prev.filter(p => p.id !== nextPost.id)
+            if (exists) return prev.map(p => p.id === nextPost.id ? nextPost : p)
+            return [nextPost, ...prev]
+          })
+          setSelected(prev => {
+            if (prev?.id !== nextPost.id) return prev
+            return inScope ? nextPost : null
+          })
+        }
+
+        if (payload.eventType === 'INSERT' && inScope) {
+          setPosts(prev => prev.some(p => p.id === nextPost.id) ? prev : [nextPost, ...prev])
+        }
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
