@@ -2,9 +2,8 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import type { BrandVoice, PlatformConfig } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
-import { useAuth } from '../lib/auth'
 import {
-  Settings2, Users, Mic2, Plug, Building2, Save, Plus, Trash2,
+  Settings2, Users, Mic2, Plug, Building2, Save,
   Eye, EyeOff, CheckCircle2, XCircle, AlertCircle, Sun, Moon, Monitor
 } from 'lucide-react'
 import { PublishersCard } from '../components/PublishersCard'
@@ -14,7 +13,7 @@ type Tab = 'workspace' | 'team' | 'brand' | 'integrations'
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'workspace',    label: 'Workspace',    icon: Building2 },
-  { id: 'team',         label: 'Team',         icon: Users },
+  { id: 'team',         label: 'Access',       icon: Users },
   { id: 'brand',        label: 'Brand Voice',  icon: Mic2 },
   { id: 'integrations', label: 'Integrations', icon: Plug },
 ]
@@ -177,152 +176,54 @@ function AppearancePreference() {
   )
 }
 
-// ─── Team Tab ─────────────────────────────────────────────────────────────────
-interface Member {
-  id: string
-  user_id: string
-  role: string
-  users: { email: string; full_name?: string } | null
-}
-
+// ─── Access Tab ───────────────────────────────────────────────────────────────
 function TeamTab() {
-  const { activeOrg, activeRole } = useOrg()
-  const { user } = useAuth()
-  const [members, setMembers] = useState<Member[]>([])
-  const [loading, setLoading] = useState(true)
-  const [inviteEmail, setInviteEmail] = useState('')
-  const [inviteRole, setInviteRole] = useState('member')
-  const [inviting, setInviting] = useState(false)
-  const [inviteMsg, setInviteMsg] = useState<{type: 'ok'|'err'; text: string} | null>(null)
-
-  const canManage = ['owner','admin'].includes(activeRole ?? '')
-
-  useEffect(() => {
-    if (!activeOrg) return
-    supabase.from('org_members')
-      .select('id, user_id, role, users(email, full_name)')
-      .eq('org_id', activeOrg.id)
-      .then(({ data }) => { setMembers((data as unknown as Member[]) || []); setLoading(false) })
-  }, [activeOrg?.id])
-
-  async function handleInvite() {
-    if (!activeOrg || !inviteEmail.trim()) return
-    setInviting(true)
-    setInviteMsg(null)
-
-    // Find auth user by email
-    const { data: existing } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', inviteEmail.trim())
-      .single()
-
-    if (!existing) {
-      setInviteMsg({ type: 'err', text: 'No account found with that email. Ask them to sign up first.' })
-      setInviting(false)
-      return
-    }
-
-    const { error } = await supabase.from('org_members').insert({
-      user_id: existing.id,
-      org_id: activeOrg.id,
-      role: inviteRole,
-    })
-
-    if (error) {
-      setInviteMsg({ type: 'err', text: error.message })
-    } else {
-      setInviteMsg({ type: 'ok', text: `${inviteEmail} added as ${inviteRole}.` })
-      setInviteEmail('')
-      // Refresh
-      supabase.from('org_members')
-        .select('id, user_id, role, users(email, full_name)')
-        .eq('org_id', activeOrg.id)
-        .then(({ data }) => setMembers((data as unknown as Member[]) || []))
-    }
-    setInviting(false)
-  }
-
-  async function handleRemove(memberId: string) {
-    await supabase.from('org_members').delete().eq('id', memberId)
-    setMembers(prev => prev.filter(m => m.id !== memberId))
-  }
-
-  async function handleRoleChange(memberId: string, newRole: string) {
-    await supabase.from('org_members').update({ role: newRole }).eq('id', memberId)
-    setMembers(prev => prev.map(m => m.id === memberId ? { ...m, role: newRole } : m))
-  }
-
   return (
     <div className="max-w-xl space-y-5">
       <div>
-        <h2 className="text-base font-semibold text-gray-900">Team Members</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Manage who has access to this workspace.</p>
+        <h2 className="text-base font-semibold text-gray-900">Access Management</h2>
+        <p className="text-sm text-gray-500 mt-0.5">Access is managed per client space, not from this workspace settings page.</p>
       </div>
 
-      {loading ? (
-        <p className="text-sm text-gray-400">Loading…</p>
-      ) : (
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-          {members.map((m, i) => (
-            <div key={m.id} className={`flex items-center gap-3 px-4 py-3 ${i > 0 ? 'border-t border-gray-100' : ''}`}>
-              <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500 flex-shrink-0">
-                {(m.users?.email ?? '?').slice(0, 2).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-gray-800 truncate">
-                  {m.users?.full_name || m.users?.email || m.user_id}
-                </div>
-                <div className="text-xs text-gray-400 truncate">{m.users?.email}</div>
-              </div>
-              {canManage && m.user_id !== user?.id ? (
-                <>
-                  <select value={m.role} onChange={e => handleRoleChange(m.id, e.target.value)}
-                    className="text-xs border border-gray-200 rounded-md px-2 py-1 text-gray-600 bg-white">
-                    <option value="owner">Owner</option>
-                    <option value="admin">Admin</option>
-                    <option value="member">Member</option>
-                    <option value="agency_admin">Agency Admin</option>
-                  </select>
-                  <button onClick={() => handleRemove(m.id)}
-                    className="text-gray-300 hover:text-red-400 transition-colors p-1">
-                    <Trash2 size={14} />
-                  </button>
-                </>
-              ) : (
-                <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-500 capitalize">{m.role}</span>
-              )}
+      <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+        <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
+          <Users size={18} />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-gray-900">Use Client management for invites and roles</p>
+          <p className="text-sm text-gray-500 mt-1">
+            Client spaces are the source of truth for client users, view and write permissions, pending invites, and client API keys.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-2">
+          {['Invite clients by email', 'Assign viewer, commenter, editor, or admin roles', 'Revoke pending invites and remove client access'].map(item => (
+            <div key={item} className="flex items-center gap-2 text-sm text-gray-700">
+              <CheckCircle2 size={14} className="text-emerald-600 flex-shrink-0" />
+              <span>{item}</span>
             </div>
           ))}
         </div>
-      )}
+        <button
+          type="button"
+          onClick={() => { window.location.href = '/clients' }}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
+        >
+          <Users size={14} />
+          Open client management
+        </button>
+      </div>
 
-      {canManage && (
-        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
-          <p className="text-sm font-medium text-gray-700">Add Member</p>
-          <div className="flex gap-2">
-            <input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)}
-              placeholder="Email address" className="input flex-1" />
-            <select value={inviteRole} onChange={e => setInviteRole(e.target.value)}
-              className="input w-32">
-              <option value="member">Member</option>
-              <option value="admin">Admin</option>
-              <option value="agency_admin">Agency Admin</option>
-            </select>
-            <button onClick={handleInvite} disabled={inviting || !inviteEmail.trim()}
-              className="flex items-center gap-1.5 px-3 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 disabled:opacity-50 transition-colors">
-              <Plus size={14} />
-              {inviting ? 'Adding…' : 'Add'}
-            </button>
-          </div>
-          {inviteMsg && (
-            <p className={`text-xs flex items-center gap-1.5 ${inviteMsg.type === 'ok' ? 'text-emerald-600' : 'text-red-500'}`}>
-              {inviteMsg.type === 'ok' ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
-              {inviteMsg.text}
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+        <div className="flex items-start gap-3">
+          <AlertCircle size={16} className="text-amber-700 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-amber-900">Workspace team management is not active yet</p>
+            <p className="text-xs text-amber-800 mt-1">
+              We will add organisation-level staff access later. For now, keep permissions scoped to client spaces.
             </p>
-          )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   )
 }
