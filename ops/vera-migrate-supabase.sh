@@ -50,13 +50,13 @@ require_target_access() {
 stage_source() {
   log "creating fresh source backup and migration bundle on $SOURCE_HOST"
   ssh "${SOURCE_SSH_ARGS[@]}" "$SOURCE_HOST" \
-    "SOURCE_STACK='$SOURCE_STACK' REMOTE_STAGE='$REMOTE_STAGE' bash -s" <<'REMOTE'
+    "SOURCE_STACK='$SOURCE_STACK' REMOTE_STAGE='$REMOTE_STAGE' DOMAIN='$DOMAIN' bash -s" <<'REMOTE'
 set -euo pipefail
 
 "$SOURCE_STACK/scripts/content-supabase-backup" </dev/null >/tmp/vera-content-backup-run.log
 "$SOURCE_STACK/scripts/content-supabase-backup-verify" </dev/null >/tmp/vera-content-backup-verify-run.log
 
-mkdir -p "$REMOTE_STAGE/systemd" "$REMOTE_STAGE/root-ssh" "$REMOTE_STAGE/notification-secrets"
+mkdir -p "$REMOTE_STAGE/systemd" "$REMOTE_STAGE/root-ssh" "$REMOTE_STAGE/notification-secrets" "$REMOTE_STAGE/caddy-cert-empty"
 chmod 700 "$REMOTE_STAGE"
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -65,6 +65,7 @@ systemd_bundle="$REMOTE_STAGE/vera-supabase-systemd-${stamp}.tar.gz"
 root_ssh_bundle="$REMOTE_STAGE/vera-supabase-root-ssh-${stamp}.tar.gz"
 notify_bundle="$REMOTE_STAGE/vera-supabase-notification-secrets-${stamp}.tar.gz"
 db_config_bundle="$REMOTE_STAGE/vera-supabase-db-config-${stamp}.tar.gz"
+caddy_cert_bundle="$REMOTE_STAGE/vera-supabase-caddy-cert-${stamp}.tar.gz"
 
 tar -C "$SOURCE_STACK" \
   --exclude="./backups" \
@@ -110,6 +111,14 @@ else
 fi
 sha256sum "$db_config_bundle" > "$db_config_bundle.sha256"
 
+caddy_cert_dir="/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/$DOMAIN"
+if test -d "$caddy_cert_dir"; then
+  tar -C "$(dirname "$caddy_cert_dir")" -czf "$caddy_cert_bundle" "$(basename "$caddy_cert_dir")"
+else
+  tar -C "$REMOTE_STAGE/caddy-cert-empty" -czf "$caddy_cert_bundle" .
+fi
+sha256sum "$caddy_cert_bundle" > "$caddy_cert_bundle.sha256"
+
 latest_db="$(readlink -f "$SOURCE_STACK/backups/latest/latest.dump")"
 latest_storage="$(readlink -f "$SOURCE_STACK/backups/latest/latest.storage.tar.gz")"
 latest_schema="$(readlink -f "$SOURCE_STACK/backups/latest/latest.schema.sql")"
@@ -122,6 +131,7 @@ SYSTEMD_BUNDLE=$systemd_bundle
 ROOT_SSH_BUNDLE=$root_ssh_bundle
 NOTIFY_BUNDLE=$notify_bundle
 DB_CONFIG_BUNDLE=$db_config_bundle
+CADDY_CERT_BUNDLE=$caddy_cert_bundle
 LATEST_DB=$latest_db
 LATEST_STORAGE=$latest_storage
 LATEST_SCHEMA=$latest_schema
@@ -138,6 +148,7 @@ REMOTE
 copy_artifacts() {
   log "copying migration artifacts through local temp storage"
   local tmp source_ssh_host
+  local -a remote_artifacts
   source_ssh_host="$SOURCE_HOST"
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
@@ -146,7 +157,7 @@ copy_artifacts() {
   # shellcheck disable=SC1091
   source "$tmp/manifest.env"
 
-  rsync -az -e "$SOURCE_RSYNC_SSH" \
+  remote_artifacts=(
     "$source_ssh_host:$STACK_BUNDLE" \
     "$source_ssh_host:$STACK_BUNDLE.sha256" \
     "$source_ssh_host:$SYSTEMD_BUNDLE" \
@@ -162,6 +173,16 @@ copy_artifacts() {
     "$source_ssh_host:$LATEST_STORAGE" \
     "$source_ssh_host:$LATEST_STORAGE.sha256" \
     "$source_ssh_host:$LATEST_SCHEMA" \
+  )
+  if [[ -n "${CADDY_CERT_BUNDLE:-}" ]]; then
+    remote_artifacts+=(
+      "$source_ssh_host:$CADDY_CERT_BUNDLE"
+      "$source_ssh_host:$CADDY_CERT_BUNDLE.sha256"
+    )
+  fi
+
+  rsync -az -e "$SOURCE_RSYNC_SSH" \
+    "${remote_artifacts[@]}" \
     "$tmp/"
 
   ssh_target "mkdir -p '$REMOTE_STAGE' && chmod 700 '$REMOTE_STAGE'"
@@ -209,6 +230,7 @@ latest_systemd="$(ls -1t vera-supabase-systemd-*.tar.gz | head -1)"
 latest_root_ssh="$(ls -1t vera-supabase-root-ssh-*.tar.gz | head -1)"
 latest_notify="$(ls -1t vera-supabase-notification-secrets-*.tar.gz | head -1)"
 latest_db_config="$(ls -1t vera-supabase-db-config-*.tar.gz | head -1)"
+latest_caddy_cert="$(ls -1t vera-supabase-caddy-cert-*.tar.gz 2>/dev/null | head -1 || true)"
 latest_db="$(ls -1t content-pipeline-supabase-*.dump.enc | head -1)"
 latest_storage="$(ls -1t content-pipeline-supabase-*.storage.tar.gz.enc | head -1)"
 
@@ -226,6 +248,9 @@ verify_sha "$latest_systemd"
 verify_sha "$latest_root_ssh"
 verify_sha "$latest_notify"
 verify_sha "$latest_db_config"
+if [[ -n "$latest_caddy_cert" ]]; then
+  verify_sha "$latest_caddy_cert"
+fi
 verify_sha "$latest_db"
 verify_sha "$latest_storage"
 
@@ -253,6 +278,16 @@ $DOMAIN {
 EOF
 caddy fmt --overwrite /etc/caddy/Caddyfile
 systemctl enable caddy
+if [[ -n "$latest_caddy_cert" ]]; then
+  caddy_cert_parent=/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory
+  install -d -m 700 -o caddy -g caddy "$caddy_cert_parent"
+  tar -C "$caddy_cert_parent" -xzf "$REMOTE_STAGE/$latest_caddy_cert"
+  if test -d "$caddy_cert_parent/$DOMAIN"; then
+    chown -R caddy:caddy "$caddy_cert_parent/$DOMAIN"
+    chmod 700 "$caddy_cert_parent/$DOMAIN"
+    chmod 600 "$caddy_cert_parent/$DOMAIN"/* 2>/dev/null || true
+  fi
+fi
 
 cd "$TARGET_STACK"
 docker compose down --remove-orphans || true
