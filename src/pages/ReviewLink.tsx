@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import type { Post } from '../lib/supabase'
 import { color, space, type as t, radius } from '../design'
+import { PlatformPostPreview } from '../components/PlatformPostPreview'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -108,8 +109,6 @@ export default function ReviewLink() {
     )
   }
 
-  const author = 'Jennifer Fleming'   // synthetic poster persona (preview only)
-  const tags = Array.isArray(post.hashtags) ? post.hashtags.filter(Boolean) : []
   const prompt = (post as unknown as { media_metadata?: { prompt?: string } }).media_metadata?.prompt
   const inputStyle: React.CSSProperties = { padding: '9px 12px', fontSize: t.size.sm, border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.surface, color: color.ink, outline: 'none', fontFamily: t.family.sans }
 
@@ -132,43 +131,7 @@ export default function ReviewLink() {
 
           {/* CENTER — the output (asset) */}
           <div style={{ flex: '1 1 380px', minWidth: 300 }}>
-            <div style={cardStyle}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: `${space[5]} ${space[5]} ${space[3]}` }}>
-                <img src="/poster-jennifer.png" alt="Jennifer Fleming" style={{ width: 44, height: 44, borderRadius: '50%', flexShrink: 0, objectFit: 'cover', display: 'block' }} />
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: color.ink, lineHeight: 1.2 }}>{author}</div>
-                  <div style={{ fontSize: 12, color: color.ghost, marginTop: 1 }}>Founder &amp; CEO</div>
-                </div>
-              </div>
-              <div style={{ padding: `0 ${space[5]} ${space[4]}` }}>
-                <p style={{ fontSize: 14, lineHeight: 1.55, color: color.ink, whiteSpace: 'pre-wrap', margin: 0 }}>{post.copy}</p>
-                {tags.length > 0 && <p style={{ fontSize: 14, color: color.accent, marginTop: space[3], marginBottom: 0, fontWeight: 500 }}>{tags.map(h => (h.startsWith('#') ? h : `#${h}`)).join(' ')}</p>}
-              </div>
-              {(() => {
-                const frames = (post as unknown as { media_metadata?: { frames?: Array<{ url: string; text?: string | null }> } }).media_metadata?.frames
-                if (post.media_type === 'carousel' && Array.isArray(frames) && frames.length > 0) {
-                  return (
-                    <div style={{ borderTop: `1px solid ${color.line}` }}>
-                      <div style={{ display: 'flex', overflowX: 'auto', scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch', gap: 8, padding: 8 }}>
-                        {frames.map((f, i) => (
-                          <div key={i} style={{ flex: '0 0 88%', scrollSnapAlign: 'center', position: 'relative', borderRadius: radius.md, overflow: 'hidden', border: `1px solid ${color.line}` }}>
-                            <img src={f.url} alt={f.text ?? `Frame ${i + 1}`} style={{ width: '100%', display: 'block' }} />
-                            <span style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(20,20,20,0.62)', color: '#fff', fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999 }}>{i + 1}/{frames.length}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '0 0 10px' }}>
-                        {frames.map((_, i) => <span key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: color.line }} />)}
-                        <span style={{ marginLeft: 8, fontSize: t.size.micro, color: color.ghost }}>{frames.length} frames · swipe</span>
-                      </div>
-                    </div>
-                  )
-                }
-                if (post.media_url && post.media_type === 'video') return <video src={post.media_url} controls playsInline style={{ width: '100%', display: 'block', borderTop: `1px solid ${color.line}`, background: '#000' }} />
-                if (post.media_url) return <img src={post.media_url} alt="" style={{ width: '100%', display: 'block', borderTop: `1px solid ${color.line}` }} />
-                return null
-              })()}
-            </div>
+            <PlatformPostPreview post={post} density="standard" autoplayMedia={false} />
           </div>
 
           {/* RIGHT — feedback */}

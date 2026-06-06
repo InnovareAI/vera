@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, X } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -19,6 +19,7 @@ import { useAuth } from '../lib/auth'
 import { useRightRail } from '../lib/rightRailContext'
 import { useToast } from '../design'
 import { color, space, type as t, radius } from '../design'
+import { PlatformPostPreview } from '../components/PlatformPostPreview'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -1134,10 +1135,6 @@ function DraftArtifact({ draft, approving, sending, onApprove, onSendForApproval
       setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1800)
     } catch { /* parent toast handles the send path; copy failure can be retried */ }
   }
-  const author = 'Jennifer Fleming'   // synthetic poster persona (preview only; real publish uses the connected account)
-  const headline = 'Founder & CEO'
-  const tags = Array.isArray(draft.hashtags) ? draft.hashtags.filter(Boolean) : []
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Toolbar — label + the decision actions, always in reach. */}
@@ -1170,66 +1167,7 @@ function DraftArtifact({ draft, approving, sending, onApprove, onSendForApproval
 
       {/* The post preview card. */}
       <div style={{ flex: 1, overflowY: 'auto', padding: `0 ${space[5]} ${space[5]}` }}>
-        <div style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, overflow: 'hidden', boxShadow: 'var(--shadow-pop)' }}>
-          {/* author header */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: `${space[5]} ${space[5]} ${space[3]}` }}>
-            <img src="/poster-jennifer.png" alt="Jennifer Fleming" style={{ width: 44, height: 44, borderRadius: '50%', flexShrink: 0, objectFit: 'cover', display: 'block' }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: color.ink, lineHeight: 1.2 }}>{author}</div>
-              <div style={{ fontSize: 12, color: color.ghost, lineHeight: 1.3, marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{headline}</div>
-              <div style={{ fontSize: 11.5, color: color.faint, display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>now · <Globe size={11} /></div>
-            </div>
-            <MoreHorizontal size={18} style={{ color: color.faint, flexShrink: 0 }} />
-          </div>
-
-          {/* body copy + hashtags */}
-          <div style={{ padding: `0 ${space[5]} ${space[4]}` }}>
-            <p style={{ fontSize: 14, lineHeight: 1.55, color: color.ink, whiteSpace: 'pre-wrap', margin: 0 }}>{draft.copy}</p>
-            {tags.length > 0 && (
-              <p style={{ fontSize: 14, color: color.accent, marginTop: space[3], marginBottom: 0, fontWeight: 500 }}>
-                {tags.map(h => (h.startsWith('#') ? h : `#${h}`)).join(' ')}
-              </p>
-            )}
-          </div>
-
-          {/* media — edge to edge, like a real post (carousel · video · image) */}
-          {(() => {
-            const frames = (draft as unknown as { media_metadata?: { frames?: Array<{ url: string; text?: string | null }> } }).media_metadata?.frames
-            if (draft.media_type === 'carousel' && Array.isArray(frames) && frames.length > 0) {
-              return (
-                <div style={{ borderTop: `1px solid ${color.line}` }}>
-                  <div style={{ display: 'flex', overflowX: 'auto', scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch', gap: 8, padding: 8 }}>
-                    {frames.map((f, i) => (
-                      <div key={i} style={{ flex: '0 0 88%', scrollSnapAlign: 'center', position: 'relative', borderRadius: radius.md, overflow: 'hidden', border: `1px solid ${color.line}` }}>
-                        <img src={f.url} alt={f.text ?? `Frame ${i + 1}`} style={{ width: '100%', display: 'block' }} />
-                        <span style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(20,20,20,0.62)', color: '#fff', fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999 }}>{i + 1}/{frames.length}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '0 0 10px' }}>
-                    {frames.map((_, i) => <span key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: color.line2 }} />)}
-                    <span style={{ marginLeft: 8, fontSize: t.size.micro, color: color.ghost }}>{frames.length} frames · swipe</span>
-                  </div>
-                </div>
-              )
-            }
-            if (draft.media_url && draft.media_type === 'video') return <video src={draft.media_url} autoPlay muted loop playsInline style={{ width: '100%', display: 'block', borderTop: `1px solid ${color.line}` }} />
-            if (draft.media_url) return <img src={draft.media_url} alt="" style={{ width: '100%', display: 'block', borderTop: `1px solid ${color.line}` }} />
-            return null
-          })()}
-
-          {/* reaction bar — static, for realism */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', flexWrap: 'wrap', rowGap: 2, padding: `${space[2]} ${space[3]}`, borderTop: `1px solid ${color.line}` }}>
-            {[[ThumbsUp, 'Like'], [MessageCircle, 'Comment'], [Repeat2, 'Repost'], [Send, 'Send']].map(([Ic, lbl], i) => {
-              const Icn = Ic as React.ElementType
-              return (
-                <span key={i} style={{ flex: '1 1 74px', minWidth: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12.5, fontWeight: 500, color: color.ghost, padding: '6px 8px', whiteSpace: 'nowrap' }}>
-                  <Icn size={16} strokeWidth={1.75} /> {lbl as string}
-                </span>
-              )
-            })}
-          </div>
-        </div>
+        <PlatformPostPreview post={draft} density="standard" autoplayMedia />
 
         {/* secondary actions under the preview */}
         <div style={{ display: 'flex', gap: space[2], marginTop: space[4] }}>

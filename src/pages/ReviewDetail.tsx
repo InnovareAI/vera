@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { Copy, Check, ExternalLink, ArrowLeft, ThumbsUp, MessageCircle, Repeat2, Send, Sparkles, Loader2 } from 'lucide-react'
+import { Copy, Check, ExternalLink, ArrowLeft, Sparkles, Loader2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { PublishToConnectedBlog } from '../components/PublishToConnectedBlog'
+import { PlatformPostPreview } from '../components/PlatformPostPreview'
 
 const APPROVAL_WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approval-webhook`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -302,7 +303,6 @@ export default function ReviewDetail() {
   const isRejected = statusLower === 'rejected'
   const isPosted = !!post.posted_at
   const composerInfo = composerForChannel(post.channel, post.copy)
-  const initial = (post.profile_name ?? 'T')[0]
   const composerUrl = composerInfo.url
   const compliance = Array.isArray(post.compliance_checks) ? (post.compliance_checks as Array<{ pass?: boolean; label?: string }>) : []
   const statusBadge = isPosted
@@ -328,43 +328,11 @@ export default function ReviewDetail() {
           <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${statusBadge.cls}`}>{statusBadge.text}</span>
         </div>
         <div className="text-xs text-gray-500">
-          {post.channel} · {post.format}{post.author ? ` · by ${post.author}` : ''}
+          {post.channel} · {post.format} · Content Generator
         </div>
       </div>
 
-      {/* LinkedIn-styled preview */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-        <div className="px-4 pt-4 flex items-start gap-3">
-          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-900 to-gray-700 flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
-            {initial}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-gray-900 leading-tight">{post.profile_name ?? 'Thorsten Linz'}</p>
-            <p className="text-xs text-gray-500 leading-snug mt-0.5">{post.profile_title ?? 'CEO & Co-Founder @ InnovareAI'}</p>
-            <p className="text-[11px] text-gray-400 mt-0.5">{post.publish_date ? new Date(post.publish_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' }) : 'Draft preview'}</p>
-          </div>
-        </div>
-        <div className="px-4 pt-3">
-          <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{post.copy}</p>
-          {post.hashtags && post.hashtags.length > 0 && (
-            <p className="text-sm text-blue-600 mt-2">{post.hashtags.join(' ')}</p>
-          )}
-        </div>
-        {post.media_url && (
-          <div className="mt-3">
-            {post.media_type === 'video'
-              ? <video src={post.media_url} controls autoPlay muted loop playsInline className="w-full block" />
-              : <img src={post.media_url} alt="Post media" className="w-full block" />}
-          </div>
-        )}
-        <div className="flex gap-1 px-2 py-1 mt-3 border-t border-gray-100">
-          {[{ Icon: ThumbsUp, label: 'Like' }, { Icon: MessageCircle, label: 'Comment' }, { Icon: Repeat2, label: 'Repost' }, { Icon: Send, label: 'Send' }].map(({ Icon, label }) => (
-            <button key={label} className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs font-semibold text-gray-600 hover:bg-[var(--fog)] rounded">
-              <Icon className="w-4 h-4" /> {label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <PlatformPostPreview post={post} density="standard" autoplayMedia={false} />
 
       {/* Refine with VERA — feedback → in-place revision of copy/image/video */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 mt-4">
