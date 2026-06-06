@@ -24,6 +24,7 @@ import Brain from './pages/Brain'                    // /p/:slug/brain
 import Measure from './pages/Measure'                // /p/:slug/measure
 import ReviewLink from './pages/ReviewLink'          // /r/:reviewToken — public, tokened review link
 import ApprovalIndex from './pages/ApprovalIndex'
+import AcceptInvite from './pages/AcceptInvite'
 
 export default function App() {
   // Top-level boundary catches anything that escapes a route boundary —
@@ -46,6 +47,7 @@ export default function App() {
               {/* Public, no-login review link, scoped by a revocable review token. */}
               <Route path="/r/:reviewToken" element={<ReviewLink />} />
               <Route element={<RequireAuth />}>
+                <Route path="invite/:token" element={<AcceptInvite />} />
                 <Route path="approvals/:projectRef" element={<ApprovalIndex />} />
                 <Route path="/" element={<Layout />}>
                 {/* "/" lands you IN your active client — no duplicate client  */}

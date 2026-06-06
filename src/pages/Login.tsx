@@ -4,6 +4,7 @@
 // not a rewrite — same providers, same flow.
 
 import { useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Mail, Check, Loader2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
@@ -30,17 +31,22 @@ function MicrosoftLogo() {
 }
 
 export default function Login() {
+  const location = useLocation()
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   const [loading, setLoading] = useState<null | 'google' | 'azure' | 'email'>(null)
   const [error, setError] = useState('')
+  const from = typeof (location.state as { from?: unknown } | null)?.from === 'string'
+    ? (location.state as { from: string }).from
+    : '/'
+  const redirectTo = `${window.location.origin}${from}`
 
   async function oauth(provider: 'google' | 'azure') {
     setError(''); setLoading(provider)
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: window.location.origin,
+        redirectTo,
         scopes: provider === 'azure' ? 'email profile offline_access' : 'email profile',
       },
     })
@@ -54,7 +60,7 @@ export default function Login() {
     setError(''); setLoading('email')
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: redirectTo },
     })
     if (error) { setError(error.message); setLoading(null) }
     else { setSent(true); setLoading(null) }
