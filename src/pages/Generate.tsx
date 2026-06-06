@@ -99,6 +99,7 @@ function parsePublisherMessage(content: string): {
 }
 
 function PublisherBubble({ message }: { message: Message }) {
+  const { activeProject } = useProject()
   const dot = 'var(--dot-emerald)'
   if (message.isStreaming) {
     return (
@@ -134,6 +135,9 @@ function PublisherBubble({ message }: { message: Message }) {
 
   const { meta, status, postId } = parsePublisherMessage(message.content)
   const hasIssues = status.includes('⚠️')
+  const reviewHref = postId
+    ? activeProject?.slug ? `/p/${activeProject.slug}/review/${postId}` : `/review/${postId}`
+    : null
 
   return (
     <div className="flex gap-3 items-start">
@@ -179,9 +183,9 @@ function PublisherBubble({ message }: { message: Message }) {
                 {status}
               </div>
             )}
-            {postId && (
+            {postId && reviewHref && (
               <p className="text-[12px]" style={{ color: 'var(--ghost)' }}>
-                Post ID: {postId} · <a href={`/review/${postId}`} className="hover:underline" style={{ color: 'var(--ink-quiet)' }}>Go to Review →</a>
+                Post ID: {postId} · <a href={reviewHref} className="hover:underline" style={{ color: 'var(--ink-quiet)' }}>Go to Review →</a>
               </p>
             )}
           </div>

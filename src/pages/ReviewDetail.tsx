@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { PublishToConnectedBlog } from '../components/PublishToConnectedBlog'
 import { PlatformPostPreview } from '../components/PlatformPostPreview'
+import { useProject } from '../lib/projectContext'
 
 const APPROVAL_WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approval-webhook`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -54,6 +55,7 @@ type ActionState = 'idle' | 'saving' | 'done'
 
 export default function ReviewDetail() {
   const { id } = useParams<{ id: string }>()
+  const { activeProject } = useProject()
   const [post, setPost] = useState<Post | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -67,6 +69,7 @@ export default function ReviewDetail() {
   const [refineText, setRefineText] = useState('')
   const [refining, setRefining] = useState(false)
   const [refineStatus, setRefineStatus] = useState('')
+  const reviewQueuePath = activeProject?.slug ? `/p/${activeProject.slug}/review` : '/review'
 
   useEffect(() => {
     if (!id) {
@@ -289,7 +292,7 @@ export default function ReviewDetail() {
   if (error || !post) {
     return (
       <div className="max-w-2xl mx-auto py-12">
-        <Link to="/review" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-6">
+        <Link to={reviewQueuePath} className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-6">
           <ArrowLeft className="w-4 h-4" /> Back to queue
         </Link>
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-6 text-sm">{error || 'Post not found'}</div>
@@ -317,7 +320,7 @@ export default function ReviewDetail() {
 
   return (
     <div className="max-w-2xl mx-auto pb-12">
-      <Link to="/review" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-4">
+      <Link to={reviewQueuePath} className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-4">
         <ArrowLeft className="w-4 h-4" /> Back to queue
       </Link>
 

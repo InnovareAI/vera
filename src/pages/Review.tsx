@@ -24,7 +24,7 @@ type MediaFrame = { url: string; text?: string | null }
 const TAB_DROP_ACTION: Record<StatusTab, { kind: 'webhook' | 'direct' | 'forbidden'; value?: string; action?: string }> = {
   'Pending Review': { kind: 'direct',   value: 'Pending Review' },
   'Approved':       { kind: 'webhook',  action: 'approved' },
-  'Scheduled':      { kind: 'direct',   value: 'Scheduled' },
+  'Scheduled':      { kind: 'forbidden' },                       // needs a date; use Calendar
   'Posted':         { kind: 'forbidden' },                       // needs posted_url; use detail page
   'Rejected':       { kind: 'webhook',  action: 'rejected' },
 }
@@ -33,10 +33,11 @@ const isPending = (s: string) => ['Pending Review', 'Draft', 'pending', 'changes
 const isPosted = (p: Post) => !!p.posted_at
 
 function tabFor(post: Post): StatusTab {
+  const status = (post.status ?? '').toLowerCase()
   if (isPosted(post)) return 'Posted'
-  if (post.status === 'Rejected' || post.status === 'rejected') return 'Rejected'
-  if (post.status === 'Scheduled') return 'Scheduled'
-  if (post.status === 'Approved' || post.status === 'approved') return 'Approved'
+  if (status === 'rejected') return 'Rejected'
+  if (status === 'scheduled' || ((post.scheduled_at || post.publish_date) && status === 'approved')) return 'Scheduled'
+  if (status === 'approved') return 'Approved'
   return 'Pending Review'
 }
 
@@ -151,7 +152,9 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
   async function moveToTab(postId: string, targetTab: StatusTab) {
     const rule = TAB_DROP_ACTION[targetTab]
     if (rule.kind === 'forbidden') {
-      alert(`Can't drop here — "Posted" needs a live URL. Use the post detail page to mark it posted.`)
+      alert(targetTab === 'Scheduled'
+        ? `Scheduling needs a date. Use the Calendar page to place this post.`
+        : `Can't drop here — "Posted" needs a live URL. Use the post detail page to mark it posted.`)
       return
     }
     setSaving(postId)
@@ -196,6 +199,8 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
     acc[tab] = scoped.filter(p => tabFor(p) === tab).length
     return acc
   }, {} as Record<StatusTab, number>)
+  const postReviewPath = (postId: string) => activeProject?.slug ? `/p/${activeProject.slug}/review/${postId}` : `/review/${postId}`
+  const calendarPath = activeProject?.slug ? `/p/${activeProject.slug}/calendar` : '/calendar'
 
   return (
     <div className="p-6 h-full flex flex-col">
@@ -293,13 +298,15 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
           saving={saving}
           moveToTab={moveToTab}
           campaignsById={campaignsById}
+          postReviewPath={postReviewPath}
+          calendarPath={calendarPath}
         />
       )}
       {view === 'calendar' && (
         <CalendarView
           posts={scoped}
           loading={loading}
-          onOpen={(p) => navigate(`/review/${p.id}`)}
+          onOpen={(p) => navigate(postReviewPath(p.id))}
         />
       )}
       {view === 'board' && (
@@ -311,7 +318,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
           setDragOverTab={setDragOverTab}
           campaignsById={campaignsById}
           onMove={moveToTab}
-          onOpen={(p) => navigate(`/review/${p.id}`)}
+          onOpen={(p) => navigate(postReviewPath(p.id))}
         />
       )}
     </div>
@@ -320,7 +327,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
 
 // ─── List view (existing UX, refactored) ─────────────────────────────────
 function ListView({
-  loading, activeTab, setActiveTab, tabCounts, filtered, selected, setSelected, saving, moveToTab, campaignsById,
+  loading, activeTab, setActiveTab, tabCounts, filtered, selected, setSelected, saving, moveToTab, campaignsById, postReviewPath, calendarPath,
 }: {
   posts: Post[]
   loading: boolean
@@ -333,6 +340,8 @@ function ListView({
   saving: string | null
   moveToTab: (postId: string, target: StatusTab) => void | Promise<void>
   campaignsById: Map<string, Campaign>
+  postReviewPath: (postId: string) => string
+  calendarPath: string
 }) {
   return (
     <div className="flex flex-1 gap-6 min-h-0">
@@ -424,7 +433,7 @@ function ListView({
       {/* Detail side panel */}
       <div className="w-96 flex-shrink-0">
         {selected ? (
-          <PostDetailPanel post={selected} onClose={() => setSelected(null)} saving={saving} onMove={moveToTab} />
+          <PostDetailPanel post={selected} onClose={() => setSelected(null)} saving={saving} onMove={moveToTab} detailPath={postReviewPath(selected.id)} calendarPath={calendarPath} />
         ) : (
           <div className="p-8 flex flex-col items-center justify-center text-center h-64"
             style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}>
@@ -642,13 +651,17 @@ function BoardCard({ post, campaign, onOpen, draggable }: { post: Post; campaign
 
 // ─── Detail side panel (kept from list view; mostly unchanged for now) ────
 function PostDetailPanel({
-  post, onClose, saving, onMove,
+  post, onClose, saving, onMove, detailPath, calendarPath,
 }: {
   post: Post
   onClose: () => void
   saving: string | null
   onMove: (postId: string, target: StatusTab) => void | Promise<void>
+  detailPath: string
+  calendarPath: string
 }) {
+  const status = (post.status ?? '').toLowerCase()
+  const isDateScheduled = !!(post.scheduled_at || post.publish_date)
   return (
     <div className="sticky top-0 p-5"
       style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}>
@@ -699,14 +712,14 @@ function PostDetailPanel({
             ✕ Reject
           </button>
         </>)}
-        {post.status === 'Approved' && !isPosted(post) && (
-          <button onClick={() => onMove(post.id, 'Scheduled')} disabled={saving === post.id}
-            className="w-full py-2 text-[13px] font-medium transition-colors disabled:opacity-50"
+        {status === 'approved' && !isPosted(post) && !isDateScheduled && (
+          <a href={calendarPath}
+            className="w-full py-2 text-[13px] font-medium text-center transition-colors"
             style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '3px' }}>
-            📅 Schedule
-          </button>
+            Schedule in calendar
+          </a>
         )}
-        <a href={`/review/${post.id}`}
+        <a href={detailPath}
           className="w-full py-2 text-[13px] text-center transition-colors"
           style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
           Open detail →

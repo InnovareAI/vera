@@ -20,6 +20,9 @@ export default function Library() {
   const [copied, setCopied] = useState(false)
   const { activeOrg } = useOrg()
   const { activeProject } = useProject()
+  const reviewCampaignPath = (campaignId: string) => activeProject?.slug
+    ? `/p/${activeProject.slug}/review?campaign=${campaignId}`
+    : `/review?campaign=${campaignId}`
 
   const platforms = ['All', 'LinkedIn', 'Twitter', 'Instagram', 'Quora', 'Facebook']
   const statuses = ['All', 'Published', 'Approved', 'Scheduled', 'Pending Review', 'Draft', 'Rejected']
@@ -91,8 +94,9 @@ export default function Library() {
       ].filter(Boolean) as string[]}
       primaryAudience={primaryAudience ?? null}
       activeCampaign={activeCampaign ?? null}
+      reviewCampaignPath={reviewCampaignPath}
     />,
-    [posts.length, filtered.length, campaigns.length, audiences.length, search, platformFilter, statusFilter, primaryAudience?.id, activeCampaign?.id],
+    [posts.length, filtered.length, campaigns.length, audiences.length, search, platformFilter, statusFilter, primaryAudience?.id, activeCampaign?.id, activeProject?.slug],
   )
 
   return (
@@ -177,7 +181,7 @@ export default function Library() {
                 return (
                   <Link
                     key={c.id}
-                    to={`/review?campaign=${c.id}`}
+                    to={reviewCampaignPath(c.id)}
                     className="block p-4 transition-all hover:shadow-sm relative"
                     style={{
                       background: 'var(--paper)',
@@ -310,7 +314,7 @@ export default function Library() {
 // is reference info.
 function LibraryRightRail({
   total, filtered, campaignsCount, audiencesCount, activeFilters,
-  primaryAudience, activeCampaign,
+  primaryAudience, activeCampaign, reviewCampaignPath,
 }: {
   total: number
   filtered: number
@@ -319,6 +323,7 @@ function LibraryRightRail({
   activeFilters: string[]
   primaryAudience: Audience | null
   activeCampaign: Campaign | null
+  reviewCampaignPath: (campaignId: string) => string
 }) {
   return (
     <div className="flex flex-col gap-6 py-6 pr-5 pl-1">
@@ -370,7 +375,7 @@ function LibraryRightRail({
             Active campaign
           </p>
           <Link
-            to={`/review?campaign=${activeCampaign.id}`}
+            to={reviewCampaignPath(activeCampaign.id)}
             className="block text-[12.5px] hover:opacity-80 transition-opacity"
             style={{ color: 'var(--ink-quiet)' }}
           >

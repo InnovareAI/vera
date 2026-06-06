@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BarChart3, CalendarDays, ChartGantt, ChevronLeft, ChevronRight, Clock, Columns3, Inbox, KanbanSquare, ListChecks, MapPin, Share2, Target } from 'lucide-react'
+import { AlertTriangle, BarChart3, CalendarDays, CalendarPlus, ChartGantt, Check, ChevronLeft, ChevronRight, Clock, Columns3, Filter, Inbox, KanbanSquare, ListChecks, MapPin, Plus, RotateCcw, Share2, Target, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Campaign, Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -11,6 +11,12 @@ import { color, radius, type as t } from '../design'
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 type CalendarGridMode = 'day' | 'week' | 'month'
 type CalendarMode = 'calendar' | 'agenda' | 'gantt' | 'kanban' | 'platform' | 'workload' | 'planner'
+type FilterState = {
+  platform: string
+  status: string
+  campaign: string
+  owner: string
+}
 type DatedPost = { post: Post; date: Date }
 type GanttRow = {
   id: string
@@ -57,6 +63,15 @@ const PLATFORM_LANES = [
 
 const DAILY_POST_CAPACITY = 4
 const DAILY_REVIEW_CAPACITY = 3
+const DRAG_POST_MIME = 'application/x-vera-post-id'
+const DANGER_TINT = 'color-mix(in srgb, var(--danger) 10%, var(--surface))'
+const DANGER_LINE = 'color-mix(in srgb, var(--danger) 42%, var(--line))'
+const DEFAULT_FILTERS: FilterState = {
+  platform: 'all',
+  status: 'all',
+  campaign: 'all',
+  owner: 'all',
+}
 type KanbanStatus = (typeof KANBAN_COLUMNS)[number]['id']
 type PlatformLaneId = (typeof PLATFORM_LANES)[number]['id']
 
@@ -72,6 +87,11 @@ export default function Calendar() {
   const [selectedDate, setSelectedDate] = useState<string>(() => isoDay(today))
   const [viewMode, setViewMode] = useState<CalendarMode>('calendar')
   const [calendarGridMode, setCalendarGridMode] = useState<CalendarGridMode>('month')
+  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
+  const [savingPostId, setSavingPostId] = useState<string | null>(null)
+  const [scheduleError, setScheduleError] = useState<string | null>(null)
+  const [dayDrawerOpen, setDayDrawerOpen] = useState(true)
+  const calendarPreferenceKey = `vera-calendar-view:${activeProject?.id ?? activeOrg?.id ?? 'global'}`
 
   useEffect(() => {
     if (!activeOrg?.id) {
@@ -109,13 +129,43 @@ export default function Calendar() {
       .finally(() => setLoading(false))
   }, [activeOrg?.id, activeProject?.id])
 
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(calendarPreferenceKey)
+      if (!saved) return
+      const parsed = JSON.parse(saved) as { viewMode?: CalendarMode; calendarGridMode?: CalendarGridMode }
+      if (parsed.viewMode && VIEW_MODES.some(mode => mode.id === parsed.viewMode)) setViewMode(parsed.viewMode)
+      if (parsed.calendarGridMode && CALENDAR_GRID_MODES.some(mode => mode.id === parsed.calendarGridMode)) setCalendarGridMode(parsed.calendarGridMode)
+    } catch {
+      // Ignore stale preference payloads.
+    }
+  }, [calendarPreferenceKey])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(calendarPreferenceKey, JSON.stringify({ viewMode, calendarGridMode }))
+    } catch {
+      // Preferences are optional.
+    }
+  }, [calendarPreferenceKey, viewMode, calendarGridMode])
+
   const month = viewDate.getMonth()
   const year = viewDate.getFullYear()
   const monthLabel = viewDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
   const campaignsById = new Map(campaigns.map(campaign => [campaign.id, campaign]))
   const cells = monthCells(year, month)
+  const platformOptions = uniqueValues(posts.map(post => platformBucket(post.channel)))
+  const ownerOptions = uniqueValues(posts.map(postOwner))
+  const filteredPosts = posts.filter(post => {
+    if (filters.platform !== 'all' && platformBucket(post.channel) !== filters.platform) return false
+    if (filters.status !== 'all' && postStatusBucket(post) !== filters.status) return false
+    if (filters.campaign === 'none' && post.campaign_id) return false
+    if (filters.campaign !== 'all' && filters.campaign !== 'none' && post.campaign_id !== filters.campaign) return false
+    if (filters.owner !== 'all' && postOwner(post) !== filters.owner) return false
+    return true
+  })
 
-  const datedPosts = posts
+  const datedPosts = filteredPosts
     .map(post => ({ post, date: targetDate(post) }))
     .filter((item): item is DatedPost => !!item.date)
     .sort((a, b) => a.date.getTime() - b.date.getTime())
@@ -128,8 +178,16 @@ export default function Calendar() {
   }
 
   const monthPostCount = datedPosts.filter(item => item.date.getFullYear() === year && item.date.getMonth() === month).length
-  const readyToSchedule = posts.filter(post => isApproved(post) && !targetDate(post))
+  const unscheduledPosts = filteredPosts.filter(post => !targetDate(post))
+  const readyToSchedule = unscheduledPosts.filter(post => isApproved(post))
   const selectedPosts = postsByDay.get(selectedDate) ?? []
+  const selectedDayCapacity = selectedPosts.length
+  const overCapacityDays = Array.from(postsByDay.entries()).filter(([day, dayPosts]) => {
+    const date = parseIsoDay(day)
+    return date.getFullYear() === year && date.getMonth() === month && dayPosts.length > DAILY_POST_CAPACITY
+  })
+  const reviewQueueCount = filteredPosts.filter(post => postStatusBucket(post) === 'review').length
+  const activeFilterCount = Object.values(filters).filter(value => value !== 'all').length
   const selectedDateObject = parseIsoDay(selectedDate)
   const weekStart = mondayOf(selectedDateObject)
   const weekDays = Array.from({ length: 7 }, (_, index) => {
@@ -175,6 +233,117 @@ export default function Calendar() {
     else navigate(`/review/${post.id}`)
   }
 
+  function createNewPost() {
+    if (activeProject?.slug) navigate(`/p/${activeProject.slug}/vera`)
+    else navigate('/vera')
+  }
+
+  function selectDate(date: string) {
+    setSelectedDate(date)
+    setDayDrawerOpen(true)
+  }
+
+  function resetFilters() {
+    setFilters(DEFAULT_FILTERS)
+  }
+
+  function draggedPostId(event: React.DragEvent) {
+    return event.dataTransfer.getData(DRAG_POST_MIME) || event.dataTransfer.getData('text/plain')
+  }
+
+  async function schedulePost(postId: string, day: string, hour = 9) {
+    const scheduledAt = scheduledIsoForDay(day, hour)
+    setSavingPostId(postId)
+    setScheduleError(null)
+    try {
+      const { data, error } = await supabase
+        .from('content_posts')
+        .update({ scheduled_at: scheduledAt, publish_date: day })
+        .eq('id', postId)
+        .select()
+        .single()
+
+      if (error) throw error
+      if (!data) throw new Error('No post was updated. Check access for this client space.')
+
+      setPosts(prev => prev.map(post => post.id === postId ? data as Post : post))
+      setSelectedDate(day)
+      setDayDrawerOpen(true)
+    } catch (error) {
+      setScheduleError(`Could not schedule post: ${errorMessage(error, 'Unknown scheduling error')}`)
+    } finally {
+      setSavingPostId(null)
+    }
+  }
+
+  async function unschedulePost(postId: string) {
+    setSavingPostId(postId)
+    setScheduleError(null)
+    try {
+      const { data, error } = await supabase
+        .from('content_posts')
+        .update({ scheduled_at: null, publish_date: null })
+        .eq('id', postId)
+        .select()
+        .single()
+
+      if (error) throw error
+      if (!data) throw new Error('No post was updated. Check access for this client space.')
+
+      setPosts(prev => prev.map(post => post.id === postId ? data as Post : post))
+    } catch (error) {
+      setScheduleError(`Could not unschedule post: ${errorMessage(error, 'Unknown scheduling error')}`)
+    } finally {
+      setSavingPostId(null)
+    }
+  }
+
+  async function updatePostStatus(postId: string, status: string) {
+    setSavingPostId(postId)
+    setScheduleError(null)
+    try {
+      const { data, error } = await supabase
+        .from('content_posts')
+        .update({ status })
+        .eq('id', postId)
+        .select()
+        .single()
+
+      if (error) throw error
+      if (!data) throw new Error('No post was updated. Check access for this client space.')
+
+      setPosts(prev => prev.map(post => post.id === postId ? data as Post : post))
+    } catch (error) {
+      setScheduleError(`Could not update status: ${errorMessage(error, 'Unknown status error')}`)
+    } finally {
+      setSavingPostId(null)
+    }
+  }
+
+  function postCardActions(post: Post) {
+    const bucket = postStatusBucket(post)
+    const disabled = savingPostId === post.id
+    return (
+      <>
+        {bucket === 'review' && (
+          <CardActionButton disabled={disabled} icon={<Check size={12} />} label="Approve" onClick={() => updatePostStatus(post.id, 'approved')} />
+        )}
+        {bucket === 'approved' && !targetDate(post) && (
+          <CardActionButton disabled={disabled} icon={<CalendarPlus size={12} />} label="Schedule" onClick={() => schedulePost(post.id, selectedDate)} />
+        )}
+        {targetDate(post) && bucket !== 'posted' && (
+          <CardActionButton disabled={disabled} icon={<RotateCcw size={12} />} label="Unschedule" onClick={() => unschedulePost(post.id)} />
+        )}
+      </>
+    )
+  }
+
+  function handleDropOnDay(event: React.DragEvent, day: string, hour = 9) {
+    event.preventDefault()
+    const postId = draggedPostId(event)
+    if (postId) void schedulePost(postId, day, hour)
+  }
+
   return (
     <div className="p-6 h-full flex flex-col min-h-0">
       <div className="flex items-start justify-between gap-5 mb-5">
@@ -182,12 +351,21 @@ export default function Calendar() {
           <h1 className="text-[28px] leading-tight tracking-tight font-semibold" style={{ color: color.ink }}>
             Content calendar
           </h1>
-          <p className="text-[13px] mt-1" style={{ color: color.ghost }}>
-            {monthPostCount} dated posts this month · {readyToSchedule.length} approved without a date
-          </p>
+          <div className="flex flex-wrap items-center gap-2 mt-1 text-[13px]" style={{ color: color.ghost }}>
+            <span>{monthPostCount} dated posts this month</span>
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 font-medium" style={{ color: color.danger, background: DANGER_TINT, border: `1px solid ${DANGER_LINE}`, borderRadius: radius.pill }}>
+              <AlertTriangle size={12} />
+              {unscheduledPosts.length} unscheduled
+            </span>
+            <span>{filteredPosts.length} visible</span>
+          </div>
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-2">
+            <button onClick={createNewPost} className="h-9 px-3 text-[13px] font-medium inline-flex items-center gap-2 transition-colors hover:bg-[var(--fog)]" style={buttonStyle}>
+              <Plus size={14} />
+              New post
+            </button>
             <button onClick={() => movePeriod(-1)} title="Previous period" className="w-9 h-9 inline-flex items-center justify-center transition-colors hover:bg-[var(--fog)]" style={iconButtonStyle}>
               <ChevronLeft size={16} />
             </button>
@@ -200,6 +378,24 @@ export default function Calendar() {
           </div>
         </div>
       </div>
+
+      <CalendarFilters
+        filters={filters}
+        campaigns={campaigns}
+        platformOptions={platformOptions}
+        ownerOptions={ownerOptions}
+        activeFilterCount={activeFilterCount}
+        onChange={setFilters}
+        onReset={resetFilters}
+      />
+
+      <CalendarWarnings
+        scheduleError={scheduleError}
+        overCapacityDays={overCapacityDays}
+        reviewQueueCount={reviewQueueCount}
+        filteredTotal={filteredPosts.length}
+        total={posts.length}
+      />
 
       <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-5 min-h-0 flex-1">
         <section className="min-h-0 flex flex-col" style={panelStyle}>
@@ -258,7 +454,8 @@ export default function Calendar() {
               postsByDay={postsByDay}
               today={today}
               selectedDate={selectedDate}
-              onSelectDate={setSelectedDate}
+              onSelectDate={selectDate}
+              onDropPost={handleDropOnDay}
             />
           )}
           {viewMode === 'calendar' && calendarGridMode === 'day' && (
@@ -267,6 +464,8 @@ export default function Calendar() {
               posts={selectedPosts}
               campaignsById={campaignsById}
               onOpen={openPost}
+              onDropPost={handleDropOnDay}
+              renderActions={postCardActions}
             />
           )}
           {viewMode === 'calendar' && calendarGridMode === 'week' && (
@@ -276,8 +475,10 @@ export default function Calendar() {
               campaignsById={campaignsById}
               today={today}
               selectedDate={selectedDate}
-              onSelectDate={setSelectedDate}
+              onSelectDate={selectDate}
               onOpen={openPost}
+              onDropPost={handleDropOnDay}
+              renderActions={postCardActions}
             />
           )}
           {viewMode === 'agenda' && (
@@ -299,16 +500,18 @@ export default function Calendar() {
           )}
           {viewMode === 'kanban' && (
             <KanbanView
-              posts={posts}
+              posts={filteredPosts}
               campaignsById={campaignsById}
               onOpen={openPost}
+              renderActions={postCardActions}
             />
           )}
           {viewMode === 'platform' && (
             <PlatformView
-              posts={posts}
+              posts={filteredPosts}
               campaignsById={campaignsById}
               onOpen={openPost}
+              renderActions={postCardActions}
             />
           )}
           {viewMode === 'workload' && (
@@ -316,58 +519,49 @@ export default function Calendar() {
               year={year}
               month={month}
               postsByDay={postsByDay}
-              posts={posts}
+              posts={filteredPosts}
               selectedDate={selectedDate}
-              onSelectDate={setSelectedDate}
+              onSelectDate={selectDate}
             />
           )}
           {viewMode === 'planner' && (
             <CampaignPlannerView
               campaigns={campaigns}
-              posts={posts}
+              posts={filteredPosts}
               datedPosts={datedPosts}
             />
           )}
         </section>
 
         <aside className="min-h-0 flex flex-col gap-4">
-          <section style={panelStyle}>
-            <div className="px-4 py-3" style={{ borderBottom: `1px solid ${color.line}` }}>
-              <div className="text-[12px] uppercase font-semibold" style={{ color: color.ghost, letterSpacing: t.letterSpacing.wide }}>Selected day</div>
-              <h3 className="text-[18px] font-semibold mt-1" style={{ color: color.ink }}>
-                {selectedDateObject.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
-              </h3>
-            </div>
-            <div className="p-3 max-h-[420px] overflow-auto">
-              {selectedPosts.length === 0 ? (
-                <EmptyCalendarState icon={<Inbox size={18} />} text="No dated posts on this day." />
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {selectedPosts.map(post => (
-                    <CalendarPostCard key={post.id} post={post} campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null} onOpen={() => openPost(post)} />
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
+          {dayDrawerOpen && (
+            <DayDrawer
+              date={selectedDateObject}
+              posts={selectedPosts}
+              campaignsById={campaignsById}
+              capacity={selectedDayCapacity}
+              onClose={() => setDayDrawerOpen(false)}
+              onOpen={openPost}
+              onDropPost={handleDropOnDay}
+              renderActions={postCardActions}
+            />
+          )}
 
-          <section style={panelStyle}>
-            <div className="px-4 py-3" style={{ borderBottom: `1px solid ${color.line}` }}>
-              <div className="text-[12px] uppercase font-semibold" style={{ color: color.ghost, letterSpacing: t.letterSpacing.wide }}>Ready to schedule</div>
-              <p className="text-[12px] mt-1" style={{ color: color.ghost }}>Approved posts without a date.</p>
-            </div>
-            <div className="p-3 max-h-[300px] overflow-auto">
-              {readyToSchedule.length === 0 ? (
-                <EmptyCalendarState icon={<MapPin size={18} />} text="No approved posts waiting for a date." />
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {readyToSchedule.map(post => (
-                    <CalendarPostCard key={post.id} post={post} campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null} onOpen={() => openPost(post)} />
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
+          <UnscheduledTray
+            posts={unscheduledPosts}
+            readyCount={readyToSchedule.length}
+            campaignsById={campaignsById}
+            onOpen={openPost}
+            onDragStart={(event, post) => {
+              event.dataTransfer.setData(DRAG_POST_MIME, post.id)
+              event.dataTransfer.setData('text/plain', post.id)
+              event.dataTransfer.effectAllowed = 'move'
+            }}
+            renderActions={postCardActions}
+            onCreate={createNewPost}
+          />
+
+          <CampaignLegend campaigns={campaigns} />
         </aside>
       </div>
     </div>
@@ -380,12 +574,14 @@ function MonthGrid({
   today,
   selectedDate,
   onSelectDate,
+  onDropPost,
 }: {
   cells: Array<Date | null>
   postsByDay: Map<string, Post[]>
   today: Date
   selectedDate: string
   onSelectDate: (date: string) => void
+  onDropPost: (event: React.DragEvent, day: string) => void
 }) {
   return (
     <>
@@ -407,6 +603,11 @@ function MonthGrid({
             <button
               key={key}
               onClick={() => onSelectDate(key)}
+              onDragOver={event => {
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'move'
+              }}
+              onDrop={event => onDropPost(event, key)}
               className="min-h-[132px] p-2 text-left transition-colors hover:bg-[var(--paper-2)]"
               style={{
                 ...dayCellStyle,
@@ -440,6 +641,11 @@ function MonthGrid({
                 {dayPosts.length > 3 && (
                   <span className="text-[11px]" style={{ color: color.ghost }}>+{dayPosts.length - 3} more</span>
                 )}
+                {dayPosts.length > DAILY_POST_CAPACITY && (
+                  <span className="text-[10px] inline-flex items-center gap-1 mt-1" style={{ color: color.warn }}>
+                    <AlertTriangle size={10} /> Heavy day
+                  </span>
+                )}
               </div>
             </button>
           )
@@ -454,11 +660,15 @@ function DayView({
   posts,
   campaignsById,
   onOpen,
+  onDropPost,
+  renderActions,
 }: {
   date: Date
   posts: Post[]
   campaignsById: Map<string, Campaign>
   onOpen: (post: Post) => void
+  onDropPost: (event: React.DragEvent, day: string, hour?: number) => void
+  renderActions: (post: Post) => React.ReactNode
 }) {
   const timedPosts = posts
     .map(post => ({ post, date: targetDate(post) }))
@@ -485,7 +695,14 @@ function DayView({
 
       <div className="p-4">
         {timedPosts.length === 0 ? (
-          <div className="min-h-[420px] flex items-center justify-center">
+          <div
+            onDragOver={event => {
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'move'
+            }}
+            onDrop={event => onDropPost(event, isoDay(date))}
+            className="min-h-[420px] flex items-center justify-center"
+          >
             <EmptyCalendarState icon={<Inbox size={20} />} text="No dated posts on this day." />
           </div>
         ) : (
@@ -502,6 +719,7 @@ function DayView({
                       post={item.post}
                       campaign={item.post.campaign_id ? campaignsById.get(item.post.campaign_id) ?? null : null}
                       onOpen={() => onOpen(item.post)}
+                      actions={renderActions(item.post)}
                     />
                   ))}
                 </div>
@@ -516,7 +734,14 @@ function DayView({
                     <div className="px-3 py-3 text-[11px] text-right" style={{ color: color.ghost, background: color.paper2, borderRight: `1px solid ${color.line}` }}>
                       {formatHour(hour)}
                     </div>
-                    <div className="p-2 flex flex-col gap-2">
+                    <div
+                      onDragOver={event => {
+                        event.preventDefault()
+                        event.dataTransfer.dropEffect = 'move'
+                      }}
+                      onDrop={event => onDropPost(event, isoDay(date), hour)}
+                      className="p-2 flex flex-col gap-2"
+                    >
                       {postsInHour.length === 0 ? (
                         <span className="text-[11px] py-1" style={{ color: color.faint }}>Open</span>
                       ) : postsInHour.map(item => (
@@ -525,6 +750,7 @@ function DayView({
                           post={item.post}
                           campaign={item.post.campaign_id ? campaignsById.get(item.post.campaign_id) ?? null : null}
                           onOpen={() => onOpen(item.post)}
+                          actions={renderActions(item.post)}
                         />
                       ))}
                     </div>
@@ -547,6 +773,8 @@ function WeekGrid({
   selectedDate,
   onSelectDate,
   onOpen,
+  onDropPost,
+  renderActions,
 }: {
   days: Date[]
   postsByDay: Map<string, Post[]>
@@ -555,6 +783,8 @@ function WeekGrid({
   selectedDate: string
   onSelectDate: (date: string) => void
   onOpen: (post: Post) => void
+  onDropPost: (event: React.DragEvent, day: string) => void
+  renderActions: (post: Post) => React.ReactNode
 }) {
   return (
     <div className="grid grid-cols-7 min-h-0 flex-1">
@@ -564,7 +794,16 @@ function WeekGrid({
         const isToday = key === isoDay(today)
         const isSelected = key === selectedDate
         return (
-          <div key={key} className="min-h-0 flex flex-col" style={{ ...dayCellStyle, background: isSelected ? 'var(--accent-tint)' : color.surface }}>
+          <div
+            key={key}
+            onDragOver={event => {
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'move'
+            }}
+            onDrop={event => onDropPost(event, key)}
+            className="min-h-0 flex flex-col"
+            style={{ ...dayCellStyle, background: isSelected ? 'var(--accent-tint)' : color.surface }}
+          >
             <button onClick={() => onSelectDate(key)} className="text-left px-3 py-3 transition-colors hover:bg-[var(--paper-2)]" style={{ borderBottom: `1px solid ${color.line}` }}>
               <div className="text-[11px] uppercase font-semibold" style={{ color: color.ghost, letterSpacing: t.letterSpacing.wide }}>
                 {day.toLocaleDateString(undefined, { weekday: 'short' })}
@@ -582,6 +821,7 @@ function WeekGrid({
                   post={post}
                   campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
                   onOpen={() => onOpen(post)}
+                  actions={renderActions(post)}
                 />
               ))}
             </div>
@@ -785,10 +1025,12 @@ function KanbanView({
   posts,
   campaignsById,
   onOpen,
+  renderActions,
 }: {
   posts: Post[]
   campaignsById: Map<string, Campaign>
   onOpen: (post: Post) => void
+  renderActions: (post: Post) => React.ReactNode
 }) {
   const columns = KANBAN_COLUMNS.map(column => ({
     ...column,
@@ -818,6 +1060,7 @@ function KanbanView({
                   post={post}
                   campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
                   onOpen={() => onOpen(post)}
+                  actions={renderActions(post)}
                 />
               ))}
             </div>
@@ -832,10 +1075,12 @@ function PlatformView({
   posts,
   campaignsById,
   onOpen,
+  renderActions,
 }: {
   posts: Post[]
   campaignsById: Map<string, Campaign>
   onOpen: (post: Post) => void
+  renderActions: (post: Post) => React.ReactNode
 }) {
   const lanes = PLATFORM_LANES.map(lane => ({
     ...lane,
@@ -865,6 +1110,7 @@ function PlatformView({
                   post={post}
                   campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
                   onOpen={() => onOpen(post)}
+                  actions={renderActions(post)}
                 />
               ))}
             </div>
@@ -1040,25 +1286,349 @@ function CalendarPill({ post }: { post: Post }) {
   )
 }
 
-function CalendarPostCard({ post, campaign, onOpen }: { post: Post; campaign: Campaign | null; onOpen: () => void }) {
+function CalendarPostCard({
+  post,
+  campaign,
+  onOpen,
+  actions,
+  draggable,
+  onDragStart,
+}: {
+  post: Post
+  campaign: Campaign | null
+  onOpen: () => void
+  actions?: React.ReactNode
+  draggable?: boolean
+  onDragStart?: (event: React.DragEvent) => void
+}) {
+  const date = targetDate(post)
+  const isUnscheduled = !date
+  const isUnscheduledWarning = isUnscheduled && postStatusBucket(post) !== 'approved'
+
   return (
-    <button onClick={onOpen} className="w-full text-left p-3 transition-colors hover:bg-[var(--paper-2)]" style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
-      <div className="flex items-center gap-2 mb-2">
-        <PlatformChip channel={post.channel} />
-        <StatusChip status={displayStatus(post)} />
-      </div>
-      <div className="text-[13px] font-semibold leading-snug" style={{ color: color.ink }}>
-        {post.title || 'Untitled post'}
-      </div>
-      <div className="text-[12px] mt-1 line-clamp-2" style={{ color: color.ink2 }}>
-        {post.copy}
-      </div>
-      <div className="flex items-center gap-1.5 mt-2 text-[11px]" style={{ color: color.ghost }}>
-        <Clock size={12} />
-        <span>{targetDate(post) ? timeLabel(post) : 'No date set'}</span>
-        {campaign && <span className="truncate">· {campaign.name}</span>}
-      </div>
+    <div
+      draggable={draggable}
+      onDragStart={onDragStart}
+      className="w-full p-3 transition-colors hover:bg-[var(--paper-2)]"
+      style={{
+        background: isUnscheduledWarning ? DANGER_TINT : color.surface,
+        border: `1px solid ${isUnscheduledWarning ? DANGER_LINE : color.line}`,
+        borderLeft: isUnscheduledWarning ? `3px solid ${color.danger}` : `1px solid ${color.line}`,
+        borderRadius: radius.md,
+        cursor: draggable ? 'grab' : 'default',
+      }}
+    >
+      <button onClick={onOpen} className="w-full text-left" style={{ background: 'transparent', border: 'none', padding: 0, color: 'inherit', cursor: 'pointer' }}>
+        <div className="flex items-center gap-2 mb-2">
+          <PlatformChip channel={post.channel} />
+          <StatusChip status={displayStatus(post)} />
+        </div>
+        <div className="text-[13px] font-semibold leading-snug" style={{ color: color.ink }}>
+          {post.title || 'Untitled post'}
+        </div>
+        <div className="text-[12px] mt-1 line-clamp-2" style={{ color: color.ink2 }}>
+          {post.copy}
+        </div>
+        <div className="flex items-center gap-1.5 mt-2 text-[11px]" style={{ color: isUnscheduledWarning ? color.danger : color.ghost }}>
+          {isUnscheduledWarning ? <AlertTriangle size={12} /> : <Clock size={12} />}
+          <span>{date ? timeLabel(post) : 'Unscheduled'}</span>
+          {campaign && <span className="truncate">· {campaign.name}</span>}
+        </div>
+      </button>
+      {actions && (
+        <div className="flex flex-wrap items-center gap-1.5 mt-3">
+          {actions}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CardActionButton({ disabled, icon, label, onClick }: { disabled?: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={event => {
+        event.preventDefault()
+        event.stopPropagation()
+        onClick()
+      }}
+      className="h-7 px-2 inline-flex items-center gap-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--fog)] disabled:opacity-50"
+      style={{ background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.sm, color: color.ink2 }}
+    >
+      {icon}
+      <span>{label}</span>
     </button>
+  )
+}
+
+function CalendarFilters({
+  filters,
+  campaigns,
+  platformOptions,
+  ownerOptions,
+  activeFilterCount,
+  onChange,
+  onReset,
+}: {
+  filters: FilterState
+  campaigns: Campaign[]
+  platformOptions: string[]
+  ownerOptions: string[]
+  activeFilterCount: number
+  onChange: (filters: FilterState) => void
+  onReset: () => void
+}) {
+  function update(key: keyof FilterState, value: string) {
+    onChange({ ...filters, [key]: value })
+  }
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2 p-3" style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg }}>
+      <div className="inline-flex items-center gap-2 mr-1" style={{ color: color.ghost }}>
+        <Filter size={14} />
+        <span className="text-[12px] uppercase font-semibold" style={{ letterSpacing: t.letterSpacing.wide }}>Filters</span>
+      </div>
+      <FilterSelect label="Platform" value={filters.platform} onChange={value => update('platform', value)}>
+        <option value="all">All platforms</option>
+        {platformOptions.map(platform => (
+          <option key={platform} value={platform}>{platformLabel(platform)}</option>
+        ))}
+      </FilterSelect>
+      <FilterSelect label="Status" value={filters.status} onChange={value => update('status', value)}>
+        <option value="all">All statuses</option>
+        {KANBAN_COLUMNS.map(column => (
+          <option key={column.id} value={column.id}>{column.label}</option>
+        ))}
+      </FilterSelect>
+      <FilterSelect label="Campaign" value={filters.campaign} onChange={value => update('campaign', value)}>
+        <option value="all">All campaigns</option>
+        <option value="none">No campaign</option>
+        {campaigns.map(campaign => (
+          <option key={campaign.id} value={campaign.id}>{campaign.name}</option>
+        ))}
+      </FilterSelect>
+      <FilterSelect label="Owner" value={filters.owner} onChange={value => update('owner', value)}>
+        <option value="all">All owners</option>
+        {ownerOptions.map(owner => (
+          <option key={owner} value={owner}>{owner}</option>
+        ))}
+      </FilterSelect>
+      {activeFilterCount > 0 && (
+        <button onClick={onReset} className="h-8 px-2.5 inline-flex items-center gap-1.5 text-[12px] font-medium transition-colors hover:bg-[var(--fog)]" style={buttonStyle}>
+          <X size={13} />
+          Clear {activeFilterCount}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function FilterSelect({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: React.ReactNode }) {
+  return (
+    <label className="inline-flex items-center gap-2 h-8 px-2.5" style={{ background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
+      <span className="text-[11px]" style={{ color: color.ghost }}>{label}</span>
+      <select value={value} onChange={event => onChange(event.target.value)} className="text-[12px] outline-none cursor-pointer" style={{ background: 'transparent', border: 'none', color: color.ink, fontFamily: 'inherit' }}>
+        {children}
+      </select>
+    </label>
+  )
+}
+
+function CalendarWarnings({
+  scheduleError,
+  overCapacityDays,
+  reviewQueueCount,
+  filteredTotal,
+  total,
+}: {
+  scheduleError: string | null
+  overCapacityDays: Array<[string, Post[]]>
+  reviewQueueCount: number
+  filteredTotal: number
+  total: number
+}) {
+  const warnings: string[] = []
+  if (scheduleError) warnings.push(scheduleError)
+  if (overCapacityDays.length > 0) warnings.push(`${overCapacityDays.length} heavy days exceed ${DAILY_POST_CAPACITY} posts`)
+  if (reviewQueueCount > DAILY_REVIEW_CAPACITY) warnings.push(`${reviewQueueCount} posts are waiting for review`)
+  if (filteredTotal < total) warnings.push(`${filteredTotal} of ${total} posts visible`)
+  if (warnings.length === 0) return null
+
+  const hasError = !!scheduleError
+  return (
+    <div
+      className="mb-4 flex flex-wrap items-center gap-2 px-3 py-2"
+      style={{
+        background: hasError ? DANGER_TINT : color.paper2,
+        border: `1px solid ${hasError ? DANGER_LINE : color.line}`,
+        borderRadius: radius.md,
+        color: hasError ? color.danger : color.ink2,
+      }}
+    >
+      <AlertTriangle size={14} style={{ color: hasError ? color.danger : color.warn }} />
+      {warnings.map(warning => (
+        <span key={warning} className="text-[12px]">{warning}</span>
+      ))}
+    </div>
+  )
+}
+
+function DayDrawer({
+  date,
+  posts,
+  campaignsById,
+  capacity,
+  onClose,
+  onOpen,
+  onDropPost,
+  renderActions,
+}: {
+  date: Date
+  posts: Post[]
+  campaignsById: Map<string, Campaign>
+  capacity: number
+  onClose: () => void
+  onOpen: (post: Post) => void
+  onDropPost: (event: React.DragEvent, day: string) => void
+  renderActions: (post: Post) => React.ReactNode
+}) {
+  const key = isoDay(date)
+  const isHeavy = capacity > DAILY_POST_CAPACITY
+
+  return (
+    <section
+      onDragOver={event => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+      }}
+      onDrop={event => onDropPost(event, key)}
+      style={panelStyle}
+    >
+      <div className="px-4 py-3 flex items-start justify-between gap-3" style={{ borderBottom: `1px solid ${color.line}` }}>
+        <div>
+          <div className="text-[12px] uppercase font-semibold" style={{ color: color.ghost, letterSpacing: t.letterSpacing.wide }}>Day drawer</div>
+          <h3 className="text-[18px] font-semibold mt-1" style={{ color: color.ink }}>
+            {date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+          </h3>
+          <p className="text-[12px] mt-1" style={{ color: isHeavy ? color.warn : color.ghost }}>
+            {capacity} posts scheduled · capacity {DAILY_POST_CAPACITY}
+          </p>
+        </div>
+        <button onClick={onClose} title="Close day drawer" className="w-8 h-8 inline-flex items-center justify-center transition-colors hover:bg-[var(--fog)]" style={iconButtonStyle}>
+          <X size={14} />
+        </button>
+      </div>
+      <div className="p-3 max-h-[420px] overflow-auto">
+        {posts.length === 0 ? (
+          <div className="py-8 text-center" style={{ color: color.ghost }}>
+            <MapPin size={18} style={{ margin: '0 auto 8px' }} />
+            <p className="text-[12px] m-0">Drop an unscheduled post here.</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {posts.map(post => (
+              <CalendarPostCard
+                key={post.id}
+                post={post}
+                campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
+                onOpen={() => onOpen(post)}
+                actions={renderActions(post)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function UnscheduledTray({
+  posts,
+  readyCount,
+  campaignsById,
+  onOpen,
+  onDragStart,
+  renderActions,
+  onCreate,
+}: {
+  posts: Post[]
+  readyCount: number
+  campaignsById: Map<string, Campaign>
+  onOpen: (post: Post) => void
+  onDragStart: (event: React.DragEvent, post: Post) => void
+  renderActions: (post: Post) => React.ReactNode
+  onCreate: () => void
+}) {
+  const warningCount = posts.filter(post => postStatusBucket(post) !== 'approved').length
+  const hasUnscheduledWarning = warningCount > 0
+
+  return (
+    <section style={{ ...panelStyle, borderColor: hasUnscheduledWarning ? DANGER_LINE : color.line }}>
+      <div className="px-4 py-3" style={{ borderBottom: `1px solid ${hasUnscheduledWarning ? DANGER_LINE : color.line}`, background: hasUnscheduledWarning ? DANGER_TINT : color.surface }}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="inline-flex items-center gap-2 min-w-0">
+            <AlertTriangle size={14} style={{ color: hasUnscheduledWarning ? color.danger : color.ghost }} />
+            <div className="text-[12px] uppercase font-semibold" style={{ color: hasUnscheduledWarning ? color.danger : color.ghost, letterSpacing: t.letterSpacing.wide }}>
+              Unscheduled
+            </div>
+          </div>
+          <span className="text-[12px] font-semibold" style={{ color: hasUnscheduledWarning ? color.danger : color.ghost }}>
+            {posts.length}
+          </span>
+        </div>
+        <p className="text-[12px] mt-1" style={{ color: hasUnscheduledWarning ? color.danger : color.ghost }}>
+          {readyCount} approved · {warningCount} need review · drag cards onto the calendar.
+        </p>
+      </div>
+      <div className="p-3 max-h-[360px] overflow-auto">
+        {posts.length === 0 ? (
+          <div className="py-8 text-center" style={{ color: color.ghost }}>
+            <Inbox size={18} style={{ margin: '0 auto 8px' }} />
+            <p className="text-[12px] m-0 mb-3">No unscheduled posts match the current filters.</p>
+            <button onClick={onCreate} className="h-8 px-3 inline-flex items-center gap-2 text-[12px] font-medium transition-colors hover:bg-[var(--fog)]" style={buttonStyle}>
+              <Plus size={13} />
+              Create post
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {posts.map(post => (
+              <CalendarPostCard
+                key={post.id}
+                post={post}
+                campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
+                onOpen={() => onOpen(post)}
+                draggable
+                onDragStart={event => onDragStart(event, post)}
+                actions={renderActions(post)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function CampaignLegend({ campaigns }: { campaigns: Campaign[] }) {
+  if (campaigns.length === 0) return null
+  return (
+    <section style={panelStyle}>
+      <div className="px-4 py-3" style={{ borderBottom: `1px solid ${color.line}` }}>
+        <div className="text-[12px] uppercase font-semibold" style={{ color: color.ghost, letterSpacing: t.letterSpacing.wide }}>Campaign legend</div>
+      </div>
+      <div className="p-3 flex flex-col gap-2 max-h-[220px] overflow-auto">
+        {campaigns.map(campaign => (
+          <div key={campaign.id} className="flex items-center gap-2 min-w-0 text-[12px]" style={{ color: color.ink2 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: campaignAccent(campaign.color), flexShrink: 0 }} />
+            <span className="truncate">{campaign.name}</span>
+            <span className="ml-auto capitalize" style={{ color: color.ghost }}>{campaign.status}</span>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -1245,6 +1815,16 @@ function isApproved(post: Post) {
   return displayStatus(post) === 'Approved'
 }
 
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === 'string' && message.trim()) return message
+  }
+  if (typeof error === 'string' && error.trim()) return error
+  return fallback
+}
+
 function timeLabel(post: Post) {
   const date = targetDate(post)
   if (!date) return 'Unscheduled'
@@ -1255,6 +1835,17 @@ function formatHour(hour: number) {
   const date = new Date()
   date.setHours(hour, 0, 0, 0)
   return date.toLocaleTimeString(undefined, { hour: 'numeric' })
+}
+
+function scheduledIsoForDay(day: string, hour: number) {
+  const date = parseIsoDay(day)
+  date.setHours(hour, 0, 0, 0)
+  return date.toISOString()
+}
+
+function platformLabel(platform: string) {
+  if (platform === 'x') return 'X'
+  return platform.charAt(0).toUpperCase() + platform.slice(1)
 }
 
 function monthCells(year: number, month: number): Array<Date | null> {
