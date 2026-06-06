@@ -3,8 +3,16 @@ import { createClient } from "npm:@supabase/supabase-js"
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-const POSTMARK_SERVER_TOKEN = Deno.env.get("POSTMARK_SERVER_TOKEN") ?? Deno.env.get("POSTMARK_API_TOKEN")
-const POSTMARK_FROM = Deno.env.get("POSTMARK_INVITE_FROM") ?? "InnovareAI <hello@innovareai.com>"
+const POSTMARK_SERVER_TOKEN =
+  Deno.env.get("POSTMARK_SERVER_TOKEN") ??
+  Deno.env.get("POSTMARK_API_TOKEN") ??
+  Deno.env.get("POSTMARK_API_KEY")
+const POSTMARK_FROM =
+  Deno.env.get("POSTMARK_INVITE_FROM") ??
+  mailFrom(
+    Deno.env.get("POSTMARK_FROM_NAME") ?? "InnovareAI",
+    Deno.env.get("POSTMARK_FROM_EMAIL") ?? "hello@innovareai.com",
+  )
 const POSTMARK_MESSAGE_STREAM = Deno.env.get("POSTMARK_MESSAGE_STREAM") ?? "outbound"
 const APP_BASE_URL = (Deno.env.get("APP_BASE_URL") ?? Deno.env.get("SITE_URL") ?? "https://vera.innovareai.com").replace(/\/+$/, "")
 
@@ -302,6 +310,12 @@ function originFor(req: Request) {
 
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
+function mailFrom(name: string, email: string) {
+  const safeName = name.replace(/[<>\r\n"]/g, "").trim() || "InnovareAI"
+  const safeEmail = email.replace(/[<>\r\n]/g, "").trim() || "hello@innovareai.com"
+  return `${safeName} <${safeEmail}>`
 }
 
 function escapeHtml(value: string) {
