@@ -8,7 +8,7 @@
 // Regenerate. Images (generate_image) and videos (generate_video) attach
 // to the artifact. This matches SAM's chat+artifact model.
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -284,9 +284,10 @@ export default function VeraThread() {
   useEffect(() => {
     const el = taRef.current
     if (!el) return
+    const minHeight = messages.length === 0 ? 118 : 100
     el.style.height = 'auto'
-    el.style.height = `${Math.min(Math.max(el.scrollHeight, 100), 220)}px`
-  }, [input])
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, minHeight), 240)}px`
+  }, [input, messages.length])
 
   // "Go home" — clicking the Vera item in the rail (while already here) returns
   // to the launcher, the way people expect the logo/home to behave. The prior
@@ -745,6 +746,74 @@ export default function VeraThread() {
     'clamp(420px, 42vw, 660px)',
   )
 
+  const hasThread = messages.length > 0
+  const renderComposer = (placement: 'idle' | 'thread') => {
+    const idle = placement === 'idle'
+    return (
+      <div style={{ maxWidth: idle ? 760 : 720, margin: '0 auto', width: '100%' }}>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: space[2],
+          padding: idle ? `${space[4]} ${space[5]}` : `${space[3]} ${space[4]}`,
+          background: color.surface,
+          border: `1px solid ${idle ? 'var(--accent-line)' : color.line2}`,
+          borderRadius: idle ? radius.lg : radius.lg,
+          boxShadow: idle ? 'var(--shadow-modal)' : 'var(--shadow-pop)',
+        }}>
+          {attachments.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: space[2] }}>
+              {attachments.map((a, i) => (
+                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px 4px 4px', background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, fontSize: t.size.micro, color: color.ink2 }}>
+                  {a.kind === 'image'
+                    ? <img src={a.url} alt="" style={{ width: 26, height: 26, borderRadius: radius.sm, objectFit: 'cover', display: 'block' }} />
+                    : <FileText size={15} style={{ color: color.ghost }} />}
+                  <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+                  <button onClick={() => removeAttachment(i)} title="Remove" style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: color.ghost, display: 'inline-flex', padding: 0 }}><X size={13} /></button>
+                </span>
+              ))}
+            </div>
+          )}
+          <textarea
+            ref={taRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={onKey}
+            rows={1}
+            placeholder="Ask Vera anything..."
+            disabled={!activeProject}
+            style={{ width: '100%', resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontFamily: t.family.sans, fontSize: idle ? t.size.h4 : t.size.lg, lineHeight: 1.5, color: color.ink, minHeight: idle ? 118 : 100, maxHeight: 240, paddingTop: 2 }}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[2] }}>
+            {!idle && (
+              <button onClick={newChat} disabled={!activeProject} title="Start a new conversation"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 32, padding: '0 12px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: color.ink2, cursor: activeProject ? 'pointer' : 'default', flexShrink: 0, fontSize: t.size.cap, fontWeight: t.weight.medium }}>
+                <Plus size={14} /> New
+              </button>
+            )}
+            <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => handleFiles(e.target.files)} />
+            <button onClick={() => fileRef.current?.click()} disabled={uploading || !activeProject} title="Attach an image"
+              style={{ width: 32, height: 32, borderRadius: '50%', border: `1px solid ${color.line}`, background: color.surface, color: color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'default' : 'pointer', flexShrink: 0 }}>
+              <Paperclip size={15} />
+            </button>
+            <div style={{ flex: 1 }} />
+            {streaming ? (
+              <button onClick={() => abortRef.current?.abort()} title="Stop"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: radius.pill, border: 'none', cursor: 'pointer', background: color.ink, color: '#fff', fontSize: t.size.sm, fontWeight: t.weight.medium }}>
+                <Square size={11} fill="currentColor" /> Stop
+              </button>
+            ) : (
+              <button onClick={() => send()} disabled={(!input.trim() && attachments.length === 0) || !activeProject} title="Send"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: idle ? '8px 16px' : '7px 14px', borderRadius: radius.pill, border: 'none', cursor: (input.trim() || attachments.length) ? 'pointer' : 'not-allowed', background: (input.trim() || attachments.length) ? color.accent : color.paper2, color: (input.trim() || attachments.length) ? '#fff' : color.ghost, fontSize: t.size.sm, fontWeight: t.weight.medium, boxShadow: (input.trim() || attachments.length) ? 'var(--shadow-glow)' : 'none', transition: 'background 120ms, box-shadow 120ms' }}>
+                <Send size={14} /> Send
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: color.paper }}>
       {/* thread (no header bar — SAM-clean; rail identifies "Vera", Recents
@@ -755,7 +824,8 @@ export default function VeraThread() {
         ) : messages.length === 0 ? (
           <Idle onRun={pr => send(pr)} observations={observations} actions={buildLaunchActions(stats)} onDismiss={dismissObservation}
             setup={setup} projectName={activeProject?.name ?? 'this client'}
-            onOpenBrain={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/brain`) }} />
+            onOpenBrain={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/brain`) }}
+            composer={renderComposer('idle')} />
         ) : (
           <div style={{ maxWidth: 680, margin: '0 auto', padding: `0 ${space[8]}`, display: 'flex', flexDirection: 'column', gap: space[7] }}>
             {messages.map(m => <Bubble key={m.id} m={m} />)}
@@ -763,59 +833,11 @@ export default function VeraThread() {
         )}
       </div>
 
-      {/* composer */}
-      <div style={{ padding: `${space[5]} ${space[8]} ${space[7]}` }}>
-        <div style={{ maxWidth: 720, margin: '0 auto' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: space[2], padding: `${space[3]} ${space[4]}`, background: color.surface, border: `1px solid ${color.line2}`, borderRadius: radius.lg, boxShadow: 'var(--shadow-pop)' }}>
-            {attachments.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: space[2] }}>
-                {attachments.map((a, i) => (
-                  <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px 4px 4px', background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, fontSize: t.size.micro, color: color.ink2 }}>
-                    {a.kind === 'image'
-                      ? <img src={a.url} alt="" style={{ width: 26, height: 26, borderRadius: radius.sm, objectFit: 'cover', display: 'block' }} />
-                      : <FileText size={15} style={{ color: color.ghost }} />}
-                    <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
-                    <button onClick={() => removeAttachment(i)} title="Remove" style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: color.ghost, display: 'inline-flex', padding: 0 }}><X size={13} /></button>
-                  </span>
-                ))}
-              </div>
-            )}
-            <textarea
-              ref={taRef}
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={onKey}
-              rows={1}
-              placeholder="Ask Vera anything…"
-              disabled={!activeProject}
-              style={{ width: '100%', resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontFamily: t.family.sans, fontSize: t.size.lg, lineHeight: 1.5, color: color.ink, minHeight: 100, maxHeight: 220, paddingTop: 2 }}
-            />
-            <div style={{ display: 'flex', alignItems: 'center', gap: space[2] }}>
-              <button onClick={newChat} disabled={!activeProject} title="Start a new conversation"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 32, padding: '0 12px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: color.ink2, cursor: activeProject ? 'pointer' : 'default', flexShrink: 0, fontSize: t.size.cap, fontWeight: t.weight.medium }}>
-                <Plus size={14} /> New
-              </button>
-              <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => handleFiles(e.target.files)} />
-              <button onClick={() => fileRef.current?.click()} disabled={uploading || !activeProject} title="Attach an image"
-                style={{ width: 32, height: 32, borderRadius: '50%', border: `1px solid ${color.line}`, background: color.surface, color: color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'default' : 'pointer', flexShrink: 0 }}>
-                <Paperclip size={15} />
-              </button>
-              <div style={{ flex: 1 }} />
-              {streaming ? (
-                <button onClick={() => abortRef.current?.abort()} title="Stop"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: radius.pill, border: 'none', cursor: 'pointer', background: color.ink, color: '#fff', fontSize: t.size.sm, fontWeight: t.weight.medium }}>
-                  <Square size={11} fill="currentColor" /> Stop
-                </button>
-              ) : (
-                <button onClick={() => send()} disabled={(!input.trim() && attachments.length === 0) || !activeProject} title="Send"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: radius.pill, border: 'none', cursor: (input.trim() || attachments.length) ? 'pointer' : 'not-allowed', background: (input.trim() || attachments.length) ? color.accent : color.paper2, color: (input.trim() || attachments.length) ? '#fff' : color.ghost, fontSize: t.size.sm, fontWeight: t.weight.medium, boxShadow: (input.trim() || attachments.length) ? 'var(--shadow-glow)' : 'none', transition: 'background 120ms, box-shadow 120ms' }}>
-                  <Send size={14} /> Send
-                </button>
-              )}
-            </div>
-          </div>
+      {hasThread && (
+        <div style={{ padding: `${space[5]} ${space[8]} ${space[7]}` }}>
+          {renderComposer('thread')}
         </div>
-      </div>
+      )}
     </div>
   )
 }
@@ -1113,7 +1135,7 @@ function buildLaunchActions(stats: { pending: number; campaigns: number }): Laun
   return a.slice(0, 6)
 }
 
-function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain }: {
+function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain, composer }: {
   onRun: (prompt: string) => void
   observations: { id: string; title: string; proposed_action: string | null }[]
   actions: LaunchAction[]
@@ -1121,6 +1143,7 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
   setup: { audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null
   projectName: string
   onOpenBrain: () => void
+  composer: ReactNode
 }) {
   const setupDone = !!setup && setup.audience && setup.voice && setup.categories && setup.knowledge
   // Persona-first, SAM-clean: when the brain is thin, the FIRST card is "set up
@@ -1133,13 +1156,15 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
       <h1 style={{ fontSize: t.size.h2, fontWeight: t.weight.semibold, color: color.ink, marginBottom: space[2], textAlign: 'center' }}>
         What should we create today?
       </h1>
-      <p style={{ fontSize: t.size.body, color: color.ghost, marginBottom: space[7], textAlign: 'center', maxWidth: '44ch' }}>
+      <p style={{ fontSize: t.size.body, color: color.ghost, marginBottom: space[5], textAlign: 'center', maxWidth: '44ch' }}>
         Bring Vera a brief, a question, or an idea you want to move forward.
       </p>
 
+      {composer}
+
       {/* "VERA wants to" — proactive observations (moved from the old Home). */}
       {observations.length > 0 && (
-        <div style={{ width: '100%', maxWidth: 640, marginBottom: space[5] }}>
+        <div style={{ width: '100%', maxWidth: 760, marginTop: space[6], marginBottom: space[5] }}>
           <div style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.accent, marginBottom: space[3] }}>VERA wants to</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
             {observations.map(o => (
@@ -1160,20 +1185,20 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[3], width: '100%', maxWidth: 640 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: space[3], width: '100%', maxWidth: 760, marginTop: observations.length > 0 ? 0 : space[5] }}>
         {grid.map(c => {
           const Icn = c.icon
           return (
             <button key={c.title} onClick={() => c.action === 'brain' ? onOpenBrain() : onRun(c.prompt)}
-              style={{ display: 'flex', alignItems: 'flex-start', gap: space[4], textAlign: 'left', padding: `${space[4]} ${space[5]}`, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, cursor: 'pointer', fontFamily: t.family.sans, transition: 'border-color 120ms, box-shadow 120ms' }}
+              style={{ flex: '1 1 220px', maxWidth: 248, minHeight: 50, display: 'inline-flex', alignItems: 'center', gap: space[3], textAlign: 'left', padding: `${space[3]} ${space[4]}`, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.pill, cursor: 'pointer', fontFamily: t.family.sans, transition: 'border-color 120ms, box-shadow 120ms' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-line)'; e.currentTarget.style.boxShadow = 'var(--shadow-pop)' }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--line)'; e.currentTarget.style.boxShadow = 'none' }}>
-              <span style={{ width: 36, height: 36, borderRadius: radius.md, background: 'var(--accent-tint)', color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Icn size={18} strokeWidth={1.9} />
+              <span style={{ width: 32, height: 32, borderRadius: radius.pill, background: 'var(--accent-tint)', color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Icn size={17} strokeWidth={1.9} />
               </span>
               <span style={{ minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink }}>{c.title}</span>
-                <span style={{ display: 'block', fontSize: t.size.cap, color: color.ghost, marginTop: 2 }}>{c.sub}</span>
+                <span style={{ display: 'block', fontSize: t.size.cap, color: color.ghost, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.sub}</span>
               </span>
             </button>
           )
