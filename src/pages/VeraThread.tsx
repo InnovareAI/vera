@@ -23,6 +23,117 @@ import { color, space, type as t, radius } from '../design'
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 const HISTORY_LIMIT = 40
+const MAX_ATTACHMENTS = 6
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+const MAX_TEXT_DOCUMENT_CHARS = 120_000
+const ACCEPTED_ATTACHMENT_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'text/html',
+  'text/xml',
+  'application/json',
+  'application/xml',
+  '.txt',
+  '.md',
+  '.markdown',
+  '.csv',
+  '.json',
+  '.pdf',
+  '.html',
+  '.htm',
+  '.xml',
+  '.yaml',
+  '.yml',
+].join(',')
+
+type ImageAttachment = { kind: 'image'; dataUrl: string; name: string; mime: string; size: number }
+type DocumentBlock = {
+  type: 'document'
+  source:
+    | { type: 'base64'; media_type: 'application/pdf'; data: string }
+    | { type: 'text'; media_type: 'text/plain'; data: string }
+  title: string
+  context?: string
+}
+type DocumentAttachment = { kind: 'document'; document: DocumentBlock; name: string; mime: string; size: number; truncated?: boolean }
+type ComposerAttachment = ImageAttachment | DocumentAttachment
+type MessageFile = { name: string; mime: string; size: number }
+type WireContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+  | DocumentBlock
+
+function extension(name: string) {
+  const dot = name.lastIndexOf('.')
+  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : ''
+}
+
+function attachmentMime(file: File) {
+  const mime = file.type || ''
+  if (mime) return mime
+  const ext = extension(file.name)
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
+  if (ext === 'png') return 'image/png'
+  if (ext === 'gif') return 'image/gif'
+  if (ext === 'webp') return 'image/webp'
+  if (ext === 'pdf') return 'application/pdf'
+  if (ext === 'json') return 'application/json'
+  if (ext === 'csv') return 'text/csv'
+  if (ext === 'md' || ext === 'markdown') return 'text/markdown'
+  if (ext === 'html' || ext === 'htm') return 'text/html'
+  if (ext === 'xml') return 'text/xml'
+  if (ext === 'yaml' || ext === 'yml') return 'text/yaml'
+  if (ext === 'txt') return 'text/plain'
+  return 'application/octet-stream'
+}
+
+function isSupportedImage(mime: string) {
+  return mime === 'image/jpeg' || mime === 'image/png' || mime === 'image/gif' || mime === 'image/webp'
+}
+
+function isTextDocument(file: File, mime: string) {
+  if (mime.startsWith('text/')) return true
+  if (mime === 'application/json' || mime === 'application/xml' || mime === 'application/x-yaml' || mime === 'application/yaml') return true
+  return ['txt', 'md', 'markdown', 'csv', 'json', 'html', 'htm', 'xml', 'yaml', 'yml'].includes(extension(file.name))
+}
+
+function readAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+function readAsText(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsText(file)
+  })
+}
+
+function bytesHuman(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function attachmentPrompt(attachments: ComposerAttachment[]) {
+  const images = attachments.filter(a => a.kind === 'image').length
+  const documents = attachments.filter(a => a.kind === 'document').length
+  if (images && documents) return `Use the attached ${documents} document${documents === 1 ? '' : 's'} and ${images} image${images === 1 ? '' : 's'}.`
+  if (documents) return `Use the attached ${documents} document${documents === 1 ? '' : 's'}.`
+  return `Use the attached ${images} image${images === 1 ? '' : 's'}.`
+}
 
 interface ToolEvent { id?: string; tool: string; status: 'running' | 'done'; message?: string }
 interface Message {
@@ -32,6 +143,7 @@ interface Message {
   pending?: boolean
   tools?: ToolEvent[]
   images?: string[]
+  files?: MessageFile[]
   videos?: string[]
   videoPending?: boolean   // a fal video job is rendering in the background
   carouselPending?: { done: number; total: number }  // carousel frames rendering
@@ -91,7 +203,7 @@ export default function VeraThread() {
   const [observations, setObservations] = useState<{ id: string; title: string; proposed_action: string | null }[]>([])
   const [stats, setStats] = useState<{ pending: number; campaigns: number }>({ pending: 0, campaigns: 0 })
   const [sessionId, setSessionId] = useState<string>('')
-  const [attachments, setAttachments] = useState<{ kind: 'image' | 'file'; url: string; name: string; mime: string }[]>([])
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
   const [setup, setSetup] = useState<{ audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null>(null)
@@ -318,7 +430,15 @@ export default function VeraThread() {
     if ((!text && attachments.length === 0) || streaming || !activeOrg?.id) return
 
     const atts = attachments
-    const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text, images: atts.length ? atts.map(a => a.url) : undefined }
+    const imageAtts = atts.filter((a): a is ImageAttachment => a.kind === 'image')
+    const docAtts = atts.filter((a): a is DocumentAttachment => a.kind === 'document')
+    const userMsg: Message = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: text,
+      images: imageAtts.length ? imageAtts.map(a => a.dataUrl) : undefined,
+      files: docAtts.length ? docAtts.map(a => ({ name: a.name, mime: a.mime, size: a.size })) : undefined,
+    }
     const assistantId = crypto.randomUUID()
     // The draft created earlier in THIS stream (save_draft → draft event), so a
     // video_pending later in the same stream can be filed against the right
@@ -334,19 +454,24 @@ export default function VeraThread() {
 
     const wire: Array<{ role: string; content: unknown }> = next.map(m => ({ role: m.role, content: m.content }))
     // Compose the outgoing user turn: typed text + the open draft as context
-    // (so "tweak the draft" doesn't force a re-paste) + any image attachments
-    // as vision blocks (the model sees them; the backend persists them). Only
-    // the outgoing turn is enriched; the thread copy stays clean.
+    // (so "tweak the draft" doesn't force a re-paste) + any attachments as
+    // content blocks. Only the outgoing turn is enriched; the thread copy
+    // stays clean.
     if (wire.length) {
       let outText = text
       if (draft?.copy) {
         outText += `\n\n---\n[The draft currently open in the preview${draft.id ? ` (id: ${draft.id})` : ''}. If I ask you to tweak, edit, refine, shorten, or change "the draft/copy/post", revise THIS exact text in place and return the full updated post — do not ask me to paste it again:]\n${draft.copy}`
       }
+      const contentBlocks: WireContentBlock[] = [
+        ...docAtts.map(a => a.document),
+        ...imageAtts.map(a => ({
+          type: 'image' as const,
+          source: { type: 'base64' as const, media_type: a.mime, data: a.dataUrl.split(',')[1] ?? '' },
+        })),
+        { type: 'text', text: outText || attachmentPrompt(atts) },
+      ]
       wire[wire.length - 1] = atts.length
-        ? { role: 'user', content: [
-            { type: 'text', text: outText },
-            ...atts.map(a => ({ type: 'image', source: { type: 'base64', media_type: a.mime, data: a.url.split(',')[1] ?? '' } })),
-          ] }
+        ? { role: 'user', content: contentBlocks }
         : { role: 'user', content: outText }
     }
     const controller = new AbortController()
@@ -619,24 +744,88 @@ export default function VeraThread() {
     setDraft(null); setDraftHistory([]); setCampaign(null); setSessionId(sid)
   }
 
-  // Attachments — read picked images as data URLs and send them as vision
-  // blocks (the model sees them; vera-chat persists them). Images only for now.
+  // Attachments: images become vision blocks, PDFs and text files become
+  // document blocks for the current turn.
   async function handleFiles(files: FileList | null) {
     if (!files || !files.length) return
     setUploading(true)
-    const picked: { kind: 'image' | 'file'; url: string; name: string; mime: string }[] = []
-    for (const f of Array.from(files).slice(0, 6)) {
-      if (!f.type.startsWith('image/')) continue
-      try {
-        const url = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(f) })
-        picked.push({ kind: 'image', url, name: f.name, mime: f.type })
-      } catch { /* skip unreadable file */ }
+    const picked: ComposerAttachment[] = []
+    let skippedLarge = 0
+    let skippedUnsupported = 0
+    let skippedUnreadable = 0
+    let skippedLimit = 0
+    const remaining = Math.max(0, MAX_ATTACHMENTS - attachments.length)
+    if (!remaining) {
+      setUploading(false)
+      if (fileRef.current) fileRef.current.value = ''
+      push({ kind: 'warn', title: 'Attachment limit reached', body: `Remove a file before adding another. Limit: ${MAX_ATTACHMENTS}.` })
+      return
     }
-    setAttachments(prev => [...prev, ...picked].slice(0, 6))
+    for (const f of Array.from(files)) {
+      if (picked.length >= remaining) { skippedLimit++; continue }
+      const mime = attachmentMime(f)
+      if (f.size > MAX_ATTACHMENT_BYTES) { skippedLarge++; continue }
+      try {
+        if (isSupportedImage(mime)) {
+          const dataUrl = await readAsDataUrl(f)
+          picked.push({ kind: 'image', dataUrl, name: f.name, mime, size: f.size })
+        } else if (mime === 'application/pdf') {
+          const dataUrl = await readAsDataUrl(f)
+          picked.push({
+            kind: 'document',
+            name: f.name,
+            mime,
+            size: f.size,
+            document: {
+              type: 'document',
+              title: f.name,
+              context: `${mime} · ${bytesHuman(f.size)}`,
+              source: { type: 'base64', media_type: 'application/pdf', data: dataUrl.split(',')[1] ?? '' },
+            },
+          })
+        } else if (isTextDocument(f, mime)) {
+          const raw = await readAsText(f)
+          const truncated = raw.length > MAX_TEXT_DOCUMENT_CHARS
+          const text = truncated ? `${raw.slice(0, MAX_TEXT_DOCUMENT_CHARS)}\n\n[Document truncated in chat upload at ${MAX_TEXT_DOCUMENT_CHARS.toLocaleString()} characters.]` : raw
+          picked.push({
+            kind: 'document',
+            name: f.name,
+            mime,
+            size: f.size,
+            truncated,
+            document: {
+              type: 'document',
+              title: f.name,
+              context: `${mime} · ${bytesHuman(f.size)}${truncated ? ' · truncated' : ''}`,
+              source: { type: 'text', media_type: 'text/plain', data: text },
+            },
+          })
+        } else {
+          skippedUnsupported++
+        }
+      } catch { skippedUnreadable++ }
+    }
+    if (picked.length) setAttachments(prev => [...prev, ...picked].slice(0, MAX_ATTACHMENTS))
     setUploading(false)
     if (fileRef.current) fileRef.current.value = ''
+    const issues: string[] = []
+    if (skippedUnsupported) issues.push(`${skippedUnsupported} unsupported`)
+    if (skippedLarge) issues.push(`${skippedLarge} over ${bytesHuman(MAX_ATTACHMENT_BYTES)}`)
+    if (skippedUnreadable) issues.push(`${skippedUnreadable} unreadable`)
+    if (skippedLimit) issues.push(`${skippedLimit} over the ${MAX_ATTACHMENTS} file limit`)
+    if (issues.length) push({ kind: 'warn', title: 'Some files were skipped', body: issues.join(', ') })
   }
   function removeAttachment(i: number) { setAttachments(prev => prev.filter((_, idx) => idx !== i)) }
+
+  function onComposerDrop(e: React.DragEvent<HTMLDivElement>) {
+    if (!e.dataTransfer.files.length) return
+    e.preventDefault()
+    void handleFiles(e.dataTransfer.files)
+  }
+
+  function onComposerDragOver(e: React.DragEvent<HTMLDivElement>) {
+    if (e.dataTransfer.types.includes('Files')) e.preventDefault()
+  }
 
   // Dismiss a "VERA wants to" nudge — clears every dupe of it (by title).
   async function dismissObservation(o: { title: string }) {
@@ -751,7 +940,7 @@ export default function VeraThread() {
     const idle = placement === 'idle'
     return (
       <div style={{ maxWidth: idle ? 760 : 720, margin: '0 auto', width: '100%' }}>
-        <div style={{
+        <div onDrop={onComposerDrop} onDragOver={onComposerDragOver} style={{
           display: 'flex',
           flexDirection: 'column',
           gap: space[2],
@@ -766,9 +955,10 @@ export default function VeraThread() {
               {attachments.map((a, i) => (
                 <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px 4px 4px', background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, fontSize: t.size.micro, color: color.ink2 }}>
                   {a.kind === 'image'
-                    ? <img src={a.url} alt="" style={{ width: 26, height: 26, borderRadius: radius.sm, objectFit: 'cover', display: 'block' }} />
+                    ? <img src={a.dataUrl} alt="" style={{ width: 26, height: 26, borderRadius: radius.sm, objectFit: 'cover', display: 'block' }} />
                     : <FileText size={15} style={{ color: color.ghost }} />}
-                  <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+                  <span style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+                  {a.kind === 'document' && a.truncated && <span title="Truncated for this chat turn" style={{ color: color.ghost }}>trimmed</span>}
                   <button onClick={() => removeAttachment(i)} title="Remove" style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: color.ghost, display: 'inline-flex', padding: 0 }}><X size={13} /></button>
                 </span>
               ))}
@@ -791,8 +981,8 @@ export default function VeraThread() {
                 <Plus size={14} /> New
               </button>
             )}
-            <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => handleFiles(e.target.files)} />
-            <button onClick={() => fileRef.current?.click()} disabled={uploading || !activeProject} title="Attach an image"
+            <input ref={fileRef} type="file" accept={ACCEPTED_ATTACHMENT_TYPES} multiple style={{ display: 'none' }} onChange={e => handleFiles(e.target.files)} />
+            <button onClick={() => fileRef.current?.click()} disabled={uploading || !activeProject} title="Attach images or documents"
               style={{ width: 32, height: 32, borderRadius: '50%', border: `1px solid ${color.line}`, background: color.surface, color: color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'default' : 'pointer', flexShrink: 0 }}>
               <Paperclip size={15} />
             </button>
@@ -851,6 +1041,17 @@ function Bubble({ m }: { m: Message }) {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: space[2], justifyContent: 'flex-end', maxWidth: '78%' }}>
             {m.images.map((src, i) => (
               <img key={i} src={src} alt="" style={{ maxWidth: 160, maxHeight: 160, borderRadius: radius.md, border: `1px solid ${color.line}`, objectFit: 'cover', display: 'block' }} />
+            ))}
+          </div>
+        )}
+        {m.files && m.files.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: space[2], justifyContent: 'flex-end', maxWidth: '78%' }}>
+            {m.files.map((file, i) => (
+              <span key={`${file.name}-${i}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 10px', background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, fontSize: t.size.cap, color: color.ink2, maxWidth: 260 }}>
+                <FileText size={14} style={{ color: color.ghost, flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+                <span style={{ color: color.ghost, flexShrink: 0 }}>{bytesHuman(file.size)}</span>
+              </span>
             ))}
           </div>
         )}
