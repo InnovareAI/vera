@@ -996,11 +996,11 @@ function DraftArtifact({ draft, approving, sending, onApprove, onSendForApproval
           })()}
 
           {/* reaction bar — static, for realism */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: `${space[2]} ${space[3]}`, borderTop: `1px solid ${color.line}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', flexWrap: 'wrap', rowGap: 2, padding: `${space[2]} ${space[3]}`, borderTop: `1px solid ${color.line}` }}>
             {[[ThumbsUp, 'Like'], [MessageCircle, 'Comment'], [Repeat2, 'Repost'], [Send, 'Send']].map(([Ic, lbl], i) => {
               const Icn = Ic as React.ElementType
               return (
-                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 500, color: color.ghost, padding: '6px 8px' }}>
+                <span key={i} style={{ flex: '1 1 74px', minWidth: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12.5, fontWeight: 500, color: color.ghost, padding: '6px 8px', whiteSpace: 'nowrap' }}>
                   <Icn size={16} strokeWidth={1.75} /> {lbl as string}
                 </span>
               )

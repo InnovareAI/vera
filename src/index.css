@@ -15,6 +15,8 @@
 /* coloured backgrounds.                                                     */
 /* Variable names preserved so existing components keep working.             */
 :root {
+  --font-scale:   1.25;
+
   /* Surfaces */
   --paper:        #FAFAF9;        /* page background */
   --paper-warm:   #FFFFFF;        /* cards, sidebar */
@@ -65,9 +67,8 @@
   --radius-md:    12px;
   --radius-lg:    16px;
 
-  /* Base body size — bumped to read like Notion / Asana (14-15px is the */
-  /* modern productivity-tool sweet spot, not 12-13px dashboard density) */
-  --text-base:    14px;
+  /* Base body size, globally scaled from the original 14px. */
+  --text-base:    calc(14px * var(--font-scale));
 
   /* ════════════════════════════════════════════════════════════════════ */
   /* CANONICAL DESIGN SYSTEM TOKENS                                       */
@@ -99,16 +100,16 @@
   --info:         #2A5DA8;
 
   /* — Type · sizes ─────────────────────────────────────────────────── */
-  --t-micro:      11px;               /* uppercase section labels */
-  --t-cap:        12px;               /* captions, helper text */
-  --t-sm:         13px;               /* dense body, button labels */
-  --t-body:       14px;               /* primary body */
-  --t-lg:         15px;               /* emphasized body */
-  --t-h4:         17px;
-  --t-h3:         20px;
-  --t-h2:         26px;
-  --t-h1:         34px;
-  --t-display:    44px;
+  --t-micro:      calc(11px * var(--font-scale));  /* uppercase section labels */
+  --t-cap:        calc(12px * var(--font-scale));  /* captions, helper text */
+  --t-sm:         calc(13px * var(--font-scale));  /* dense body, button labels */
+  --t-body:       calc(14px * var(--font-scale));  /* primary body */
+  --t-lg:         calc(15px * var(--font-scale));  /* emphasized body */
+  --t-h4:         calc(17px * var(--font-scale));
+  --t-h3:         calc(20px * var(--font-scale));
+  --t-h2:         calc(26px * var(--font-scale));
+  --t-h1:         calc(34px * var(--font-scale));
+  --t-display:    calc(44px * var(--font-scale));
 
   /* — Spacing · 4px base ───────────────────────────────────────────── */
   --s-0: 0;
@@ -154,6 +155,10 @@
   --shadow-modal: 0 2px 4px rgba(23,23,23,0.05), 0 24px 64px rgba(23,23,23,0.16);
   /* Blue glow — brand-moment shadow */
   --shadow-glow:  0 18px 48px rgba(37, 99, 235, 0.18);
+}
+
+html {
+  font-size: calc(16px * var(--font-scale, 1));
 }
 
 body[data-theme="dark"] {
@@ -211,6 +216,32 @@ body[data-theme="dark"] {
   background: var(--paper);
   color: var(--ink);
 }
+
+/* Legacy fixed-pixel text, mostly inline React styles and Tailwind arbitrary
+   values, bypasses rem/token scaling. Keep the 25% lift centralized here. */
+:where([style*="font-size: 9px"], .text-\[9px\]) { font-size: calc(9px * var(--font-scale)) !important; }
+:where([style*="font-size: 10px"], .text-\[10px\]) { font-size: calc(10px * var(--font-scale)) !important; }
+:where([style*="font-size: 10.5px"], .text-\[10\.5px\]) { font-size: calc(10.5px * var(--font-scale)) !important; }
+:where([style*="font-size: 11px"], .text-\[11px\]) { font-size: calc(11px * var(--font-scale)) !important; }
+:where([style*="font-size: 11.5px"], .text-\[11\.5px\]) { font-size: calc(11.5px * var(--font-scale)) !important; }
+:where([style*="font-size: 12px"], .text-\[12px\]) { font-size: calc(12px * var(--font-scale)) !important; }
+:where([style*="font-size: 12.5px"], .text-\[12\.5px\]) { font-size: calc(12.5px * var(--font-scale)) !important; }
+:where([style*="font-size: 13px"], .text-\[13px\]) { font-size: calc(13px * var(--font-scale)) !important; }
+:where([style*="font-size: 13.5px"], .text-\[13\.5px\]) { font-size: calc(13.5px * var(--font-scale)) !important; }
+:where([style*="font-size: 14px"], .text-\[14px\]) { font-size: calc(14px * var(--font-scale)) !important; }
+:where([style*="font-size: 14.5px"], .text-\[14\.5px\]) { font-size: calc(14.5px * var(--font-scale)) !important; }
+:where([style*="font-size: 15px"], .text-\[15px\]) { font-size: calc(15px * var(--font-scale)) !important; }
+:where([style*="font-size: 16px"], .text-\[16px\]) { font-size: calc(16px * var(--font-scale)) !important; }
+:where([style*="font-size: 17px"], .text-\[17px\]) { font-size: calc(17px * var(--font-scale)) !important; }
+:where([style*="font-size: 18px"], .text-\[18px\]) { font-size: calc(18px * var(--font-scale)) !important; }
+:where([style*="font-size: 20px"], .text-\[20px\]) { font-size: calc(20px * var(--font-scale)) !important; }
+:where([style*="font-size: 22px"], .text-\[22px\]) { font-size: calc(22px * var(--font-scale)) !important; }
+:where([style*="font-size: 24px"], .text-\[24px\]) { font-size: calc(24px * var(--font-scale)) !important; }
+:where([style*="font-size: 26px"], .text-\[26px\]) { font-size: calc(26px * var(--font-scale)) !important; }
+:where([style*="font-size: 28px"], .text-\[28px\]) { font-size: calc(28px * var(--font-scale)) !important; }
+:where([style*="font-size: 32px"], .text-\[32px\]) { font-size: calc(32px * var(--font-scale)) !important; }
+:where([style*="font-size: 34px"], .text-\[34px\]) { font-size: calc(34px * var(--font-scale)) !important; }
+:where([style*="font-size: 44px"], .text-\[44px\]) { font-size: calc(44px * var(--font-scale)) !important; }
 
 /* Backgrounds */
 body[data-theme="dark"] .bg-white          { background-color: #212121 !important; }
