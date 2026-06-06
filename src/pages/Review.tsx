@@ -16,6 +16,7 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 const STATUS_TABS = ['Pending Review', 'Approved', 'Scheduled', 'Posted', 'Rejected'] as const
 type StatusTab = typeof STATUS_TABS[number]
 type View = 'list' | 'board' | 'calendar'
+type MediaFrame = { url: string; text?: string | null }
 
 // Status-tab → underlying DB status value. Pending and Posted are special
 // (Pending matches a set of values; Posted is derived from posted_at).
@@ -411,6 +412,7 @@ function ListView({
                     <p className="font-display text-[15px] leading-snug truncate" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 24, "wght" 500' }}>{post.title || 'Untitled post'}</p>
                     <p className="text-[12px] mt-1 line-clamp-2" style={{ color: 'var(--ink-quiet)' }}>{post.copy}</p>
                   </div>
+                  <PostMediaThumb post={post} className="w-24 h-24 flex-shrink-0" />
                 </div>
               </div>
             )
@@ -432,6 +434,91 @@ function ListView({
       </div>
     </div>
   )
+}
+
+function postMediaFrames(post: Post): MediaFrame[] {
+  const frames = post.media_metadata?.frames
+  if (!Array.isArray(frames)) return []
+  return frames.filter((frame): frame is MediaFrame => (
+    !!frame &&
+    typeof frame === 'object' &&
+    typeof (frame as { url?: unknown }).url === 'string' &&
+    (frame as { url: string }).url.length > 0
+  ))
+}
+
+function PostMediaThumb({ post, className = '' }: { post: Post; className?: string }) {
+  const frames = postMediaFrames(post)
+  const firstFrame = frames[0]
+  const label = post.media_type === 'carousel' && frames.length > 0
+    ? `${frames.length} frames`
+    : post.media_type === 'video' && post.media_url
+      ? 'Video'
+      : null
+
+  if (!firstFrame && !post.media_url) return null
+
+  return (
+    <div
+      className={`relative overflow-hidden ${className}`}
+      style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--paper-edge)', background: 'var(--fog)' }}
+    >
+      {post.media_type === 'video' && post.media_url ? (
+        <video src={post.media_url} muted playsInline preload="metadata" className="w-full h-full object-cover block" />
+      ) : (
+        <img src={firstFrame?.url ?? post.media_url} alt="" className="w-full h-full object-cover block" />
+      )}
+      {label && (
+        <span
+          className="absolute right-1.5 top-1.5 text-[10px] font-medium"
+          style={{ background: 'rgba(14,14,15,0.72)', color: '#fff', padding: '2px 6px', borderRadius: '2px' }}
+        >
+          {label}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function PostMediaPreview({ post }: { post: Post }) {
+  const frames = postMediaFrames(post)
+  if (post.media_type === 'carousel' && frames.length > 0) {
+    return (
+      <div className="mb-3 overflow-hidden" style={{ borderRadius: '3px', border: '1px solid var(--paper-edge)', background: 'var(--paper)' }}>
+        <div className="flex gap-2 overflow-x-auto p-2">
+          {frames.map((frame, index) => (
+            <div key={`${frame.url}-${index}`} className="relative flex-shrink-0 w-64 overflow-hidden" style={{ borderRadius: '3px', border: '1px solid var(--paper-edge)' }}>
+              <img src={frame.url} alt={frame.text ?? `Frame ${index + 1}`} className="w-full h-48 object-cover block" />
+              <span
+                className="absolute right-2 top-2 text-[10px] font-medium"
+                style={{ background: 'rgba(14,14,15,0.72)', color: '#fff', padding: '2px 6px', borderRadius: '2px' }}
+              >
+                {index + 1}/{frames.length}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (post.media_type === 'video' && post.media_url) {
+    return (
+      <div className="mb-3 overflow-hidden" style={{ borderRadius: '3px', border: '1px solid var(--paper-edge)', background: '#000' }}>
+        <video src={post.media_url} controls playsInline preload="metadata" className="w-full block max-h-80" />
+      </div>
+    )
+  }
+
+  if (post.media_url) {
+    return (
+      <div className="mb-3 overflow-hidden" style={{ borderRadius: '3px', border: '1px solid var(--paper-edge)' }}>
+        <img src={post.media_url} alt="" className="w-full object-cover max-h-64" />
+      </div>
+    )
+  }
+
+  return null
 }
 
 // ─── Board view (Trello-style, 5 columns with HTML5 drag/drop) ───────────
@@ -570,11 +657,7 @@ function BoardCard({ post, campaign, onOpen, draggable }: { post: Post; campaign
         )}
         <span className="text-[11px] ml-auto" style={{ color: 'var(--mist)' }}>{relativeTime(post.created_at)}</span>
       </div>
-      {post.media_url && (
-        <div className="mb-2 overflow-hidden" style={{ borderRadius: 'var(--radius-sm)' }}>
-          <img src={post.media_url} alt="" className="w-full h-20 object-cover" />
-        </div>
-      )}
+      <PostMediaThumb post={post} className="w-full h-24 mb-2" />
       <p className="text-[14px] font-medium leading-snug line-clamp-2 mb-1" style={{ color: 'var(--ink)' }}>
         {post.title || 'Untitled post'}
       </p>
@@ -619,11 +702,7 @@ function PostDetailPanel({
       <h3 className="text-[17px] font-semibold mt-3 mb-3 leading-snug" style={{ color: 'var(--ink)' }}>
         {post.title || 'Untitled'}
       </h3>
-      {post.media_url && (
-        <div className="mb-3 overflow-hidden" style={{ borderRadius: '3px', border: '1px solid var(--paper-edge)' }}>
-          <img src={post.media_url} alt="" className="w-full object-cover max-h-48" />
-        </div>
-      )}
+      <PostMediaPreview post={post} />
       <div className="p-3 text-[13px] leading-relaxed whitespace-pre-wrap max-h-64 overflow-auto mb-4"
         style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', borderRadius: '3px' }}>
         {post.copy || 'No content'}
