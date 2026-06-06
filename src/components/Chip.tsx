@@ -26,6 +26,7 @@ const STATUS_DOT: Record<string, string> = {
   'pending review': 'var(--dot-amber)',
   draft: 'var(--dot-amber)',
   changes_requested: 'var(--dot-amber)',
+  'changes requested': 'var(--dot-amber)',
   approved: 'var(--dot-green)',
   scheduled: 'var(--dot-blue)',
   published: 'var(--dot-green)',

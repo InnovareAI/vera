@@ -14,12 +14,13 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 // for status changes + n8n forwarding + Slack notifications).
 async function callApprovalWebhook(payload: Record<string, unknown>): Promise<{ post?: Post; error?: string }> {
   try {
+    const { data: { session } } = await supabase.auth.getSession()
     const res = await fetch(APPROVAL_WEBHOOK_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Authorization': `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
       },
       body: JSON.stringify(payload),
     })
@@ -29,6 +30,23 @@ async function callApprovalWebhook(payload: Record<string, unknown>): Promise<{ 
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) }
   }
+}
+
+type PostLifecycle = 'Draft' | 'Pending Review' | 'Changes Requested' | 'Approved' | 'Scheduled' | 'Posted' | 'Rejected'
+
+function normalizedStatus(status?: string | null) {
+  return (status ?? '').trim().toLowerCase().replace(/\s+/g, '_')
+}
+
+function postLifecycle(post: Post): PostLifecycle {
+  const status = normalizedStatus(post.status)
+  if (post.posted_at || post.published_at || status === 'posted' || status === 'published') return 'Posted'
+  if (status === 'rejected') return 'Rejected'
+  if (status === 'scheduled' || ((post.scheduled_at || post.publish_date) && status === 'approved')) return 'Scheduled'
+  if (status === 'approved') return 'Approved'
+  if (status === 'changes_requested') return 'Changes Requested'
+  if (status === 'draft') return 'Draft'
+  return 'Pending Review'
 }
 
 // Per-channel composer URL + label for the HITL "Open <platform>" button.
@@ -141,7 +159,9 @@ export default function ReviewDetail() {
     // Map UI status labels → approval-webhook action values
     const actionMap: Record<string, string> = {
       'Approved': 'approved',
+      'approved': 'approved',
       'Rejected': 'rejected',
+      'rejected': 'rejected',
       'changes_requested': 'changes_requested',
     }
     const apiAction = actionMap[newStatus]
@@ -300,22 +320,29 @@ export default function ReviewDetail() {
     )
   }
 
-  const statusLower = (post.status ?? '').toLowerCase()
-  const isPending = statusLower === 'pending' || statusLower === 'changes_requested' || statusLower === 'draft' || post.status === 'Pending Review'
-  const isApproved = statusLower === 'approved'
-  const isRejected = statusLower === 'rejected'
-  const isPosted = !!post.posted_at
+  const lifecycle = postLifecycle(post)
+  const isDraft = lifecycle === 'Draft'
+  const isPending = lifecycle === 'Pending Review'
+  const isChangesRequested = lifecycle === 'Changes Requested'
+  const isApproved = lifecycle === 'Approved'
+  const isScheduled = lifecycle === 'Scheduled'
+  const isRejected = lifecycle === 'Rejected'
+  const isPosted = lifecycle === 'Posted'
   const composerInfo = composerForChannel(post.channel, post.copy)
   const composerUrl = composerInfo.url
   const compliance = Array.isArray(post.compliance_checks) ? (post.compliance_checks as Array<{ pass?: boolean; label?: string }>) : []
   const statusBadge = isPosted
     ? { text: 'Posted', cls: 'bg-violet-50 text-gray-900 border-violet-200' }
+    : isScheduled
+    ? { text: 'Scheduled', cls: 'bg-blue-50 text-blue-700 border-blue-200' }
     : isApproved
     ? { text: 'Approved', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
     : isRejected
     ? { text: 'Rejected', cls: 'bg-red-50 text-red-700 border-red-200' }
-    : statusLower === 'changes_requested'
+    : isChangesRequested
     ? { text: 'Changes requested', cls: 'bg-blue-50 text-blue-700 border-blue-200' }
+    : isDraft
+    ? { text: 'Draft', cls: 'bg-gray-50 text-gray-700 border-gray-200' }
     : { text: 'Pending review', cls: 'bg-amber-50 text-amber-700 border-amber-200' }
 
   return (
@@ -384,19 +411,44 @@ export default function ReviewDetail() {
 
       {/* Action panel */}
       <div className="bg-white rounded-xl border border-gray-200 p-5 mt-4">
-        {isPending && (
+        {isDraft && (
           <>
-            <p className="text-sm font-semibold text-gray-900 mb-3">Ready to approve?</p>
+            <p className="text-sm font-semibold text-gray-900 mb-1">Draft</p>
+            <p className="text-xs text-gray-500 mb-3">Move this into review when it is ready for a human decision.</p>
+            <button onClick={() => updateStatus('pending')} disabled={action === 'saving'}
+              className="w-full py-2.5 px-4 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white rounded-lg text-sm font-semibold">
+              {action === 'saving' ? 'Saving...' : 'Send to review'}
+            </button>
+          </>
+        )}
+
+        {(isPending || isChangesRequested) && (
+          <>
+            <p className="text-sm font-semibold text-gray-900 mb-1">
+              {isChangesRequested ? 'Changes requested' : 'Ready to approve?'}
+            </p>
+            {isChangesRequested && post.feedback && (
+              <div className="mb-3 bg-gray-50 rounded-lg p-3 text-xs text-gray-700">
+                <p className="font-medium text-gray-900 mb-1">Notes:</p>
+                {post.feedback}
+              </div>
+            )}
             <div className="flex gap-2 mb-2">
               <button onClick={() => updateStatus('approved')} disabled={action === 'saving'}
                 className="flex-1 py-2.5 px-4 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white rounded-lg text-sm font-semibold">
-                {action === 'saving' ? 'Saving…' : 'Approve'}
+                {action === 'saving' ? 'Saving...' : 'Approve'}
               </button>
               <button onClick={() => updateStatus('rejected')} disabled={action === 'saving'}
                 className="flex-1 py-2.5 px-4 bg-white hover:bg-red-50 disabled:opacity-50 text-red-700 border-2 border-red-300 rounded-lg text-sm font-semibold">
                 Reject
               </button>
             </div>
+            {isChangesRequested && (
+              <button onClick={() => updateStatus('pending')} disabled={action === 'saving'}
+                className="w-full py-2 text-sm font-medium text-gray-600 hover:bg-[var(--fog)] border border-gray-200 rounded-lg mb-2">
+                Return to review
+              </button>
+            )}
             <button onClick={() => setShowFeedback(s => !s)}
               className="w-full py-2 text-sm font-medium text-gray-600 hover:bg-[var(--fog)] border border-gray-200 rounded-lg">
               Request changes
@@ -414,10 +466,15 @@ export default function ReviewDetail() {
           </>
         )}
 
-        {isApproved && !isPosted && (
+        {(isApproved || isScheduled) && !isPosted && (
           <>
-            <p className="text-sm font-semibold text-emerald-700 mb-1">Approved — ready to post</p>
+            <p className="text-sm font-semibold text-emerald-700 mb-1">
+              {isScheduled ? 'Scheduled' : 'Approved, ready to post'}
+            </p>
             <p className="text-xs text-gray-500 mb-4">
+              {isScheduled && (post.scheduled_at || post.publish_date)
+                ? `Planned for ${new Date((post.scheduled_at || post.publish_date)!).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}. `
+                : ''}
               {post.channel?.toLowerCase() === 'linkedin'
                 ? 'Auto-publish via Unipile, or copy + open the composer to post manually.'
                 : post.channel?.toLowerCase() === 'blog'

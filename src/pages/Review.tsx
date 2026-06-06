@@ -14,31 +14,55 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 // Platform + status chip helpers moved to ../components/Chip — neutral
 // chips with coloured dots replace the older bright Tailwind pills.
 
-const STATUS_TABS = ['Pending Review', 'Approved', 'Scheduled', 'Posted', 'Rejected'] as const
+const STATUS_TABS = ['Draft', 'Pending Review', 'Changes Requested', 'Approved', 'Scheduled', 'Posted', 'Rejected'] as const
 type StatusTab = typeof STATUS_TABS[number]
-type View = 'list' | 'board' | 'calendar'
+const REVIEW_VIEWS = ['list', 'board', 'calendar'] as const
+type View = typeof REVIEW_VIEWS[number]
 type MediaFrame = { url: string; text?: string | null }
 
-// Status-tab → underlying DB status value. Pending and Posted are special
-// (Pending matches a set of values; Posted is derived from posted_at).
+// Status-tab → underlying DB status value. Scheduled and Posted are derived
+// delivery states: scheduled needs a date, posted needs a live URL.
 const TAB_DROP_ACTION: Record<StatusTab, { kind: 'webhook' | 'direct' | 'forbidden'; value?: string; action?: string }> = {
-  'Pending Review': { kind: 'direct',   value: 'Pending Review' },
+  'Draft':          { kind: 'direct',   value: 'draft' },
+  'Pending Review': { kind: 'direct',   value: 'pending' },
+  'Changes Requested': { kind: 'webhook', action: 'changes_requested' },
   'Approved':       { kind: 'webhook',  action: 'approved' },
   'Scheduled':      { kind: 'forbidden' },                       // needs a date; use Calendar
   'Posted':         { kind: 'forbidden' },                       // needs posted_url; use detail page
   'Rejected':       { kind: 'webhook',  action: 'rejected' },
 }
 
-const isPending = (s: string) => ['Pending Review', 'Draft', 'pending', 'changes_requested'].includes(s)
-const isPosted = (p: Post) => !!p.posted_at
+const normalizeStatus = (status?: string | null) => (status ?? '').trim().toLowerCase().replace(/\s+/g, '_')
+const isPosted = (p: Post) => !!p.posted_at || !!p.published_at || ['posted', 'published'].includes(normalizeStatus(p.status))
+const isDraftLike = (s: string) => ['draft'].includes(normalizeStatus(s))
+const isReviewLike = (s: string) => ['pending', 'pending_review', 'review'].includes(normalizeStatus(s))
+const isChangesRequested = (s: string) => normalizeStatus(s) === 'changes_requested'
+const isActionableReview = (s: string) => isDraftLike(s) || isReviewLike(s) || isChangesRequested(s)
 
 function tabFor(post: Post): StatusTab {
-  const status = (post.status ?? '').toLowerCase()
+  const status = normalizeStatus(post.status)
   if (isPosted(post)) return 'Posted'
   if (status === 'rejected') return 'Rejected'
   if (status === 'scheduled' || ((post.scheduled_at || post.publish_date) && status === 'approved')) return 'Scheduled'
   if (status === 'approved') return 'Approved'
+  if (status === 'changes_requested') return 'Changes Requested'
+  if (status === 'draft') return 'Draft'
   return 'Pending Review'
+}
+
+function lifecycleLabel(post: Post): string {
+  return tabFor(post)
+}
+
+function storedView(value: string | null, allowCalendar: boolean): View | null {
+  if (!value || !REVIEW_VIEWS.includes(value as View)) return null
+  if (value === 'calendar' && !allowCalendar) return null
+  return value as View
+}
+
+function storedTab(value: string | null): StatusTab | null {
+  if (!value || !STATUS_TABS.includes(value as StatusTab)) return null
+  return value as StatusTab
 }
 
 function relativeTime(iso?: string): string {
@@ -56,19 +80,14 @@ function relativeTime(iso?: string): string {
 }
 
 export default function Review({ initialView }: { initialView?: 'list' | 'board' | 'calendar' } = {}) {
+  const { activeOrg } = useOrg()
+  const { activeProject } = useProject()
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<StatusTab>('Pending Review')
   const [selected, setSelected] = useState<Post | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
-  // Review is the pending inbox (list/board). Calendar is its own rail surface,
-  // reached via initialView='calendar'. The inbox never opens in calendar — even
-  // if a stale 'calendar' is in localStorage from a prior Calendar visit.
-  const [view, setView] = useState<View>(() => {
-    if (initialView) return initialView
-    const stored = localStorage.getItem('reviewView') as View | null
-    return stored && stored !== 'calendar' ? stored : 'list'
-  })
+  const [view, setView] = useState<View>(initialView ?? 'list')
   const [dragOverTab, setDragOverTab] = useState<StatusTab | null>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [searchParams, setSearchParams] = useSearchParams()
@@ -81,9 +100,31 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
     }
     setSearchParams(searchParams, { replace: true })
   }
-  const { activeOrg } = useOrg()
-  const { activeProject } = useProject()
   const navigate = useNavigate()
+  const preferenceScope = activeProject?.id ?? activeOrg?.id ?? 'global'
+  const reviewViewPreferenceKey = `vera-review-view:${preferenceScope}`
+  const reviewTabPreferenceKey = `vera-review-tab:${preferenceScope}`
+
+  useEffect(() => {
+    if (initialView) {
+      setView(initialView)
+      return
+    }
+    setView(storedView(localStorage.getItem(reviewViewPreferenceKey), false) ?? 'list')
+  }, [initialView, reviewViewPreferenceKey])
+
+  useEffect(() => {
+    if (initialView === 'calendar' && view === 'calendar') return
+    localStorage.setItem(reviewViewPreferenceKey, view)
+  }, [initialView, reviewViewPreferenceKey, view])
+
+  useEffect(() => {
+    setActiveTab(storedTab(localStorage.getItem(reviewTabPreferenceKey)) ?? 'Pending Review')
+  }, [reviewTabPreferenceKey])
+
+  useEffect(() => {
+    localStorage.setItem(reviewTabPreferenceKey, activeTab)
+  }, [reviewTabPreferenceKey, activeTab])
 
   useEffect(() => {
     if (!activeOrg?.id) { setCampaigns([]); return }
@@ -97,8 +138,6 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
   }, [activeOrg?.id, activeProject?.id])
 
   const campaignsById = new Map(campaigns.map(c => [c.id, c]))
-
-  useEffect(() => { localStorage.setItem('reviewView', view) }, [view])
 
   useEffect(() => {
     // Scope posts to active workspace + project. Without the project
@@ -160,12 +199,13 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
     setSaving(postId)
     if (rule.kind === 'webhook' && rule.action) {
       try {
+        const { data: { session } } = await supabase.auth.getSession()
         const res = await fetch(APPROVAL_WEBHOOK_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'apikey': SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Authorization': `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
           },
           body: JSON.stringify({ post_id: postId, action: rule.action }),
         })
@@ -211,7 +251,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
             Review queue
           </h1>
           <p className="text-[13px] mt-1" style={{ color: 'var(--ghost)' }}>
-            {scoped.length} of {posts.length} posts · {tabCounts['Pending Review']} awaiting approval
+            {scoped.length} of {posts.length} posts · {tabCounts['Draft']} draft · {tabCounts['Pending Review']} pending review · {tabCounts['Changes Requested']} changes requested
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -347,12 +387,12 @@ function ListView({
     <div className="flex flex-1 gap-6 min-h-0">
       <div className="flex-1 flex flex-col min-w-0">
         {/* Tabs */}
-        <div className="flex gap-1 mb-4 p-0.5" style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
+        <div className="flex gap-1 mb-4 p-0.5 overflow-x-auto" style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
           {STATUS_TABS.map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className="flex-1 px-3 py-1.5 text-[12px] transition-all inline-flex items-center justify-center gap-1.5"
+              className="flex-1 min-w-[112px] px-3 py-1.5 text-[12px] transition-all inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
               style={{
                 background: activeTab === tab ? 'var(--paper)' : 'transparent',
                 color: activeTab === tab ? 'var(--ink)' : 'var(--ghost)',
@@ -411,7 +451,7 @@ function ListView({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2">
                       <PlatformChip channel={post.channel} />
-                      <StatusChip status={isPosted(post) ? 'Posted' : post.status} />
+                      <StatusChip status={lifecycleLabel(post)} />
                       {campaign && (
                         <span className="text-[12px] truncate" style={{ color: 'var(--ghost)' }} title={campaign.theme || campaign.name}>
                           · {campaign.name}
@@ -490,7 +530,7 @@ function PostMediaThumb({ post, className = '' }: { post: Post; className?: stri
   )
 }
 
-// ─── Board view (Trello-style, 5 columns with HTML5 drag/drop) ───────────
+// ─── Board view (lifecycle columns with HTML5 drag/drop) ───────────
 function BoardView({
   posts, loading, tabCounts, dragOverTab, setDragOverTab, onMove, onOpen, campaignsById,
 }: {
@@ -576,7 +616,7 @@ function BoardView({
                     post={post}
                     campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
                     onOpen={() => onOpen(post)}
-                    draggable={!isForbidden /* Posted column items can be dragged out via detail page anyway */}
+                    draggable={!isPosted(post)}
                   />
                 ))}
               </div>
@@ -660,8 +700,12 @@ function PostDetailPanel({
   detailPath: string
   calendarPath: string
 }) {
-  const status = (post.status ?? '').toLowerCase()
+  const currentTab = tabFor(post)
   const isDateScheduled = !!(post.scheduled_at || post.publish_date)
+  const canApprove = isActionableReview(post.status) && !isPosted(post)
+  const canReject = !['Rejected', 'Posted'].includes(currentTab)
+  const canRequestChanges = ['Pending Review', 'Approved'].includes(currentTab)
+  const canReturnToReview = currentTab === 'Draft' || currentTab === 'Changes Requested'
   return (
     <div className="sticky top-0 p-5"
       style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}>
@@ -700,29 +744,52 @@ function PostDetailPanel({
         </div>
       )}
       <div className="flex flex-col gap-2">
-        {isPending(post.status) && !isPosted(post) && (<>
+        {canReturnToReview && (
+          <button onClick={() => onMove(post.id, 'Pending Review')} disabled={saving === post.id}
+            className="w-full py-2 text-[13px] font-medium transition-colors disabled:opacity-50"
+            style={{ background: currentTab === 'Draft' ? 'var(--ink)' : 'var(--paper)', color: currentTab === 'Draft' ? 'var(--paper)' : 'var(--ink)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
+            {saving === post.id ? 'Saving...' : currentTab === 'Draft' ? 'Send to review' : 'Return to review'}
+          </button>
+        )}
+        {canApprove && (<>
           <button onClick={() => onMove(post.id, 'Approved')} disabled={saving === post.id}
             className="w-full py-2 text-[13px] font-medium transition-colors disabled:opacity-50"
             style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '3px' }}>
-            {saving === post.id ? 'Saving…' : '✓ Approve'}
+            {saving === post.id ? 'Saving...' : 'Approve'}
           </button>
+        </>)}
+        {canRequestChanges && (
+          <button onClick={() => onMove(post.id, 'Changes Requested')} disabled={saving === post.id}
+            className="w-full py-2 text-[13px] transition-colors disabled:opacity-50"
+            style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
+            Request changes
+          </button>
+        )}
+        {canReject && (
           <button onClick={() => onMove(post.id, 'Rejected')} disabled={saving === post.id}
             className="w-full py-2 text-[13px] transition-colors disabled:opacity-50"
             style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
-            ✕ Reject
+            Reject
           </button>
-        </>)}
-        {status === 'approved' && !isPosted(post) && !isDateScheduled && (
+        )}
+        {currentTab === 'Approved' && !isDateScheduled && (
           <a href={calendarPath}
             className="w-full py-2 text-[13px] font-medium text-center transition-colors"
             style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '3px' }}>
             Schedule in calendar
           </a>
         )}
+        {currentTab === 'Scheduled' && (
+          <a href={calendarPath}
+            className="w-full py-2 text-[13px] font-medium text-center transition-colors"
+            style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '3px' }}>
+            Open in calendar
+          </a>
+        )}
         <a href={detailPath}
           className="w-full py-2 text-[13px] text-center transition-colors"
           style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
-          Open detail →
+          Open detail
         </a>
       </div>
     </div>
