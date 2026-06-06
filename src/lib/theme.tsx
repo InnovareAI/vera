@@ -5,33 +5,18 @@
 // flip the resolved theme live as the OS preference changes (operator runs
 // at night → app goes dark automatically).
 //
-// `resolvedTheme` is what's actually applied to <body data-theme="..."> —
-// always light or dark, never system. Components that care about the
+// `resolvedTheme` is what's actually applied to the DOM theme signals:
+// <html class="dark">, <html data-theme="...">, and <body data-theme="...">.
+// Always light or dark, never system. Components that care about the
 // applied theme (e.g. for conditional rendering) should read this, not
 // `theme`.
 //
 // Persists the preference in localStorage. Defaults to 'system' on first
 // load — matches Notion / Linear / GitHub / ChatGPT convention.
 
-import { createContext, useContext, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-
-export type Theme = 'light' | 'dark' | 'system'
-export type ResolvedTheme = 'light' | 'dark'
-
-interface ThemeContextType {
-  theme: Theme
-  resolvedTheme: ResolvedTheme
-  setTheme: (theme: Theme) => void
-  toggle: () => void   // kept for backwards compat — cycles light → dark → system
-}
-
-const ThemeContext = createContext<ThemeContextType>({
-  theme: 'system',
-  resolvedTheme: 'light',
-  setTheme: () => {},
-  toggle: () => {},
-})
+import { ThemeContext, type ResolvedTheme, type Theme } from './themeContext'
 
 const STORAGE_KEY = 'vera-theme'
 const LEGACY_STORAGE_KEY = 'kai-theme'
@@ -76,10 +61,24 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // Derived: what we actually apply
   const resolvedTheme: ResolvedTheme = theme === 'system' ? systemTheme : theme
 
-  // Push the resolved theme onto <body> and persist the preference
+  // Push the resolved theme onto the same class-based contract SAM uses, while
+  // preserving Vera's existing data-theme selectors.
   useEffect(() => {
-    document.body.setAttribute('data-theme', resolvedTheme)
-    localStorage.setItem(STORAGE_KEY, theme)
+    const root = document.documentElement
+    const body = document.body
+    const isDark = resolvedTheme === 'dark'
+
+    root.setAttribute('data-theme', resolvedTheme)
+    body.setAttribute('data-theme', resolvedTheme)
+    root.classList.toggle('dark', isDark)
+    body.classList.toggle('dark', isDark)
+    root.style.colorScheme = resolvedTheme
+
+    try {
+      localStorage.setItem(STORAGE_KEY, theme)
+    } catch {
+      /* ignore */
+    }
   }, [theme, resolvedTheme])
 
   function setTheme(next: Theme) {
@@ -97,5 +96,3 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     </ThemeContext.Provider>
   )
 }
-
-export const useTheme = () => useContext(ThemeContext)

@@ -5,9 +5,10 @@ import { useOrg } from '../lib/orgContext'
 import { useAuth } from '../lib/auth'
 import {
   Settings2, Users, Mic2, Plug, Building2, Save, Plus, Trash2,
-  Eye, EyeOff, CheckCircle2, XCircle, AlertCircle
+  Eye, EyeOff, CheckCircle2, XCircle, AlertCircle, Sun, Moon, Monitor
 } from 'lucide-react'
 import { PublishersCard } from '../components/PublishersCard'
+import { useTheme, type Theme } from '../lib/themeContext'
 
 type Tab = 'workspace' | 'team' | 'brand' | 'integrations'
 
@@ -100,6 +101,78 @@ function WorkspaceTab() {
         {saved ? <CheckCircle2 size={14} className="text-emerald-400" /> : <Save size={14} />}
         {saving ? 'Saving…' : saved ? 'Saved!' : 'Save Changes'}
       </button>
+      <AppearancePreference />
+    </div>
+  )
+}
+
+function AppearancePreference() {
+  const { theme, resolvedTheme, setTheme } = useTheme()
+  const options: { id: Theme; label: string; icon: React.ElementType }[] = [
+    { id: 'light', label: 'Light', icon: Sun },
+    { id: 'dark', label: 'Dark', icon: Moon },
+    { id: 'system', label: 'System', icon: Monitor },
+  ]
+
+  return (
+    <div
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--line)',
+        borderRadius: 'var(--radius-lg)',
+        padding: 16,
+      }}
+    >
+      <div style={{ marginBottom: 12 }}>
+        <h3 style={{ margin: 0, color: 'var(--ink)', fontSize: 'var(--t-body)', fontWeight: 650 }}>
+          Appearance
+        </h3>
+        <p style={{ margin: '2px 0 0', color: 'var(--faint)', fontSize: 'var(--t-cap)' }}>
+          Current: {resolvedTheme === 'dark' ? 'Dark' : 'Light'}
+        </p>
+      </div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+          gap: 8,
+          background: 'var(--paper-2)',
+          border: '1px solid var(--line)',
+          borderRadius: 'var(--radius-md)',
+          padding: 4,
+        }}
+      >
+        {options.map(({ id, label, icon: Icon }) => {
+          const active = theme === id
+          return (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={active}
+              aria-label={`Use ${label.toLowerCase()} theme`}
+              onClick={() => setTheme(id)}
+              style={{
+                minHeight: 36,
+                border: active ? '1px solid var(--line-2)' : '1px solid transparent',
+                borderRadius: 'var(--radius-md)',
+                background: active ? 'var(--surface)' : 'transparent',
+                color: active ? 'var(--ink)' : 'var(--ink-2)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                fontSize: 'var(--t-sm)',
+                fontWeight: active ? 650 : 550,
+                boxShadow: active ? 'var(--shadow-pop)' : 'none',
+              }}
+            >
+              <Icon size={14} />
+              <span>{label}</span>
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -401,7 +474,7 @@ function UnipileConnectionCard() {
       return
     }
     if (status === 'error') {
-      setMsg({ type: 'err', text: 'Connection was cancelled or failed.' })
+      queueMicrotask(() => setMsg({ type: 'err', text: 'Connection was cancelled or failed.' }))
       cleanUrl()
     }
 
