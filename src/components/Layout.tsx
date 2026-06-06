@@ -8,7 +8,7 @@
 //
 // Labels are VERA's content-side equivalents of SAM's sales rail.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   MessageSquare, CheckSquare, Brain,
@@ -99,7 +99,7 @@ function RailRecents() {
 
   useEffect(() => {
     const pid = activeProject?.id
-    if (!pid) { setSessions([]); return }
+    if (!pid) { queueMicrotask(() => setSessions([])); return }
     let cancelled = false
     const load = () => supabase.rpc('list_chat_sessions', { p_project_id: pid }).then(({ data }) => {
       if (!cancelled) setSessions(((data ?? []) as RailSession[]).slice(0, 5))
@@ -111,7 +111,7 @@ function RailRecents() {
     return () => { cancelled = true; window.removeEventListener('vera:home', load); window.removeEventListener('vera:session', load) }
   }, [activeProject?.id])
 
-  if (!activeProject || sessions.length === 0) return null
+  if (!activeProject) return null
 
   const open = (sid: string) => {
     const target = `/p/${activeProject.slug}/vera`
@@ -120,9 +120,29 @@ function RailRecents() {
     window.dispatchEvent(new CustomEvent('vera:session', { detail: { sid } }))
   }
 
+  // Start a fresh conversation. On the Vera page, fire vera:home so the open
+  // thread resets in place; from elsewhere, seed a new session id and navigate
+  // in (VeraThread reads this key on mount) so we land on an empty thread.
+  const startNew = () => {
+    const target = `/p/${activeProject.slug}/vera`
+    if (location.pathname === target) {
+      window.dispatchEvent(new CustomEvent('vera:home'))
+    } else {
+      const sid = crypto.randomUUID()
+      try { localStorage.setItem(`vera-session:${activeProject.id}`, sid) } catch { /* ignore */ }
+      navigate(target)
+    }
+  }
+
   return (
     <nav className="space-y-0.5 mt-1">
-      <RailLabel>Recents</RailLabel>
+      <button onClick={startNew} title="Start a new conversation"
+        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 mx-2 transition-colors hover:bg-[var(--fog)]"
+        style={{ background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 'var(--radius-md)', width: 'calc(100% - 1rem)' }}>
+        <Plus size={15} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+        <span className="flex-1 truncate text-left" style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>New chat</span>
+      </button>
+      {sessions.length > 0 && <RailLabel>Recents</RailLabel>}
       {sessions.map(s => {
         const title = compactRecentTitle(s.title)
         return (
@@ -264,6 +284,16 @@ export default function Layout() {
     window.addEventListener('vera:rail-open', open)
     return () => window.removeEventListener('vera:rail-open', open)
   }, [])
+  // Bulletproof reveal: the moment the page supplies rail content where there
+  // was none (a fresh draft/campaign), open the rail. This doesn't depend on
+  // the vera:rail-open event firing/being caught, so a newly generated post
+  // can never silently land in a collapsed rail.
+  const hadRailContent = useRef(false)
+  useEffect(() => {
+    const has = rightRailContent != null
+    if (has && !hadRailContent.current) queueMicrotask(() => setRailOpen(true))
+    hadRailContent.current = has
+  }, [rightRailContent])
   // Responsive: on narrow / half-screen viewports the 3-pane layout cramps, so
   // collapse the rail by default (conversation gets full width) and overlay it
   // when opened. Restore the saved preference when there's room again.
@@ -275,14 +305,18 @@ export default function Layout() {
   }, [])
   const narrowRail = vw < 1100
   useEffect(() => {
-    if (narrowRail) setRailOpen(false)
-    else { try { setRailOpen(localStorage.getItem('vera-rail-open') !== '0') } catch { setRailOpen(true) } }
+    if (narrowRail) queueMicrotask(() => setRailOpen(false))
+    else {
+      let shouldOpen = true
+      try { shouldOpen = localStorage.getItem('vera-rail-open') !== '0' } catch { /* ignore */ }
+      queueMicrotask(() => setRailOpen(shouldOpen))
+    }
   }, [narrowRail])
 
   // One live number in the rail: the Review badge (pending/draft posts in the
   // active project).
   useEffect(() => {
-    if (!activeOrg?.id) { setPendingCount(0); return }
+    if (!activeOrg?.id) { queueMicrotask(() => setPendingCount(0)); return }
     let q = supabase.from('content_posts')
       .select('id', { count: 'exact', head: true })
       .eq('org_id', activeOrg.id)
