@@ -8,17 +8,38 @@ TARGET_STACK="${TARGET_STACK:-/srv/supabase-content}"
 REMOTE_STAGE="${REMOTE_STAGE:-/root/vera-migration}"
 DOMAIN="${DOMAIN:-supabase-content-eu.innovareai.com}"
 SWAP_SIZE="${SWAP_SIZE:-8G}"
+TARGET_HOSTNAME="${TARGET_HOSTNAME:-vera-supabase-eu-01}"
+SOURCE_SSH_KEY="${SOURCE_SSH_KEY:-}"
+TARGET_SSH_KEY="${TARGET_SSH_KEY:-}"
+
+if [[ -z "$TARGET_SSH_KEY" && -f "$HOME/.ssh/vera_hetzner_ed25519" ]]; then
+  TARGET_SSH_KEY="$HOME/.ssh/vera_hetzner_ed25519"
+fi
+
+SOURCE_SSH_ARGS=(-o BatchMode=yes -o ConnectTimeout=8)
+TARGET_SSH_ARGS=(-o BatchMode=yes -o ConnectTimeout=8)
+SOURCE_RSYNC_SSH="ssh -o BatchMode=yes -o ConnectTimeout=8"
+TARGET_RSYNC_SSH="ssh -o BatchMode=yes -o ConnectTimeout=8"
+
+if [[ -n "$SOURCE_SSH_KEY" ]]; then
+  SOURCE_SSH_ARGS=(-i "$SOURCE_SSH_KEY" -o IdentitiesOnly=yes "${SOURCE_SSH_ARGS[@]}")
+  SOURCE_RSYNC_SSH="ssh -i $SOURCE_SSH_KEY -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=8"
+fi
+if [[ -n "$TARGET_SSH_KEY" ]]; then
+  TARGET_SSH_ARGS=(-i "$TARGET_SSH_KEY" -o IdentitiesOnly=yes "${TARGET_SSH_ARGS[@]}")
+  TARGET_RSYNC_SSH="ssh -i $TARGET_SSH_KEY -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=8"
+fi
 
 log() {
   printf '%s [vera-migrate] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
 }
 
 ssh_source() {
-  ssh -o BatchMode=yes -o ConnectTimeout=8 "$SOURCE_HOST" "$@"
+  ssh "${SOURCE_SSH_ARGS[@]}" "$SOURCE_HOST" "$@"
 }
 
 ssh_target() {
-  ssh -o BatchMode=yes -o ConnectTimeout=8 "$TARGET_HOST" "$@"
+  ssh "${TARGET_SSH_ARGS[@]}" "$TARGET_HOST" "$@"
 }
 
 require_target_access() {
@@ -28,7 +49,7 @@ require_target_access() {
 
 stage_source() {
   log "creating fresh source backup and migration bundle on $SOURCE_HOST"
-  ssh -o BatchMode=yes -o ConnectTimeout=8 "$SOURCE_HOST" \
+  ssh "${SOURCE_SSH_ARGS[@]}" "$SOURCE_HOST" \
     "SOURCE_STACK='$SOURCE_STACK' REMOTE_STAGE='$REMOTE_STAGE' bash -s" <<'REMOTE'
 set -euo pipefail
 
@@ -43,6 +64,7 @@ stack_bundle="$REMOTE_STAGE/vera-supabase-stack-${stamp}.tar.gz"
 systemd_bundle="$REMOTE_STAGE/vera-supabase-systemd-${stamp}.tar.gz"
 root_ssh_bundle="$REMOTE_STAGE/vera-supabase-root-ssh-${stamp}.tar.gz"
 notify_bundle="$REMOTE_STAGE/vera-supabase-notification-secrets-${stamp}.tar.gz"
+db_config_bundle="$REMOTE_STAGE/vera-supabase-db-config-${stamp}.tar.gz"
 
 tar -C "$SOURCE_STACK" \
   --exclude="./backups" \
@@ -77,6 +99,17 @@ fi
 tar -C "$REMOTE_STAGE/notification-secrets" -czf "$notify_bundle" .
 sha256sum "$notify_bundle" > "$notify_bundle.sha256"
 
+source_project="$(basename "$SOURCE_STACK")"
+db_config_volume="${source_project}_db-config"
+db_config_mount="$(docker volume inspect "$db_config_volume" -f '{{.Mountpoint}}' 2>/dev/null || true)"
+if test -n "$db_config_mount" && test -d "$db_config_mount"; then
+  tar -C "$db_config_mount" -czf "$db_config_bundle" .
+else
+  mkdir -p "$REMOTE_STAGE/db-config-empty"
+  tar -C "$REMOTE_STAGE/db-config-empty" -czf "$db_config_bundle" .
+fi
+sha256sum "$db_config_bundle" > "$db_config_bundle.sha256"
+
 latest_db="$(readlink -f "$SOURCE_STACK/backups/latest/latest.dump")"
 latest_storage="$(readlink -f "$SOURCE_STACK/backups/latest/latest.storage.tar.gz")"
 latest_schema="$(readlink -f "$SOURCE_STACK/backups/latest/latest.schema.sql")"
@@ -88,6 +121,7 @@ STACK_BUNDLE=$stack_bundle
 SYSTEMD_BUNDLE=$systemd_bundle
 ROOT_SSH_BUNDLE=$root_ssh_bundle
 NOTIFY_BUNDLE=$notify_bundle
+DB_CONFIG_BUNDLE=$db_config_bundle
 LATEST_DB=$latest_db
 LATEST_STORAGE=$latest_storage
 LATEST_SCHEMA=$latest_schema
@@ -103,41 +137,47 @@ REMOTE
 
 copy_artifacts() {
   log "copying migration artifacts through local temp storage"
-  local tmp
+  local tmp source_ssh_host
+  source_ssh_host="$SOURCE_HOST"
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
 
-  rsync -az "$SOURCE_HOST:$REMOTE_STAGE/manifest.env" "$tmp/"
+  rsync -az -e "$SOURCE_RSYNC_SSH" "$source_ssh_host:$REMOTE_STAGE/manifest.env" "$tmp/"
   # shellcheck disable=SC1091
   source "$tmp/manifest.env"
 
-  rsync -az \
-    "$SOURCE_HOST:$STACK_BUNDLE" \
-    "$SOURCE_HOST:$STACK_BUNDLE.sha256" \
-    "$SOURCE_HOST:$SYSTEMD_BUNDLE" \
-    "$SOURCE_HOST:$SYSTEMD_BUNDLE.sha256" \
-    "$SOURCE_HOST:$ROOT_SSH_BUNDLE" \
-    "$SOURCE_HOST:$ROOT_SSH_BUNDLE.sha256" \
-    "$SOURCE_HOST:$NOTIFY_BUNDLE" \
-    "$SOURCE_HOST:$NOTIFY_BUNDLE.sha256" \
-    "$SOURCE_HOST:$LATEST_DB" \
-    "$SOURCE_HOST:$LATEST_DB.sha256" \
-    "$SOURCE_HOST:$LATEST_STORAGE" \
-    "$SOURCE_HOST:$LATEST_STORAGE.sha256" \
-    "$SOURCE_HOST:$LATEST_SCHEMA" \
+  rsync -az -e "$SOURCE_RSYNC_SSH" \
+    "$source_ssh_host:$STACK_BUNDLE" \
+    "$source_ssh_host:$STACK_BUNDLE.sha256" \
+    "$source_ssh_host:$SYSTEMD_BUNDLE" \
+    "$source_ssh_host:$SYSTEMD_BUNDLE.sha256" \
+    "$source_ssh_host:$ROOT_SSH_BUNDLE" \
+    "$source_ssh_host:$ROOT_SSH_BUNDLE.sha256" \
+    "$source_ssh_host:$NOTIFY_BUNDLE" \
+    "$source_ssh_host:$NOTIFY_BUNDLE.sha256" \
+    "$source_ssh_host:$DB_CONFIG_BUNDLE" \
+    "$source_ssh_host:$DB_CONFIG_BUNDLE.sha256" \
+    "$source_ssh_host:$LATEST_DB" \
+    "$source_ssh_host:$LATEST_DB.sha256" \
+    "$source_ssh_host:$LATEST_STORAGE" \
+    "$source_ssh_host:$LATEST_STORAGE.sha256" \
+    "$source_ssh_host:$LATEST_SCHEMA" \
     "$tmp/"
 
   ssh_target "mkdir -p '$REMOTE_STAGE' && chmod 700 '$REMOTE_STAGE'"
-  rsync -az "$tmp/" "$TARGET_HOST:$REMOTE_STAGE/"
+  rsync -az -e "$TARGET_RSYNC_SSH" "$tmp/" "$TARGET_HOST:$REMOTE_STAGE/"
+  rm -rf "$tmp"
+  trap - RETURN
 }
 
 bootstrap_target() {
   log "installing target packages and baseline system config"
-  ssh -o BatchMode=yes -o ConnectTimeout=8 "$TARGET_HOST" \
-    "SWAP_SIZE='$SWAP_SIZE' bash -s" <<'REMOTE'
+  ssh "${TARGET_SSH_ARGS[@]}" "$TARGET_HOST" \
+    "SWAP_SIZE='$SWAP_SIZE' TARGET_HOSTNAME='$TARGET_HOSTNAME' bash -s" <<'REMOTE'
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
+hostnamectl set-hostname "$TARGET_HOSTNAME"
 apt-get update
 apt-get install -y ca-certificates curl jq openssl rsync docker.io docker-compose-v2 caddy
 systemctl enable --now docker
@@ -159,7 +199,7 @@ REMOTE
 
 restore_target() {
   log "restoring Vera Supabase on target"
-  ssh -o BatchMode=yes -o ConnectTimeout=8 "$TARGET_HOST" \
+  ssh "${TARGET_SSH_ARGS[@]}" "$TARGET_HOST" \
     "REMOTE_STAGE='$REMOTE_STAGE' TARGET_STACK='$TARGET_STACK' DOMAIN='$DOMAIN' bash -s" <<'REMOTE'
 set -euo pipefail
 
@@ -168,6 +208,7 @@ latest_stack="$(ls -1t vera-supabase-stack-*.tar.gz | head -1)"
 latest_systemd="$(ls -1t vera-supabase-systemd-*.tar.gz | head -1)"
 latest_root_ssh="$(ls -1t vera-supabase-root-ssh-*.tar.gz | head -1)"
 latest_notify="$(ls -1t vera-supabase-notification-secrets-*.tar.gz | head -1)"
+latest_db_config="$(ls -1t vera-supabase-db-config-*.tar.gz | head -1)"
 latest_db="$(ls -1t content-pipeline-supabase-*.dump.enc | head -1)"
 latest_storage="$(ls -1t content-pipeline-supabase-*.storage.tar.gz.enc | head -1)"
 
@@ -184,6 +225,7 @@ verify_sha "$latest_stack"
 verify_sha "$latest_systemd"
 verify_sha "$latest_root_ssh"
 verify_sha "$latest_notify"
+verify_sha "$latest_db_config"
 verify_sha "$latest_db"
 verify_sha "$latest_storage"
 
@@ -214,6 +256,15 @@ systemctl enable caddy
 
 cd "$TARGET_STACK"
 docker compose down --remove-orphans || true
+rm -rf "$TARGET_STACK/volumes/db/data"
+target_project="$(basename "$TARGET_STACK")"
+db_config_volume="${target_project}_db-config"
+docker volume rm "$db_config_volume" >/dev/null 2>&1 || true
+docker volume create "$db_config_volume" >/dev/null
+db_config_mount="$(docker volume inspect "$db_config_volume" -f '{{.Mountpoint}}')"
+tar -C "$db_config_mount" -xzf "$REMOTE_STAGE/$latest_db_config"
+chown -R 105:106 "$db_config_mount"
+test -f "$db_config_mount/pgsodium_root.key" && chmod 600 "$db_config_mount/pgsodium_root.key"
 docker compose up -d db
 
 for _ in $(seq 1 90); do
@@ -230,9 +281,111 @@ openssl enc -d -aes-256-cbc -pbkdf2 \
   -in "$REMOTE_STAGE/$latest_db" \
   -out "$tmp_db"
 
+restore_user="$(docker exec content-supabase-db printenv POSTGRES_USER 2>/dev/null || true)"
+restore_db="$(docker exec content-supabase-db printenv POSTGRES_DB 2>/dev/null || true)"
+restore_user="${restore_user:-supabase_admin}"
+restore_db="${restore_db:-postgres}"
+
+docker exec -i content-supabase-db psql \
+  -U "$restore_user" -d "$restore_db" -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
+    CREATE ROLE supabase_realtime_admin NOLOGIN NOINHERIT;
+  END IF;
+END
+$$;
+
+GRANT supabase_realtime_admin TO postgres;
+
+DO $$
+DECLARE
+  extension_record record;
+BEGIN
+  FOR extension_record IN SELECT extname FROM pg_extension WHERE extname <> 'plpgsql' LOOP
+    EXECUTE format('DROP EXTENSION IF EXISTS %I CASCADE', extension_record.extname);
+  END LOOP;
+END
+$$;
+
+DO $$
+DECLARE
+  trigger_record record;
+BEGIN
+  FOR trigger_record IN SELECT evtname FROM pg_event_trigger LOOP
+    EXECUTE format('DROP EVENT TRIGGER IF EXISTS %I', trigger_record.evtname);
+  END LOOP;
+END
+$$;
+
+DO $$
+DECLARE
+  publication_record record;
+BEGIN
+  FOR publication_record IN SELECT pubname FROM pg_publication LOOP
+    EXECUTE format('DROP PUBLICATION IF EXISTS %I', publication_record.pubname);
+  END LOOP;
+END
+$$;
+
+DROP SCHEMA IF EXISTS
+  public,
+  auth,
+  storage,
+  realtime,
+  _realtime,
+  graphql,
+  graphql_public,
+  pgbouncer,
+  supabase_functions,
+  vault,
+  net,
+  extensions
+CASCADE;
+
+CREATE SCHEMA public;
+SQL
+
+restore_log="$(mktemp /tmp/vera-pg-restore.XXXXXX.log)"
+set +e
 docker exec -i content-supabase-db pg_restore \
-  --clean --if-exists --no-owner \
-  -U postgres -d postgres < "$tmp_db"
+  -U "$restore_user" -d "$restore_db" < "$tmp_db" 2> "$restore_log"
+restore_status=$?
+set -e
+if [[ "$restore_status" -ne 0 ]]; then
+  cat "$restore_log" >&2
+  printf 'pg_restore completed with warnings; continuing to service smoke checks\n' >&2
+fi
+rm -f "$restore_log"
+
+docker exec -i content-supabase-db psql \
+  -U "$restore_user" -d "$restore_db" -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+ALTER SCHEMA public OWNER TO pg_database_owner;
+REVOKE ALL ON SCHEMA public FROM supabase_admin;
+GRANT USAGE ON SCHEMA public TO PUBLIC, postgres, anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA graphql TO postgres, anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA graphql_public TO postgres, anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION graphql_public.graphql(
+  "operationName" text DEFAULT NULL::text,
+  query text DEFAULT NULL::text,
+  variables jsonb DEFAULT NULL::jsonb,
+  extensions jsonb DEFAULT NULL::jsonb
+)
+RETURNS jsonb
+LANGUAGE sql
+AS $function$
+  select graphql.resolve(
+    query := query,
+    variables := coalesce(variables, '{}'),
+    "operationName" := "operationName",
+    extensions := extensions
+  );
+$function$;
+
+GRANT ALL ON FUNCTION graphql_public.graphql(text, text, jsonb, jsonb)
+  TO postgres, anon, authenticated, service_role;
+SQL
 
 rm -rf "$TARGET_STACK/volumes/storage"
 mkdir -p "$TARGET_STACK/volumes/storage"
@@ -249,7 +402,7 @@ REMOTE
 
 smoke_target() {
   log "running target smoke tests over localhost Kong"
-  ssh -o BatchMode=yes -o ConnectTimeout=8 "$TARGET_HOST" \
+  ssh "${TARGET_SSH_ARGS[@]}" "$TARGET_HOST" \
     "TARGET_STACK='$TARGET_STACK' bash -s" <<'REMOTE'
 set -euo pipefail
 
@@ -262,22 +415,34 @@ read_env_key() {
 ANON_KEY="$(read_env_key ANON_KEY)"
 POST_ID="$(docker exec content-supabase-db psql -U supabase_admin -d postgres -Atqc "select id from public.content_posts where review_token is not null limit 1")"
 REVIEW_TOKEN="$(docker exec content-supabase-db psql -U supabase_admin -d postgres -Atqc "select review_token from public.content_posts where id = '$POST_ID'")"
+test -n "$POST_ID"
+test -n "$REVIEW_TOKEN"
 
+review_code=000
+anon_code=000
 for _ in $(seq 1 90); do
-  code="$(curl -sS -o /tmp/vera-target-health.json -w '%{http_code}' http://127.0.0.1:8002/rest/v1/ 2>/dev/null || true)"
-  test "$code" != "000" && break
+  review_code="$(curl -sS -o /tmp/vera-review-link.json -w '%{http_code}' "http://127.0.0.1:8002/functions/v1/review-link?token=$REVIEW_TOKEN" 2>/dev/null || true)"
+  anon_code="$(curl -sS -o /tmp/vera-anon-posts.json -w '%{http_code}' "http://127.0.0.1:8002/rest/v1/content_posts?select=id&limit=1" -H "apikey: $ANON_KEY" 2>/dev/null || true)"
+  if [[ "$review_code" = "200" && "$anon_code" = "200" ]]; then
+    break
+  fi
   sleep 2
 done
 
-review_code="$(curl -sS -o /tmp/vera-review-link.json -w '%{http_code}' "http://127.0.0.1:8002/functions/v1/review-link?token=$REVIEW_TOKEN")"
-anon_code="$(curl -sS -o /tmp/vera-anon-posts.json -w '%{http_code}' "http://127.0.0.1:8002/rest/v1/content_posts?select=id&limit=1" -H "apikey: $ANON_KEY")"
 unsafe_count="$(docker exec content-supabase-db psql -U supabase_admin -d postgres -Atqc "select count(*) from pg_policies where schemaname = 'public' and ('anon' = any(roles) or qual = 'true' or with_check = 'true')")"
+review_has_post="$(jq -r '(.post.id != null)' /tmp/vera-review-link.json)"
+review_exposes_token="$(jq -r '(.post.review_token != null)' /tmp/vera-review-link.json)"
 
 printf 'review_link_http=%s\n' "$review_code"
-jq -r '"review_link_has_post=" + ((.post.id != null)|tostring) + " review_link_exposes_token=" + ((.post.review_token != null)|tostring)' /tmp/vera-review-link.json
+printf 'review_link_has_post=%s review_link_exposes_token=%s\n' "$review_has_post" "$review_exposes_token"
 printf 'anon_content_posts_http=%s body=%s\n' "$anon_code" "$(cat /tmp/vera-anon-posts.json)"
 printf 'unsafe_public_policy_count=%s\n' "$unsafe_count"
 docker compose ps
+test "$review_code" = "200"
+test "$review_has_post" = "true"
+test "$review_exposes_token" = "false"
+test "$anon_code" = "200"
+test "$unsafe_count" = "0"
 REMOTE
 }
 
@@ -311,6 +476,8 @@ Environment overrides:
   TARGET_STACK=/srv/supabase-content
   REMOTE_STAGE=/root/vera-migration
   DOMAIN=supabase-content-eu.innovareai.com
+  TARGET_HOSTNAME=vera-supabase-eu-01
+  TARGET_SSH_KEY=~/.ssh/vera_hetzner_ed25519
 EOF
 }
 
