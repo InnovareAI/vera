@@ -28,11 +28,12 @@ require_target_access() {
 
 stage_source() {
   log "creating fresh source backup and migration bundle on $SOURCE_HOST"
-  ssh_source "SOURCE_STACK='$SOURCE_STACK' REMOTE_STAGE='$REMOTE_STAGE' bash -s" <<'REMOTE'
+  ssh -o BatchMode=yes -o ConnectTimeout=8 "$SOURCE_HOST" \
+    "SOURCE_STACK='$SOURCE_STACK' REMOTE_STAGE='$REMOTE_STAGE' bash -s" <<'REMOTE'
 set -euo pipefail
 
-"$SOURCE_STACK/scripts/content-supabase-backup" >/tmp/vera-content-backup-run.log
-"$SOURCE_STACK/scripts/content-supabase-backup-verify" >/tmp/vera-content-backup-verify-run.log
+"$SOURCE_STACK/scripts/content-supabase-backup" </dev/null >/tmp/vera-content-backup-run.log
+"$SOURCE_STACK/scripts/content-supabase-backup-verify" </dev/null >/tmp/vera-content-backup-verify-run.log
 
 mkdir -p "$REMOTE_STAGE/systemd" "$REMOTE_STAGE/root-ssh" "$REMOTE_STAGE/notification-secrets"
 chmod 700 "$REMOTE_STAGE"
@@ -132,7 +133,8 @@ copy_artifacts() {
 
 bootstrap_target() {
   log "installing target packages and baseline system config"
-  ssh_target "SWAP_SIZE='$SWAP_SIZE' bash -s" <<'REMOTE'
+  ssh -o BatchMode=yes -o ConnectTimeout=8 "$TARGET_HOST" \
+    "SWAP_SIZE='$SWAP_SIZE' bash -s" <<'REMOTE'
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -157,7 +159,8 @@ REMOTE
 
 restore_target() {
   log "restoring Vera Supabase on target"
-  ssh_target "REMOTE_STAGE='$REMOTE_STAGE' TARGET_STACK='$TARGET_STACK' DOMAIN='$DOMAIN' bash -s" <<'REMOTE'
+  ssh -o BatchMode=yes -o ConnectTimeout=8 "$TARGET_HOST" \
+    "REMOTE_STAGE='$REMOTE_STAGE' TARGET_STACK='$TARGET_STACK' DOMAIN='$DOMAIN' bash -s" <<'REMOTE'
 set -euo pipefail
 
 cd "$REMOTE_STAGE"
@@ -246,7 +249,8 @@ REMOTE
 
 smoke_target() {
   log "running target smoke tests over localhost Kong"
-  ssh_target "TARGET_STACK='$TARGET_STACK' bash -s" <<'REMOTE'
+  ssh -o BatchMode=yes -o ConnectTimeout=8 "$TARGET_HOST" \
+    "TARGET_STACK='$TARGET_STACK' bash -s" <<'REMOTE'
 set -euo pipefail
 
 cd "$TARGET_STACK"
@@ -277,7 +281,7 @@ docker compose ps
 REMOTE
 }
 
-main() {
+run_all() {
   require_target_access
   stage_source
   copy_artifacts
@@ -285,6 +289,48 @@ main() {
   restore_target
   smoke_target
   log "target restore is complete. DNS cutover is intentionally not performed by this script."
+}
+
+usage() {
+  cat <<'EOF'
+Usage: vera-migrate-supabase.sh [command]
+
+Commands:
+  all        Run full migration through target smoke tests, no DNS cutover.
+  check      Check target SSH access only.
+  stage      Create a fresh source backup and source-side migration bundle.
+  copy       Copy the latest staged source artifacts to the target.
+  bootstrap  Install target packages and baseline system config.
+  restore    Restore Supabase database, storage, stack files, and timers.
+  smoke      Run local target smoke tests.
+
+Environment overrides:
+  SOURCE_HOST=root@178.104.187.43
+  TARGET_HOST=root@157.90.255.28
+  SOURCE_STACK=/srv/supabase-content
+  TARGET_STACK=/srv/supabase-content
+  REMOTE_STAGE=/root/vera-migration
+  DOMAIN=supabase-content-eu.innovareai.com
+EOF
+}
+
+main() {
+  local command="${1:-all}"
+
+  case "$command" in
+    all) run_all ;;
+    check) require_target_access ;;
+    stage) stage_source ;;
+    copy) require_target_access; copy_artifacts ;;
+    bootstrap) require_target_access; bootstrap_target ;;
+    restore) require_target_access; restore_target ;;
+    smoke) require_target_access; smoke_target ;;
+    help|-h|--help) usage ;;
+    *)
+      usage >&2
+      exit 2
+      ;;
+  esac
 }
 
 main "$@"
