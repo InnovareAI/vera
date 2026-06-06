@@ -6,74 +6,61 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import type { Post, Project } from '../lib/supabase'
+import type { Post } from '../lib/supabase'
+import { useProject } from '../lib/projectContext'
 import { color, space, type as t, radius } from '../design'
 
 type Row = Post & {
   media_metadata?: { frames?: Array<{ url: string; text?: string | null }> } | null
 }
 
-type ProjectSummary = Pick<Project, 'id' | 'name' | 'slug'>
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-
-async function resolveProject(ref: string): Promise<ProjectSummary | null> {
-  const fields = 'id, name, slug'
-  const primaryField = UUID_RE.test(ref) ? 'id' : 'slug'
-  const secondaryField = primaryField === 'id' ? 'slug' : 'id'
-  const primary = await supabase.from('projects').select(fields).eq(primaryField, ref).maybeSingle()
-  if (primary.error) throw new Error(primary.error.message)
-  if (primary.data) return primary.data as ProjectSummary
-
-  const secondary = await supabase.from('projects').select(fields).eq(secondaryField, ref).maybeSingle()
-  if (secondary.error) throw new Error(secondary.error.message)
-  return (secondary.data as ProjectSummary | null) ?? null
-}
-
 export default function ApprovalIndex() {
   const { projectRef } = useParams()
+  const { projects, loading: projectsLoading } = useProject()
+  const project = projectRef ? projects.find(p => p.slug === projectRef || p.id === projectRef) ?? null : null
+  const projectId = project?.id ?? null
   const [state, setState] = useState<{
-    project: ProjectSummary | null
     posts: Row[]
     loading: boolean
     err: string
-  }>({ project: null, posts: [], loading: true, err: '' })
+  }>({ posts: [], loading: true, err: '' })
 
   useEffect(() => {
     let cancelled = false
 
     Promise.resolve()
       .then(async () => {
+        if (projectsLoading) {
+          if (!cancelled) setState(prev => ({ ...prev, loading: true, err: '' }))
+          return null
+        }
         if (!projectRef) throw new Error('No client specified.')
-        if (!cancelled) setState({ project: null, posts: [], loading: true, err: '' })
-        return resolveProject(projectRef)
-      })
-      .then(async resolved => {
-        if (!resolved) throw new Error('Client not found.')
+        if (!projectId) throw new Error('Client not found in this workspace.')
+        if (!cancelled) setState({ posts: [], loading: true, err: '' })
         const { data, error } = await supabase.from('content_posts')
           .select('*')
-          .eq('project_id', resolved.id)
+          .eq('project_id', projectId)
           .order('created_at', { ascending: false })
         if (error) throw new Error(error.message)
-        return { resolved, rows: (data ?? []) as Row[] }
+        return (data ?? []) as Row[]
       })
-      .then(({ resolved, rows }) => {
+      .then(rows => {
         if (cancelled) return
-        setState({ project: resolved, posts: rows, loading: false, err: '' })
+        if (!rows) return
+        setState({ posts: rows, loading: false, err: '' })
       })
       .catch(error => {
         if (cancelled) return
         setState({
-          project: null,
           posts: [],
           loading: false,
           err: (error as Error).message || 'Could not load approvals.',
         })
       })
     return () => { cancelled = true }
-  }, [projectRef])
+  }, [projectId, projectRef, projectsLoading])
 
-  const { project, posts, loading, err } = state
+  const { posts, loading, err } = state
   const page: React.CSSProperties = { minHeight: '100vh', background: color.paper, padding: `${space[7]} ${space[5]}` }
   const cardStyle: React.CSSProperties = { background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, overflow: 'hidden', boxShadow: 'var(--shadow-pop)', display: 'flex', flexDirection: 'column' }
 
