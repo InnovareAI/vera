@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { OrgProvider, useOrg } from './lib/orgContext'
 import { ProjectProvider, useProject } from './lib/projectContext'
@@ -22,7 +22,7 @@ import AcrossClients from './pages/AcrossClients'   // "/" — the shelf
 import VeraThread from './pages/VeraThread'          // /p/:slug/vera
 import Brain from './pages/Brain'                    // /p/:slug/brain
 import Measure from './pages/Measure'                // /p/:slug/measure
-import ReviewLink from './pages/ReviewLink'          // /r/:postId — public, no-login review link
+import ReviewLink from './pages/ReviewLink'          // /r/:reviewToken — public, tokened review link
 
 export default function App() {
   // Top-level boundary catches anything that escapes a route boundary —
@@ -42,8 +42,10 @@ export default function App() {
             <Routes>
               <Route path="/login" element={<LoginGuard />} />
               <Route path="/onboarding" element={<Onboarding />} />
-              {/* Public, no-login review link — a reviewer approves / leaves feedback. */}
-              <Route path="/r/:postId" element={<ReviewLink />} />
+              {/* Public, no-login review link, scoped by a revocable review token. */}
+              <Route path="/r/:reviewToken" element={<ReviewLink />} />
+              <Route path="/approvals/:projectId" element={<Navigate to="/login" replace />} />
+              <Route element={<RequireAuth />}>
               <Route path="/" element={<Layout />}>
                 {/* "/" lands you IN your active client — no duplicate client  */}
                 {/* list in the canvas (the rail is the switcher). The "all     */}
@@ -85,6 +87,7 @@ export default function App() {
                 <Route path="skills"     element={<Skills />} />
                 <Route path="settings"   element={<Settings />} />
               </Route>
+              </Route>
             </Routes>
             </RightRailProvider>
             </ProjectProvider>
@@ -102,6 +105,14 @@ function LoginGuard() {
   if (loading) return null
   if (session) return <Navigate to="/" replace />
   return <Login />
+}
+
+function RequireAuth() {
+  const { session, loading } = useAuth()
+  const location = useLocation()
+  if (loading) return null
+  if (!session) return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  return <Outlet />
 }
 
 // Root "/" — land the operator IN their active client's Home. The rail is

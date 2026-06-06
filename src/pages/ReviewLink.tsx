@@ -1,4 +1,4 @@
-// Public, no-login review link — /r/:postId.
+// Public, no-login review link, scoped by a revocable token.
 //
 // A reviewer (e.g. the client) opens this URL, sees the asset (copy + image or
 // video) on the LEFT, and leaves feedback in a large box on the RIGHT, or
@@ -11,12 +11,8 @@
 //   2. On submit, feedback is persisted server-side (post_outcomes, append-only)
 //      BEFORE the local draft is cleared. A failed submit keeps the draft.
 //
-// Interim: keyed by post id. A secure, revocable per-asset token replaces this
-// once the review_token migration lands.
-
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { color, space, type as t, radius } from '../design'
 
@@ -24,7 +20,7 @@ const SUPA = import.meta.env.VITE_SUPABASE_URL as string
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
 export default function ReviewLink() {
-  const { postId } = useParams()
+  const { reviewToken } = useParams()
   const [post, setPost] = useState<Post | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
@@ -34,25 +30,30 @@ export default function ReviewLink() {
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState<'approved' | 'changes_requested' | null>(null)
 
-  const draftKey = `review-feedback:${postId}`
-  const nameKey = `review-reviewer:${postId}`
+  const draftKey = `review-feedback:${reviewToken}`
+  const nameKey = `review-reviewer:${reviewToken}`
 
   useEffect(() => {
-    if (!postId) { setErr('No post specified.'); setLoading(false); return }
+    if (!reviewToken) { setErr('No review token specified.'); setLoading(false); return }
     let cancelled = false
     // Restore any unsent draft first — never lose typed feedback.
     try {
       const d = localStorage.getItem(draftKey); if (d) { setFeedback(d); setSaved(true) }
       const n = localStorage.getItem(nameKey); if (n) setReviewer(n)
     } catch { /* ignore */ }
-    supabase.from('content_posts').select('*').eq('id', postId).maybeSingle().then(({ data, error }) => {
-      if (cancelled) return
-      if (error || !data) setErr('This post could not be found, or the link has expired.')
-      else setPost(data as Post)
-      setLoading(false)
+    fetch(`${SUPA}/functions/v1/review-link?token=${encodeURIComponent(reviewToken)}`, {
+      headers: { apikey: ANON, Authorization: `Bearer ${ANON}` },
     })
+      .then(async res => {
+        const data = await res.json().catch(() => null)
+        if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`)
+        return data.post as Post
+      })
+      .then(data => { if (!cancelled) setPost(data) })
+      .catch(() => { if (!cancelled) setErr('This post could not be found, or the link has expired.') })
+      .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [postId])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [reviewToken])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const onFeedback = (v: string) => {
     setFeedback(v)
@@ -64,14 +65,14 @@ export default function ReviewLink() {
   }
 
   async function act(action: 'approved' | 'changes_requested') {
-    if (!postId || submitting) return
+    if (!reviewToken || submitting) return
     if (action === 'changes_requested' && !feedback.trim()) { setErr('Add a note before sending feedback.'); return }
     setSubmitting(true); setErr('')
     try {
       const res = await fetch(`${SUPA}/functions/v1/approval-webhook`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: `Bearer ${ANON}` },
-        body: JSON.stringify({ post_id: postId, action, feedback: feedback.trim() || undefined, reviewed_by: reviewer.trim() || 'Reviewer (link)' }),
+        body: JSON.stringify({ review_token: reviewToken, action, feedback: feedback.trim() || undefined, reviewed_by: reviewer.trim() || 'Reviewer (link)' }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       // Saved durably server-side — now it's safe to drop the local draft.
@@ -143,9 +144,30 @@ export default function ReviewLink() {
                 <p style={{ fontSize: 14, lineHeight: 1.55, color: color.ink, whiteSpace: 'pre-wrap', margin: 0 }}>{post.copy}</p>
                 {tags.length > 0 && <p style={{ fontSize: 14, color: color.accent, marginTop: space[3], marginBottom: 0, fontWeight: 500 }}>{tags.map(h => (h.startsWith('#') ? h : `#${h}`)).join(' ')}</p>}
               </div>
-              {post.media_url && post.media_type === 'video'
-                ? <video src={post.media_url} controls playsInline style={{ width: '100%', display: 'block', borderTop: `1px solid ${color.line}`, background: '#000' }} />
-                : post.media_url && <img src={post.media_url} alt="" style={{ width: '100%', display: 'block', borderTop: `1px solid ${color.line}` }} />}
+              {(() => {
+                const frames = (post as unknown as { media_metadata?: { frames?: Array<{ url: string; text?: string | null }> } }).media_metadata?.frames
+                if (post.media_type === 'carousel' && Array.isArray(frames) && frames.length > 0) {
+                  return (
+                    <div style={{ borderTop: `1px solid ${color.line}` }}>
+                      <div style={{ display: 'flex', overflowX: 'auto', scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch', gap: 8, padding: 8 }}>
+                        {frames.map((f, i) => (
+                          <div key={i} style={{ flex: '0 0 88%', scrollSnapAlign: 'center', position: 'relative', borderRadius: radius.md, overflow: 'hidden', border: `1px solid ${color.line}` }}>
+                            <img src={f.url} alt={f.text ?? `Frame ${i + 1}`} style={{ width: '100%', display: 'block' }} />
+                            <span style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(20,20,20,0.62)', color: '#fff', fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999 }}>{i + 1}/{frames.length}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '0 0 10px' }}>
+                        {frames.map((_, i) => <span key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: color.line }} />)}
+                        <span style={{ marginLeft: 8, fontSize: t.size.micro, color: color.ghost }}>{frames.length} frames · swipe</span>
+                      </div>
+                    </div>
+                  )
+                }
+                if (post.media_url && post.media_type === 'video') return <video src={post.media_url} controls playsInline style={{ width: '100%', display: 'block', borderTop: `1px solid ${color.line}`, background: '#000' }} />
+                if (post.media_url) return <img src={post.media_url} alt="" style={{ width: '100%', display: 'block', borderTop: `1px solid ${color.line}` }} />
+                return null
+              })()}
             </div>
           </div>
 

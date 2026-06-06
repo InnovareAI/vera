@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Link2, X } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, MoreHorizontal, Globe, ThumbsUp, MessageCircle, Repeat2, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -34,6 +34,7 @@ interface Message {
   images?: string[]
   videos?: string[]
   videoPending?: boolean   // a fal video job is rendering in the background
+  carouselPending?: { done: number; total: number }  // carousel frames rendering
 }
 
 // A campaign = a batch of scheduled posts produced by the agent's plan_campaign
@@ -135,6 +136,83 @@ export default function VeraThread() {
       })
     return () => { cancelled = true }
   }, [activeProject?.id, sessionId])
+
+  // Restore the last open draft on load. The post itself survives in
+  // content_posts, but the interactive preview card is client state that a
+  // refresh wipes — which read as "the post is gone". Re-open the most recent
+  // draft for this client (unless one is already open or a New chat cleared it)
+  // so the card + its saved media come back. content_posts isn't session-keyed,
+  // so this is per-client, which matches "reopen what I was last working on".
+  useEffect(() => {
+    if (!activeProject?.id) return
+    let cancelled = false
+    supabase.from('content_posts')
+      .select('*')
+      .eq('project_id', activeProject.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled || !data) return
+        setDraft(prev => prev ?? (data as Post))
+        setDraftHistory(prev => (prev.length ? prev : [data as Post]))
+      })
+    return () => { cancelled = true }
+  }, [activeProject?.id])
+
+  // Resume any in-flight video renders on load. A render that was still going
+  // when the page was refreshed / closed used to be lost forever (its fal
+  // request_id only lived in the poll loop). Now it's recorded in video_jobs,
+  // so we pick up every 'rendering' job for this client and keep polling until
+  // the clip lands — it writes through to the post + the message attachment, so
+  // the video appears whether or not the operator is still on the same thread.
+  // Age-capped at 30 min so a genuinely stuck job doesn't retry on every load.
+  const resumedJobs = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!activeProject?.id) return
+    let cancelled = false
+    const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString()
+    supabase.from('video_jobs')
+      .select('request_id, slug, post_id, message_id')
+      .eq('project_id', activeProject.id)
+      .eq('status', 'rendering')
+      .gte('created_at', cutoff)
+      .then(({ data }) => {
+        if (cancelled || !data) return
+        for (const job of data as Array<{ request_id: string; slug: string | null; post_id: string | null; message_id: string | null }>) {
+          if (resumedJobs.current.has(job.request_id)) continue
+          resumedJobs.current.add(job.request_id)
+          if (job.message_id) setMessages(prev => prev.map(m => m.id === job.message_id ? { ...m, videoPending: true } : m))
+          void pollVideo(job.request_id, job.slug ?? 'veo-3', job.message_id ?? crypto.randomUUID(), { postId: job.post_id })
+        }
+      })
+    return () => { cancelled = true }
+  }, [activeProject?.id])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Resume watching any server-side carousel job still processing on load — the
+  // render keeps going on the server even if the tab was closed, so re-attach
+  // and show it filling in.
+  const watchedCarousels = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!activeProject?.id) return
+    let cancelled = false
+    const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString()
+    supabase.from('media_jobs')
+      .select('post_id, spec')
+      .eq('project_id', activeProject.id)
+      .eq('kind', 'carousel')
+      .eq('status', 'processing')
+      .gte('created_at', cutoff)
+      .then(({ data }) => {
+        if (cancelled || !data) return
+        for (const job of data as Array<{ post_id: string | null; spec: { frames?: unknown[] } | null }>) {
+          if (!job.post_id || watchedCarousels.current.has(job.post_id)) continue
+          const total = Array.isArray(job.spec?.frames) ? job.spec!.frames!.length : 0
+          void watchCarousel(job.post_id, total, crypto.randomUUID())
+        }
+      })
+    return () => { cancelled = true }
+  }, [activeProject?.id])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // "VERA wants to" — open observations, surfaced in the launcher (moved here
   // from the old Home/Dashboard so nothing is lost when Home goes away).
@@ -241,6 +319,11 @@ export default function VeraThread() {
     const atts = attachments
     const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text, images: atts.length ? atts.map(a => a.url) : undefined }
     const assistantId = crypto.randomUUID()
+    // The draft created earlier in THIS stream (save_draft → draft event), so a
+    // video_pending later in the same stream can be filed against the right
+    // post. The closure's `draft` state is stale (null at send time), so we
+    // track it locally as the stream's events arrive.
+    let streamDraftId: string | null = draft?.id ?? null
     const placeholder: Message = { id: assistantId, role: 'assistant', content: '', pending: true }
     const next = [...messages, userMsg]
     setMessages([...next, placeholder])
@@ -337,9 +420,28 @@ export default function VeraThread() {
               // misleading checkmark on a video that couldn't play yet).
               tools: (m.tools ?? []).map(tl => tl.tool === 'generate_video' ? { ...tl, status: 'running' as const } : tl),
             } : m))
-            void pollVideo(ev.request_id as string, (ev.slug as string) ?? 'veo-3', assistantId)
+            // Record the render durably so it survives a refresh / tab close.
+            // The request_id used to live only in this poll loop — losing the
+            // page lost the clip with no id to recover it. Now any 'rendering'
+            // job is resumed on load (see the resume effect below).
+            const reqId = ev.request_id as string
+            const vslug = (ev.slug as string) ?? 'veo-3'
+            if (activeProject?.id) {
+              void supabase.from('video_jobs').upsert({
+                request_id: reqId, slug: vslug, post_id: streamDraftId,
+                project_id: activeProject.id, session_id: sessionId, message_id: assistantId,
+                status: 'rendering', prompt: typeof ev.prompt === 'string' ? ev.prompt : null,
+              }, { onConflict: 'request_id' })
+            }
+            void pollVideo(reqId, vslug, assistantId, { postId: streamDraftId })
+          } else if (ev.type === 'carousel_job') {
+            // The server (generate-carousel + media_jobs) is rendering the frames
+            // in the background. We don't do the work — just watch the post fill
+            // in. Survives a closed tab; resumes on reload (see resume effect).
+            void watchCarousel((ev.post_id as string) ?? streamDraftId, (ev.total as number) ?? 0, assistantId)
           } else if (ev.type === 'draft' && ev.post) {
             const post = ev.post as Post
+            streamDraftId = (post.id as string) ?? streamDraftId
             setDraft(post)
             // Keep every version so the operator can flip back through drafts
             // (tester: tweaking made the previous draft vanish).
@@ -386,7 +488,8 @@ export default function VeraThread() {
   // requests only — nothing is held open long enough for the gateway to kill
   // it, which is what produced the "network error" at ~47s. Runs after the
   // chat SSE stream has already closed.
-  async function pollVideo(requestId: string, slug: string, assistantId: string) {
+  async function pollVideo(requestId: string, slug: string, assistantId: string, opts?: { postId?: string | null }) {
+    const postId = opts?.postId ?? null
     const INTERVAL = 5000
     const MAX_TRIES = 72 // 72 × 5s = 6 min ceiling
     for (let i = 0; i < MAX_TRIES; i++) {
@@ -406,10 +509,23 @@ export default function VeraThread() {
         const vurl = data.video_url
         setMessages(prev => prev.map(m => m.id === assistantId
           ? { ...m, videoPending: false, videos: [...(m.videos ?? []), vurl], tools: (m.tools ?? []).map(tl => tl.tool === 'generate_video' ? { ...tl, status: 'done' as const } : tl) } : m))
-        setDraft(prev => {
-          if (prev?.id) void supabase.from('content_posts').update({ media_url: vurl, media_type: 'video' }).eq('id', prev.id)
-          return prev ? { ...prev, media_url: vurl, media_type: 'video' } : prev
-        })
+        // Write to the post by its known id (deterministic — works on a resume
+        // after refresh where there's no in-memory draft), and reflect it on the
+        // open card if it's the same post. BACKSTOP: if we never got a post id
+        // (the draft context was lost / out-of-order tool calls), find the most
+        // recent media-less draft for this client and attach the clip there, so
+        // a rendered video can NEVER end up orphaned in the chat with no post.
+        let targetPostId = postId ?? draft?.id ?? null
+        if (!targetPostId && activeProject?.id) {
+          const { data: orphan } = await supabase.from('content_posts')
+            .select('id').eq('project_id', activeProject.id).is('media_url', null)
+            .order('created_at', { ascending: false }).limit(1).maybeSingle()
+          targetPostId = (orphan as { id?: string } | null)?.id ?? null
+        }
+        if (targetPostId) void supabase.from('content_posts').update({ media_url: vurl, media_type: 'video' }).eq('id', targetPostId)
+        setDraft(prev => (prev && (!targetPostId || prev.id === targetPostId)) ? { ...prev, media_url: vurl, media_type: 'video' } : prev)
+        // The job is done — stop it being resumed on the next load.
+        void supabase.from('video_jobs').update({ status: 'completed', video_url: vurl, updated_at: new Date().toISOString() }).eq('request_id', requestId)
         // Persist the clip so it survives a refresh: it finishes AFTER the
         // assistant message was saved, so it isn't in attachments yet. Append
         // it to this session's latest assistant message.
@@ -432,12 +548,54 @@ export default function VeraThread() {
       if (data.status === 'FAILED' || data.status === 'CANCELLED' || data.status === 'ERROR') {
         setMessages(prev => prev.map(m => m.id === assistantId
           ? { ...m, videoPending: false, content: (m.content ? m.content + '\n\n' : '') + `⚠ Video rendering failed (${(data.status ?? '').toLowerCase()}). Try again or tweak the prompt.` } : m))
+        void supabase.from('video_jobs').update({ status: 'failed', error: (data.status ?? 'failed').toLowerCase(), updated_at: new Date().toISOString() }).eq('request_id', requestId)
         return
       }
       // IN_QUEUE / IN_PROGRESS → keep polling
     }
     setMessages(prev => prev.map(m => m.id === assistantId
       ? { ...m, videoPending: false, content: (m.content ? m.content + '\n\n' : '') + '⚠ Video is taking longer than usual — it may still be rendering. Try again shortly.' } : m))
+  }
+
+  // Watch a server-side carousel job fill in. generate-carousel renders frames
+  // in the background (EdgeRuntime.waitUntil) and writes them onto the post as
+  // each lands; we poll the post for progress and reflect it on the draft card.
+  // The browser does NO generation — the render survives a closed tab, and the
+  // resume effect re-attaches to any still-processing job on reload.
+  async function watchCarousel(postId: string | null, total: number, assistantId: string) {
+    let target = postId
+    if (!target && activeProject?.id) {
+      const { data } = await supabase.from('content_posts').select('id').eq('project_id', activeProject.id).is('media_url', null).order('created_at', { ascending: false }).limit(1).maybeSingle()
+      target = (data as { id?: string } | null)?.id ?? null
+    }
+    if (!target) return
+    if (watchedCarousels.current.has(target)) return
+    watchedCarousels.current.add(target)
+    setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, carouselPending: { done: 0, total } } : m))
+    const INTERVAL = 4000
+    const MAX_TRIES = 105 // 7 min ceiling
+    for (let i = 0; i < MAX_TRIES; i++) {
+      await new Promise(r => setTimeout(r, INTERVAL))
+      const { data: post } = await supabase.from('content_posts').select('*').eq('id', target).maybeSingle()
+      const frames = post ? (post as unknown as { media_metadata?: { frames?: Array<{ url: string }> } }).media_metadata?.frames : undefined
+      const done = frames?.length ?? 0
+      setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, carouselPending: { done, total: total || done } } : m))
+      if (post && done > 0) setDraft(prev => (!prev || prev.id === target) ? (post as Post) : prev)
+      const { data: job } = await supabase.from('media_jobs').select('status').eq('post_id', target).eq('kind', 'carousel').order('created_at', { ascending: false }).limit(1).maybeSingle()
+      const status = (job as { status?: string } | null)?.status
+      if (status === 'completed' || status === 'failed' || (total > 0 && done >= total)) {
+        setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, carouselPending: undefined } : m))
+        if (post) { setDraft(prev => (!prev || prev.id === target) ? (post as Post) : prev); setDraftHistory(prev => prev.some(p => p.id === target) ? prev : [...prev, post as Post]) }
+        window.dispatchEvent(new CustomEvent('vera:rail-open'))
+        watchedCarousels.current.delete(target)
+        if (status === 'failed' && done === 0) {
+          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: (m.content ? m.content + '\n\n' : '') + '⚠ Carousel generation failed on the server. Say "retry the carousel".' } : m))
+        }
+        return
+      }
+    }
+    setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, carouselPending: undefined } : m))
+    watchedCarousels.current.delete(target)
   }
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -508,6 +666,48 @@ export default function VeraThread() {
       setApproving(false)
     }
   }
+  // "Send for approval" pins the completed post into the approval queue
+  // (status 'pending' = Awaiting approval, what the Review queue surfaces) and
+  // opens the reviewer's approval page with the link copied to share. The
+  // reviewer approves there; "Approve directly" is the skip-the-reviewer path.
+  // This is the explicit "completed → in approval" move.
+  const [sending, setSending] = useState(false)
+  async function reviewUrlForDraft(post: Post): Promise<string> {
+    if (!post.id) throw new Error('Draft has no post id.')
+    let token = post.review_token ?? null
+    if (!token) {
+      const { data, error } = await supabase
+        .from('content_posts')
+        .select('review_token')
+        .eq('id', post.id)
+        .maybeSingle()
+      if (error) throw error
+      token = (data as { review_token?: string | null } | null)?.review_token ?? null
+      if (token) {
+        setDraft(prev => prev?.id === post.id ? { ...prev, review_token: token } : prev)
+        setDraftHistory(prev => prev.map(p => p.id === post.id ? { ...p, review_token: token } : p))
+      }
+    }
+    if (!token) throw new Error('This post does not have a review token yet.')
+    return `${window.location.origin}/r/${token}`
+  }
+  async function sendForApproval() {
+    if (!draft?.id) return
+    setSending(true)
+    try {
+      const url = await reviewUrlForDraft(draft)
+      const { error } = await supabase.from('content_posts').update({ status: 'pending' }).eq('id', draft.id)
+      if (error) throw error
+      setDraft(prev => prev ? { ...prev, status: 'pending' } : prev)
+      try { void navigator.clipboard?.writeText(url) } catch { /* ignore */ }
+      window.open(url, '_blank', 'noopener')
+      push({ kind: 'success', title: 'Sent for approval', body: 'In the approval queue (Review → Pending Review). Link copied to share.' })
+    } catch (e) {
+      push({ kind: 'danger', title: "Couldn't send for approval", body: (e as Error).message })
+    } finally {
+      setSending(false)
+    }
+  }
   function tweakDraft() {
     setInput(`Tweak the draft: `)
     setTimeout(() => taRef.current?.focus(), 0)
@@ -524,7 +724,10 @@ export default function VeraThread() {
       <DraftArtifact
         draft={draft}
         approving={approving}
+        sending={sending}
         onApprove={approveDraft}
+        onSendForApproval={sendForApproval}
+        onCopyShareLink={() => reviewUrlForDraft(draft).then(url => { void navigator.clipboard?.writeText(url) })}
         onTweak={tweakDraft}
         onRegenerate={regenerateDraft}
         onBack={campaign ? () => setDraft(null) : undefined}
@@ -536,7 +739,7 @@ export default function VeraThread() {
     ) : campaign ? (
       <CampaignArtifact campaign={campaign} onOpenPost={p => setDraft(p as unknown as Post)} />
     ) : <ArtifactEmpty />,
-    [draft?.id, draft?.media_url, draft?.status, approving, campaign?.id, campaign?.posts?.length, draftIdx, draftHistory.length],
+    [draft?.id, draft?.media_url, draft?.media_metadata, draft?.review_token, draft?.status, approving, sending, campaign?.id, campaign?.posts?.length, draftIdx, draftHistory.length],
     // Wide, readable artifact panel — this is the working surface, not a
     // skinny sidebar. ~42vw, clamped so it stays sane on small + huge screens.
     'clamp(420px, 42vw, 660px)',
@@ -588,6 +791,10 @@ export default function VeraThread() {
               style={{ width: '100%', resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontFamily: t.family.sans, fontSize: t.size.lg, lineHeight: 1.5, color: color.ink, minHeight: 100, maxHeight: 220, paddingTop: 2 }}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: space[2] }}>
+              <button onClick={newChat} disabled={!activeProject} title="Start a new conversation"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 32, padding: '0 12px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: color.ink2, cursor: activeProject ? 'pointer' : 'default', flexShrink: 0, fontSize: t.size.cap, fontWeight: t.weight.medium }}>
+                <Plus size={14} /> New
+              </button>
               <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => handleFiles(e.target.files)} />
               <button onClick={() => fileRef.current?.click()} disabled={uploading || !activeProject} title="Attach an image"
                 style={{ width: 32, height: 32, borderRadius: '50%', border: `1px solid ${color.line}`, background: color.surface, color: color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'default' : 'pointer', flexShrink: 0 }}>
@@ -668,6 +875,13 @@ function Bubble({ m }: { m: Message }) {
             <span style={{ marginLeft: 'auto', width: 9, height: 9, borderRadius: '50%', background: color.accent, animation: 'vera-pulse 1.2s ease-in-out infinite', flexShrink: 0 }} />
           </div>
         )}
+        {m.carouselPending && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: 340, padding: '12px 14px', border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2, color: color.ink2, fontSize: t.size.sm }}>
+            <ImagePlus size={15} style={{ color: color.accent }} />
+            <span>Rendering carousel… {m.carouselPending.done}/{m.carouselPending.total} frames. They land on the draft card as each finishes.</span>
+            <span style={{ marginLeft: 'auto', width: 9, height: 9, borderRadius: '50%', background: color.accent, animation: 'vera-pulse 1.2s ease-in-out infinite', flexShrink: 0 }} />
+          </div>
+        )}
         {(m.content || m.pending) && (
           <div style={{ fontSize: t.size.lg, lineHeight: 1.62, color: color.ink, whiteSpace: 'pre-wrap' }}>
             {m.content || <Dots />}
@@ -681,19 +895,22 @@ function Bubble({ m }: { m: Message }) {
 // ─── right rail: a FULL preview of the post, as it will appear once live ──
 // A realistic LinkedIn-style card (author, body, media, reaction bar) so the
 // operator sees the actual post — plus the approve / tweak / regenerate bar.
-function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate, onBack, versionIdx, versionTotal, onPrevVersion, onNextVersion }: {
-  draft: Post; approving: boolean; onApprove: () => void; onTweak: () => void; onRegenerate: () => void; onBack?: () => void
+function DraftArtifact({ draft, approving, sending, onApprove, onSendForApproval, onCopyShareLink, onTweak, onRegenerate, onBack, versionIdx, versionTotal, onPrevVersion, onNextVersion }: {
+  draft: Post; approving: boolean; sending: boolean; onApprove: () => void; onSendForApproval: () => void; onCopyShareLink: () => Promise<void>; onTweak: () => void; onRegenerate: () => void; onBack?: () => void
   versionIdx: number; versionTotal: number; onPrevVersion?: () => void; onNextVersion?: () => void
 }) {
-  const [copied, setCopied] = useState(false)
-  const copyReviewLink = () => {
-    if (!draft.id) return
-    const url = `${window.location.origin}/r/${draft.id}`
-    void navigator.clipboard?.writeText(url)
-    setCopied(true); setTimeout(() => setCopied(false), 1800)
-  }
   const isApproved = (draft.status ?? '').toLowerCase() === 'approved'
   const channel = (draft.channel ?? 'LinkedIn') as string
+  // "Generate sharing link" — just copy the public, no-login review URL. No
+  // status change, no opening the page; purely "give me the link to share".
+  const [linkCopied, setLinkCopied] = useState(false)
+  const copyShareLink = async () => {
+    if (!draft.id) return
+    try {
+      await onCopyShareLink()
+      setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1800)
+    } catch { /* parent toast handles the send path; copy failure can be retried */ }
+  }
   const author = 'Jennifer Fleming'   // synthetic poster persona (preview only; real publish uses the connected account)
   const headline = 'Founder & CEO'
   const tags = Array.isArray(draft.hashtags) ? draft.hashtags.filter(Boolean) : []
@@ -709,7 +926,7 @@ function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate, onB
         )}
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: isApproved ? color.success : color.accent }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: isApproved ? color.success : color.accent }} />
-          {isApproved ? 'Approved' : 'Preview'} · {channel}
+          {isApproved ? 'Approved' : 'Awaiting approval'} · {channel}
         </span>
         {versionTotal > 1 && versionIdx >= 0 && (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: space[2] }}>
@@ -721,9 +938,9 @@ function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate, onB
           </span>
         )}
         <div style={{ flex: 1 }} />
-        {!isApproved && (
-          <button onClick={onApprove} disabled={approving} style={{ ...btn(color.accent, '#fff', approving), boxShadow: approving ? 'none' : 'var(--shadow-glow)' }}>
-            {approving ? '…' : <><Check size={13} strokeWidth={2.25} /> Send to review</>}
+        {!isApproved && draft.id && (
+          <button onClick={onSendForApproval} disabled={sending} title="Put this in the approval queue and open the reviewer's approval page (link copied to share)" style={{ ...btn(color.accent, '#fff', sending), boxShadow: sending ? 'none' : 'var(--shadow-glow)' }}>
+            {sending ? '…' : <><Send size={13} strokeWidth={2.25} /> Send for approval</>}
           </button>
         )}
       </div>
@@ -752,12 +969,31 @@ function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate, onB
             )}
           </div>
 
-          {/* media — edge to edge, like a real post */}
-          {draft.media_url && draft.media_type === 'video'
-            ? <video src={draft.media_url} autoPlay muted loop playsInline style={{ width: '100%', display: 'block', borderTop: `1px solid ${color.line}` }} />
-            : draft.media_url && (
-              <img src={draft.media_url} alt="" style={{ width: '100%', display: 'block', borderTop: `1px solid ${color.line}` }} />
-            )}
+          {/* media — edge to edge, like a real post (carousel · video · image) */}
+          {(() => {
+            const frames = (draft as unknown as { media_metadata?: { frames?: Array<{ url: string; text?: string | null }> } }).media_metadata?.frames
+            if (draft.media_type === 'carousel' && Array.isArray(frames) && frames.length > 0) {
+              return (
+                <div style={{ borderTop: `1px solid ${color.line}` }}>
+                  <div style={{ display: 'flex', overflowX: 'auto', scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch', gap: 8, padding: 8 }}>
+                    {frames.map((f, i) => (
+                      <div key={i} style={{ flex: '0 0 88%', scrollSnapAlign: 'center', position: 'relative', borderRadius: radius.md, overflow: 'hidden', border: `1px solid ${color.line}` }}>
+                        <img src={f.url} alt={f.text ?? `Frame ${i + 1}`} style={{ width: '100%', display: 'block' }} />
+                        <span style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(20,20,20,0.62)', color: '#fff', fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999 }}>{i + 1}/{frames.length}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '0 0 10px' }}>
+                    {frames.map((_, i) => <span key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: color.line2 }} />)}
+                    <span style={{ marginLeft: 8, fontSize: t.size.micro, color: color.ghost }}>{frames.length} frames · swipe</span>
+                  </div>
+                </div>
+              )
+            }
+            if (draft.media_url && draft.media_type === 'video') return <video src={draft.media_url} autoPlay muted loop playsInline style={{ width: '100%', display: 'block', borderTop: `1px solid ${color.line}` }} />
+            if (draft.media_url) return <img src={draft.media_url} alt="" style={{ width: '100%', display: 'block', borderTop: `1px solid ${color.line}` }} />
+            return null
+          })()}
 
           {/* reaction bar — static, for realism */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: `${space[2]} ${space[3]}`, borderTop: `1px solid ${color.line}` }}>
@@ -778,9 +1014,15 @@ function DraftArtifact({ draft, approving, onApprove, onTweak, onRegenerate, onB
           <button onClick={onRegenerate} style={{ ...btn(color.paper2, color.ink, false), flex: 1, justifyContent: 'center', border: `1px solid ${color.line}` }}><RefreshCw size={12} /> Regenerate</button>
         </div>
         {draft.id && (
-          <button onClick={copyReviewLink} title="Copy a no-login link a reviewer can approve or comment on"
-            style={{ ...btn(color.paper2, copied ? color.success : color.ink, false), width: '100%', justifyContent: 'center', border: `1px solid ${copied ? color.success : color.line}`, marginTop: space[2] }}>
-            {copied ? <><Check size={12} /> Review link copied</> : <><Link2 size={12} /> Copy review link</>}
+          <button onClick={copyShareLink} title="Copy a public, no-login link to this post for sharing"
+            style={{ ...btn(color.paper2, linkCopied ? color.success : color.ink, false), width: '100%', justifyContent: 'center', border: `1px solid ${linkCopied ? color.success : color.line}`, marginTop: space[2] }}>
+            {linkCopied ? <><Check size={12} /> Sharing link copied</> : <><Link2 size={12} /> Generate sharing link</>}
+          </button>
+        )}
+        {!isApproved && (
+          <button onClick={onApprove} disabled={approving} title="Skip the reviewer and approve this yourself"
+            style={{ ...btn(color.paper2, color.ink2, approving), width: '100%', justifyContent: 'center', border: `1px solid ${color.line}`, marginTop: space[2] }}>
+            {approving ? '…' : <><Check size={12} /> Approve directly</>}
           </button>
         )}
       </div>

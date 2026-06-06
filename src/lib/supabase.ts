@@ -57,6 +57,10 @@ export interface Post {
   image_prompt?: string
   media_url?: string
   media_type?: string
+  media_metadata?: Record<string, unknown> | null
+  review_token?: string | null
+  review_token_expires_at?: string | null
+  review_token_revoked_at?: string | null
   feedback?: string
   compliance_checks?: Record<string, unknown>
   created_by?: string
