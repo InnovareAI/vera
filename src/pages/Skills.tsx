@@ -195,6 +195,8 @@ function parseJsonObject(value: string): Record<string, unknown> {
 export default function Skills() {
   const { activeOrg } = useOrg()
   const { activeProject } = useProject()
+  const activeOrgId = activeOrg?.id ?? null
+  const activeProjectId = activeProject?.id ?? null
   useRightRail(null, [])
 
   const [skills, setSkills] = useState<Skill[]>([])
@@ -215,13 +217,13 @@ export default function Skills() {
     setError(null)
 
     let skillQuery = supabase.from('skills').select('*').order('sort_order').order('name')
-    if (activeOrg?.id) skillQuery = skillQuery.or(`org_id.is.null,org_id.eq.${activeOrg.id}`)
+    if (activeOrgId) skillQuery = skillQuery.or(`org_id.is.null,org_id.eq.${activeOrgId}`)
     else skillQuery = skillQuery.is('org_id', null)
 
     const [{ data: skillRows, error: skillErr }, { data: perfRows }] = await Promise.all([
       skillQuery,
-      activeOrg?.id
-        ? supabase.from('skill_performance').select('*').or(`org_id.is.null,org_id.eq.${activeOrg.id}`)
+      activeOrgId
+        ? supabase.from('skill_performance').select('*').or(`org_id.is.null,org_id.eq.${activeOrgId}`)
         : supabase.from('skill_performance').select('*').is('org_id', null),
     ])
 
@@ -232,7 +234,6 @@ export default function Skills() {
       return
     }
 
-    const activeProjectId = activeProject?.id ?? null
     const visible = ((skillRows ?? []) as Skill[]).filter(skill => {
       if (!skill.project_id) return true
       return skill.project_id === activeProjectId
@@ -243,15 +244,10 @@ export default function Skills() {
       ((perfRows ?? []) as SkillPerformance[]).map(row => [row.skill_id, row]),
     ))
     setLoading(false)
-  }, [activeOrg?.id, activeProject?.id])
+  }, [activeOrgId, activeProjectId])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load() }, [load])
-
-  useEffect(() => {
-    if (!activeProject?.id && form.scope === 'client') {
-      setForm(prev => ({ ...prev, scope: 'workspace' }))
-    }
-  }, [activeProject?.id, form.scope])
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase()
