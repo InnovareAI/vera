@@ -524,6 +524,13 @@ function googleProvidersForSelection(provider: ClientIntegrationProvider): strin
   return ['google_search_console', 'google_analytics_4']
 }
 
+function metaProvidersForSelection(provider: ClientIntegrationProvider): string[] {
+  if (provider === 'meta_facebook_pages' || provider === 'meta_instagram') {
+    return ['meta_facebook_pages', 'meta_instagram']
+  }
+  return []
+}
+
 const WAVE_ONE_TEMPLATES = PROVIDERS.filter(isWaveOne)
 
 const STATUS_LABELS: Record<ClientIntegrationStatus, string> = {
@@ -617,6 +624,7 @@ export function ClientIntegrationsCard() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [connectingGoogle, setConnectingGoogle] = useState(false)
+  const [connectingMeta, setConnectingMeta] = useState(false)
   const [selectedProvider, setSelectedProvider] = useState<ClientIntegrationProvider>(() => initialProviderFromUrl())
   const selectedTemplate = PROVIDERS.find(p => p.provider === selectedProvider) ?? PROVIDERS[0]
   const rowByProvider = useMemo(() => new Map(rows.map(row => [row.provider, row])), [rows])
@@ -629,6 +637,7 @@ export function ClientIntegrationsCard() {
   const draft = draftState.key === draftKey ? draftState.draft : makeDraft(selectedTemplate, selectedRow)
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const isGoogleOauthProvider = selectedProvider === 'google_search_console' || selectedProvider === 'google_analytics_4' || selectedProvider === 'youtube'
+  const isMetaOauthProvider = selectedProvider === 'meta_facebook_pages' || selectedProvider === 'meta_instagram'
 
   function updateDraft(updater: (draft: Draft) => Draft) {
     setDraftState(prev => {
@@ -668,6 +677,8 @@ export function ClientIntegrationsCard() {
     const url = new URL(window.location.href)
     const googleStatus = url.searchParams.get('google_status')
     const googleDetail = url.searchParams.get('google_detail')
+    const metaStatus = url.searchParams.get('meta_status')
+    const metaDetail = url.searchParams.get('meta_detail')
 
     if (googleStatus === 'success' || googleStatus === 'error') {
       queueMicrotask(() => {
@@ -678,6 +689,18 @@ export function ClientIntegrationsCard() {
       })
       url.searchParams.delete('google_status')
       url.searchParams.delete('google_detail')
+      window.history.replaceState({}, '', url.toString())
+    }
+
+    if (metaStatus === 'success' || metaStatus === 'error') {
+      queueMicrotask(() => {
+        setMessage({
+          type: metaStatus === 'success' ? 'ok' : 'err',
+          text: metaDetail || (metaStatus === 'success' ? 'Meta connected.' : 'Meta connection failed.'),
+        })
+      })
+      url.searchParams.delete('meta_status')
+      url.searchParams.delete('meta_detail')
       window.history.replaceState({}, '', url.toString())
     }
   }, [])
@@ -794,6 +817,52 @@ export function ClientIntegrationsCard() {
     } catch (error) {
       setConnectingGoogle(false)
       setMessage({ type: 'err', text: error instanceof Error ? error.message : 'Google connection failed.' })
+    }
+  }
+
+  async function connectMeta() {
+    if (!activeProject) return
+    setConnectingMeta(true)
+    setMessage(null)
+
+    try {
+      const { data, error } = await supabase.auth.getSession()
+      if (error) throw error
+      const token = data.session?.access_token
+      if (!token) throw new Error('Sign in again before connecting Meta.')
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+      if (!supabaseUrl) throw new Error('Supabase URL is not configured.')
+
+      const returnUrl = new URL('/settings', window.location.origin)
+      returnUrl.searchParams.set('tab', 'integrations')
+      returnUrl.searchParams.set('provider', selectedProvider)
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      }
+      if (anonKey) headers.apikey = anonKey
+
+      const response = await fetch(`${supabaseUrl.replace(/\/+$/, '')}/functions/v1/meta-oauth-start`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          project_id: activeProject.id,
+          providers: metaProvidersForSelection(selectedProvider),
+          return_url: returnUrl.toString(),
+        }),
+      })
+      const body = await response.json().catch(() => ({})) as { auth_url?: string; error?: string }
+      if (!response.ok || !body.auth_url) {
+        throw new Error(body.error ?? `Meta OAuth returned HTTP ${response.status}`)
+      }
+
+      window.location.assign(body.auth_url)
+    } catch (error) {
+      setConnectingMeta(false)
+      setMessage({ type: 'err', text: error instanceof Error ? error.message : 'Meta connection failed.' })
     }
   }
 
@@ -1296,6 +1365,23 @@ export function ClientIntegrationsCard() {
                   >
                     {connectingGoogle ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
                     Connect Google
+                  </button>
+                )}
+                {isMetaOauthProvider && (
+                  <button
+                    type="button"
+                    onClick={connectMeta}
+                    disabled={saving || connectingMeta}
+                    className="inline-flex items-center gap-2"
+                    style={{
+                      ...secondaryButtonStyle,
+                      color: selectedTemplate.accent,
+                      borderColor: selectedTemplate.accent,
+                      opacity: saving || connectingMeta ? 0.65 : 1,
+                    }}
+                  >
+                    {connectingMeta ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
+                    Connect Meta
                   </button>
                 )}
               </div>
