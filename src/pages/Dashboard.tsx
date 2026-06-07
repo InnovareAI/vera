@@ -52,7 +52,7 @@ export default function Dashboard() {
       let q = supabase
         .from('content_posts')
         .select('*')
-        .in('status', ['Draft', 'Pending Review'])
+        .in('status', ['draft', 'pending', 'Draft', 'Pending Review'])
         .order('created_at', { ascending: false })
         .limit(6)
       if (activeOrg?.id)     q = q.eq('org_id', activeOrg.id)

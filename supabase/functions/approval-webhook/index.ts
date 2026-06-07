@@ -39,11 +39,10 @@ Deno.serve(async (req) => {
   const feedback = body.feedback as string | undefined
   const reviewed_by = body.reviewed_by as string | undefined
   const posted_url = body.posted_url as string | undefined
+  const provider_post_id = body.provider_post_id as string | undefined
 
   if (!action) return jsonError("action is required", 400)
   if (!VALID_ACTIONS.has(action)) return jsonError(`action must be one of: ${[...VALID_ACTIONS].join(", ")}`, 400)
-  if (action === "posted" && !posted_url) return jsonError("posted_url is required when action is 'posted'", 400)
-
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
   const authHeader = req.headers.get("authorization") ?? ""
   const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : ""
@@ -82,7 +81,8 @@ Deno.serve(async (req) => {
   const updates: Record<string, unknown> = {}
   if (action === "posted") {
     updates.posted_at = now
-    updates.posted_url = posted_url
+    if (posted_url !== undefined) updates.posted_url = posted_url
+    if (provider_post_id !== undefined) updates.provider_post_id = provider_post_id
   } else {
     updates.status = action
     updates.reviewed_at = now
@@ -151,13 +151,27 @@ async function userCanAccessPost(supabase: Supabase, userId: string, post: PostR
     orgId = (project as { org_id?: string | null } | null)?.org_id ?? null
   }
   if (!orgId) return false
-  const { data, error } = await supabase
-    .from("org_members")
-    .select("id")
-    .eq("org_id", orgId)
-    .eq("user_id", userId)
-    .maybeSingle()
-  return !error && !!data
+  const checks = [
+    supabase
+      .from("org_members")
+      .select("id")
+      .eq("org_id", orgId)
+      .eq("user_id", userId)
+      .maybeSingle(),
+  ]
+  if (post.project_id) {
+    checks.push(
+      supabase
+        .from("project_members")
+        .select("id")
+        .eq("project_id", post.project_id)
+        .eq("user_id", userId)
+        .maybeSingle(),
+    )
+  }
+  const [orgResult, projectResult] = await Promise.all(checks)
+  if (orgResult.error || projectResult?.error) return false
+  return !!orgResult.data || !!projectResult?.data
 }
 
 async function notifySlack(post: PostRow, action: "approved" | "posted"): Promise<void> {

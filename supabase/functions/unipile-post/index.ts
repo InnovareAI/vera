@@ -77,9 +77,9 @@ Deno.serve(async (req) => {
     return jsonError(`unipile-post handles linkedin + instagram; got channel='${channel}'`, 400)
   }
 
-  // Resolve the account: per-client connection first (social_connections by
-  // project + provider), then fall back to the legacy org-level LinkedIn column
-  // so existing connections keep working until clients are reconnected per V2.
+  // Resolve the account. Project posts must use a project-scoped connection.
+  // The legacy org-level LinkedIn column is only allowed for old org-wide posts
+  // that have no project_id.
   let unipileAccountId: string | null = null
   if (post.project_id) {
     const { data: conn } = await supabase
@@ -90,8 +90,11 @@ Deno.serve(async (req) => {
       .eq("status", "connected")
       .maybeSingle()
     unipileAccountId = (conn?.unipile_account_id as string | null) ?? null
+    if (!unipileAccountId) {
+      return jsonError(`No connected ${channel} account for this client — connect it first.`, 400)
+    }
   }
-  if (!unipileAccountId && channel === "linkedin" && post.org_id) {
+  if (!post.project_id && !unipileAccountId && channel === "linkedin" && post.org_id) {
     const { data: org } = await supabase
       .from("organizations")
       .select("unipile_account_id")
@@ -108,10 +111,11 @@ Deno.serve(async (req) => {
     return jsonError("Instagram posts require an image or video (media_url).", 400)
   }
 
-  // 2. Resolve company URN if needed (explicit param wins; otherwise auto-
-  //    detect when the org has a linkedin_company channel configured).
+  // 2. Resolve company URN if needed. Explicit param wins. Automatic org-level
+  // channel profile detection is only safe for legacy org-wide posts because
+  // channel_profiles is not project-scoped.
   let asOrganization: string | undefined = explicitOrgUrn
-  if (channel === "linkedin" && !asOrganization && post.org_id) {
+  if (channel === "linkedin" && !asOrganization && !post.project_id && post.org_id) {
     const { data: channels } = await supabase
       .from("channel_profiles")
       .select("channel, url")
@@ -207,17 +211,28 @@ Deno.serve(async (req) => {
 
   // 6. Optionally close the loop: route through approval-webhook so the DB
   //    write + Slack notify run through the single hub.
-  if (autoMarkPosted && posted_url) {
+  let autoMarkedPosted = false
+  if (autoMarkPosted) {
     try {
-      await fetch(`${SUPABASE_URL}/functions/v1/approval-webhook`, {
+      const postedPayload: Record<string, unknown> = { post_id, action: "posted" }
+      if (posted_url) postedPayload.posted_url = posted_url
+      if (urn) postedPayload.provider_post_id = urn
+      const markRes = await fetch(`${SUPABASE_URL}/functions/v1/approval-webhook`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
           "apikey": SUPABASE_SERVICE_ROLE_KEY,
         },
-        body: JSON.stringify({ post_id, action: "posted", posted_url }),
+        body: JSON.stringify(postedPayload),
       })
+      autoMarkedPosted = markRes.ok
+      if (!markRes.ok) {
+        console.error("approval-webhook mark-posted failed after successful Unipile post", {
+          status: markRes.status,
+          body: (await markRes.text()).slice(0, 500),
+        })
+      }
     } catch (e) {
       // The Unipile call already succeeded; surface the chain failure but don't
       // fail the whole request — operator can mark posted manually.
@@ -229,7 +244,7 @@ Deno.serve(async (req) => {
     unipile_response: unipileBody,
     posted_url,
     urn,
-    auto_marked_posted: autoMarkPosted && !!posted_url,
+    auto_marked_posted: autoMarkedPosted,
   }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   })

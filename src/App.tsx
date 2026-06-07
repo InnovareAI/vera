@@ -14,6 +14,8 @@ import Review from './pages/Review'
 import ReviewDetail from './pages/ReviewDetail'
 import Calendar from './pages/Calendar'
 import Onboarding from './pages/Onboarding'
+import OnboardingAudit from './pages/OnboardingAudit'
+import LinkedInScore from './pages/LinkedInScore'
 import Knowledge from './pages/Knowledge'
 import Artifacts from './pages/Artifacts'
 import Skills from './pages/Skills'
@@ -45,6 +47,8 @@ export default function App() {
             <Routes>
               <Route path="/login" element={<LoginGuard />} />
               <Route path="/onboarding" element={<Onboarding />} />
+              <Route path="/onboarding/audit/:orgId" element={<OnboardingAudit />} />
+              <Route path="/linkedin-score/:orgId" element={<LinkedInScore />} />
               {/* Public, no-login review link, scoped by a revocable review token. */}
               <Route path="/r/:reviewToken" element={<ReviewLink />} />
               <Route element={<RequireAuth />}>
@@ -92,6 +96,7 @@ export default function App() {
                 <Route path="settings"   element={<Settings />} />
                 </Route>
               </Route>
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
             </RightRailProvider>
             </ProjectProvider>

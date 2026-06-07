@@ -674,7 +674,7 @@ async function loadContext(
     supabase.from('campaigns').select('name, theme, status').eq('org_id', orgId).eq('status', 'active').limit(10),
     supabase.from('audiences').select('kind, name, is_primary').eq('org_id', orgId).limit(10),
     supabase.from('linkedin_audits').select('kind, result, created_at').eq('org_id', orgId).order('created_at', { ascending: false }).limit(2),
-    supabase.from('content_posts').select('id', { count: 'exact', head: true }).eq('org_id', orgId).eq('status', 'Pending Review'),
+    supabase.from('content_posts').select('id', { count: 'exact', head: true }).eq('org_id', orgId).eq('status', 'pending'),
     // Workspace-wide memories (user_id null) + this user's personal memories.
     supabase.from('vera_memories').select('key, value, kind')
       .eq('org_id', orgId)
@@ -1168,7 +1168,7 @@ const TOOLS = [
   // ─── Workspace data access ───────────────────────────────────────────────
   {
     name: 'list_pending_posts',
-    description: 'List posts currently in the review queue (status="Pending Review") for the active workspace. Use when the operator asks "what\'s pending?", "what\'s in the queue?", "what should I review next?", or wants a queue summary.',
+    description: 'List posts currently in the review queue (DB status="pending", displayed as "Pending Review") for the active workspace. Use when the operator asks "what\'s pending?", "what\'s in the queue?", "what should I review next?", or wants a queue summary.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1675,7 +1675,12 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
       case 'refine_post': {
         const postId = String(input.post_id ?? '')
         if (!postId) return { result: 'No post_id was provided.' }
-        const { data: existing } = await ctx.supabase.from('content_posts').select('id, title').eq('id', postId).maybeSingle()
+        let existingQuery = ctx.supabase.from('content_posts')
+          .select('id, title')
+          .eq('id', postId)
+          .eq('org_id', ctx.orgId)
+        if (ctx.projectId) existingQuery = existingQuery.eq('project_id', ctx.projectId)
+        const { data: existing } = await existingQuery.maybeSingle()
         if (!existing) return { result: 'That post no longer exists.' }
         const updates: Record<string, unknown> = {}
         const newCopy = (input.copy as string)?.trim()
@@ -1722,7 +1727,12 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           return { result: "I couldn't tell whether to change the copy, image, or video — ask the operator to be a touch more specific." }
         }
         updates.updated_at = new Date().toISOString()
-        const { data: updated, error: upErr } = await ctx.supabase.from('content_posts').update(updates as Database['public']['Tables']['content_posts']['Update']).eq('id', postId).select('*').single()
+        let updateQuery = ctx.supabase.from('content_posts')
+          .update(updates as Database['public']['Tables']['content_posts']['Update'])
+          .eq('id', postId)
+          .eq('org_id', ctx.orgId)
+        if (ctx.projectId) updateQuery = updateQuery.eq('project_id', ctx.projectId)
+        const { data: updated, error: upErr } = await updateQuery.select('*').single()
         if (upErr) return { result: `Couldn't save the change: ${upErr.message}` }
         if (updated) ctx.emit({ type: 'draft', post: updated })
         return { result: `Updated the ${changed || 'post'} on "${(updated as Record<string, unknown>)?.title ?? 'the post'}". Reply in ONE short line telling the operator what you changed.` }
@@ -2030,7 +2040,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         let q = ctx.supabase.from('content_posts')
           .select('id, title, channel, format, copy, created_at')
           .eq('org_id', ctx.orgId)
-          .eq('status', 'Pending Review')
+          .eq('status', 'pending')
           .order('created_at', { ascending: false })
           .limit(limit)
         if (channel) q = q.eq('channel', channel)

@@ -338,6 +338,12 @@ export default function VeraThread() {
   const fileRef = useRef<HTMLInputElement | null>(null)
   const [setup, setSetup] = useState<{ business: boolean; audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null>(null)
 
+  useEffect(() => {
+    setDraft(null)
+    setDraftHistory([])
+    setCampaign(null)
+  }, [activeProject?.id])
+
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -1041,6 +1047,12 @@ export default function VeraThread() {
   }
 
   // ─── Draft actions ──────────────────────────────────────────────
+  function ensureDraftInActiveProject(post: Post) {
+    if (!activeProject?.id || post.project_id !== activeProject.id) {
+      throw new Error('This draft belongs to another client. Reopen the draft in the active client workspace.')
+    }
+  }
+
   async function callApprovalWebhook(payload: Record<string, unknown>, bearer: string) {
     const res = await fetch(`${SUPA}/functions/v1/approval-webhook`, {
       method: 'POST',
@@ -1060,6 +1072,7 @@ export default function VeraThread() {
     if (!draft?.id) return
     setApproving(true)
     try {
+      ensureDraftInActiveProject(draft)
       const { data: { session }, error } = await supabase.auth.getSession()
       if (error) throw error
       const reviewedBy = user?.email ?? user?.id ?? 'VERA operator'
@@ -1097,12 +1110,14 @@ export default function VeraThread() {
   const [sending, setSending] = useState(false)
   async function ensureReviewToken(post: Post): Promise<string> {
     if (!post.id) throw new Error('Draft has no post id.')
+    ensureDraftInActiveProject(post)
     let token = post.review_token ?? null
     if (!token) {
       const { data, error } = await supabase
         .from('content_posts')
         .select('review_token')
         .eq('id', post.id)
+        .eq('project_id', activeProject!.id)
         .maybeSingle()
       if (error) throw error
       token = (data as { review_token?: string | null } | null)?.review_token ?? null
@@ -1117,6 +1132,7 @@ export default function VeraThread() {
         .from('content_posts')
         .update({ review_token: token, review_token_revoked_at: null })
         .eq('id', post.id)
+        .eq('project_id', activeProject!.id)
         .select('review_token')
         .single()
       if (error) throw error
@@ -1135,8 +1151,12 @@ export default function VeraThread() {
     if (!draft?.id) return
     setSending(true)
     try {
+      ensureDraftInActiveProject(draft)
       const url = await reviewUrlForDraft(draft)
-      const { error } = await supabase.from('content_posts').update({ status: 'pending' }).eq('id', draft.id)
+      const { error } = await supabase.from('content_posts')
+        .update({ status: 'pending' })
+        .eq('id', draft.id)
+        .eq('project_id', activeProject!.id)
       if (error) throw error
       setDraft(prev => prev ? { ...prev, status: 'pending' } : prev)
       try { void navigator.clipboard?.writeText(url) } catch { /* ignore */ }

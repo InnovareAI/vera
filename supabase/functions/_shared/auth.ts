@@ -140,7 +140,22 @@ export async function requirePublisherActionAccess(
   if (error) return { ok: false, response: jsonError(error.message, 500, corsHeaders) }
   if (!publisher) return { ok: false, response: jsonError("Publisher not found", 404, corsHeaders) }
 
-  return await requireOrgProjectMember(supabase, auth.userId, (publisher as { org_id: string }).org_id, null, corsHeaders)
+  const publisherOrgId = (publisher as { org_id: string }).org_id
+  const postId = typeof body.post_id === "string" ? body.post_id : null
+  if (postId) {
+    const { data: post, error: postError } = await supabase
+      .from("content_posts")
+      .select("id, org_id, project_id")
+      .eq("id", postId)
+      .maybeSingle()
+    if (postError) return { ok: false, response: jsonError(postError.message, 500, corsHeaders) }
+    if (!post) return { ok: false, response: jsonError("Post not found", 404, corsHeaders) }
+    const postRow = post as { org_id: string; project_id?: string | null }
+    if (postRow.org_id !== publisherOrgId) return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
+    return await requireOrgProjectMember(supabase, auth.userId, publisherOrgId, postRow.project_id ?? null, corsHeaders)
+  }
+
+  return await requireOrgProjectMember(supabase, auth.userId, publisherOrgId, null, corsHeaders)
 }
 
 export async function requireObservationMember(
