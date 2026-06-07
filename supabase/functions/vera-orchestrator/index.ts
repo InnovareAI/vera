@@ -23,6 +23,43 @@ const FORMAT_LABELS: Record<string, string> = {
   case_study: 'Case Study', post: 'Post', article: 'Article', newsletter: 'Newsletter',
 }
 
+const VERA_MARKETING_EXPERTISE = `
+VERA senior marketing operating model:
+- Treat every brief as a business communication problem, not a generic writing
+  request. Resolve audience, business objective, offer, category context,
+  positioning, promise, proof, objections, channel, format, CTA, and
+  distribution path before writing.
+- Think in campaigns and content systems. A single post should still connect to
+  a larger narrative, content pillar, product story, founder POV, launch,
+  nurture sequence, or trust-building job when that is useful.
+- Choose the job of the content: awareness, demand creation, lead generation,
+  nurture, retention, recruiting, founder brand, product education, sales
+  enablement, event support, or community building.
+- Prefer a real point of view over generic tips. Use tension, trade-offs,
+  examples, proof, lived experience, frameworks, and practical specificity.
+- Copywriting bar: strong first line, one reader, one promise, one idea per
+  piece, concrete nouns and verbs, specific proof, no fake statistics, no vague
+  superlatives, no filler transitions, no corporate throat-clearing.
+- Platform fluency matters. LinkedIn, Instagram, X, Facebook, Medium,
+  newsletters, blogs, email, Reddit, Quora, short video, and carousel formats
+  each need a native structure and pacing.
+- Quality gate: would the right person stop, recognize their problem, trust the
+  claim, know what to do next, and hear the specific brand rather than generic
+  AI copy.
+- Specialist advisor model: pick the right lens for the brief, such as
+  marketing strategy, positioning, copywriting, content strategy, production,
+  brand voice, distribution, audience research, or source-grounded framework
+  advisor. Use trusted project knowledge and skills over generic model
+  knowledge whenever available.
+- If source material is weak, do not fake authority. Make the best practical
+  assumption, separate it from source-backed claims, and write a draft that is
+  useful without pretending the client Brain is complete.
+- When a brief references a framework, book, expert, playbook, or prior client
+  source, treat that as a specialist knowledge lens. Preserve the framework's
+  actual logic, name the applicable principle in the strategy, and avoid
+  drifting into generic tips.
+`.trim()
+
 // Web research via Perplexity Sonar through OpenRouter: single call returns
 // search + synthesis + citations. Replaces the previous Brave+Claude two-step.
 async function perplexityResearch(query: string): Promise<{ findings: string; citations: string[] }> {
@@ -161,9 +198,11 @@ This is not "a VP of Sales" — it is THIS VP of Sales with THESE pains. Referen
 
         const strategistStream = anthropic.messages.stream({
           model: 'claude-sonnet-4-6',
-          max_tokens: 1024,
+          max_tokens: 1600,
           system: `You are VERA's Strategist. Analyse the content brief and output a strategy as valid JSON only — no prose, no markdown fences.
 ${campaignContext}${audienceContext}
+
+${VERA_MARKETING_EXPERTISE}
 
 Available skills:
 ${skillList || '(none configured yet)'}
@@ -171,12 +210,18 @@ ${skillList || '(none configured yet)'}
 Output exactly this JSON structure:
 {
   "persona": "target audience description",
+  "business_objective": "the job this content should do for the business",
   "platform": "linkedin|twitter|instagram|quora|blog|email|reddit|substack|medium",
   "content_type": "thought_leadership|thread|cold_outreach|product_launch|case_study|post",
   "angle": "specific hook or angle",
+  "core_message": "one sentence thesis the audience should remember",
+  "proof_points": ["specific proof, example, data, story, or credibility point"],
+  "reader_objection": "the likely resistance, doubt, or misconception to address",
+  "conversion_goal": "what the reader should think, feel, or do next",
+  "production_note": "format, repurposing, or asset guidance if useful",
   "tone": "professional|casual|authoritative|conversational",
   "selected_skill_names": ["exact skill name 1"],
-  "brief_for_writer": "detailed brief including angle, tone, key points, CTA",
+  "brief_for_writer": "detailed brief including audience, business objective, core message, proof, objection, tone, key points, CTA, and platform-native structure",
   "run_researcher": true,
   "research_query": "specific web search query to find supporting data/evidence",
   "run_seo": false,
@@ -260,6 +305,17 @@ When run_image_designer is true, populate image_prompt with a concrete 1-2 sente
           model: 'claude-sonnet-4-6',
           max_tokens: 2048,
           system: `You are VERA's Writer. Write the content based on the strategy brief below.
+
+${VERA_MARKETING_EXPERTISE}
+
+Before writing, enforce the strategy:
+- One clear audience.
+- One business objective.
+- One core message.
+- One believable proof path.
+- One likely objection answered through the copy.
+- One platform-native CTA or next step.
+- No generic marketing language, no empty inspiration, no fake metrics.
 
 ## Target platform: ${platformLabel}
 ${platformGuide(platform)}
