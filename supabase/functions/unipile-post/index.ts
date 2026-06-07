@@ -23,7 +23,7 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js"
-import { requireSignedInOrService } from "../_shared/auth.ts"
+import { requirePostMember } from "../_shared/auth.ts"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-  const auth = await requireSignedInOrService(req, supabase, SUPABASE_SERVICE_ROLE_KEY, corsHeaders)
+  const auth = await requirePostMember(req, supabase, SUPABASE_SERVICE_ROLE_KEY, body.post_id as string | undefined, corsHeaders)
   if (!auth.ok) return auth.response
 
   const post_id = body.post_id as string | undefined

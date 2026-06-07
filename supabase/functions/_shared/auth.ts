@@ -77,3 +77,107 @@ export async function requireProjectMember(
   if (orgMember || projectMember) return { ok: true, userId: auth.userId, orgId, service: false }
   return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
 }
+
+export async function requirePostMember(
+  req: Request,
+  supabase: AdminClient,
+  serviceKey: string,
+  postId: string | null | undefined,
+  corsHeaders: Record<string, string>,
+): Promise<{ ok: true; userId: string | null; service: boolean } | { ok: false; response: Response }> {
+  const auth = await requireSignedInOrService(req, supabase, serviceKey, corsHeaders)
+  if (!auth.ok || auth.service || !postId) return auth
+
+  const { data: post, error } = await supabase
+    .from("content_posts")
+    .select("id, org_id, project_id")
+    .eq("id", postId)
+    .maybeSingle()
+  if (error) return { ok: false, response: jsonError(error.message, 500, corsHeaders) }
+  if (!post) return { ok: false, response: jsonError("Post not found", 404, corsHeaders) }
+
+  return await requireOrgProjectMember(
+    supabase,
+    auth.userId,
+    (post as { org_id: string }).org_id,
+    ((post as { project_id?: string | null }).project_id ?? null),
+    corsHeaders,
+  )
+}
+
+export async function requirePublisherActionAccess(
+  req: Request,
+  supabase: AdminClient,
+  serviceKey: string,
+  body: Record<string, unknown>,
+  corsHeaders: Record<string, string>,
+): Promise<{ ok: true; userId: string | null; service: boolean } | { ok: false; response: Response }> {
+  const auth = await requireSignedInOrService(req, supabase, serviceKey, corsHeaders)
+  if (!auth.ok || auth.service) return auth
+
+  if (body.action === "connect") {
+    const orgId = typeof body.org_id === "string" ? body.org_id : null
+    if (!orgId) return auth
+    return await requireOrgProjectMember(supabase, auth.userId, orgId, null, corsHeaders)
+  }
+
+  const publisherId = typeof body.publisher_id === "string" ? body.publisher_id : null
+  if (!publisherId) return auth
+  const { data: publisher, error } = await supabase
+    .from("publishers")
+    .select("id, org_id")
+    .eq("id", publisherId)
+    .maybeSingle()
+  if (error) return { ok: false, response: jsonError(error.message, 500, corsHeaders) }
+  if (!publisher) return { ok: false, response: jsonError("Publisher not found", 404, corsHeaders) }
+
+  return await requireOrgProjectMember(supabase, auth.userId, (publisher as { org_id: string }).org_id, null, corsHeaders)
+}
+
+export async function requireObservationMember(
+  req: Request,
+  supabase: AdminClient,
+  serviceKey: string,
+  observationId: string | null | undefined,
+  corsHeaders: Record<string, string>,
+): Promise<{ ok: true; userId: string | null; service: boolean } | { ok: false; response: Response }> {
+  const auth = await requireSignedInOrService(req, supabase, serviceKey, corsHeaders)
+  if (!auth.ok || auth.service || !observationId) return auth
+
+  const { data: observation, error } = await supabase
+    .from("agent_observations")
+    .select("id, org_id, project_id")
+    .eq("id", observationId)
+    .maybeSingle()
+  if (error) return { ok: false, response: jsonError(error.message, 500, corsHeaders) }
+  if (!observation) return { ok: false, response: jsonError("Observation not found", 404, corsHeaders) }
+
+  return await requireOrgProjectMember(
+    supabase,
+    auth.userId,
+    (observation as { org_id: string }).org_id,
+    ((observation as { project_id?: string | null }).project_id ?? null),
+    corsHeaders,
+  )
+}
+
+async function requireOrgProjectMember(
+  supabase: AdminClient,
+  userId: string | null,
+  orgId: string,
+  projectId: string | null,
+  corsHeaders: Record<string, string>,
+): Promise<{ ok: true; userId: string | null; service: false } | { ok: false; response: Response }> {
+  if (!userId) return { ok: false, response: jsonError("Unauthorized", 401, corsHeaders) }
+  const queries = [
+    supabase.from("org_members").select("role").eq("org_id", orgId).eq("user_id", userId).maybeSingle(),
+  ]
+  if (projectId) {
+    queries.push(supabase.from("project_members").select("role").eq("project_id", projectId).eq("user_id", userId).maybeSingle())
+  }
+  const [orgResult, projectResult] = await Promise.all(queries)
+  if (orgResult.error) return { ok: false, response: jsonError(orgResult.error.message, 500, corsHeaders) }
+  if (projectResult?.error) return { ok: false, response: jsonError(projectResult.error.message, 500, corsHeaders) }
+  if (orgResult.data || projectResult?.data) return { ok: true, userId, service: false }
+  return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
+}

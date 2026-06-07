@@ -15,7 +15,7 @@
 
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
-import { requireSignedInOrService } from '../_shared/auth.ts'
+import { requirePublisherActionAccess } from '../_shared/auth.ts'
 import { renderMarkdown, slugify } from '../_shared/markdown.ts'
 import type {
   HealthCheckResult, DryRunResult, PublishResult, VerifyResult, UnpublishResult,
@@ -38,7 +38,7 @@ Deno.serve(async (req) => {
   try { body = await req.json() } catch { return json({ error: 'invalid JSON' }, 400) }
   const action = body.action as string
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
-  const auth = await requireSignedInOrService(req, supabase, SERVICE_KEY, corsHeaders)
+  const auth = await requirePublisherActionAccess(req, supabase, SERVICE_KEY, body, corsHeaders)
   if (!auth.ok) return auth.response
 
   try {
