@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
   }
 })
 
-function apiBase(project_id: string, dataset: string): string {
+function apiBase(project_id: string): string {
   return `https://${project_id}.api.sanity.io/v${SANITY_API_VERSION}/data`
 }
 
@@ -77,7 +77,7 @@ async function connect(supabase: ReturnType<typeof createClient>, input: Record<
 
   // Probe by running a tiny query against the dataset.
   const probeRes = await sanFetch(
-    `${apiBase(project_id, dataset)}/query/${dataset}?query=${encodeURIComponent('*[_type==$t][0..0]{_id}')}&%24t=%22${encodeURIComponent(document_type)}%22`,
+    `${apiBase(project_id)}/query/${dataset}?query=${encodeURIComponent('*[_type==$t][0..0]{_id}')}&%24t=%22${encodeURIComponent(document_type)}%22`,
     token,
   )
   if (probeRes.status === 401 || probeRes.status === 403) {
@@ -126,7 +126,7 @@ async function connect(supabase: ReturnType<typeof createClient>, input: Record<
 async function health_check(supabase: ReturnType<typeof createClient>, input: Record<string, unknown>): Promise<HealthCheckResult> {
   const publisher_id = input.publisher_id as string
   const { config, creds } = await loadPublisher(supabase, publisher_id)
-  const res = await sanFetch(`${apiBase(config.project_id as string, config.dataset as string)}/query/${config.dataset}?query=${encodeURIComponent('true')}`, creds.token)
+  const res = await sanFetch(`${apiBase(config.project_id as string)}/query/${config.dataset}?query=${encodeURIComponent('true')}`, creds.token)
   const checked_at = new Date().toISOString()
   if (res.status === 200) { await updateHealth(supabase, publisher_id, 'healthy', null); return { ok: true, status: 'healthy', checked_at } }
   if (res.status === 401 || res.status === 403) { await updateHealth(supabase, publisher_id, 'stale', 'Token rejected'); return { ok: false, status: 'stale', detail: 'Token rejected', checked_at } }
@@ -209,7 +209,7 @@ async function publish(supabase: ReturnType<typeof createClient>, input: Record<
 
     const mutations = { mutations: [{ createOrReplace: doc }] }
     const mutateRes = await sanFetch(
-      `${apiBase(project_id, dataset)}/mutate/${dataset}?returnIds=true`,
+      `${apiBase(project_id)}/mutate/${dataset}?returnIds=true`,
       creds.token,
       { method: 'POST', body: JSON.stringify(mutations) },
     )
@@ -244,7 +244,7 @@ async function verify(supabase: ReturnType<typeof createClient>, input: Record<s
   const remote_id = input.remote_id as string
   const { config, creds } = await loadPublisher(supabase, publisher_id)
   const res = await sanFetch(
-    `${apiBase(config.project_id as string, config.dataset as string)}/doc/${config.dataset}/${remote_id}`,
+    `${apiBase(config.project_id as string)}/doc/${config.dataset}/${remote_id}`,
     creds.token,
   )
   if (res.status === 404) return { ok: false, status: 'missing', detail: 'Document deleted' }
@@ -264,7 +264,7 @@ async function unpublish(supabase: ReturnType<typeof createClient>, input: Recor
   const publishedId = remote_id.replace(/^drafts\./, '')
   const mutations = { mutations: [{ delete: { id: publishedId } }] }
   const res = await sanFetch(
-    `${apiBase(config.project_id as string, config.dataset as string)}/mutate/${config.dataset}`,
+    `${apiBase(config.project_id as string)}/mutate/${config.dataset}`,
     creds.token,
     { method: 'POST', body: JSON.stringify(mutations) },
   )

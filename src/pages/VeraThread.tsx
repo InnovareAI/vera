@@ -807,6 +807,9 @@ export default function VeraThread() {
       setStreaming(false)
       abortRef.current = null
     }
+    // pollVideo and watchCarousel are long-running stream helpers. Keep send bound
+    // to route, session, and message state so active streams do not churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, streaming, activeOrg?.id, activeProject?.id, user?.id, messages, location.pathname, sessionId, draft, attachments, persistChatMessage])
 
   // Poll a backgrounded fal video job (submitted by vera-chat) until the MP4

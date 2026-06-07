@@ -43,6 +43,7 @@ const PLATFORM_LABELS: Record<string, string> = {
 // ─── Workspace Tab ────────────────────────────────────────────────────────────
 function WorkspaceTab() {
   const { activeOrg, refetch } = useOrg()
+  const activeOrgId = activeOrg?.id
   const [form, setForm] = useState({
     name: '', website: '', industry: '', timezone: 'Europe/Berlin', locale: 'en',
   })
@@ -50,8 +51,8 @@ function WorkspaceTab() {
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    if (!activeOrg) return
-    supabase.from('organizations').select('*').eq('id', activeOrg.id).single()
+    if (!activeOrgId) return
+    supabase.from('organizations').select('*').eq('id', activeOrgId).single()
       .then(({ data }) => {
         if (data) setForm({
           name:      data.name ?? '',
@@ -61,7 +62,7 @@ function WorkspaceTab() {
           locale:    data.locale ?? 'en',
         })
       })
-  }, [activeOrg?.id])
+  }, [activeOrgId])
 
   async function handleSave() {
     if (!activeOrg) return
@@ -247,6 +248,7 @@ function TeamTab() {
 // ─── Brand Voice Tab ──────────────────────────────────────────────────────────
 function BrandVoiceTab() {
   const { activeOrg } = useOrg()
+  const activeOrgId = activeOrg?.id
   const [bv, setBv] = useState<Partial<BrandVoice>>({})
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -255,10 +257,10 @@ function BrandVoiceTab() {
   const [forbidInput, setForbidInput] = useState('')
 
   useEffect(() => {
-    if (!activeOrg) return
-    supabase.from('brand_voice').select('*').eq('org_id', activeOrg.id).maybeSingle()
+    if (!activeOrgId) return
+    supabase.from('brand_voice').select('*').eq('org_id', activeOrgId).maybeSingle()
       .then(({ data }) => { if (data) setBv(data) })
-  }, [activeOrg?.id])
+  }, [activeOrgId])
 
   async function handleSave() {
     if (!activeOrg) return
@@ -351,23 +353,24 @@ function BrandVoiceTab() {
 // ─── Integrations Tab ─────────────────────────────────────────────────────────
 function IntegrationsTab() {
   const { activeOrg } = useOrg()
+  const activeOrgId = activeOrg?.id
   const [configs, setConfigs] = useState<Partial<PlatformConfig>[]>([])
   const [saving, setSaving] = useState<string | null>(null)
   const [reveal, setReveal] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
-    if (!activeOrg) return
-    supabase.from('platform_configs').select('*').eq('org_id', activeOrg.id)
+    if (!activeOrgId) return
+    supabase.from('platform_configs').select('*').eq('org_id', activeOrgId)
       .then(({ data }) => {
         const existing = data || []
         // Ensure all platforms have an entry
         const merged = PLATFORMS.map(p => {
           const found = existing.find(e => e.platform === p)
-          return found ?? { platform: p, is_active: false, hashtag_limit: 5, org_id: activeOrg.id }
+          return found ?? { platform: p, is_active: false, hashtag_limit: 5, org_id: activeOrgId }
         })
         setConfigs(merged)
       })
-  }, [activeOrg?.id])
+  }, [activeOrgId])
 
   function update(platform: string, patch: Partial<PlatformConfig>) {
     setConfigs(prev => prev.map(c => c.platform === platform ? { ...c, ...patch } : c))

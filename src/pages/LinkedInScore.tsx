@@ -214,8 +214,8 @@ export default function LinkedInScore() {
   }, [orgId])
 
   // Update runAt when fresh results land
-  useEffect(() => { if (profile && !profileLoading) setProfileRunAt(new Date().toISOString()) }, [profile])
-  useEffect(() => { if (brew && !brewLoading) setBrewRunAt(new Date().toISOString()) }, [brew])
+  useEffect(() => { if (profile && !profileLoading) setProfileRunAt(new Date().toISOString()) }, [profile, profileLoading])
+  useEffect(() => { if (brew && !brewLoading) setBrewRunAt(new Date().toISOString()) }, [brew, brewLoading])
 
   const canContinue = !!profile && !!brew
 

@@ -17,6 +17,7 @@ interface ClientOrg {
 
 export default function Agency() {
   const { activeOrg } = useOrg()
+  const activeOrgId = activeOrg?.id
   const navigate = useNavigate()
   const [clients, setClients] = useState<ClientOrg[]>([])
   const [loading, setLoading] = useState(true)
@@ -25,13 +26,13 @@ export default function Agency() {
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
-    if (!activeOrg) return
+    if (!activeOrgId) return
     // Fetch all client orgs that have this agency as their agency_id
     supabase.from('organizations')
       .select('*')
-      .eq('agency_id', activeOrg.id)
+      .eq('agency_id', activeOrgId)
       .then(({ data }) => { setClients(data || []); setLoading(false) })
-  }, [activeOrg?.id])
+  }, [activeOrgId])
 
   async function handleCreateClient() {
     if (!activeOrg || !newForm.name.trim()) return

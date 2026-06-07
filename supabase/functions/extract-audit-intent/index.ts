@@ -109,7 +109,7 @@ Deno.serve(async (req) => {
   // Marketing pages tell us what the company CLAIMS they're about; blog content
   // tells us what they ACTUALLY write about — themes, voice, depth, cadence.
   const sitemapUrls = await discoverSitemapUrls(base)
-  let blogPosts: ParsedPage[] = []
+  const blogPosts: ParsedPage[] = []
   let blogDiscoveryNote = ''
 
   if (sitemapUrls.length) {

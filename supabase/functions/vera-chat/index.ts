@@ -255,51 +255,6 @@ async function uploadImageToStorage(
   return publicUrl.replace(/^https?:\/\/[^/]+/, publicBase.replace(/\/$/, ''))
 }
 
-// Generate ONE image via the generate-image edge function and return a stable
-// stored URL. Factored out of the generate_image tool so the carousel tool can
-// fan out many frames in parallel (Promise.all) and stay under the gateway's
-// SSE timeout. Throws on failure so the caller can count successes.
-async function generateOneImage(
-  supabaseUrl: string,
-  serviceKey: string,
-  supabase: ReturnType<typeof createClient>,
-  orgId: string,
-  prompt: string,
-  aspect = 'square_hd',
-): Promise<string> {
-  const res = await fetch(`${supabaseUrl}/functions/v1/generate-image`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}`, 'apikey': serviceKey },
-    body: JSON.stringify({ prompt, model: 'nano-banana-pro', image_size: aspect, quality: 'high' }),
-  })
-  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let imageUrl: string | undefined
-  let errMsg: string | undefined
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    let idx
-    while ((idx = buffer.indexOf('\n\n')) !== -1) {
-      const frame = buffer.slice(0, idx)
-      buffer = buffer.slice(idx + 2)
-      const line = frame.split('\n').find(l => l.startsWith('data: '))
-      if (!line) continue
-      try {
-        const event = JSON.parse(line.slice(6)) as Record<string, unknown>
-        if (event.event === 'done') { const images = event.images as Array<{ url: string }> | undefined; imageUrl = images?.[0]?.url }
-        else if (event.event === 'error') errMsg = String(event.message ?? 'image error')
-      } catch { /* skip malformed frame */ }
-    }
-  }
-  if (errMsg) throw new Error(errMsg)
-  if (!imageUrl) throw new Error('no image url returned')
-  try { return await uploadImageToStorage(supabase, orgId, imageUrl) } catch { return imageUrl }
-}
-
 const BASE_PERSONA = `
 You are VERA — InnovareAI's creative AI partner. The always-on chat dock at
 the bottom of every page. You're not a brief workshop — that's the

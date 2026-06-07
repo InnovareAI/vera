@@ -86,7 +86,6 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         if (error) {
           // Defensive: table doesn't exist yet (migration 026 not applied),
           // or RLS blocks. Surface empty list rather than crash.
-          // eslint-disable-next-line no-console
           console.warn('[projectContext] projects query failed — migration 026 may not be applied yet:', error.message)
           setProjects([])
           setActiveSlug(null)

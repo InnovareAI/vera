@@ -345,7 +345,7 @@ export function ChatPanel() {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [input, pendingImages, streaming, activeOrg?.id, messages, user?.id, session?.access_token, location.pathname, mode])
+  }, [input, pendingImages, streaming, activeOrg?.id, activeProject?.id, messages, user?.id, session?.access_token, location.pathname, mode])
 
   function stop() {
     abortRef.current?.abort()
@@ -422,7 +422,7 @@ export function ChatPanel() {
               Loading thread…
             </div>
           ) : messages.length === 0 ? (
-            <EmptyState onSuggest={s => { setInput(s); textareaRef.current?.focus() }} />
+            <EmptyState />
           ) : (
             <div className="max-w-4xl mx-auto space-y-5">
               {messages.map(m => <MessageBubble key={m.id} message={m} />)}
@@ -553,7 +553,7 @@ function ModeButton({
 }
 
 // ─── Empty state — quiet center, one line, nothing competing ───────────────
-function EmptyState({ onSuggest: _onSuggest }: { onSuggest: (text: string) => void }) {
+function EmptyState() {
   return (
     <div className="h-full flex flex-col items-center justify-center text-center px-6">
       <div

@@ -279,7 +279,6 @@ export default function Skills() {
     setLoading(false)
   }, [activeOrgId, activeProjectId])
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load() }, [load])
 
   const filtered = useMemo(() => {

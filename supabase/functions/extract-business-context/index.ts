@@ -382,7 +382,7 @@ async function withFallback<T>(primary: () => Promise<T>, fallback: () => Promis
     try {
       return await fallback()
     } catch (secondError) {
-      throw new Error(`${errorMessage(firstError)}; fallback failed: ${errorMessage(secondError)}`)
+      throw new Error(`${errorMessage(firstError)}; fallback failed: ${errorMessage(secondError)}`, { cause: secondError })
     }
   }
 }
@@ -593,7 +593,7 @@ ${input.documentText}`
 
 function parseContextJson(text: string): BusinessContext {
   const jsonText = text.match(/\{[\s\S]*\}/)?.[0] ?? "{}"
-  let parsed: Record<string, unknown> = {}
+  let parsed: Record<string, unknown>
   try {
     parsed = JSON.parse(jsonText)
   } catch {

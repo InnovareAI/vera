@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST')    return json(405, { error: 'method not allowed' })
 
-  let body: { observation_id?: string } = {}
+  let body: { observation_id?: string }
   try { body = await req.json() } catch { return json(400, { error: 'invalid json' }) }
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY)

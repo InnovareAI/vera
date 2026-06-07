@@ -66,7 +66,6 @@ export function useRightRailWidth() {
  *   useRightRail(<DashboardRail pending={pendingCount} />, [pendingCount])
  *   useRightRail(<DraftArtifact draft={draft} />, [draft], 'clamp(380px, 42vw, 640px)')
  */
-// eslint-disable-next-line react-refresh/only-export-components
 export function useRightRail(content: ReactNode | null, deps: unknown[] = [], width: string = DEFAULT_WIDTH) {
   const { setRail } = useContext(RightRailContext)
   useEffect(() => {

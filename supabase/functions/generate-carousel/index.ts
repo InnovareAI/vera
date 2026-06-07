@@ -28,7 +28,7 @@ type Frame = { image_prompt?: string; text?: string | null }
 
 async function uploadToStorage(supabase: ReturnType<typeof createClient>, orgId: string, source: string): Promise<string> {
   let bytes: Uint8Array
-  let contentType = 'image/png'
+  let contentType: string
   if (source.startsWith('data:')) {
     const m = source.match(/^data:([^;]+);base64,(.+)$/s)
     if (!m) throw new Error('invalid data URL')
@@ -159,7 +159,7 @@ Deno.serve(async (req) => {
     if (error || !job) throw new Error(error?.message ?? 'job insert failed')
     const jobId = (job as { id: string }).id
 
-    // @ts-ignore EdgeRuntime is provided by the supabase edge runtime
+    // @ts-expect-error EdgeRuntime is provided by the supabase edge runtime
     EdgeRuntime.waitUntil(processJob(supabase, jobId, body.post_id ?? null, frames, aspect))
 
     return new Response(JSON.stringify({ job_id: jobId, status: 'processing', total: frames.length }), {

@@ -87,6 +87,8 @@ export default function OnboardingAudit() {
 
     preflight()
     return () => { cancelled = true }
+    // Callback params are consumed once per org route. runAudit is guarded by startedRef.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId])
 
   async function startUnipileConnect() {

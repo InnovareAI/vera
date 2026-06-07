@@ -92,7 +92,7 @@ Deno.serve(async (req) => {
 
   // Step 4: Platform-specific public discovery
   let hint: Record<string, unknown> = { connection_name, base_url }
-  let credential_needed: CredentialPrompt | null = null
+  let credential_needed: CredentialPrompt | null
   let platform: string = detection.detected_cms
 
   if (detection.detected_cms === 'wordpress') {

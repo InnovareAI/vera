@@ -49,26 +49,27 @@ Deno.serve(async (req) => {
   const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : ""
   const isServiceRole = bearer === SUPABASE_SERVICE_ROLE_KEY
 
-  let post: PostRow | null = null
-  let user: User | null = null
+  let post: PostRow
 
   if (review_token) {
     if (!REVIEW_ACTIONS.has(action)) return jsonError("review_token can only be used for review actions", 403)
     if (!/^[a-f0-9]{32,128}$/i.test(review_token)) return jsonError("Invalid review token", 400)
     const result = await supabase.from("content_posts").select("*").eq("review_token", review_token).maybeSingle()
     if (result.error) return jsonError(result.error.message, 500)
-    post = result.data as PostRow | null
-    if (!post) return jsonError("Review link not found", 404)
+    const fetchedPost = result.data as PostRow | null
+    if (!fetchedPost) return jsonError("Review link not found", 404)
+    post = fetchedPost
     const tokenError = validateReviewToken(post)
     if (tokenError) return tokenError
   } else if (post_id) {
     const result = await supabase.from("content_posts").select("*").eq("id", post_id).maybeSingle()
     if (result.error) return jsonError(result.error.message, 500)
-    post = result.data as PostRow | null
-    if (!post) return jsonError(`No post with id ${post_id}`, 404)
+    const fetchedPost = result.data as PostRow | null
+    if (!fetchedPost) return jsonError(`No post with id ${post_id}`, 404)
+    post = fetchedPost
 
     if (!isServiceRole) {
-      user = await authenticatedUser(supabase, bearer)
+      const user = await authenticatedUser(supabase, bearer)
       if (!user) return jsonError("Authentication required", 401)
       const allowed = await userCanAccessPost(supabase, user.id, post)
       if (!allowed) return jsonError("Not allowed for this post", 403)
@@ -92,7 +93,7 @@ Deno.serve(async (req) => {
   const { data: updated, error } = await supabase
     .from("content_posts")
     .update(updates)
-    .eq("id", post!.id)
+    .eq("id", post.id)
     .select()
     .single()
 
