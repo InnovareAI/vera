@@ -134,6 +134,13 @@ function bytesHuman(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function hexToken(byteLength = 24) {
+  const bytes = crypto.getRandomValues(new Uint8Array(byteLength))
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+type ApprovalWebhookError = Error & { status?: number }
+
 function attachmentPrompt(attachments: ComposerAttachment[]) {
   const images = attachments.filter(a => a.kind === 'image').length
   const documents = attachments.filter(a => a.kind === 'document').length
@@ -1019,18 +1026,48 @@ export default function VeraThread() {
   }
 
   // ─── Draft actions ──────────────────────────────────────────────
+  async function callApprovalWebhook(payload: Record<string, unknown>, bearer: string) {
+    const res = await fetch(`${SUPA}/functions/v1/approval-webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${bearer}` },
+      body: JSON.stringify(payload),
+    })
+    const data = await res.json().catch(() => null) as { post?: Post; error?: string } | null
+    if (!res.ok) {
+      const err = new Error(data?.error ?? `HTTP ${res.status}`) as ApprovalWebhookError
+      err.status = res.status
+      throw err
+    }
+    return data?.post ?? null
+  }
+
   async function approveDraft() {
     if (!draft?.id) return
     setApproving(true)
     try {
-      const res = await fetch(`${SUPA}/functions/v1/approval-webhook`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
-        body: JSON.stringify({ post_id: draft.id, action: 'approved' }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const { data: { session }, error } = await supabase.auth.getSession()
+      if (error) throw error
+      const reviewedBy = user?.email ?? user?.id ?? 'VERA operator'
+      let updated: Post | null = null
+
+      if (session?.access_token) {
+        try {
+          updated = await callApprovalWebhook({ post_id: draft.id, action: 'approved', reviewed_by: reviewedBy }, session.access_token)
+        } catch (e) {
+          const err = e as ApprovalWebhookError
+          if (err.status !== 401) throw err
+        }
+      }
+
+      if (!updated) {
+        const reviewToken = draft.review_token ?? await ensureReviewToken(draft)
+        updated = await callApprovalWebhook({ review_token: reviewToken, action: 'approved', reviewed_by: reviewedBy }, ANON)
+      }
+
+      if (!updated) throw new Error('Sign in again to approve directly, or generate a sharing link and approve from the review page.')
       push({ kind: 'success', title: 'Approved', body: 'Moved to the review queue as approved.' })
-      setDraft(prev => prev ? { ...prev, status: 'Approved' } : prev)
+      setDraft(prev => prev?.id === draft.id ? { ...prev, ...updated } : prev)
+      setDraftHistory(prev => prev.map(p => p.id === draft.id ? { ...p, ...updated } : p))
     } catch (e) {
       push({ kind: 'danger', title: 'Approve failed', body: (e as Error).message })
     } finally {
@@ -1043,7 +1080,7 @@ export default function VeraThread() {
   // reviewer approves there; "Approve directly" is the skip-the-reviewer path.
   // This is the explicit "completed → in approval" move.
   const [sending, setSending] = useState(false)
-  async function reviewUrlForDraft(post: Post): Promise<string> {
+  async function ensureReviewToken(post: Post): Promise<string> {
     if (!post.id) throw new Error('Draft has no post id.')
     let token = post.review_token ?? null
     if (!token) {
@@ -1059,7 +1096,24 @@ export default function VeraThread() {
         setDraftHistory(prev => prev.map(p => p.id === post.id ? { ...p, review_token: token } : p))
       }
     }
+    if (!token) {
+      token = hexToken()
+      const { data, error } = await supabase
+        .from('content_posts')
+        .update({ review_token: token, review_token_revoked_at: null })
+        .eq('id', post.id)
+        .select('review_token')
+        .single()
+      if (error) throw error
+      token = (data as { review_token?: string | null } | null)?.review_token ?? token
+      setDraft(prev => prev?.id === post.id ? { ...prev, review_token: token } : prev)
+      setDraftHistory(prev => prev.map(p => p.id === post.id ? { ...p, review_token: token } : p))
+    }
     if (!token) throw new Error('This post does not have a review token yet.')
+    return token
+  }
+  async function reviewUrlForDraft(post: Post): Promise<string> {
+    const token = await ensureReviewToken(post)
     return `${window.location.origin}/r/${token}`
   }
   async function sendForApproval() {
@@ -1098,7 +1152,16 @@ export default function VeraThread() {
         sending={sending}
         onApprove={approveDraft}
         onSendForApproval={sendForApproval}
-        onCopyShareLink={() => reviewUrlForDraft(draft).then(url => { void navigator.clipboard?.writeText(url) })}
+        onCopyShareLink={async () => {
+          try {
+            const url = await reviewUrlForDraft(draft)
+            try { await navigator.clipboard?.writeText(url) } catch { /* ignore */ }
+            push({ kind: 'success', title: 'Sharing link copied', body: 'Public review link copied to the clipboard.' })
+          } catch (e) {
+            push({ kind: 'danger', title: "Couldn't generate sharing link", body: (e as Error).message })
+            throw e
+          }
+        }}
         onTweak={tweakDraft}
         onRegenerate={regenerateDraft}
         onBack={campaign ? () => setDraft(null) : undefined}
@@ -1110,7 +1173,7 @@ export default function VeraThread() {
     ) : campaign ? (
       <CampaignArtifact campaign={campaign} onOpenPost={p => setDraft(p as unknown as Post)} />
     ) : <ArtifactEmpty />,
-    [draft?.id, draft?.media_url, draft?.media_metadata, draft?.review_token, draft?.status, approving, sending, campaign?.id, campaign?.posts?.length, draftIdx, draftHistory.length],
+    [draft?.id, draft?.media_url, draft?.media_metadata, draft?.review_token, draft?.status, approving, sending, campaign?.id, campaign?.posts?.length, draftIdx, draftHistory.length, user?.id, user?.email],
     // Wide, readable artifact panel — this is the working surface, not a
     // skinny sidebar. ~42vw, clamped so it stays sane on small + huge screens.
     'clamp(420px, 42vw, 660px)',
@@ -1156,12 +1219,6 @@ export default function VeraThread() {
             style={{ width: '100%', resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontFamily: t.family.sans, fontSize: idle ? t.size.h4 : t.size.lg, lineHeight: 1.5, color: color.ink, minHeight: idle ? 118 : 100, maxHeight: 240, paddingTop: 2 }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: space[2] }}>
-            {!idle && (
-              <button onClick={newChat} disabled={!activeProject} title="Start a new conversation"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 32, padding: '0 12px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: color.ink2, cursor: activeProject ? 'pointer' : 'default', flexShrink: 0, fontSize: t.size.cap, fontWeight: t.weight.medium }}>
-                <Plus size={14} /> New
-              </button>
-            )}
             <input ref={fileRef} type="file" accept={ACCEPTED_ATTACHMENT_TYPES} multiple style={{ display: 'none' }} onChange={e => handleFiles(e.target.files)} />
             <button onClick={() => fileRef.current?.click()} disabled={uploading || !activeProject} title="Attach images or documents"
               style={{ width: 32, height: 32, borderRadius: '50%', border: `1px solid ${color.line}`, background: color.surface, color: color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'default' : 'pointer', flexShrink: 0 }}>
@@ -1186,7 +1243,11 @@ export default function VeraThread() {
   }
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: color.paper }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: color.paper, position: 'relative' }}>
+      <button onClick={newChat} disabled={!activeProject} title="Start a new session"
+        style={{ position: 'absolute', top: space[5], right: space[6], zIndex: 3, display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 13px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: activeProject ? color.ink2 : color.ghost, boxShadow: 'var(--shadow-pop)', cursor: activeProject ? 'pointer' : 'default', fontSize: t.size.cap, fontWeight: t.weight.medium }}>
+        <Plus size={14} /> New session
+      </button>
       {/* thread (no header bar — SAM-clean; rail identifies "Vera", Recents
           lists past chats, the Vera rail item starts a new chat) */}
       <div ref={scrollerRef} style={{ flex: 1, overflowY: 'auto', padding: `${space[6]} 0 ${space[7]}` }}>
