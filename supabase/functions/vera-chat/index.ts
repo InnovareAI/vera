@@ -625,6 +625,7 @@ interface WorkspaceContext {
     display_name: string
     status: string
     connection_kind: string
+    config: Record<string, unknown> | null
     scopes: string[] | null
     capabilities: Record<string, unknown> | null
     health_status: string | null
@@ -700,7 +701,7 @@ async function loadContext(
 
   const integrationsQuery = projectId
     ? supabase.from('client_integrations')
-        .select('provider, category, display_name, status, connection_kind, scopes, capabilities, health_status, health_detail, last_sync_at')
+        .select('provider, category, display_name, status, connection_kind, config, scopes, capabilities, health_status, health_detail, last_sync_at')
         .eq('project_id', projectId)
         .order('category')
         .order('display_name')
@@ -984,9 +985,23 @@ function renderContext(ctx: WorkspaceContext, route: string): string {
     for (const integration of ctx.integrations) {
       const scopes = integration.scopes?.length ? integration.scopes.join(', ') : 'none'
       const caps = formatIntegrationCapabilities(integration.capabilities)
+      const launchPriority = typeof integration.config?.launch_priority === 'string' ? integration.config.launch_priority : null
+      const workstream = typeof integration.config?.workstream === 'string' ? integration.config.workstream : null
+      const adapterState = typeof integration.config?.adapter_state === 'string' ? integration.config.adapter_state : null
+      const nextBuild = typeof integration.config?.next_build === 'string' ? integration.config.next_build : null
+      const launchLabel = launchPriority || workstream ? `; launch=${launchPriority ?? 'later'}${workstream ? `/${workstream}` : ''}` : ''
       lines.push(`  - ${integration.display_name} [${integration.provider}/${integration.category}] status=${integration.status}; health=${integration.health_status ?? 'unknown'}; connection=${integration.connection_kind}; capabilities=${caps}; scopes=${scopes}`)
+      if (launchLabel) {
+        lines[lines.length - 1] += launchLabel
+      }
       if (integration.status !== 'connected' && integration.health_detail) {
         lines.push(`    Setup note: ${integration.health_detail}`)
+      }
+      if (adapterState && adapterState !== integration.health_detail) {
+        lines.push(`    Adapter state: ${adapterState}`)
+      }
+      if (nextBuild && integration.status !== 'connected') {
+        lines.push(`    Next build: ${nextBuild}`)
       }
     }
   } else if (ctx.activeProject) {

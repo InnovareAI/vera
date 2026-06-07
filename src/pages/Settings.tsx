@@ -19,10 +19,10 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'integrations', label: 'Integrations', icon: Plug },
 ]
 
-const PLATFORMS = ['linkedin', 'twitter', 'instagram', 'facebook', 'quora', 'medium']
+const PLATFORMS = ['linkedin', 'twitter', 'instagram', 'facebook', 'youtube', 'quora', 'medium']
 const PLATFORM_LABELS: Record<string, string> = {
   linkedin: 'LinkedIn', twitter: 'X (Twitter)', instagram: 'Instagram',
-  facebook: 'Facebook', quora: 'Quora', medium: 'Medium',
+  facebook: 'Facebook', youtube: 'YouTube', quora: 'Quora', medium: 'Medium',
 }
 
 // ─── Workspace Tab ────────────────────────────────────────────────────────────
@@ -590,6 +590,7 @@ function IntegrationsTab() {
                   platform === 'twitter'  ? 'bg-sky-100 text-sky-700' :
                   platform === 'instagram' ? 'bg-pink-100 text-pink-700' :
                   platform === 'facebook' ? 'bg-indigo-100 text-indigo-700' :
+                  platform === 'youtube' ? 'bg-red-100 text-red-700' :
                   platform === 'medium' ? 'bg-stone-100 text-stone-700' :
                   'bg-red-100 text-red-700'
                 }`}>
@@ -616,7 +617,7 @@ function IntegrationsTab() {
                       value={config.char_limit ?? ''}
                       onChange={e => update(platform, { char_limit: Number(e.target.value) || undefined })}
                       className="input w-full"
-                      placeholder={platform === 'twitter' ? '280' : platform === 'medium' ? '10000' : '3000'}
+                      placeholder={platform === 'twitter' ? '280' : platform === 'medium' || platform === 'youtube' ? '10000' : '3000'}
                     />
                   </div>
                   <div>

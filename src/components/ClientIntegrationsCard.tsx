@@ -12,10 +12,12 @@ import {
   Globe2,
   Hash,
   KeyRound,
+  ListChecks,
   Loader2,
   MessageSquareText,
   PauseCircle,
   Radio,
+  Rocket,
   Save,
   Search,
   Send,
@@ -26,6 +28,7 @@ import {
   Trash2,
   UploadCloud,
   Video,
+  Wrench,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type {
@@ -52,6 +55,13 @@ interface IntegrationTemplate {
   scopes: string[]
   capabilities: IntegrationCapabilities
   setupNote: string
+  launch?: {
+    priority: 'wave_1' | 'wave_2' | 'later'
+    workstream: 'Search & analytics' | 'WordPress' | 'Meta' | 'YouTube' | 'Other'
+    adapterState: string
+    nextBuild: string
+    requirements: string[]
+  }
   icon: ElementType
   accent: string
 }
@@ -71,6 +81,13 @@ const PROVIDERS: IntegrationTemplate[] = [
     scopes: ['webmasters.readonly', 'site_verification.read'],
     capabilities: { read: true, ingest: true, analyze: true },
     setupNote: 'Needs Google OAuth and a Search Console ingestion adapter before live reads.',
+    launch: {
+      priority: 'wave_1',
+      workstream: 'Search & analytics',
+      adapterState: 'Needs Google OAuth and ingestion adapter',
+      nextBuild: 'Create one Google OAuth flow shared by Search Console, GA4, and YouTube.',
+      requirements: ['Google Cloud project', 'OAuth consent screen', 'Verified site property', 'Daily ingestion schedule'],
+    },
     icon: Search,
     accent: '#0f766e',
   },
@@ -88,6 +105,13 @@ const PROVIDERS: IntegrationTemplate[] = [
     scopes: ['analytics.readonly'],
     capabilities: { read: true, ingest: true, analyze: true },
     setupNote: 'Needs Google OAuth and a GA4 reporting adapter before live reads.',
+    launch: {
+      priority: 'wave_1',
+      workstream: 'Search & analytics',
+      adapterState: 'Needs Google OAuth and reporting adapter',
+      nextBuild: 'Reuse the Google OAuth flow and add GA4 property sync, traffic summaries, and content performance pulls.',
+      requirements: ['Google Cloud project', 'GA4 property access', 'Analytics readonly scope', 'Quota guardrails'],
+    },
     icon: BarChart3,
     accent: '#a16207',
   },
@@ -105,6 +129,13 @@ const PROVIDERS: IntegrationTemplate[] = [
     scopes: ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'pages_manage_engagement'],
     capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true, schedule: true },
     setupNote: 'Needs Meta app review, Page asset access, and a Graph API adapter before live publishing.',
+    launch: {
+      priority: 'wave_1',
+      workstream: 'Meta',
+      adapterState: 'Needs Meta app review and Page adapter',
+      nextBuild: 'Build the Meta OAuth callback, Page selector, publishing dry run, and human approval gate.',
+      requirements: ['Meta app', 'Business Manager asset access', 'Page publishing permissions', 'Comment and insight permissions'],
+    },
     icon: MessageSquareText,
     accent: '#2563eb',
   },
@@ -122,6 +153,13 @@ const PROVIDERS: IntegrationTemplate[] = [
     scopes: ['instagram_business_basic', 'instagram_business_content_publish', 'instagram_business_manage_comments', 'instagram_business_manage_insights'],
     capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true, schedule: true },
     setupNote: 'Needs a professional Instagram account, Meta app review, media URL hosting, and a Graph API publish adapter.',
+    launch: {
+      priority: 'wave_1',
+      workstream: 'Meta',
+      adapterState: 'Needs Meta app review and media publish adapter',
+      nextBuild: 'Build Instagram professional account connection, media container creation, publish dry run, and insight sync.',
+      requirements: ['Professional Instagram account', 'Connected Facebook Page', 'Media URL hosting', 'Content publishing permissions'],
+    },
     icon: Camera,
     accent: '#c026d3',
   },
@@ -164,15 +202,15 @@ const PROVIDERS: IntegrationTemplate[] = [
     category: 'social',
     group: 'Organic social',
     label: 'X',
-    eyebrow: 'Short-form social',
-    description: 'Publish posts, threads, and media to X, then pull post performance and reply context where access tier allows.',
+    eyebrow: 'Later, paid API',
+    description: 'Prepare X posts for manual handoff now. Add official API publishing only when the client plan covers X usage.',
     connectionKind: 'oauth',
     credentialRoute: 'X OAuth 2.0 with tweet read and write scopes',
     primaryLabel: 'X handle or profile URL',
     primaryPlaceholder: 'https://x.com/brand',
     scopes: ['tweet.read', 'tweet.write', 'users.read', 'offline.access'],
-    capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true, schedule: true },
-    setupNote: 'Needs X developer app access, paid API tier review, media upload support, and strict rate-limit handling.',
+    capabilities: { read: true, ingest: true, analyze: true },
+    setupNote: 'Keep manual handoff first. Add API publishing only when the client plan covers X API usage.',
     icon: Hash,
     accent: '#0f172a',
   },
@@ -190,6 +228,13 @@ const PROVIDERS: IntegrationTemplate[] = [
     scopes: ['youtube.upload', 'youtube.readonly', 'yt-analytics.readonly'],
     capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true, schedule: true },
     setupNote: 'Needs Google OAuth verification and YouTube upload review before public uploads are production-safe.',
+    launch: {
+      priority: 'wave_1',
+      workstream: 'YouTube',
+      adapterState: 'Needs Google OAuth, quota handling, and upload adapter',
+      nextBuild: 'Reuse Google OAuth, connect channel selection, then add metadata drafting and upload dry runs before live publishing.',
+      requirements: ['Google Cloud project', 'YouTube channel access', 'Upload scope approval', 'Quota and file-size safeguards'],
+    },
     icon: Video,
     accent: '#dc2626',
   },
@@ -292,6 +337,13 @@ const PROVIDERS: IntegrationTemplate[] = [
     scopes: ['posts.write', 'posts.read', 'media.upload', 'taxonomies.read'],
     capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true, schedule: true },
     setupNote: 'Needs the WordPress publishing function and encrypted application password.',
+    launch: {
+      priority: 'wave_1',
+      workstream: 'WordPress',
+      adapterState: 'Needs deployed WordPress connector and credential vault path',
+      nextBuild: 'Ship WordPress connect, dry run, publish, featured image upload, taxonomy mapping, and posted URL verification.',
+      requirements: ['Site URL', 'Application password', 'User with post permissions', 'Dry-run preview before publish'],
+    },
     icon: Globe2,
     accent: '#7c3aed',
   },
@@ -434,14 +486,32 @@ const PROVIDERS: IntegrationTemplate[] = [
 ]
 
 const PROVIDER_GROUPS: IntegrationTemplate['group'][] = [
-  'Organic social',
-  'Content platforms',
   'Search & analytics',
   'Publishing & CMS',
+  'Organic social',
+  'Content platforms',
 ]
 
-const DEFAULT_PROVIDER: ClientIntegrationProvider = 'meta_instagram'
+const DEFAULT_PROVIDER: ClientIntegrationProvider = 'google_search_console'
 const DEFAULT_TEMPLATE = PROVIDERS.find(provider => provider.provider === DEFAULT_PROVIDER) ?? PROVIDERS[0]
+
+const DEFAULT_LAUNCH = {
+  priority: 'later',
+  workstream: 'Other',
+  adapterState: 'Backlog',
+  nextBuild: 'Defer until a client needs this channel.',
+  requirements: ['Client demand', 'Adapter brief', 'Permission model'],
+} satisfies NonNullable<IntegrationTemplate['launch']>
+
+function launchMeta(template: IntegrationTemplate): NonNullable<IntegrationTemplate['launch']> {
+  return template.launch ?? DEFAULT_LAUNCH
+}
+
+function isWaveOne(template: IntegrationTemplate): boolean {
+  return launchMeta(template).priority === 'wave_1'
+}
+
+const WAVE_ONE_TEMPLATES = PROVIDERS.filter(isWaveOne)
 
 const STATUS_LABELS: Record<ClientIntegrationStatus, string> = {
   not_connected: 'Planned',
@@ -504,6 +574,27 @@ function activeCapabilities(capabilities: IntegrationCapabilities): string[] {
   return CAPABILITY_LABELS
     .filter(({ key }) => capabilities[key])
     .map(({ label }) => label)
+}
+
+function buildIntegrationConfig(
+  template: IntegrationTemplate,
+  draft: Pick<Draft, 'primaryRef' | 'notes' | 'approvalRequired'>,
+  previousConfig: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const launch = launchMeta(template)
+  return {
+    ...previousConfig,
+    primary_ref: draft.primaryRef.trim(),
+    notes: draft.notes.trim(),
+    approval_required: draft.approvalRequired,
+    credential_route: template.credentialRoute,
+    setup_note: template.setupNote,
+    launch_priority: launch.priority,
+    workstream: launch.workstream,
+    adapter_state: launch.adapterState,
+    next_build: launch.nextBuild,
+    required_setup: launch.requirements,
+  }
 }
 
 export function ClientIntegrationsCard() {
@@ -572,18 +663,11 @@ export function ClientIntegrationsCard() {
       display_name: draft.displayName.trim() || selectedTemplate.label,
       status,
       connection_kind: selectedTemplate.connectionKind,
-      config: {
-        ...(selectedRow?.config ?? {}),
-        primary_ref: draft.primaryRef.trim(),
-        notes: draft.notes.trim(),
-        approval_required: draft.approvalRequired,
-        credential_route: selectedTemplate.credentialRoute,
-        setup_note: selectedTemplate.setupNote,
-      },
+      config: buildIntegrationConfig(selectedTemplate, draft, selectedRow?.config ?? {}),
       capabilities: draft.capabilities,
       scopes: selectedTemplate.scopes,
       health_status: selectedRow?.health_status ?? 'unknown',
-      health_detail: selectedRow?.health_detail ?? selectedTemplate.setupNote,
+      health_detail: selectedRow?.health_detail ?? launchMeta(selectedTemplate).adapterState,
     }
 
     const { data: authData } = await supabase.auth.getUser()
@@ -634,9 +718,57 @@ export function ClientIntegrationsCard() {
     setMessage({ type: 'ok', text: `${selectedTemplate.label} removed.` })
   }
 
+  async function createFirstWavePlan() {
+    if (!activeProject) return
+    const missingTemplates = WAVE_ONE_TEMPLATES.filter(template => !rowByProvider.has(template.provider))
+    if (!missingTemplates.length) {
+      setMessage({ type: 'ok', text: 'First-wave integrations are already planned for this client space.' })
+      return
+    }
+
+    setSaving(true)
+    setMessage(null)
+    const { data: authData } = await supabase.auth.getUser()
+    const userId = authData.user?.id ?? null
+    const payloads = missingTemplates.map(template => ({
+      org_id: activeProject.org_id,
+      project_id: activeProject.id,
+      provider: template.provider,
+      category: template.category,
+      display_name: template.label,
+      status: 'not_connected' as ClientIntegrationStatus,
+      connection_kind: template.connectionKind,
+      config: buildIntegrationConfig(template, { primaryRef: '', notes: '', approvalRequired: true }),
+      capabilities: template.capabilities,
+      scopes: template.scopes,
+      health_status: 'unknown',
+      health_detail: launchMeta(template).adapterState,
+      created_by: userId,
+      updated_by: userId,
+    }))
+
+    const { data, error } = await supabase
+      .from('client_integrations')
+      .insert(payloads)
+      .select('*')
+
+    setSaving(false)
+    if (error) {
+      setMessage({ type: 'err', text: error.message })
+      return
+    }
+
+    const inserted = (data ?? []) as ClientIntegration[]
+    setRows(prev => [...prev, ...inserted])
+    setMessage({ type: 'ok', text: `First-wave plan added for ${activeProject.name}.` })
+  }
+
   const connectedCount = rows.filter(row => row.status === 'connected').length
   const pendingCount = rows.filter(row => row.status === 'pending' || row.status === 'not_connected').length
   const publishCount = rows.filter(row => row.status === 'connected' && row.capabilities.publish).length
+  const waveOneRows = WAVE_ONE_TEMPLATES.map(template => rowByProvider.get(template.provider)).filter(Boolean) as ClientIntegration[]
+  const waveOneConnectedCount = waveOneRows.filter(row => row.status === 'connected').length
+  const missingWaveOneCount = WAVE_ONE_TEMPLATES.length - waveOneRows.length
 
   if (!activeProject) {
     return (
@@ -651,6 +783,7 @@ export function ClientIntegrationsCard() {
 
   const StatusIcon = STATUS_META[draft.status].icon
   const SelectedIcon = selectedTemplate.icon
+  const selectedLaunch = launchMeta(selectedTemplate)
 
   return (
     <section style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', padding: 18 }}>
@@ -663,10 +796,107 @@ export function ClientIntegrationsCard() {
             Register organic social, content platforms, search, analytics, WordPress, and CMS routes per client space. Vera reads these capability records before she analyzes, ingests, or publishes anything.
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-2 min-w-[260px]">
+        <div className="grid grid-cols-3 gap-2 min-w-[300px]">
           <Metric label="Connected" value={connectedCount} />
           <Metric label="Planned" value={pendingCount} />
           <Metric label="Publish" value={publishCount} />
+        </div>
+      </div>
+
+      <div className="mt-4" style={{ border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', background: 'var(--paper)', padding: 14 }}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="inline-flex items-center gap-2" style={{ color: 'var(--ink)', fontSize: 'var(--t-sm)', fontWeight: 750, margin: 0 }}>
+              <Rocket size={15} /> First-wave integrations
+            </p>
+            <p style={{ color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.45, margin: '4px 0 0', maxWidth: 680 }}>
+              Focus on Search Console, GA4, WordPress, Meta, and YouTube first. X stays manual-first until paid API usage is justified.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={createFirstWavePlan}
+            disabled={saving || missingWaveOneCount === 0}
+            className="inline-flex items-center gap-2"
+            style={{
+              ...secondaryButtonStyle,
+              minHeight: 34,
+              opacity: missingWaveOneCount === 0 ? 0.6 : 1,
+            }}
+          >
+            <ListChecks size={14} />
+            {missingWaveOneCount === 0 ? 'First wave planned' : `Plan ${missingWaveOneCount} missing`}
+          </button>
+        </div>
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+          {WAVE_ONE_TEMPLATES.map(template => {
+            const row = rowByProvider.get(template.provider)
+            const launch = launchMeta(template)
+            const ProviderIcon = template.icon
+            const status = row?.status ?? 'not_connected'
+            const StatusDot = STATUS_META[status].icon
+            const active = selectedProvider === template.provider
+            return (
+              <button
+                type="button"
+                key={template.provider}
+                onClick={() => {
+                  setSelectedProvider(template.provider)
+                  setMessage(null)
+                }}
+                className="text-left"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '30px minmax(0,1fr)',
+                  gap: 9,
+                  minHeight: 78,
+                  padding: 10,
+                  borderRadius: 'var(--radius-md)',
+                  border: `1px solid ${active ? template.accent : 'var(--line)'}`,
+                  background: active ? `${template.accent}10` : 'var(--surface)',
+                  color: 'var(--ink)',
+                  cursor: 'pointer',
+                }}
+              >
+                <span
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 'var(--radius-md)',
+                    background: `${template.accent}18`,
+                    color: template.accent,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <ProviderIcon size={15} />
+                </span>
+                <span className="min-w-0">
+                  <span className="flex items-center justify-between gap-2">
+                    <span style={{ fontSize: 12, fontWeight: 750, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {template.label}
+                    </span>
+                    <span className="inline-flex items-center gap-1" style={{ color: STATUS_META[status].color, fontSize: 10, flexShrink: 0 }}>
+                      <StatusDot size={10} />
+                      {STATUS_LABELS[status]}
+                    </span>
+                  </span>
+                  <span style={{ display: 'block', color: 'var(--ink-2)', fontSize: 11, lineHeight: 1.35, marginTop: 2 }}>
+                    {launch.workstream}
+                  </span>
+                  <span style={{ display: 'block', color: 'var(--ghost)', fontSize: 10, lineHeight: 1.25, marginTop: 4 }}>
+                    {launch.adapterState}
+                  </span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <Metric label="Wave connected" value={waveOneConnectedCount} />
+          <Metric label="Wave planned" value={waveOneRows.length} />
+          <Metric label="Missing" value={missingWaveOneCount} />
         </div>
       </div>
 
@@ -789,6 +1019,46 @@ export function ClientIntegrationsCard() {
           </div>
 
           <div className="p-4 space-y-4">
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-md)', padding: 12 }}>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <p className="inline-flex items-center gap-2" style={{ color: 'var(--ink)', fontSize: 12, fontWeight: 700, margin: 0 }}>
+                    <Wrench size={14} style={{ color: selectedTemplate.accent }} />
+                    Launch path
+                  </p>
+                  <p style={{ color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.45, margin: '4px 0 0' }}>
+                    {selectedLaunch.adapterState}
+                  </p>
+                </div>
+                <span
+                  style={{
+                    ...chipStyle,
+                    color: selectedLaunch.priority === 'wave_1' ? selectedTemplate.accent : 'var(--ink-2)',
+                    background: selectedLaunch.priority === 'wave_1' ? `${selectedTemplate.accent}12` : 'var(--paper-2)',
+                    flexShrink: 0,
+                  }}
+                >
+                  {selectedLaunch.priority === 'wave_1' ? 'Wave 1' : selectedLaunch.priority === 'wave_2' ? 'Wave 2' : 'Later'}
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_1fr] gap-3">
+                <div>
+                  <p style={{ color: 'var(--ink)', fontSize: 11, fontWeight: 700, margin: '0 0 6px' }}>Required setup</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedLaunch.requirements.map(requirement => (
+                      <span key={requirement} style={chipStyle}>{requirement}</span>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p style={{ color: 'var(--ink)', fontSize: 11, fontWeight: 700, margin: '0 0 6px' }}>Next build</p>
+                  <p style={{ color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.45, margin: 0 }}>
+                    {selectedLaunch.nextBuild}
+                  </p>
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Labelled label="Display name">
                 <input
