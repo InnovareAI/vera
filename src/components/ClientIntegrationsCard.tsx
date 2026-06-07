@@ -2,22 +2,30 @@ import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties, ElementType, ReactNode } from 'react'
 import {
   AlertTriangle,
+  AtSign,
   BarChart3,
+  Camera,
   CheckCircle2,
   Clock3,
   Database,
   FileCode2,
   Globe2,
+  Hash,
   KeyRound,
   Loader2,
+  MessageSquareText,
   PauseCircle,
+  Radio,
   Save,
   Search,
+  Send,
   Settings2,
+  Share2,
   ShieldCheck,
   ShoppingBag,
   Trash2,
   UploadCloud,
+  Video,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type {
@@ -33,6 +41,7 @@ import { useProject } from '../lib/projectContext'
 interface IntegrationTemplate {
   provider: ClientIntegrationProvider
   category: ClientIntegrationCategory
+  group: 'Search & analytics' | 'Organic social' | 'Publishing & CMS'
   label: string
   eyebrow: string
   description: string
@@ -51,6 +60,7 @@ const PROVIDERS: IntegrationTemplate[] = [
   {
     provider: 'google_search_console',
     category: 'seo',
+    group: 'Search & analytics',
     label: 'Google Search Console',
     eyebrow: 'Search intelligence',
     description: 'Pull search queries, landing pages, indexing gaps, sitemap state, and SEO opportunity data.',
@@ -67,6 +77,7 @@ const PROVIDERS: IntegrationTemplate[] = [
   {
     provider: 'google_analytics_4',
     category: 'analytics',
+    group: 'Search & analytics',
     label: 'Google Analytics 4',
     eyebrow: 'Performance analytics',
     description: 'Read traffic, acquisition, campaign, conversion, and content performance signals.',
@@ -81,8 +92,179 @@ const PROVIDERS: IntegrationTemplate[] = [
     accent: '#a16207',
   },
   {
+    provider: 'meta_facebook_pages',
+    category: 'social',
+    group: 'Organic social',
+    label: 'Facebook Pages',
+    eyebrow: 'Meta organic',
+    description: 'Publish and analyze Facebook Page posts, media, comments, and engagement signals through Meta Graph API.',
+    connectionKind: 'oauth',
+    credentialRoute: 'Meta OAuth with Page publishing and engagement scopes',
+    primaryLabel: 'Facebook Page ID or URL',
+    primaryPlaceholder: 'https://facebook.com/brand',
+    scopes: ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'pages_manage_engagement'],
+    capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true, schedule: true },
+    setupNote: 'Needs Meta app review, Page asset access, and a Graph API adapter before live publishing.',
+    icon: MessageSquareText,
+    accent: '#2563eb',
+  },
+  {
+    provider: 'meta_instagram',
+    category: 'social',
+    group: 'Organic social',
+    label: 'Instagram Professional',
+    eyebrow: 'Meta organic',
+    description: 'Publish Instagram feed posts, reels, carousels, and pull profile, media, comment, and insight context.',
+    connectionKind: 'oauth',
+    credentialRoute: 'Meta OAuth with Instagram professional publishing scopes',
+    primaryLabel: 'Instagram account URL or ID',
+    primaryPlaceholder: 'https://instagram.com/brand',
+    scopes: ['instagram_business_basic', 'instagram_business_content_publish', 'instagram_business_manage_comments', 'instagram_business_manage_insights'],
+    capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true, schedule: true },
+    setupNote: 'Needs a professional Instagram account, Meta app review, media URL hosting, and a Graph API publish adapter.',
+    icon: Camera,
+    accent: '#c026d3',
+  },
+  {
+    provider: 'meta_threads',
+    category: 'social',
+    group: 'Organic social',
+    label: 'Threads',
+    eyebrow: 'Meta organic',
+    description: 'Publish short-form text, image, carousel, and video posts, then read replies and post-level insights.',
+    connectionKind: 'oauth',
+    credentialRoute: 'Threads OAuth with content publish and basic profile scopes',
+    primaryLabel: 'Threads profile URL or ID',
+    primaryPlaceholder: 'https://threads.net/@brand',
+    scopes: ['threads_basic', 'threads_content_publish', 'threads_read_replies', 'threads_manage_replies'],
+    capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true },
+    setupNote: 'Needs Threads API app setup and publish adapter before live posting.',
+    icon: AtSign,
+    accent: '#111827',
+  },
+  {
+    provider: 'linkedin',
+    category: 'social',
+    group: 'Organic social',
+    label: 'LinkedIn',
+    eyebrow: 'Unipile first',
+    description: 'Publish and analyze LinkedIn personal or company content using Unipile first, with a direct LinkedIn adapter later if needed.',
+    connectionKind: 'oauth',
+    credentialRoute: 'Unipile account connection first; direct LinkedIn OAuth later',
+    primaryLabel: 'LinkedIn profile or company URL',
+    primaryPlaceholder: 'https://linkedin.com/company/brand',
+    scopes: ['unipile.linkedin.account', 'posts.read', 'posts.write', 'profile.read'],
+    capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true, schedule: true },
+    setupNote: 'Use the existing Unipile LinkedIn connection first. Direct LinkedIn OAuth can be added behind the same registry record later.',
+    icon: Share2,
+    accent: '#0a66c2',
+  },
+  {
+    provider: 'x',
+    category: 'social',
+    group: 'Organic social',
+    label: 'X',
+    eyebrow: 'Short-form social',
+    description: 'Publish posts, threads, and media to X, then pull post performance and reply context where access tier allows.',
+    connectionKind: 'oauth',
+    credentialRoute: 'X OAuth 2.0 with tweet read and write scopes',
+    primaryLabel: 'X handle or profile URL',
+    primaryPlaceholder: 'https://x.com/brand',
+    scopes: ['tweet.read', 'tweet.write', 'users.read', 'offline.access'],
+    capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true, schedule: true },
+    setupNote: 'Needs X developer app access, paid API tier review, media upload support, and strict rate-limit handling.',
+    icon: Hash,
+    accent: '#0f172a',
+  },
+  {
+    provider: 'youtube',
+    category: 'social',
+    group: 'Organic social',
+    label: 'YouTube',
+    eyebrow: 'Video channel',
+    description: 'Upload and publish YouTube videos or Shorts, manage metadata, and read channel and video analytics signals.',
+    connectionKind: 'oauth',
+    credentialRoute: 'Google OAuth with YouTube upload and readonly scopes',
+    primaryLabel: 'YouTube channel URL or ID',
+    primaryPlaceholder: 'https://youtube.com/@brand',
+    scopes: ['youtube.upload', 'youtube.readonly', 'yt-analytics.readonly'],
+    capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true, schedule: true },
+    setupNote: 'Needs Google OAuth verification and YouTube upload review before public uploads are production-safe.',
+    icon: Video,
+    accent: '#dc2626',
+  },
+  {
+    provider: 'tiktok',
+    category: 'social',
+    group: 'Organic social',
+    label: 'TikTok',
+    eyebrow: 'Short video',
+    description: 'Publish TikTok videos or draft uploads and pull creator, post, and performance context after consent.',
+    connectionKind: 'oauth',
+    credentialRoute: 'TikTok OAuth with Content Posting API scopes',
+    primaryLabel: 'TikTok profile URL or handle',
+    primaryPlaceholder: 'https://tiktok.com/@brand',
+    scopes: ['user.info.basic', 'video.publish', 'video.upload'],
+    capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true },
+    setupNote: 'Needs TikTok Content Posting API approval, explicit user consent, and verified media hosting.',
+    icon: Radio,
+    accent: '#0891b2',
+  },
+  {
+    provider: 'pinterest',
+    category: 'social',
+    group: 'Organic social',
+    label: 'Pinterest',
+    eyebrow: 'Visual discovery',
+    description: 'Publish pins, read boards, and analyze visual discovery performance for evergreen content.',
+    connectionKind: 'oauth',
+    credentialRoute: 'Pinterest OAuth with pins and boards scopes',
+    primaryLabel: 'Pinterest profile or board URL',
+    primaryPlaceholder: 'https://pinterest.com/brand',
+    scopes: ['pins:read', 'pins:write', 'boards:read', 'boards:write', 'user_accounts:read'],
+    capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true, schedule: true },
+    setupNote: 'Needs Pinterest OAuth app setup and media upload adapter before live publishing.',
+    icon: UploadCloud,
+    accent: '#be123c',
+  },
+  {
+    provider: 'reddit',
+    category: 'social',
+    group: 'Organic social',
+    label: 'Reddit',
+    eyebrow: 'Community channels',
+    description: 'Read subreddit context, draft posts and comments, and publish only when community rules and approvals are clear.',
+    connectionKind: 'oauth',
+    credentialRoute: 'Reddit OAuth with identity, submit, read, and edit scopes',
+    primaryLabel: 'Reddit profile or subreddit',
+    primaryPlaceholder: 'r/community or u/brand',
+    scopes: ['identity', 'read', 'submit', 'edit', 'history'],
+    capabilities: { read: true, ingest: true, analyze: true, publish: true, schedule: true },
+    setupNote: 'Needs Reddit OAuth and a community-rules review step before any publishing action.',
+    icon: MessageSquareText,
+    accent: '#ea580c',
+  },
+  {
+    provider: 'bluesky',
+    category: 'social',
+    group: 'Organic social',
+    label: 'Bluesky',
+    eyebrow: 'Open social',
+    description: 'Publish posts, threads, images, and read account or feed context through the AT Protocol.',
+    connectionKind: 'api_key',
+    credentialRoute: 'Bluesky app password or OAuth, stored as encrypted client credential',
+    primaryLabel: 'Bluesky handle',
+    primaryPlaceholder: '@brand.bsky.social',
+    scopes: ['atproto.repo.write', 'atproto.repo.read'],
+    capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true, schedule: true },
+    setupNote: 'Needs Bluesky app-password or OAuth adapter and AT Protocol publishing implementation.',
+    icon: Send,
+    accent: '#0284c7',
+  },
+  {
     provider: 'wordpress',
     category: 'publisher',
+    group: 'Publishing & CMS',
     label: 'WordPress',
     eyebrow: 'Publishing',
     description: 'Publish approved drafts, upload media, update posts, and read taxonomy context.',
@@ -99,6 +281,7 @@ const PROVIDERS: IntegrationTemplate[] = [
   {
     provider: 'webflow',
     category: 'cms',
+    group: 'Publishing & CMS',
     label: 'Webflow',
     eyebrow: 'CMS publishing',
     description: 'Create CMS items, stage drafts, and publish approved long-form content to Webflow.',
@@ -115,6 +298,7 @@ const PROVIDERS: IntegrationTemplate[] = [
   {
     provider: 'contentful',
     category: 'cms',
+    group: 'Publishing & CMS',
     label: 'Contentful',
     eyebrow: 'Headless CMS',
     description: 'Create entries, attach assets, and route approved articles into a Contentful space.',
@@ -131,6 +315,7 @@ const PROVIDERS: IntegrationTemplate[] = [
   {
     provider: 'sanity',
     category: 'cms',
+    group: 'Publishing & CMS',
     label: 'Sanity',
     eyebrow: 'Structured content',
     description: 'Write portable text, media references, and article documents into Sanity datasets.',
@@ -147,6 +332,7 @@ const PROVIDERS: IntegrationTemplate[] = [
   {
     provider: 'strapi',
     category: 'cms',
+    group: 'Publishing & CMS',
     label: 'Strapi',
     eyebrow: 'Self-hosted CMS',
     description: 'Create and publish entries in a Strapi content type with media and metadata.',
@@ -163,6 +349,7 @@ const PROVIDERS: IntegrationTemplate[] = [
   {
     provider: 'hubspot_cms',
     category: 'cms',
+    group: 'Publishing & CMS',
     label: 'HubSpot CMS',
     eyebrow: 'Marketing CMS',
     description: 'Create blog posts and campaign content in HubSpot with approval controls.',
@@ -179,6 +366,7 @@ const PROVIDERS: IntegrationTemplate[] = [
   {
     provider: 'ghost',
     category: 'cms',
+    group: 'Publishing & CMS',
     label: 'Ghost',
     eyebrow: 'Editorial publishing',
     description: 'Send approved posts and newsletters into Ghost with tags, authors, and imagery.',
@@ -195,6 +383,7 @@ const PROVIDERS: IntegrationTemplate[] = [
   {
     provider: 'shopify_blog',
     category: 'cms',
+    group: 'Publishing & CMS',
     label: 'Shopify Blog',
     eyebrow: 'Commerce content',
     description: 'Publish SEO articles and product-led content to Shopify blogs.',
@@ -211,6 +400,7 @@ const PROVIDERS: IntegrationTemplate[] = [
   {
     provider: 'custom_cms',
     category: 'cms',
+    group: 'Publishing & CMS',
     label: 'Custom CMS',
     eyebrow: 'Other CMS',
     description: 'Register a generic publishing route for a client-specific CMS, webhook, or middleware.',
@@ -225,6 +415,15 @@ const PROVIDERS: IntegrationTemplate[] = [
     accent: '#be123c',
   },
 ]
+
+const PROVIDER_GROUPS: IntegrationTemplate['group'][] = [
+  'Organic social',
+  'Search & analytics',
+  'Publishing & CMS',
+]
+
+const DEFAULT_PROVIDER: ClientIntegrationProvider = 'meta_instagram'
+const DEFAULT_TEMPLATE = PROVIDERS.find(provider => provider.provider === DEFAULT_PROVIDER) ?? PROVIDERS[0]
 
 const STATUS_LABELS: Record<ClientIntegrationStatus, string> = {
   not_connected: 'Planned',
@@ -295,14 +494,14 @@ export function ClientIntegrationsCard() {
   const [rows, setRows] = useState<ClientIntegration[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [selectedProvider, setSelectedProvider] = useState<ClientIntegrationProvider>('google_search_console')
+  const [selectedProvider, setSelectedProvider] = useState<ClientIntegrationProvider>(DEFAULT_PROVIDER)
   const selectedTemplate = PROVIDERS.find(p => p.provider === selectedProvider) ?? PROVIDERS[0]
   const rowByProvider = useMemo(() => new Map(rows.map(row => [row.provider, row])), [rows])
   const selectedRow = rowByProvider.get(selectedProvider)
   const draftKey = `${selectedProvider}:${selectedRow?.id ?? 'new'}:${selectedRow?.updated_at ?? ''}`
   const [draftState, setDraftState] = useState<{ key: string; draft: Draft }>(() => ({
-    key: 'google_search_console:new:',
-    draft: makeDraft(PROVIDERS[0]),
+    key: `${DEFAULT_PROVIDER}:new:`,
+    draft: makeDraft(DEFAULT_TEMPLATE),
   }))
   const draft = draftState.key === draftKey ? draftState.draft : makeDraft(selectedTemplate, selectedRow)
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
@@ -443,7 +642,7 @@ export function ClientIntegrationsCard() {
             Agentic integrations
           </p>
           <p style={{ color: 'var(--ink-2)', fontSize: 'var(--t-sm)', lineHeight: 1.5, margin: '5px 0 0', maxWidth: 680 }}>
-            Register Google Search Console (GSC), GA4, WordPress, and CMS routes per client space. Vera reads these capability records before she analyzes, ingests, or publishes anything.
+            Register organic social, search, analytics, WordPress, and CMS routes per client space. Vera reads these capability records before she analyzes, ingests, or publishes anything.
           </p>
         </div>
         <div className="grid grid-cols-3 gap-2 min-w-[260px]">
@@ -460,65 +659,72 @@ export function ClientIntegrationsCard() {
               <Loader2 size={14} className="animate-spin" /> Loading integrations
             </div>
           )}
-          {PROVIDERS.map(template => {
-            const row = rowByProvider.get(template.provider)
-            const active = selectedProvider === template.provider
-            const status = row?.status ?? 'not_connected'
-            const statusMeta = STATUS_META[status]
-            const ProviderIcon = template.icon
-            const RowStatusIcon = statusMeta.icon
-            return (
-              <button
-                key={template.provider}
-                type="button"
-                onClick={() => {
-                  setSelectedProvider(template.provider)
-                  setMessage(null)
-                }}
-                className="w-full text-left transition-colors"
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '34px minmax(0,1fr)',
-                  gap: 10,
-                  padding: 10,
-                  borderRadius: 'var(--radius-md)',
-                  border: `1px solid ${active ? template.accent : 'var(--line)'}`,
-                  background: active ? 'color-mix(in srgb, var(--surface) 88%, var(--paper-2))' : 'var(--surface)',
-                  color: 'var(--ink)',
-                  cursor: 'pointer',
-                }}
-              >
-                <span
-                  style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 'var(--radius-md)',
-                    background: `${template.accent}18`,
-                    color: template.accent,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <ProviderIcon size={16} strokeWidth={1.8} />
-                </span>
-                <span className="min-w-0">
-                  <span className="flex items-center justify-between gap-2">
-                    <span style={{ fontSize: 'var(--t-sm)', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {template.label}
+          {PROVIDER_GROUPS.map(group => (
+            <div key={group} className="space-y-2">
+              <p style={{ color: 'var(--ink-2)', fontSize: 11, fontWeight: 750, letterSpacing: 0, margin: '12px 2px 4px' }}>
+                {group}
+              </p>
+              {PROVIDERS.filter(template => template.group === group).map(template => {
+                const row = rowByProvider.get(template.provider)
+                const active = selectedProvider === template.provider
+                const status = row?.status ?? 'not_connected'
+                const statusMeta = STATUS_META[status]
+                const ProviderIcon = template.icon
+                const RowStatusIcon = statusMeta.icon
+                return (
+                  <button
+                    key={template.provider}
+                    type="button"
+                    onClick={() => {
+                      setSelectedProvider(template.provider)
+                      setMessage(null)
+                    }}
+                    className="w-full text-left transition-colors"
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '34px minmax(0,1fr)',
+                      gap: 10,
+                      padding: 10,
+                      borderRadius: 'var(--radius-md)',
+                      border: `1px solid ${active ? template.accent : 'var(--line)'}`,
+                      background: active ? 'color-mix(in srgb, var(--surface) 88%, var(--paper-2))' : 'var(--surface)',
+                      color: 'var(--ink)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: 'var(--radius-md)',
+                        background: `${template.accent}18`,
+                        color: template.accent,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <ProviderIcon size={16} strokeWidth={1.8} />
                     </span>
-                    <span className="inline-flex items-center gap-1" style={{ color: statusMeta.color, fontSize: 11, flexShrink: 0 }}>
-                      <RowStatusIcon size={11} />
-                      {STATUS_LABELS[status]}
+                    <span className="min-w-0">
+                      <span className="flex items-center justify-between gap-2">
+                        <span style={{ fontSize: 'var(--t-sm)', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {template.label}
+                        </span>
+                        <span className="inline-flex items-center gap-1" style={{ color: statusMeta.color, fontSize: 11, flexShrink: 0 }}>
+                          <RowStatusIcon size={11} />
+                          {STATUS_LABELS[status]}
+                        </span>
+                      </span>
+                      <span style={{ display: 'block', color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.35, marginTop: 2 }}>
+                        {template.eyebrow}
+                      </span>
                     </span>
-                  </span>
-                  <span style={{ display: 'block', color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.35, marginTop: 2 }}>
-                    {template.eyebrow}
-                  </span>
-                </span>
-              </button>
-            )
-          })}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
         </div>
 
         <div style={{ border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', background: 'var(--paper)', overflow: 'hidden' }}>
