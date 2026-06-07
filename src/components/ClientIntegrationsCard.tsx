@@ -57,7 +57,7 @@ interface IntegrationTemplate {
   setupNote: string
   launch?: {
     priority: 'wave_1' | 'wave_2' | 'later'
-    workstream: 'Search & analytics' | 'WordPress' | 'Meta' | 'YouTube' | 'Other'
+    workstream: 'Search & analytics' | 'LinkedIn' | 'WordPress' | 'Meta' | 'YouTube' | 'Other'
     adapterState: string
     nextBuild: string
     requirements: string[]
@@ -185,15 +185,22 @@ const PROVIDERS: IntegrationTemplate[] = [
     category: 'social',
     group: 'Organic social',
     label: 'LinkedIn',
-    eyebrow: 'Unipile first',
-    description: 'Publish and analyze LinkedIn personal or company content using Unipile first, with a direct LinkedIn adapter later if needed.',
+    eyebrow: 'Unipile OAuth',
+    description: 'Connect LinkedIn through the Unipile OAuth Wizard, then publish and analyze personal or company content from Vera.',
     connectionKind: 'oauth',
-    credentialRoute: 'Unipile account connection first; direct LinkedIn OAuth later',
+    credentialRoute: 'Unipile Hosted Auth Wizard for LinkedIn account connection',
     primaryLabel: 'LinkedIn profile or company URL',
     primaryPlaceholder: 'https://linkedin.com/company/brand',
     scopes: ['unipile.linkedin.account', 'posts.read', 'posts.write', 'profile.read'],
     capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true, schedule: true },
-    setupNote: 'Use the existing Unipile LinkedIn connection first. Direct LinkedIn OAuth can be added behind the same registry record later.',
+    setupNote: 'Use the Unipile OAuth Wizard for LinkedIn personal and company access. Vera stores only the Unipile account reference in this registry.',
+    launch: {
+      priority: 'wave_1',
+      workstream: 'LinkedIn',
+      adapterState: 'Unipile OAuth Wizard ready for account connection',
+      nextBuild: 'Open the Unipile wizard from this card, persist the account ID on callback, then use it for LinkedIn ingestion, audits, and approved publishing.',
+      requirements: ['Unipile API key', 'Hosted auth wizard', 'LinkedIn account consent', 'Client workspace approval'],
+    },
     icon: Share2,
     accent: '#0a66c2',
   },
@@ -625,6 +632,7 @@ export function ClientIntegrationsCard() {
   const [saving, setSaving] = useState(false)
   const [connectingGoogle, setConnectingGoogle] = useState(false)
   const [connectingMeta, setConnectingMeta] = useState(false)
+  const [connectingUnipile, setConnectingUnipile] = useState(false)
   const [selectedProvider, setSelectedProvider] = useState<ClientIntegrationProvider>(() => initialProviderFromUrl())
   const selectedTemplate = PROVIDERS.find(p => p.provider === selectedProvider) ?? PROVIDERS[0]
   const rowByProvider = useMemo(() => new Map(rows.map(row => [row.provider, row])), [rows])
@@ -638,6 +646,7 @@ export function ClientIntegrationsCard() {
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const isGoogleOauthProvider = selectedProvider === 'google_search_console' || selectedProvider === 'google_analytics_4' || selectedProvider === 'youtube'
   const isMetaOauthProvider = selectedProvider === 'meta_facebook_pages' || selectedProvider === 'meta_instagram'
+  const isUnipileOauthProvider = selectedProvider === 'linkedin'
 
   function updateDraft(updater: (draft: Draft) => Draft) {
     setDraftState(prev => {
@@ -704,6 +713,135 @@ export function ClientIntegrationsCard() {
       window.history.replaceState({}, '', url.toString())
     }
   }, [])
+
+  useEffect(() => {
+    if (!activeProject) return
+    const project = activeProject
+    const url = new URL(window.location.href)
+    const unipileStatus = url.searchParams.get('unipile_status')
+    if (unipileStatus !== 'success' && unipileStatus !== 'error') return
+
+    const cleanUrl = () => {
+      url.searchParams.delete('unipile_status')
+      url.searchParams.delete('account_id')
+      url.searchParams.delete('org_id')
+      window.history.replaceState({}, '', url.toString())
+    }
+
+    if (unipileStatus === 'error') {
+      queueMicrotask(() => setMessage({ type: 'err', text: 'LinkedIn connection was cancelled or failed.' }))
+      cleanUrl()
+      return
+    }
+
+    const accountId = url.searchParams.get('account_id')
+    if (!accountId) {
+      queueMicrotask(() => setMessage({ type: 'err', text: 'LinkedIn connection finished without a Unipile account ID.' }))
+      cleanUrl()
+      return
+    }
+
+    let cancelled = false
+    async function syncLinkedInConnection() {
+      const template = PROVIDERS.find(provider => provider.provider === 'linkedin')
+      if (!template) return
+      setSaving(true)
+      setMessage(null)
+
+      const connectedAt = new Date().toISOString()
+      const { data: authData } = await supabase.auth.getUser()
+      const userId = authData.user?.id ?? null
+
+      await supabase.from('organizations').update({
+        unipile_account_id: accountId,
+        unipile_connected_at: connectedAt,
+        unipile_health_status: 'healthy',
+      }).eq('id', project.org_id)
+
+      const { data: existingRows, error: lookupError } = await supabase
+        .from('client_integrations')
+        .select('*')
+        .eq('project_id', project.id)
+        .eq('provider', 'linkedin')
+        .limit(1)
+
+      if (cancelled) return
+      if (lookupError) {
+        setSaving(false)
+        setMessage({ type: 'err', text: lookupError.message })
+        cleanUrl()
+        return
+      }
+
+      const existing = ((existingRows ?? []) as ClientIntegration[])[0]
+      const previousConfig = existing?.config ?? {}
+      const payload = {
+        org_id: project.org_id,
+        project_id: project.id,
+        provider: template.provider,
+        category: template.category,
+        display_name: existing?.display_name ?? template.label,
+        status: 'connected' as ClientIntegrationStatus,
+        connection_kind: template.connectionKind,
+        config: {
+          ...buildIntegrationConfig(template, {
+            primaryRef: configString(existing, 'primary_ref'),
+            notes: configString(existing, 'notes'),
+            approvalRequired: configBool(existing, 'approval_required', true),
+          }, previousConfig),
+          connected_via: 'unipile-oauth-wizard',
+          unipile_connected_at: connectedAt,
+        },
+        capabilities: existing?.capabilities ?? template.capabilities,
+        scopes: template.scopes,
+        external_ref: {
+          ...(existing?.external_ref ?? {}),
+          unipile_account_id: accountId,
+          source: 'organizations.unipile_account_id',
+        },
+        health_status: 'healthy' as const,
+        health_detail: 'LinkedIn connected through Unipile OAuth Wizard',
+        last_health_check: connectedAt,
+        updated_by: userId,
+      }
+
+      const query = existing
+        ? supabase
+            .from('client_integrations')
+            .update(payload)
+            .eq('id', existing.id)
+            .select()
+            .single()
+        : supabase
+            .from('client_integrations')
+            .insert({ ...payload, created_by: userId })
+            .select()
+            .single()
+
+      const { data, error } = await query
+      if (cancelled) return
+      setSaving(false)
+
+      if (error) {
+        setMessage({ type: 'err', text: error.message })
+        cleanUrl()
+        return
+      }
+
+      const saved = data as ClientIntegration
+      setSelectedProvider('linkedin')
+      setRows(prev => {
+        const exists = prev.some(row => row.id === saved.id)
+        return exists ? prev.map(row => row.id === saved.id ? saved : row) : [...prev, saved]
+      })
+      setDraftState({ key: `linkedin:${saved.id}:${saved.updated_at ?? ''}`, draft: makeDraft(template, saved) })
+      setMessage({ type: 'ok', text: 'LinkedIn connected through Unipile.' })
+      cleanUrl()
+    }
+
+    syncLinkedInConnection()
+    return () => { cancelled = true }
+  }, [activeProject])
 
   async function saveIntegration(nextStatus?: ClientIntegrationStatus) {
     if (!activeProject) return
@@ -866,6 +1004,44 @@ export function ClientIntegrationsCard() {
     }
   }
 
+  async function connectUnipile() {
+    if (!activeProject) return
+    setConnectingUnipile(true)
+    setMessage(null)
+
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+      if (!supabaseUrl || !anonKey) throw new Error('Supabase connection settings are not configured.')
+
+      const returnUrl = new URL('/settings', window.location.origin)
+      returnUrl.searchParams.set('tab', 'integrations')
+      returnUrl.searchParams.set('provider', 'linkedin')
+
+      const response = await fetch(`${supabaseUrl.replace(/\/+$/, '')}/functions/v1/unipile-connect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+        },
+        body: JSON.stringify({
+          org_id: activeProject.org_id,
+          return_url: returnUrl.toString(),
+        }),
+      })
+      const body = await response.json().catch(() => ({})) as { auth_url?: string; error?: string }
+      if (!response.ok || !body.auth_url) {
+        throw new Error(body.error ?? `Unipile OAuth returned HTTP ${response.status}`)
+      }
+
+      window.location.assign(body.auth_url)
+    } catch (error) {
+      setConnectingUnipile(false)
+      setMessage({ type: 'err', text: error instanceof Error ? error.message : 'LinkedIn connection failed.' })
+    }
+  }
+
   async function createFirstWavePlan() {
     if (!activeProject) return
     const missingTemplates = WAVE_ONE_TEMPLATES.filter(template => !rowByProvider.has(template.provider))
@@ -958,7 +1134,7 @@ export function ClientIntegrationsCard() {
               <Rocket size={15} /> First-wave integrations
             </p>
             <p style={{ color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.45, margin: '4px 0 0', maxWidth: 680 }}>
-              Focus on Search Console, GA4, WordPress, Meta, and YouTube first. X stays manual-first until paid API usage is justified.
+              Focus on Search Console, GA4, LinkedIn through Unipile, WordPress, Meta, and YouTube first. X stays manual-first until paid API usage is justified.
             </p>
           </div>
           <button
@@ -1382,6 +1558,23 @@ export function ClientIntegrationsCard() {
                   >
                     {connectingMeta ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
                     Connect Meta
+                  </button>
+                )}
+                {isUnipileOauthProvider && (
+                  <button
+                    type="button"
+                    onClick={connectUnipile}
+                    disabled={saving || connectingUnipile}
+                    className="inline-flex items-center gap-2"
+                    style={{
+                      ...secondaryButtonStyle,
+                      color: selectedTemplate.accent,
+                      borderColor: selectedTemplate.accent,
+                      opacity: saving || connectingUnipile ? 0.65 : 1,
+                    }}
+                  >
+                    {connectingUnipile ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
+                    {draft.status === 'connected' ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}
                   </button>
                 )}
               </div>
