@@ -4,6 +4,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const META_CLIENT_ID = Deno.env.get("META_OAUTH_CLIENT_ID") ?? Deno.env.get("META_APP_ID") ?? ""
+const META_BUSINESS_LOGIN_CONFIG_ID = Deno.env.get("META_BUSINESS_LOGIN_CONFIG_ID") ?? Deno.env.get("META_OAUTH_CONFIG_ID") ?? ""
 const STATE_SECRET = Deno.env.get("META_OAUTH_STATE_SECRET") ?? Deno.env.get("CLIENT_API_KEY_ENCRYPTION_KEY") ?? SUPABASE_SERVICE_ROLE_KEY
 const META_GRAPH_API_VERSION = normalizeGraphApiVersion(Deno.env.get("META_GRAPH_API_VERSION"))
 const DEFAULT_REDIRECT_URI = `${SUPABASE_URL.replace(/\/+$/, "")}/functions/v1/meta-oauth-callback`
@@ -100,16 +101,23 @@ Deno.serve(async (req) => {
     client_id: META_CLIENT_ID,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: scopes.join(","),
     state,
     auth_type: "rerequest",
   })
+
+  if (META_BUSINESS_LOGIN_CONFIG_ID) {
+    params.set("config_id", META_BUSINESS_LOGIN_CONFIG_ID)
+    params.set("override_default_response_type", "true")
+  } else {
+    params.set("scope", scopes.join(","))
+  }
 
   return json({
     ok: true,
     auth_url: `https://www.facebook.com/${META_GRAPH_API_VERSION}/dialog/oauth?${params.toString()}`,
     redirect_uri: redirectUri,
     scopes,
+    uses_business_login_config: !!META_BUSINESS_LOGIN_CONFIG_ID,
   })
 })
 
