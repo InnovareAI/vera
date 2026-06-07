@@ -1,0 +1,383 @@
+// project-ingest — accepts paste / URL / file-already-in-storage,
+// embeds text content, writes to project_knowledge (semantic retrieval)
+// and project_assets (raw file metadata).
+//
+// Modes:
+//   { kind: 'paste',   project_id, title, content }
+//     → chunks + embeds, stores in project_knowledge.
+//
+//   { kind: 'url',     project_id, title?, source_url }
+//     → fetches URL, strips HTML, chunks + embeds, stores in
+//       project_knowledge with source_kind='url' + source_url.
+//
+//   { kind: 'file',    project_id, storage_path, file_name, mime_type,
+//                      file_size, asset_kind }
+//     → looks up the file in Storage, records in project_assets.
+//       For text-bearing files (md, txt, csv, json), additionally fetches
+//       and ingests text into project_knowledge, linking the two rows.
+//       PDF / DOCX / images stored raw; text extraction is a follow-up.
+//
+// All flows return { ok: true, id, chunks_ingested? }.
+
+import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
+import { createClient } from 'npm:@supabase/supabase-js'
+import { requireProjectMember } from '../_shared/auth.ts'
+import { extractText, getDocumentProxy } from 'npm:unpdf@0.12.1'
+import mammoth from 'npm:mammoth@1.8.0'
+
+const OPENAI_API_KEY    = Deno.env.get('OPENAI_API_KEY') ?? ''
+const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
+const SUPABASE_URL      = Deno.env.get('SUPABASE_URL')!
+const SERVICE_KEY       = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+
+const cors = {
+  'Access-Control-Allow-Origin':  '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'authorization, content-type, apikey',
+}
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+
+// ─── helpers ─────────────────────────────────────────────────────────
+function chunkText(text: string, max = 1200, overlap = 150): string[] {
+  const out: string[] = []
+  let i = 0
+  const clean = text.replace(/\r\n/g, '\n').trim()
+  while (i < clean.length) {
+    out.push(clean.slice(i, i + max))
+    i += max - overlap
+  }
+  return out.filter(c => c.trim().length > 50)
+}
+
+async function embed(text: string): Promise<number[]> {
+  const res = await fetch('https://api.openai.com/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'text-embedding-3-small',
+      input: text.slice(0, 8000), // hard cap to be safe
+    }),
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`OpenAI embed failed: ${res.status} ${err.slice(0, 200)}`)
+  }
+  const data = await res.json() as { data: Array<{ embedding: number[] }> }
+  return data.data[0].embedding
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+async function fetchUrlText(url: string): Promise<string> {
+  const res = await fetch(url, { redirect: 'follow' })
+  if (!res.ok) throw new Error(`Fetch ${url} failed: ${res.status}`)
+  const html = await res.text()
+  return stripHtml(html)
+}
+
+const TEXT_MIMES = new Set([
+  'text/plain', 'text/markdown', 'text/csv', 'text/x-markdown',
+  'application/json', 'application/javascript', 'text/javascript',
+  'text/html',
+])
+
+// Binary text-bearing formats — parsed with dedicated libs before ingest.
+const PDF_MIMES = new Set([
+  'application/pdf',
+  'application/x-pdf',
+])
+const DOCX_MIMES = new Set([
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/msword',                                                       // .doc (mammoth handles many)
+])
+
+async function extractPdfText(buf: ArrayBuffer): Promise<string> {
+  // unpdf is Deno/edge-friendly; returns array of per-page strings.
+  const doc = await getDocumentProxy(new Uint8Array(buf))
+  const { text } = await extractText(doc, { mergePages: true })
+  return Array.isArray(text) ? text.join('\n\n') : (text as string)
+}
+
+async function extractDocxText(buf: ArrayBuffer): Promise<string> {
+  const result = await mammoth.extractRawText({ arrayBuffer: buf })
+  return result.value ?? ''
+}
+
+// ─── handler ─────────────────────────────────────────────────────────
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
+  if (req.method !== 'POST')    return json(405, { error: 'method not allowed' })
+
+  let body: Record<string, unknown>
+  try {
+    body = await req.json()
+  } catch {
+    return json(400, { error: 'invalid json' })
+  }
+
+  const kind = body.kind as string
+  const project_id = body.project_id as string
+  if (!project_id) return json(400, { error: 'project_id required' })
+
+  const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
+  const auth = await requireProjectMember(req, supabase, SERVICE_KEY, project_id, cors)
+  if (!auth.ok) return auth.response
+
+  // Verify project exists
+  const { data: project, error: projErr } = await supabase
+    .from('projects')
+    .select('id, org_id, name')
+    .eq('id', project_id)
+    .maybeSingle()
+  if (projErr || !project) return json(404, { error: 'project not found' })
+
+  try {
+    if (kind === 'paste') {
+      return await ingestText(supabase, project_id, body.title as string ?? 'Pasted note', body.content as string, 'paste', null, null, null)
+    }
+    if (kind === 'url') {
+      const sourceUrl = body.source_url as string
+      if (!sourceUrl) return json(400, { error: 'source_url required for kind=url' })
+      const text = await fetchUrlText(sourceUrl)
+      const title = (body.title as string) || sourceUrl
+      return await ingestText(supabase, project_id, title, text, 'url', sourceUrl, null, null)
+    }
+    if (kind === 'file') {
+      const storagePath = body.storage_path as string
+      const fileName = body.file_name as string
+      const mimeType = body.mime_type as string
+      const fileSize = body.file_size as number
+      const assetKind = (body.asset_kind as string) ?? 'other'
+      if (!storagePath || !fileName || !mimeType) {
+        return json(400, { error: 'storage_path, file_name, mime_type required for kind=file' })
+      }
+
+      // 1. Record the asset
+      const { data: assetRow, error: assetErr } = await supabase
+        .from('project_assets')
+        .insert({
+          project_id,
+          name: fileName,
+          kind: assetKind,
+          mime_type: mimeType,
+          storage_path: storagePath,
+          file_size: fileSize,
+        })
+        .select()
+        .single()
+      if (assetErr) throw new Error(`asset insert failed: ${assetErr.message}`)
+
+      // 2. Text extraction — three paths depending on MIME:
+      //    a. plain-text-like → fileBlob.text()
+      //    b. PDF              → unpdf
+      //    c. DOCX/DOC         → mammoth
+      //    d. anything else (image/font/video/etc) → store raw, no extraction
+      const isPlainText = TEXT_MIMES.has(mimeType) || mimeType.startsWith('text/')
+      const isPdf       = PDF_MIMES.has(mimeType)
+      const isDocx      = DOCX_MIMES.has(mimeType)
+
+      if (isPlainText || isPdf || isDocx) {
+        const { data: fileBlob, error: dlErr } = await supabase.storage
+          .from('project-assets')
+          .download(storagePath)
+        if (dlErr || !fileBlob) {
+          return json(200, { ok: true, asset_id: assetRow.id, chunks_ingested: 0, note: 'asset stored; text extraction skipped (download failed)' })
+        }
+        let text = ''
+        try {
+          if (isPlainText) text = await fileBlob.text()
+          else if (isPdf)  text = await extractPdfText(await fileBlob.arrayBuffer())
+          else if (isDocx) text = await extractDocxText(await fileBlob.arrayBuffer())
+        } catch (e) {
+          // Extraction blew up — still keep the asset, just skip knowledge
+          return json(200, {
+            ok: true,
+            asset_id: assetRow.id,
+            chunks_ingested: 0,
+            note: `asset stored; extraction failed: ${e instanceof Error ? e.message : String(e)}`,
+          })
+        }
+        if (!text || text.trim().length < 30) {
+          return json(200, { ok: true, asset_id: assetRow.id, chunks_ingested: 0, note: 'asset stored; extracted text too short to embed' })
+        }
+        const knowledgeResult = await ingestText(supabase, project_id, fileName, text, 'upload', null, fileName, fileSize)
+        const knowledgeJson = await knowledgeResult.json() as { id?: string; chunks_ingested?: number }
+        if (knowledgeJson.id) {
+          await supabase.from('project_assets')
+            .update({ knowledge_id: knowledgeJson.id })
+            .eq('id', assetRow.id)
+        }
+        return json(200, {
+          ok: true,
+          asset_id: assetRow.id,
+          knowledge_id: knowledgeJson.id,
+          chunks_ingested: knowledgeJson.chunks_ingested,
+          extracted_chars: text.length,
+        })
+      }
+
+      // Other binary (image / font / video / etc) — stored raw, no extraction
+      return json(200, { ok: true, asset_id: assetRow.id, chunks_ingested: 0, note: 'binary asset stored; no text extracted' })
+    }
+
+    return json(400, { error: `unknown kind: ${kind}` })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return json(500, { error: msg })
+  }
+})
+
+// ─── classify — VERA reads each ingested doc and tags it ──────────────
+// Async, fire-and-forget after the knowledge row is inserted. Sets:
+//   · kind        — brief / voice / audit / positioning / case_study /
+//                   intel / reference / other
+//   · summary     — 1-2 sentence VERA-voice summary
+//   · extracted   — kind-specific structured fields
+//   · suggestion  — one agentic propose-action
+//
+// Falls back silently on error — the knowledge row stays usable for
+// retrieval even if classification fails.
+async function classifyAndStore(
+  supabase: ReturnType<typeof createClient>,
+  knowledgeId: string,
+  content: string,
+): Promise<void> {
+  if (!ANTHROPIC_API_KEY) return
+
+  const sys = `You are VERA, a B2B content strategist reading a document an operator just dropped into their project's knowledge base.
+
+Read it once. Classify what it is, summarize it, pull out the most useful structured fields, and propose ONE concrete next action.
+
+Return ONLY a JSON object with this exact shape:
+{
+  "kind": "brief" | "voice" | "audit" | "positioning" | "case_study" | "intel" | "reference" | "other",
+  "summary": "1-2 sentence summary in your voice — what this doc IS, plainly",
+  "extracted": { /* kind-specific — see below — null if nothing fits */ },
+  "suggestion": "One concrete next action you propose, written as if speaking to the operator"
+}
+
+Kind-specific 'extracted' shape:
+  · brief        → { audience, value_prop, key_messages: [], cta, channel?: string }
+  · voice        → { tone: [], writing_rules: [], forbidden_phrases: [], required_phrases: [] }
+  · audit        → { overall_finding, top_fixes: [], strengths: [] }
+  · positioning  → { category, differentiator, target_persona, against_who }
+  · case_study   → { customer, outcome_number, mechanism, quote }
+  · intel        → { competitor, what_happened, why_it_matters }
+  · reference    → { what_it_documents, useful_when }
+  · other        → null
+
+Suggestion examples:
+  · "Want me to apply these as the project's brand voice rules?"
+  · "Want me to draft 3 posts from this brief?"
+  · "Want me to update the audit context with this positioning?"
+  · "Keep as reference — I'll pull it in when relevant."`
+
+  const body = {
+    model: 'claude-haiku-4-5',
+    max_tokens: 1024,
+    system: sys,
+    messages: [{
+      role: 'user',
+      content: `Document content (first 4000 chars):\n\n${content.slice(0, 4000)}`,
+    }],
+  }
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      console.warn(`classify: anthropic ${res.status}`)
+      return
+    }
+    const data = await res.json() as { content?: Array<{ type: string; text?: string }> }
+    const text = data.content?.find(c => c.type === 'text')?.text?.trim() ?? ''
+    // Strip markdown fences if Claude wrapped JSON
+    const cleaned = text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim()
+    let parsed: { kind?: string; summary?: string; extracted?: unknown; suggestion?: string }
+    try {
+      parsed = JSON.parse(cleaned)
+    } catch {
+      console.warn(`classify: bad JSON: ${cleaned.slice(0, 200)}`)
+      return
+    }
+    await supabase.from('project_knowledge').update({
+      kind: parsed.kind ?? 'other',
+      summary: parsed.summary ?? null,
+      extracted: parsed.extracted ?? null,
+      suggestion: parsed.suggestion ?? null,
+      classified_at: new Date().toISOString(),
+    }).eq('id', knowledgeId)
+  } catch (e) {
+    console.warn(`classify: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+// ─── ingestText — chunks, embeds, writes to project_knowledge ────────
+async function ingestText(
+  supabase: ReturnType<typeof createClient>,
+  projectId: string,
+  title: string,
+  content: string,
+  sourceKind: 'paste' | 'url' | 'upload',
+  sourceUrl: string | null,
+  fileName: string | null,
+  fileSize: number | null,
+): Promise<Response> {
+  if (!content || content.trim().length < 30) {
+    return json(400, { error: 'content too short (<30 chars)' })
+  }
+
+  // For embedding a "document" head — embed first chunk as the representative
+  const chunks = chunkText(content)
+  if (chunks.length === 0) return json(400, { error: 'no usable chunks after splitting' })
+
+  // We store ONE row per document with the full content + an embedding of the
+  // head (first ~1200 chars). For larger docs, future revision can split rows.
+  const headEmbedding = await embed(chunks[0])
+
+  const { data: row, error: insErr } = await supabase
+    .from('project_knowledge')
+    .insert({
+      project_id: projectId,
+      title,
+      content,
+      source_kind: sourceKind,
+      source_url: sourceUrl,
+      file_name: fileName,
+      file_size: fileSize,
+      embedding: headEmbedding,
+    })
+    .select()
+    .single()
+  if (insErr) throw new Error(`knowledge insert failed: ${insErr.message}`)
+
+  // Agentic next step — VERA classifies the doc and proposes an action.
+  // Fire-and-forget so the upload response stays fast; the UI polls or
+  // re-fetches and shows the classification when ready (typically 1-3s).
+  EdgeRuntime.waitUntil(classifyAndStore(supabase, row.id as string, content))
+
+  return json(200, { ok: true, id: row.id, chunks_ingested: chunks.length })
+}

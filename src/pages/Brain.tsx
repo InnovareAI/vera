@@ -297,11 +297,15 @@ export default function Brain() {
   const [draftStatus, setDraftStatus] = useState('')
   async function runDraft() {
     if (!activeOrg?.id || drafting) return
+    if (!session?.access_token) {
+      setDraftStatus('Sign in again before drafting the brand voice.')
+      return
+    }
     setDrafting(true); setDraftStatus("Reading this client's content…")
     try {
       const res = await fetch(`${SUPA}/functions/v1/content-audit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: `Bearer ${ANON}` },
+        headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: `Bearer ${session.access_token}` },
         body: JSON.stringify({ org_id: activeOrg.id }),
       })
       if (!res.body) throw new Error('no response from the audit')

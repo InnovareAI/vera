@@ -120,9 +120,14 @@ export default function ReviewDetail() {
       `The post ${post.media_url ? `has ${hasVideo ? 'a video' : 'an image'}` : 'has no media'}.\n\n` +
       `Operator feedback: "${refineText.trim()}"`
     try {
+      const { data: authData, error } = await supabase.auth.getSession()
+      if (error) throw error
+      const token = authData.session?.access_token
+      if (!token) throw new Error('Sign in again before refining this post.')
+
       const res = await fetch(`${SUPA}/functions/v1/vera-chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON}`, 'apikey': ANON },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'apikey': ANON },
         body: JSON.stringify({
           messages: [{ role: 'user', content: msg }],
           org_id: p.org_id,

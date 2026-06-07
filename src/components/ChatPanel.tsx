@@ -72,7 +72,7 @@ export function ChatPanel() {
   const location = useLocation()
   const { activeOrg } = useOrg()
   const { activeProject } = useProject()
-  const { user } = useAuth()
+  const { user, session } = useAuth()
 
   // Load thread on workspace + project switch. Each project keeps its own
   // chat history — switching projects swaps the thread (per the user's
@@ -240,12 +240,14 @@ export function ChatPanel() {
     try {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
       const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+      const token = session?.access_token
+      if (!token) throw new Error('Sign in again before using Vera.')
       const res = await fetch(`${supabaseUrl}/functions/v1/vera-chat`, {
         method: 'POST',
         signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${anonKey}`,
+          'Authorization': `Bearer ${token}`,
           'apikey': anonKey,
         },
         body: JSON.stringify({
@@ -343,7 +345,7 @@ export function ChatPanel() {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [input, pendingImages, streaming, activeOrg?.id, messages, user?.id, location.pathname, mode])
+  }, [input, pendingImages, streaming, activeOrg?.id, messages, user?.id, session?.access_token, location.pathname, mode])
 
   function stop() {
     abortRef.current?.abort()

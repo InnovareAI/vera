@@ -1,0 +1,819 @@
+// Content audit agent. Reads channel_profiles for an org, fetches what it can
+// from each channel, asks Claude to synthesise a proposed brand_voice +
+// personas + skills, saves the result to audit_runs. Streams SSE progress
+// events as it goes.
+//
+// Adapters today: blog/medium via RSS. LinkedIn channels require Unipile
+// (deferred until login). YouTube needs YOUTUBE_API_KEY. X needs APIFY_TOKEN.
+// Unknown channels are surfaced as "needs platform setup" in the audit log.
+
+import "jsr:@supabase/functions-js/edge-runtime.d.ts"
+import Anthropic from 'npm:@anthropic-ai/sdk'
+import { createClient } from 'npm:@supabase/supabase-js'
+import { requireOrgMember } from '../_shared/auth.ts'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const UNIPILE_DSN = Deno.env.get('UNIPILE_DSN')
+const UNIPILE_API_KEY = Deno.env.get('UNIPILE_API_KEY')
+const APIFY_API_TOKEN = Deno.env.get('APIFY_API_TOKEN')
+
+const MAX_ITEMS_PER_CHANNEL = 20
+const MAX_CHARS_PER_ITEM = 4000
+
+interface ChannelProfile {
+  channel: string
+  url: string
+}
+
+interface FetchedItem {
+  channel: string
+  source_url: string
+  title?: string
+  text: string
+  published_at?: string
+}
+
+interface FetchResult {
+  channel: string
+  url: string
+  ok: boolean
+  reason?: string
+  items: FetchedItem[]
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+
+  const { org_id } = await req.json().catch(() => ({}))
+  if (!org_id) {
+    return new Response(JSON.stringify({ error: 'org_id required' }), {
+      status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  if (!ANTHROPIC_API_KEY) {
+    return new Response(JSON.stringify({ error: 'ANTHROPIC_API_KEY not configured' }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+  const auth = await requireOrgMember(req, supabase, SUPABASE_SERVICE_ROLE_KEY, org_id, corsHeaders)
+  if (!auth.ok) return auth.response
+  const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY })
+  const encoder = new TextEncoder()
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (event: string, data: unknown) =>
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ event, ...((data ?? {}) as object) })}\n\n`))
+
+      try {
+        // 1. Create audit_runs row
+        const { data: run, error: runErr } = await supabase
+          .from('audit_runs').insert({ org_id, status: 'running' }).select('id').single()
+        if (runErr || !run) throw new Error(`audit_runs insert failed: ${runErr?.message}`)
+        const auditId = run.id as string
+        send('started', { audit_id: auditId })
+
+        // 2. Fetch channels + org (for unipile_account_id)
+        const [{ data: channels, error: chErr }, { data: org, error: orgErr }] = await Promise.all([
+          supabase.from('channel_profiles').select('channel, url').eq('org_id', org_id).eq('is_active', true),
+          supabase.from('organizations').select('unipile_account_id').eq('id', org_id).maybeSingle(),
+        ])
+        if (chErr) throw new Error(`channels query failed: ${chErr.message}`)
+        if (orgErr) throw new Error(`org query failed: ${orgErr.message}`)
+        if (!channels?.length) throw new Error('No channels configured for this org')
+        const unipileAccountId = (org?.unipile_account_id as string | null) ?? null
+        send('channels_loaded', { channels, unipile_connected: !!unipileAccountId })
+
+        // 3. Fetch content from each channel
+        const results: FetchResult[] = []
+        const channelList = channels as ChannelProfile[]
+        for (const c of channelList) {
+          send('fetching', { channel: c.channel, url: c.url })
+          const r = await fetchChannel(c.channel, c.url, unipileAccountId, channelList)
+          results.push(r)
+          send('fetched', { channel: c.channel, ok: r.ok, reason: r.reason, item_count: r.items.length })
+        }
+
+        const usable = results.filter(r => r.ok && r.items.length > 0)
+        if (!usable.length) {
+          throw new Error('No channels yielded usable content (LinkedIn/YouTube/X need platform setup; only blog and Medium work today).')
+        }
+
+        // 4. Synthesise via Claude
+        send('synthesising', { sources: usable.map(r => ({ channel: r.channel, items: r.items.length })) })
+
+        const corpus = buildCorpus(usable)
+        const proposal = await synthesise(anthropic, corpus, send)
+
+        // 5. Save proposal
+        await supabase.from('audit_runs').update({
+          status: 'completed',
+          channels_audited: usable.map(r => ({ channel: r.channel, url: r.url, item_count: r.items.length })),
+          raw_findings: { skipped: results.filter(r => !r.ok).map(r => ({ channel: r.channel, reason: r.reason })) },
+          proposed_brand_voice: proposal.brand_voice,
+          proposed_personas: proposal.personas,
+          proposed_skills: proposal.skills,
+        }).eq('id', auditId)
+
+        send('done', { audit_id: auditId, proposal })
+        controller.close()
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        send('error', { message: msg })
+        controller.close()
+      }
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Channel adapters
+// ──────────────────────────────────────────────────────────────────────────────
+
+async function fetchChannel(
+  channel: string,
+  url: string,
+  unipileAccountId: string | null,
+  channels: ChannelProfile[],
+): Promise<FetchResult> {
+  try {
+    switch (channel) {
+      case 'blog':
+      case 'medium':
+        return await fetchRSS(channel, url)
+      case 'linkedin_personal':
+        if (!unipileAccountId) return { channel, url, ok: false, items: [], reason: 'Click "Connect LinkedIn" above to enable this channel.' }
+        return await fetchLinkedInPosts(channel, url, unipileAccountId)
+      case 'linkedin_company':
+        if (!unipileAccountId) return { channel, url, ok: false, items: [], reason: 'Click "Connect LinkedIn" above to enable this channel.' }
+        return await fetchLinkedInCompany(url, unipileAccountId)
+      case 'linkedin_newsletter':
+        if (!unipileAccountId) return { channel, url, ok: false, items: [], reason: 'Click "Connect LinkedIn" above to enable this channel.' }
+        return await fetchLinkedInNewsletter(url, unipileAccountId, channels)
+      case 'youtube':
+        return { channel, url, ok: false, items: [], reason: 'YouTube audit needs YOUTUBE_API_KEY (not configured).' }
+      case 'twitter':
+        if (!APIFY_API_TOKEN) return { channel, url, ok: false, items: [], reason: 'APIFY_API_TOKEN not configured on the server.' }
+        return await fetchTwitterViaApify(url)
+      default:
+        return { channel, url, ok: false, items: [], reason: `Unknown channel type: ${channel}` }
+    }
+  } catch (e) {
+    return { channel, url, ok: false, items: [], reason: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+function extractTwitterHandle(url: string): string | null {
+  if (url.startsWith('@')) return url.slice(1).replace(/[\/\?#].*$/, '')
+  const m = url.match(/(?:twitter\.com|x\.com)\/([^\/\?#]+)/i)
+  return m?.[1] ?? null
+}
+
+// Apify's apidojo/tweet-scraper — sync API, returns the dataset items directly.
+// 143M+ runs, well-maintained, pay-per-use. Fields: text, fullText, url,
+// createdAt, likeCount, retweetCount, replyCount, viewCount.
+async function fetchTwitterViaApify(urlIn: string): Promise<FetchResult> {
+  const handle = extractTwitterHandle(urlIn)
+  if (!handle) return { channel: 'twitter', url: urlIn, ok: false, items: [], reason: `Could not parse handle from ${urlIn}` }
+
+  const apifyUrl = `https://api.apify.com/v2/acts/apidojo~tweet-scraper/run-sync-get-dataset-items?token=${APIFY_API_TOKEN}&timeout=90`
+  const res = await fetch(apifyUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      twitterHandles: [handle],
+      maxItems: 20,
+      sort: 'Latest',
+      includeReplies: false,
+    }),
+    signal: AbortSignal.timeout(110_000),
+  })
+  if (!res.ok) {
+    const errText = await res.text()
+    return { channel: 'twitter', url: urlIn, ok: false, items: [], reason: `Apify run failed (${res.status}): ${errText.slice(0, 200)}` }
+  }
+  const tweets = await res.json() as Array<Record<string, unknown>>
+  if (!Array.isArray(tweets) || !tweets.length) {
+    return { channel: 'twitter', url: urlIn, ok: false, items: [], reason: 'Apify returned no tweets.' }
+  }
+
+  return {
+    channel: 'twitter', url: urlIn, ok: true,
+    items: tweets.slice(0, MAX_ITEMS_PER_CHANNEL).map(t => ({
+      channel: 'twitter',
+      source_url: (t.url as string) ?? (t.twitterUrl as string) ?? urlIn,
+      title: undefined,
+      text: stripHtml(((t.fullText as string) ?? (t.text as string) ?? '')).slice(0, MAX_CHARS_PER_ITEM),
+      published_at: (t.createdAt as string) ?? undefined,
+    })).filter(it => it.text.length > 20),
+  }
+}
+
+function extractLinkedInId(url: string, channel: string): string | null {
+  const pattern = channel === 'linkedin_company'
+    ? /linkedin\.com\/company\/([^\/\?#]+)/i
+    : /linkedin\.com\/(?:in|pub)\/([^\/\?#]+)/i
+  return url.match(pattern)?.[1] ?? null
+}
+
+// Per Unipile docs: GET /api/v1/users/{identifier}/posts works for both users
+// and companies, distinguished by `is_company=true`. The identifier for
+// companies is the numeric id from /api/v1/linkedin/company/{slug}.
+async function fetchLinkedInCompany(url: string, accountId: string): Promise<FetchResult> {
+  if (!UNIPILE_DSN || !UNIPILE_API_KEY) {
+    return { channel: 'linkedin_company', url, ok: false, items: [], reason: 'UNIPILE_DSN / UNIPILE_API_KEY not configured.' }
+  }
+  const slug = extractLinkedInId(url, 'linkedin_company')
+  if (!slug) return { channel: 'linkedin_company', url, ok: false, items: [], reason: `Could not parse company slug from ${url}` }
+
+  // 1) Resolve company slug → numeric id (and grab profile text as a bonus item)
+  const lookup = await fetch(
+    `https://${UNIPILE_DSN}/api/v1/linkedin/company/${encodeURIComponent(slug)}?account_id=${encodeURIComponent(accountId)}`,
+    { headers: { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' } },
+  )
+  if (!lookup.ok) {
+    const errText = await lookup.text()
+    return { channel: 'linkedin_company', url, ok: false, items: [], reason: `Company lookup failed (${lookup.status}): ${errText.slice(0, 200)}` }
+  }
+  const profile = await lookup.json() as Record<string, unknown>
+  const companyId = (profile.id as string) ?? null
+  if (!companyId) {
+    return { channel: 'linkedin_company', url, ok: false, items: [], reason: 'Company profile returned no id field.' }
+  }
+
+  // Build an item from the company profile (useful even if /posts is empty)
+  const profileParts = [
+    profile.name ? `Company: ${profile.name}` : '',
+    profile.description ? `\n\nDescription:\n${profile.description}` : '',
+    profile.industry ? `\n\nIndustry: ${profile.industry}` : '',
+    Array.isArray(profile.specialties) ? `\n\nSpecialties: ${(profile.specialties as string[]).join(', ')}` : '',
+    profile.tagline ? `\n\nTagline: ${profile.tagline}` : '',
+  ].filter(Boolean).join('')
+
+  const items: FetchedItem[] = []
+  if (profileParts) {
+    items.push({
+      channel: 'linkedin_company',
+      source_url: (profile.share_url as string) ?? url,
+      title: (profile.name as string) ?? undefined,
+      text: profileParts.slice(0, MAX_CHARS_PER_ITEM),
+    })
+  }
+
+  // 2) Fetch company posts via the same endpoint as users, with is_company=true
+  const postsUrl = `https://${UNIPILE_DSN}/api/v1/users/${encodeURIComponent(companyId)}/posts?account_id=${encodeURIComponent(accountId)}&is_company=true&limit=20`
+  const res = await fetch(postsUrl, { headers: { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' } })
+  if (res.ok) {
+    const data = await res.json() as { items?: Array<Record<string, unknown>>; data?: Array<Record<string, unknown>> }
+    const posts = (data.items ?? data.data ?? []) as Array<Record<string, unknown>>
+    for (const p of posts.slice(0, MAX_ITEMS_PER_CHANNEL)) {
+      const text =
+        (p.text as string) ?? (p.commentary as string) ?? (p.content as string) ??
+        (p.body as string) ?? ''
+      const cleaned = stripHtml(text).slice(0, MAX_CHARS_PER_ITEM)
+      if (cleaned.length > 20) {
+        items.push({
+          channel: 'linkedin_company',
+          source_url: (p.url as string) ?? (p.share_url as string) ?? url,
+          title: undefined,
+          text: cleaned,
+          published_at: (p.date as string) ?? (p.created_at as string) ?? (p.posted_at as string) ?? undefined,
+        })
+      }
+    }
+  }
+
+  if (!items.length) {
+    return { channel: 'linkedin_company', url, ok: false, items: [], reason: 'No usable content (profile empty and no posts).' }
+  }
+  return { channel: 'linkedin_company', url, ok: true, items }
+}
+
+async function fetchLinkedInPosts(channel: string, url: string, accountId: string): Promise<FetchResult> {
+  if (!UNIPILE_DSN || !UNIPILE_API_KEY) {
+    return { channel, url, ok: false, items: [], reason: 'UNIPILE_DSN / UNIPILE_API_KEY not configured on server.' }
+  }
+  const handle = extractLinkedInId(url, channel)
+  if (!handle) return { channel, url, ok: false, items: [], reason: `Could not parse LinkedIn handle from ${url}` }
+
+  // Unipile's /posts endpoint requires the internal provider_id (ACo… for personal,
+  // numeric/ACw… for companies), not the vanity slug. Resolve via the profile lookup first.
+  let providerId: string
+  if (handle.startsWith('ACo') || handle.startsWith('ACw')) {
+    providerId = handle
+  } else {
+    const lookupUrl = `https://${UNIPILE_DSN}/api/v1/users/${encodeURIComponent(handle)}?account_id=${encodeURIComponent(accountId)}`
+    const lookup = await fetch(lookupUrl, { headers: { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' } })
+    if (!lookup.ok) {
+      const errText = await lookup.text()
+      return { channel, url, ok: false, items: [], reason: `Unipile profile lookup for "${handle}" failed (${lookup.status}): ${errText.slice(0, 200)}` }
+    }
+    const profile = await lookup.json() as Record<string, unknown>
+    const pid =
+      (profile.provider_id as string) ??
+      (profile.id as string) ??
+      (typeof profile.entity === 'object' && profile.entity !== null
+        ? ((profile.entity as Record<string, unknown>).provider_id as string)
+        : undefined)
+    if (!pid) {
+      return { channel, url, ok: false, items: [], reason: `Could not resolve provider_id for "${handle}" (Unipile returned profile without provider_id field)` }
+    }
+    providerId = pid
+  }
+
+  const postsUrl = `https://${UNIPILE_DSN}/api/v1/users/${encodeURIComponent(providerId)}/posts?account_id=${encodeURIComponent(accountId)}&limit=20`
+  const res = await fetch(postsUrl, { headers: { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' } })
+  if (!res.ok) {
+    const errText = await res.text()
+    return { channel, url, ok: false, items: [], reason: `Unipile posts fetch failed (${res.status}): ${errText.slice(0, 200)}` }
+  }
+  const data = await res.json() as { items?: Array<Record<string, unknown>>; data?: Array<Record<string, unknown>> }
+  const posts = (data.items ?? data.data ?? []) as Array<Record<string, unknown>>
+  if (!posts.length) return { channel, url, ok: false, items: [], reason: 'No posts returned by Unipile' }
+
+  return {
+    channel, url, ok: true,
+    items: posts.slice(0, MAX_ITEMS_PER_CHANNEL).map(p => {
+      const text =
+        (p.text as string) ?? (p.commentary as string) ?? (p.content as string) ??
+        (p.body as string) ?? (typeof p.share_commentary === 'string' ? p.share_commentary as string : '') ?? ''
+      return {
+        channel,
+        source_url: (p.url as string) ?? (p.share_url as string) ?? url,
+        title: undefined,
+        text: stripHtml(text).slice(0, MAX_CHARS_PER_ITEM),
+        published_at: (p.date as string) ?? (p.created_at as string) ?? (p.posted_at as string) ?? undefined,
+      }
+    }).filter(it => it.text.length > 20),
+  }
+}
+
+// LinkedIn newsletters surface as `article`-type posts on the author's normal
+// `/posts` feed — Unipile has no first-party newsletter endpoint (confirmed via
+// llms.txt). Strategy: find the org's sibling LinkedIn channel (personal or
+// company), resolve its provider_id, fetch ~50 recent posts, filter for items
+// that look like newsletter articles (post_type === 'article', or an
+// `article`/`attachment` object, or a /pulse/ URL).
+//
+// The newsletter URL format is /newsletters/{slug}-{numeric_urn}/. We extract
+// the numeric URN and use it to further refine the filter when the response
+// includes it — but the filter still works without it.
+function extractNewsletterUrn(url: string): string | null {
+  // /newsletters/<slug>-<digits>/?... — capture the trailing digits before any trailing slash
+  const m = url.match(/\/newsletters\/[^\/]*?(\d{15,})/i)
+  return m?.[1] ?? null
+}
+
+async function fetchLinkedInNewsletter(
+  url: string,
+  accountId: string,
+  channels: ChannelProfile[],
+): Promise<FetchResult> {
+  if (!UNIPILE_DSN || !UNIPILE_API_KEY) {
+    return { channel: 'linkedin_newsletter', url, ok: false, items: [], reason: 'UNIPILE_DSN / UNIPILE_API_KEY not configured on server.' }
+  }
+
+  const newsletterUrn = extractNewsletterUrn(url)
+
+  // Find the sibling LinkedIn identity that authors this newsletter. We need a
+  // person OR company channel to resolve into a provider_id, since the
+  // newsletter URL alone doesn't expose the author.
+  const sibling = channels.find(c => c.channel === 'linkedin_personal')
+    ?? channels.find(c => c.channel === 'linkedin_company')
+  if (!sibling) {
+    return {
+      channel: 'linkedin_newsletter', url, ok: false, items: [],
+      reason: 'LinkedIn newsletters surface on the author\'s posts feed. Configure a linkedin_personal or linkedin_company channel for the newsletter\'s author so we can fetch from it.',
+    }
+  }
+  const isCompany = sibling.channel === 'linkedin_company'
+
+  // Resolve sibling → provider_id (same paths as fetchLinkedInPosts/fetchLinkedInCompany)
+  let providerId: string
+  if (isCompany) {
+    const slug = extractLinkedInId(sibling.url, 'linkedin_company')
+    if (!slug) return { channel: 'linkedin_newsletter', url, ok: false, items: [], reason: `Could not parse company slug from sibling channel ${sibling.url}` }
+    const lookup = await fetch(
+      `https://${UNIPILE_DSN}/api/v1/linkedin/company/${encodeURIComponent(slug)}?account_id=${encodeURIComponent(accountId)}`,
+      { headers: { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' } },
+    )
+    if (!lookup.ok) {
+      return { channel: 'linkedin_newsletter', url, ok: false, items: [], reason: `Sibling company lookup failed (${lookup.status})` }
+    }
+    const profile = await lookup.json() as Record<string, unknown>
+    const cid = profile.id as string | undefined
+    if (!cid) return { channel: 'linkedin_newsletter', url, ok: false, items: [], reason: 'Sibling company has no id field.' }
+    providerId = cid
+  } else {
+    const handle = extractLinkedInId(sibling.url, 'linkedin_personal')
+    if (!handle) return { channel: 'linkedin_newsletter', url, ok: false, items: [], reason: `Could not parse handle from sibling channel ${sibling.url}` }
+    if (handle.startsWith('ACo') || handle.startsWith('ACw')) {
+      providerId = handle
+    } else {
+      const lookup = await fetch(
+        `https://${UNIPILE_DSN}/api/v1/users/${encodeURIComponent(handle)}?account_id=${encodeURIComponent(accountId)}`,
+        { headers: { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' } },
+      )
+      if (!lookup.ok) return { channel: 'linkedin_newsletter', url, ok: false, items: [], reason: `Sibling profile lookup failed (${lookup.status})` }
+      const profile = await lookup.json() as Record<string, unknown>
+      const pid =
+        (profile.provider_id as string) ??
+        (profile.id as string) ??
+        (typeof profile.entity === 'object' && profile.entity !== null
+          ? ((profile.entity as Record<string, unknown>).provider_id as string)
+          : undefined)
+      if (!pid) return { channel: 'linkedin_newsletter', url, ok: false, items: [], reason: `Sibling profile has no provider_id.` }
+      providerId = pid
+    }
+  }
+
+  // Fetch a wider slice than posts since articles are rare in the feed
+  const postsUrl = `https://${UNIPILE_DSN}/api/v1/users/${encodeURIComponent(providerId)}/posts?account_id=${encodeURIComponent(accountId)}&limit=50${isCompany ? '&is_company=true' : ''}`
+  const res = await fetch(postsUrl, { headers: { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' } })
+  if (!res.ok) {
+    const errText = await res.text()
+    return { channel: 'linkedin_newsletter', url, ok: false, items: [], reason: `Unipile posts fetch failed (${res.status}): ${errText.slice(0, 200)}` }
+  }
+  const data = await res.json() as { items?: Array<Record<string, unknown>>; data?: Array<Record<string, unknown>> }
+  const posts = (data.items ?? data.data ?? []) as Array<Record<string, unknown>>
+  if (!posts.length) return { channel: 'linkedin_newsletter', url, ok: false, items: [], reason: 'Sibling author has no recent posts.' }
+
+  // Filter for posts that look like newsletter articles. Unipile mirrors LinkedIn's
+  // raw shape; the discriminator varies across response versions, so we look at
+  // multiple signals.
+  const articles = posts.filter(p => {
+    if (p.post_type === 'article' || p.type === 'article') return true
+    if (p.article && typeof p.article === 'object') return true
+    const att = p.attachment as Record<string, unknown> | undefined
+    if (att && (att.type === 'article' || att.kind === 'article' || att.article)) return true
+    const atts = p.attachments as Array<Record<string, unknown>> | undefined
+    if (Array.isArray(atts) && atts.some(a => a.type === 'article' || a.kind === 'article' || a.article)) return true
+    const shareUrl = (p.share_url as string) ?? (p.url as string) ?? ''
+    if (/\/pulse\/|\/newsletters?\//i.test(shareUrl)) return true
+    // If we know the newsletter URN, match posts that reference it
+    if (newsletterUrn) {
+      const blob = JSON.stringify(p)
+      if (blob.includes(newsletterUrn)) return true
+    }
+    return false
+  })
+
+  if (!articles.length) {
+    return {
+      channel: 'linkedin_newsletter', url, ok: false, items: [],
+      reason: `Sibling author has posts but none in the last 50 are newsletter articles. The newsletter may not have published recently, or the author URL doesn't match the newsletter publisher.`,
+    }
+  }
+
+  // Build items — combine share commentary + article title + body excerpt.
+  const items: FetchedItem[] = articles.slice(0, MAX_ITEMS_PER_CHANNEL).map(p => {
+    const commentary =
+      (p.text as string) ?? (p.commentary as string) ?? (p.content as string) ??
+      (p.body as string) ?? (typeof p.share_commentary === 'string' ? p.share_commentary as string : '') ?? ''
+
+    const article = (p.article as Record<string, unknown> | undefined)
+      ?? (p.attachment as Record<string, unknown> | undefined)
+      ?? ((p.attachments as Array<Record<string, unknown>> | undefined)?.[0])
+      ?? {}
+
+    const articleTitle = (article.title as string) ?? (article.headline as string) ?? (p.title as string) ?? undefined
+    const articleSubtitle = (article.subtitle as string) ?? (article.description as string) ?? ''
+    const articleBody = (article.body as string) ?? (article.text as string) ?? ''
+
+    const composed = [
+      articleTitle ? `Title: ${articleTitle}` : '',
+      articleSubtitle ? `Subtitle: ${articleSubtitle}` : '',
+      commentary ? `\nShare commentary:\n${stripHtml(commentary)}` : '',
+      articleBody ? `\nArticle body excerpt:\n${stripHtml(articleBody)}` : '',
+    ].filter(Boolean).join('\n')
+
+    return {
+      channel: 'linkedin_newsletter',
+      source_url: (p.share_url as string) ?? (p.url as string) ?? url,
+      title: articleTitle,
+      text: composed.slice(0, MAX_CHARS_PER_ITEM),
+      published_at: (p.date as string) ?? (p.created_at as string) ?? (p.posted_at as string) ?? undefined,
+    }
+  }).filter(it => it.text.length > 40)
+
+  if (!items.length) {
+    return { channel: 'linkedin_newsletter', url, ok: false, items: [], reason: 'Filtered articles had insufficient text content.' }
+  }
+  return { channel: 'linkedin_newsletter', url, ok: true, items }
+}
+
+async function fetchRSS(channel: string, urlIn: string): Promise<FetchResult> {
+  let url = normaliseFeedUrl(channel, urlIn)
+  const headers = { 'User-Agent': 'InnovareAI-Auditor/0.1 (+content-pipeline)' }
+
+  let res = await fetch(url, { headers })
+  if (!res.ok) return { channel, url: urlIn, ok: false, items: [], reason: `Fetch failed: HTTP ${res.status}` }
+  let body = await res.text()
+
+  // If we got HTML instead of XML, try to auto-discover the feed via <link rel="alternate">
+  if (!looksLikeFeed(body)) {
+    const discovered = discoverFeedLink(body, url)
+    if (discovered) {
+      url = discovered
+      res = await fetch(url, { headers })
+      if (!res.ok) return { channel, url: urlIn, ok: false, items: [], reason: `Discovered feed fetch failed: HTTP ${res.status}` }
+      body = await res.text()
+    } else if (channel === 'blog') {
+      // No RSS feed. Fall back to HTML index scrape for blogs (covers Next.js,
+      // Webflow, and custom marketing-site blogs that don't ship a feed).
+      return await fetchBlogHtml(urlIn, body)
+    } else {
+      return { channel, url: urlIn, ok: false, items: [], reason: 'URL returned HTML and no RSS/Atom <link rel="alternate"> found. Try pasting the feed URL directly.' }
+    }
+  }
+
+  const items = parseRSS(body).slice(0, MAX_ITEMS_PER_CHANNEL)
+  if (!items.length) return { channel, url: urlIn, ok: false, items: [], reason: 'No items in feed' }
+  return {
+    channel, url: urlIn, ok: true,
+    items: items.map(it => ({
+      channel,
+      source_url: it.link ?? urlIn,
+      title: it.title,
+      text: stripHtml(it.contentEncoded || it.description || '').slice(0, MAX_CHARS_PER_ITEM),
+      published_at: it.pubDate,
+    })),
+  }
+}
+
+// HTML-scrape fallback for blogs without RSS. Reads the index page, finds
+// links that look like blog posts (same origin, path heuristics, link text),
+// fetches the top N in parallel, and extracts each post's main content.
+async function fetchBlogHtml(blogUrl: string, indexHtml: string): Promise<FetchResult> {
+  const base = new URL(blogUrl)
+  const candidates = extractBlogPostLinks(indexHtml, base)
+  if (!candidates.length) {
+    return { channel: 'blog', url: blogUrl, ok: false, items: [], reason: 'No RSS feed and could not identify blog-post links on the index HTML.' }
+  }
+
+  const top = candidates.slice(0, 10)
+  const headers = { 'User-Agent': 'InnovareAI-Auditor/0.1 (+content-pipeline)' }
+  const posts = await Promise.all(top.map(async (c) => {
+    try {
+      const r = await fetch(c.href, { headers, signal: AbortSignal.timeout(15_000) })
+      if (!r.ok) return null
+      const html = await r.text()
+      const text = extractArticleText(html)
+      if (text.length < 200) return null
+      return {
+        channel: 'blog',
+        source_url: c.href,
+        title: extractTitle(html) ?? c.title,
+        text: text.slice(0, MAX_CHARS_PER_ITEM),
+      } as FetchedItem
+    } catch { return null }
+  }))
+
+  const items = posts.filter((p): p is FetchedItem => p !== null)
+  if (!items.length) {
+    return { channel: 'blog', url: blogUrl, ok: false, items: [], reason: `Found ${candidates.length} candidate links but none yielded substantial article content.` }
+  }
+  return { channel: 'blog', url: blogUrl, ok: true, items }
+}
+
+interface PostCandidate { href: string; title: string }
+
+function extractBlogPostLinks(html: string, base: URL): PostCandidate[] {
+  const out = new Map<string, PostCandidate>()
+  const aTags = html.matchAll(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)
+  for (const m of aTags) {
+    const raw = m[1]
+    if (!raw || raw.startsWith('#') || raw.startsWith('mailto:') || raw.startsWith('tel:') || raw.startsWith('javascript:')) continue
+    let abs: URL
+    try { abs = new URL(raw, base) } catch { continue }
+    if (abs.origin !== base.origin) continue
+    if (abs.pathname === base.pathname || abs.pathname === '/' || abs.pathname === '') continue
+
+    // Path heuristics — must look like a content slug, not a nav link
+    const path = abs.pathname.replace(/\/$/, '')
+    const segs = path.split('/').filter(Boolean)
+    if (segs.length < 1) continue
+
+    const lastSeg = segs[segs.length - 1]
+    const hasYear = /\b(20\d{2})\b/.test(path)
+    const hasContentMarker = /(blog|post|article|news|insights|stories|writing)/i.test(path)
+    const looksLikeSlug = /[a-z0-9](-[a-z0-9]+){2,}/i.test(lastSeg)   // multi-word slug
+    if (!hasYear && !hasContentMarker && !looksLikeSlug) continue
+
+    // Skip common non-post paths
+    if (/\b(category|tag|tags|author|authors|page|search|feed|rss|sitemap|privacy|terms|contact|about|pricing|login|signup|register|careers)\b/i.test(path)) continue
+
+    const linkText = stripHtml(m[2] ?? '').slice(0, 200)
+    if (linkText.length < 8) continue
+    if (/^(home|read more|continue|click|here|more)$/i.test(linkText.trim())) continue
+
+    const key = abs.toString()
+    if (!out.has(key)) out.set(key, { href: key, title: linkText })
+  }
+  return [...out.values()]
+}
+
+function extractArticleText(html: string): string {
+  // Prefer <article>, then <main>, then a sensible body fallback.
+  const articleMatch = html.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)
+  const mainMatch = html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)
+  let chunk = articleMatch?.[1] ?? mainMatch?.[1]
+  if (!chunk) {
+    // Strip nav/footer/header/aside/script/style from the entire page
+    chunk = html
+      .replace(/<(script|style|nav|footer|header|aside|noscript)\b[\s\S]*?<\/\1>/gi, ' ')
+  }
+  return stripHtml(chunk)
+}
+
+function extractTitle(html: string): string | undefined {
+  // Prefer og:title or twitter:title, fall back to <title>, fall back to first h1
+  const og = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1]
+  if (og) return og
+  const tw = html.match(/<meta[^>]+name=["']twitter:title["'][^>]+content=["']([^"']+)["']/i)?.[1]
+  if (tw) return tw
+  const t = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim()
+  if (t) return stripHtml(t)
+  const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]?.trim()
+  return h1 ? stripHtml(h1) : undefined
+}
+
+function looksLikeFeed(body: string): boolean {
+  const head = body.slice(0, 1024)
+  return /<\?xml|<rss\b|<feed\b/i.test(head)
+}
+
+function discoverFeedLink(html: string, baseUrl: string): string | null {
+  const head = html.slice(0, 200_000)  // search just the head/body start
+  const linkRe = /<link[^>]+rel=["'](?:alternate|feed)["'][^>]*>/gi
+  for (const tagMatch of head.matchAll(linkRe)) {
+    const tag = tagMatch[0]
+    const type = tag.match(/type=["']([^"']+)["']/i)?.[1]?.toLowerCase()
+    if (!type || !(type.includes('rss') || type.includes('atom') || type.includes('xml'))) continue
+    const href = tag.match(/href=["']([^"']+)["']/i)?.[1]
+    if (!href) continue
+    try { return new URL(href, baseUrl).toString() } catch { /* skip */ }
+  }
+  return null
+}
+
+function normaliseFeedUrl(channel: string, urlIn: string): string {
+  if (channel === 'medium') {
+    // accept @handle, https://medium.com/@handle, full URL — output the feed
+    const handleMatch = urlIn.match(/@([A-Za-z0-9._-]+)/)
+    if (handleMatch) return `https://medium.com/feed/@${handleMatch[1]}`
+    if (urlIn.includes('medium.com') && !urlIn.includes('/feed')) {
+      return urlIn.replace(/\/?$/, '').replace('medium.com/', 'medium.com/feed/')
+    }
+  }
+  // Blog: leave as-is. If user gave the HTML page, common-case is /feed or /rss appended,
+  // but we can't auto-discover here without parsing HTML. Try the URL directly; if it
+  // returns HTML it'll fail parseRSS and surface as "no items".
+  return urlIn
+}
+
+interface RSSItem { title?: string; link?: string; description?: string; contentEncoded?: string; pubDate?: string }
+
+function parseRSS(xml: string): RSSItem[] {
+  const items: RSSItem[] = []
+  // Atom feeds use <entry>, RSS 2.0 uses <item>
+  const itemBlocks = [...xml.matchAll(/<(item|entry)\b[\s\S]*?<\/\1>/g)].map(m => m[0])
+  for (const block of itemBlocks) {
+    items.push({
+      title:        getTag(block, 'title'),
+      link:         getTag(block, 'link') || getLinkHref(block),
+      description:  getTag(block, 'description') || getTag(block, 'summary'),
+      contentEncoded: getTag(block, 'content:encoded') || getTag(block, 'content'),
+      pubDate:      getTag(block, 'pubDate') || getTag(block, 'published') || getTag(block, 'updated'),
+    })
+  }
+  return items
+}
+
+function getTag(block: string, tag: string): string | undefined {
+  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i')
+  const m = block.match(re)
+  if (!m) return undefined
+  return decodeCDATA(m[1].trim())
+}
+
+function getLinkHref(block: string): string | undefined {
+  // Atom <link href="…" />
+  const m = block.match(/<link[^>]*href=["']([^"']+)["'][^>]*\/?>/i)
+  return m?.[1]
+}
+
+function decodeCDATA(s: string): string {
+  const m = s.match(/^<!\[CDATA\[([\s\S]*)\]\]>$/)
+  return m ? m[1] : s
+}
+
+function stripHtml(s: string): string {
+  return s.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Synthesis prompt
+// ──────────────────────────────────────────────────────────────────────────────
+
+function buildCorpus(results: FetchResult[]): string {
+  const blocks = results.map(r => {
+    const header = `### Source: ${r.channel} (${r.url}) · ${r.items.length} items`
+    const body = r.items.map((it, i) =>
+      `--- Item ${i + 1}${it.title ? ` · ${it.title}` : ''}${it.published_at ? ` · ${it.published_at}` : ''} ---\n${it.text}`
+    ).join('\n\n')
+    return `${header}\n${body}`
+  })
+  return blocks.join('\n\n=========================================\n\n')
+}
+
+interface Proposal {
+  brand_voice: Record<string, unknown>
+  personas: unknown[]
+  skills: unknown[]
+}
+
+async function synthesise(
+  anthropic: Anthropic,
+  corpus: string,
+  send: (event: string, data: unknown) => void,
+): Promise<Proposal> {
+  let raw = ''
+  const sys = `You are KAI's Auditor. You read a company's existing content and extract a precise model of their voice, audience, and patterns. Output ONLY valid JSON in exactly this shape — no prose, no markdown fences:
+
+{
+  "brand_voice": {
+    "tone": ["3-5 specific tone descriptors, e.g. 'direct', 'self-deprecating', 'analytical'"],
+    "writing_rules": ["3-7 concrete rules the writer follows, e.g. 'opens with a problem statement, not a hook'"],
+    "forbidden_phrases": ["actual phrases this author avoids — leave empty array if none observed"],
+    "required_phrases": ["recurring phrases/idioms — leave empty if none"],
+    "system_prompt": "A 2-3 sentence Writer-agent system prompt that captures this voice precisely. Reference specifics from the content."
+  },
+  "personas": [
+    {
+      "name": "Short label, e.g. 'Series B SaaS founder'",
+      "title": "Job title",
+      "pain_points": ["2-4 specific pains observed in the content's framing"],
+      "goals": ["2-4 specific goals the content speaks to"],
+      "is_primary": true
+    }
+  ],
+  "skills": [
+    {
+      "type": "writing_rule | content | platform | brand",
+      "name": "Short label",
+      "description": "What this skill does",
+      "prompt_module": "A self-contained instruction block that can be injected into an agent's system prompt",
+      "injected_into": "writer | strategist | brand_guard"
+    }
+  ]
+}
+
+Rules:
+- Base every claim on the content. Don't invent generic best-practices; extract patterns that are actually present.
+- If the content is sparse, say less — fewer rules, fewer skills. Quality over quantity.
+- Personas should reflect who the author is writing FOR (their audience), not who the author IS.
+- Skills are reusable patterns: a hook style, a structural template, a recurring argument frame. 2-5 skills max.`
+
+  const msgStream = anthropic.messages.stream({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 4096,
+    system: sys,
+    messages: [{ role: 'user', content: `Analyse this content and produce the JSON proposal:\n\n${corpus}` }],
+  })
+
+  for await (const ev of msgStream) {
+    if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
+      raw += ev.delta.text
+      send('synthesis_chunk', { text: ev.delta.text })
+    }
+  }
+
+  // Parse JSON tolerantly
+  let proposal: Proposal
+  try {
+    const match = raw.match(/\{[\s\S]*\}/)
+    proposal = JSON.parse(match ? match[0] : raw) as Proposal
+  } catch {
+    proposal = { brand_voice: { raw }, personas: [], skills: [] }
+  }
+  return proposal
+}

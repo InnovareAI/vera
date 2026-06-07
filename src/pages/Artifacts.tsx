@@ -334,9 +334,14 @@ export default function Artifacts() {
         })
         if (uploadError) throw uploadError
 
+        const { data: authData, error: authError } = await supabase.auth.getSession()
+        if (authError) throw authError
+        const token = authData.session?.access_token
+        if (!token) throw new Error('Sign in again before uploading files.')
+
         const response = await fetch(INGEST_URL, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: `Bearer ${ANON}` },
+          headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: `Bearer ${token}` },
           body: JSON.stringify({
             kind: 'file',
             project_id: activeProject.id,

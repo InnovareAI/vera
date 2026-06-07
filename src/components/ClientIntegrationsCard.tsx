@@ -1014,6 +1014,11 @@ export function ClientIntegrationsCard() {
     setMessage(null)
 
     try {
+      const { data, error } = await supabase.auth.getSession()
+      if (error) throw error
+      const token = data.session?.access_token
+      if (!token) throw new Error('Sign in again before connecting LinkedIn.')
+
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
       const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
       if (!supabaseUrl || !anonKey) throw new Error('Supabase connection settings are not configured.')
@@ -1028,10 +1033,11 @@ export function ClientIntegrationsCard() {
         headers: {
           'Content-Type': 'application/json',
           apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           org_id: activeProject.org_id,
+          project_id: activeProject.id,
           return_url: returnUrl.toString(),
         }),
       })

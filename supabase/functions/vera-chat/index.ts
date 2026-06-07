@@ -2663,6 +2663,58 @@ Do NOT fabricate claims. If sources contradict, surface the contradiction.`,
   }
 }
 
+type AdminClient = ReturnType<typeof createClient<any>>
+
+function jsonError(message: string, status: number) {
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
+async function authorizeMemberRequest(
+  req: Request,
+  supabase: AdminClient,
+  orgId: string,
+  projectId: string | null,
+): Promise<{ ok: true; userId: string | null } | { ok: false; response: Response }> {
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+  if (bearer && bearer === serviceKey) return { ok: true, userId: null }
+  if (!bearer) return { ok: false, response: jsonError('Unauthorized', 401) }
+
+  const { data: auth, error: authError } = await supabase.auth.getUser(bearer)
+  if (authError || !auth.user) return { ok: false, response: jsonError('Unauthorized', 401) }
+
+  if (projectId) {
+    const { data: project, error: projectError } = await supabase
+      .from('projects')
+      .select('id, org_id')
+      .eq('id', projectId)
+      .maybeSingle()
+    if (projectError) return { ok: false, response: jsonError(projectError.message, 500) }
+    if (!project) return { ok: false, response: jsonError('Client not found', 404) }
+    if ((project as { org_id: string }).org_id !== orgId) return { ok: false, response: jsonError('Forbidden', 403) }
+
+    const [{ data: orgMember }, { data: projectMember }] = await Promise.all([
+      supabase.from('org_members').select('role').eq('org_id', orgId).eq('user_id', auth.user.id).maybeSingle(),
+      supabase.from('project_members').select('role').eq('project_id', projectId).eq('user_id', auth.user.id).maybeSingle(),
+    ])
+    if (orgMember || projectMember) return { ok: true, userId: auth.user.id }
+    return { ok: false, response: jsonError('Forbidden', 403) }
+  }
+
+  const { data: orgMember, error: orgError } = await supabase
+    .from('org_members')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', auth.user.id)
+    .maybeSingle()
+  if (orgError) return { ok: false, response: jsonError(orgError.message, 500) }
+  if (!orgMember) return { ok: false, response: jsonError('Forbidden', 403) }
+  return { ok: true, userId: auth.user.id }
+}
+
 const MAX_TOOL_ROUNDS = 5  // safety cap so a tool loop can't run forever
 
 Deno.serve(async (req) => {
@@ -2720,6 +2772,9 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
+  const access = await authorizeMemberRequest(req, supabase, org_id, project_id ?? null)
+  if (!access.ok) return access.response
+  const effectiveUserId = access.userId ?? user_id ?? null
 
   // Resolve the last user turn's text for semantic KB retrieval. Multi-block
   // content (vision) just uses the text portion.
@@ -2734,7 +2789,7 @@ Deno.serve(async (req) => {
   // if it fails we fall back to a minimal prompt so chat still works.
   let contextBlock: string
   try {
-    const ctx = await loadContext(supabase, org_id, user_id ?? null, lastUserText, project_id ?? null)
+    const ctx = await loadContext(supabase, org_id, effectiveUserId, lastUserText, project_id ?? null)
     contextBlock = renderContext(ctx, route)
   } catch (err) {
     console.error('vera-chat: context load failed', err)
@@ -2766,7 +2821,7 @@ Deno.serve(async (req) => {
       }
     }
     await supabase.from('chat_messages').insert({
-      org_id, user_id: user_id ?? null, role: 'user',
+      org_id, user_id: effectiveUserId, role: 'user',
       project_id: project_id ?? null,
       session_id: session_id ?? null,
       content: userText, route,
@@ -2919,7 +2974,7 @@ Deno.serve(async (req) => {
             for (const tu of toolUses) {
               const exec = await executeTool(tu.name, tu.input, {
                 orgId: org_id,
-                userId: user_id ?? null,
+                userId: effectiveUserId,
                 projectId: project_id ?? null,
                 supabase,
                 supabaseUrl,
@@ -2959,7 +3014,7 @@ Deno.serve(async (req) => {
           generated_by: 'tool',
         }))
         await supabase.from('chat_messages').insert({
-          org_id, user_id: user_id ?? null, role: 'assistant',
+          org_id, user_id: effectiveUserId, role: 'assistant',
           project_id: project_id ?? null,
           session_id: session_id ?? null,
           content: fullText, route,

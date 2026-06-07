@@ -342,6 +342,18 @@ export default function VeraThread() {
   const taRef = useRef<HTMLTextAreaElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
+  async function functionHeaders() {
+    const { data, error } = await supabase.auth.getSession()
+    if (error) throw error
+    const token = data.session?.access_token
+    if (!token) throw new Error('Sign in again before using Vera.')
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      apikey: ANON,
+    }
+  }
+
   // Establish the active chat session per client (persisted in localStorage).
   useEffect(() => {
     if (!activeProject?.id) { setSessionId(''); return }
@@ -656,7 +668,7 @@ export default function VeraThread() {
       const res = await fetch(`${SUPA}/functions/v1/vera-chat`, {
         method: 'POST',
         signal: controller.signal,
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON}`, 'apikey': ANON },
+        headers: await functionHeaders(),
         body: JSON.stringify({
           messages: wire,
           org_id: activeOrg.id,
@@ -812,7 +824,7 @@ export default function VeraThread() {
       try {
         const res = await fetch(`${SUPA}/functions/v1/generate-video`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON}`, 'apikey': ANON },
+          headers: await functionHeaders(),
           body: JSON.stringify({ action: 'status', request_id: requestId, slug }),
         })
         if (!res.ok) continue

@@ -18,6 +18,14 @@ import type { Post } from '../lib/supabase'
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
 const FN_URL = (name: string) => `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${name}`
 
+async function authHeaders() {
+  const { data, error } = await supabase.auth.getSession()
+  if (error) throw error
+  const token = data.session?.access_token
+  if (!token) throw new Error('Sign in again before publishing.')
+  return { 'Content-Type': 'application/json', apikey: ANON, Authorization: `Bearer ${token}` }
+}
+
 interface Publisher {
   id: string
   kind: string
@@ -113,7 +121,7 @@ function PublishModal({ publisher, post, onClose }: {
     try {
       const res = await fetch(FN_URL(fn), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
+        headers: await authHeaders(),
         body: JSON.stringify({
           action: 'dry_run',
           publisher_id: publisher.id,
@@ -144,7 +152,7 @@ function PublishModal({ publisher, post, onClose }: {
     try {
       const res = await fetch(FN_URL(fn), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
+        headers: await authHeaders(),
         body: JSON.stringify({
           action: 'publish',
           publisher_id: publisher.id,
@@ -169,7 +177,7 @@ function PublishModal({ publisher, post, onClose }: {
       if (data.remote_url) {
         fetch(FN_URL('approval-webhook'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
+          headers: await authHeaders(),
           body: JSON.stringify({ post_id: post.id, action: 'posted', posted_url: data.remote_url }),
         }).catch(() => {})
       }

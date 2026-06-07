@@ -12,6 +12,14 @@ import { useOrg } from '../lib/orgContext'
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
 const FN = (name: string) => `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${name}`
 
+async function authHeaders() {
+  const { data, error } = await supabase.auth.getSession()
+  if (error) throw error
+  const token = data.session?.access_token
+  if (!token) throw new Error('Sign in again before managing publishers.')
+  return { 'Content-Type': 'application/json', apikey: ANON, Authorization: `Bearer ${token}` }
+}
+
 interface Publisher {
   id: string
   kind: string
@@ -181,7 +189,7 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
     try {
       const res = await fetch(FN('auto-discover-publisher'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
+        headers: await authHeaders(),
         body: JSON.stringify({ url: url.trim() }),
       })
       const data = await res.json() as Discovery & { error?: string }
@@ -250,7 +258,7 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
 
       const res = await fetch(FN(connectorEndpoint), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
+        headers: await authHeaders(),
         body: JSON.stringify(payload),
       })
       const data = await res.json() as { ok: boolean; error?: { message: string; recovery_action: string } }
