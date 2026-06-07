@@ -20,6 +20,7 @@ import { useRightRail } from '../lib/rightRailContext'
 import { useToast } from '../design'
 import { color, space, type as t, radius } from '../design'
 import { PlatformPostPreview } from '../components/PlatformPostPreview'
+import { hasBusinessContext, parseProjectInstructions } from '../lib/businessContext'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -65,6 +66,11 @@ type DocumentBlock = {
 type DocumentAttachment = { kind: 'document'; document: DocumentBlock; name: string; mime: string; size: number; truncated?: boolean }
 type ComposerAttachment = ImageAttachment | DocumentAttachment
 type MessageFile = { name: string; mime: string; size: number }
+type StoredAttachment =
+  | { kind: 'image'; url: string }
+  | { kind: 'video'; url: string }
+  | { kind: 'file'; name: string; mime: string; size: number }
+  | { kind: 'document'; name: string; mime: string; size: number }
 type WireContentBlock =
   | { type: 'text'; text: string }
   | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
@@ -150,6 +156,122 @@ interface Message {
   carouselPending?: { done: number; total: number }  // carousel frames rendering
 }
 
+function chatHistoryKey(projectId: string, sessionId: string) {
+  return `vera-chat-history:${projectId}:${sessionId}`
+}
+
+function chatSessionMetaKey(projectId: string, sessionId: string) {
+  return `vera-chat-session:${projectId}:${sessionId}`
+}
+
+function titleFromMessages(messages: Message[]) {
+  const firstUser = messages.find(message => message.role === 'user' && message.content.trim())
+  const firstAny = messages.find(message => message.content.trim())
+  return (firstUser?.content || firstAny?.content || 'Untitled chat').replace(/\s+/g, ' ').trim()
+}
+
+function saveLocalChatMessages(projectId: string, sessionId: string, messages: Message[]) {
+  const keep = persistableMessages(messages)
+  localStorage.setItem(chatHistoryKey(projectId, sessionId), JSON.stringify(keep))
+  if (keep.length > 0) {
+    localStorage.setItem(chatSessionMetaKey(projectId, sessionId), JSON.stringify({
+      session_id: sessionId,
+      title: titleFromMessages(keep),
+      last_at: new Date().toISOString(),
+      message_count: keep.length,
+    }))
+  }
+}
+
+function parseStoredMessages(raw: string | null): Message[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as Message[]
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.id === 'string')
+      .map(m => ({
+        id: m.id,
+        role: m.role,
+        content: typeof m.content === 'string' ? m.content : '',
+        images: Array.isArray(m.images) ? m.images.filter(Boolean) : undefined,
+        videos: Array.isArray(m.videos) ? m.videos.filter(Boolean) : undefined,
+        files: Array.isArray(m.files) ? m.files.filter(f => f?.name) : undefined,
+      }))
+  } catch {
+    return []
+  }
+}
+
+function messageFingerprint(message: Message) {
+  return JSON.stringify({
+    role: message.role,
+    content: message.content,
+    images: message.images ?? [],
+    videos: message.videos ?? [],
+    files: message.files ?? [],
+  })
+}
+
+function mergeMessages(primary: Message[], fallback: Message[]) {
+  const seenIds = new Set<string>()
+  const seenFingerprints = new Set<string>()
+  const merged: Message[] = []
+  for (const message of [...primary, ...fallback]) {
+    if (seenIds.has(message.id)) continue
+    const fingerprint = messageFingerprint(message)
+    if (seenFingerprints.has(fingerprint)) continue
+    seenIds.add(message.id)
+    seenFingerprints.add(fingerprint)
+    merged.push(message)
+  }
+  return merged
+}
+
+function splitStoredAttachments(attachments: StoredAttachment[] | null | undefined) {
+  const atts = Array.isArray(attachments) ? attachments : []
+  const images = atts.filter((a): a is { kind: 'image'; url: string } => a.kind === 'image' && !!a.url).map(a => a.url)
+  const videos = atts.filter((a): a is { kind: 'video'; url: string } => a.kind === 'video' && !!a.url).map(a => a.url)
+  const files = atts
+    .filter((a): a is { kind: 'file' | 'document'; name: string; mime: string; size: number } => (
+      (a.kind === 'file' || a.kind === 'document') && !!a.name
+    ))
+    .map(a => ({ name: a.name, mime: a.mime ?? 'application/octet-stream', size: Number(a.size ?? 0) }))
+  return { images, videos, files }
+}
+
+function rowToMessage(row: { id: string; role: 'user' | 'assistant'; content: string | null; attachments?: StoredAttachment[] | null }): Message {
+  const { images, videos, files } = splitStoredAttachments(row.attachments)
+  return {
+    id: row.id,
+    role: row.role,
+    content: row.content ?? '',
+    images: images.length ? images : undefined,
+    videos: videos.length ? videos : undefined,
+    files: files.length ? files : undefined,
+  }
+}
+
+function serializeMessageAttachments(message: Message): StoredAttachment[] {
+  return [
+    ...(message.images ?? []).filter(Boolean).map(url => ({ kind: 'image' as const, url })),
+    ...(message.videos ?? []).filter(Boolean).map(url => ({ kind: 'video' as const, url })),
+    ...(message.files ?? []).filter(file => file?.name).map(file => ({
+      kind: 'file' as const,
+      name: file.name,
+      mime: file.mime || 'application/octet-stream',
+      size: Number(file.size ?? 0),
+    })),
+  ]
+}
+
+function persistableMessages(messages: Message[]) {
+  return messages
+    .filter(message => !message.pending)
+    .filter(message => message.content.trim() || serializeMessageAttachments(message).length > 0)
+    .slice(-HISTORY_LIMIT)
+}
+
 // A campaign = a batch of scheduled posts produced by the agent's plan_campaign
 // capability (one ask → the whole arc). Rendered as a calendar in the right rail.
 interface CampaignPost {
@@ -207,7 +329,7 @@ export default function VeraThread() {
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
-  const [setup, setSetup] = useState<{ audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null>(null)
+  const [setup, setSetup] = useState<{ business: boolean; audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null>(null)
 
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
@@ -227,8 +349,11 @@ export default function VeraThread() {
     if (!activeProject?.id || !sessionId) { setMessages([]); setHistoryLoaded(!!activeProject?.id); return }
     let cancelled = false
     setHistoryLoaded(false)
+    const key = chatHistoryKey(activeProject.id, sessionId)
+    const cached = parseStoredMessages(localStorage.getItem(key))
+    setMessages(cached)
     supabase.from('chat_messages')
-      .select('id, role, content, attachments')
+      .select('id, role, content, attachments, created_at')
       .eq('project_id', activeProject.id)
       .eq('session_id', sessionId)
       .in('role', ['user', 'assistant'])
@@ -236,19 +361,25 @@ export default function VeraThread() {
       .limit(HISTORY_LIMIT)
       .then(({ data }) => {
         if (cancelled) return
-        const rows = (data ?? []) as Array<{ id: string; role: 'user' | 'assistant'; content: string; attachments?: { kind?: string; url?: string }[] }>
-        setMessages(rows.reverse().map(r => {
-          // Rehydrate generated media from the attachments sidecar so images +
-          // videos survive a refresh (not just the message text).
-          const atts = Array.isArray(r.attachments) ? r.attachments : []
-          const images = atts.filter(a => a.kind === 'image' && a.url).map(a => a.url as string)
-          const videos = atts.filter(a => a.kind === 'video' && a.url).map(a => a.url as string)
-          return { id: r.id, role: r.role, content: r.content, images: images.length ? images : undefined, videos: videos.length ? videos : undefined }
-        }))
+        const rows = (data ?? []) as Array<{ id: string; role: 'user' | 'assistant'; content: string | null; attachments?: StoredAttachment[] | null }>
+        const stored = rows.reverse().map(rowToMessage)
+        setMessages(prev => stored.length ? mergeMessages(stored, prev) : prev)
         setHistoryLoaded(true)
+      }, () => {
+        if (!cancelled) setHistoryLoaded(true)
       })
     return () => { cancelled = true }
   }, [activeProject?.id, sessionId])
+
+  useEffect(() => {
+    if (!activeProject?.id || !sessionId || !historyLoaded) return
+    try {
+      saveLocalChatMessages(activeProject.id, sessionId, messages)
+    } catch {
+      // Local storage can fill up when image previews are large. Database
+      // persistence still handles the durable copy.
+    }
+  }, [activeProject?.id, sessionId, historyLoaded, messages])
 
   // Restore the last open draft on load. The post itself survives in
   // content_posts, but the interactive preview card is client state that a
@@ -378,7 +509,9 @@ export default function VeraThread() {
       if (cancelled) return
       const vr = (voice.data ?? []) as { tone?: string[] | null; system_prompt?: string | null; sample_posts?: string[] | null }[]
       const voiceReady = vr.some(v => (v.tone?.length ?? 0) > 0 || (v.system_prompt ?? '').trim().length > 0 || (v.sample_posts?.length ?? 0) > 0)
+      const parsedInstructions = parseProjectInstructions(instr)
       setSetup({
+        business: hasBusinessContext(parsedInstructions.businessContext),
         audience: !aud.error && (aud.count ?? 0) > 0,
         voice: voiceReady,
         categories: !cat.error && (cat.count ?? 0) > 0,
@@ -392,6 +525,36 @@ export default function VeraThread() {
   useEffect(() => {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages])
+
+  const persistChatMessage = useCallback(async (message: Message) => {
+    if (!activeOrg?.id || !activeProject?.id || !sessionId || message.pending) return
+    const attachmentsForStorage = serializeMessageAttachments(message)
+    if (!message.content.trim() && attachmentsForStorage.length === 0) return
+
+    try {
+      const key = chatHistoryKey(activeProject.id, sessionId)
+      const cached = parseStoredMessages(localStorage.getItem(key))
+      saveLocalChatMessages(activeProject.id, sessionId, mergeMessages(cached, [message]).slice(-HISTORY_LIMIT))
+    } catch {
+      // The database write below is the durable copy when local storage is full.
+    }
+
+    const { error } = await supabase.from('chat_messages').upsert({
+      id: message.id,
+      org_id: activeOrg.id,
+      project_id: activeProject.id,
+      session_id: sessionId,
+      role: message.role,
+      content: message.content,
+      attachments: attachmentsForStorage,
+    }, { onConflict: 'id' })
+
+    if (error) {
+      console.warn('chat history save failed', error.message)
+      return
+    }
+    window.dispatchEvent(new CustomEvent('vera:session', { detail: { sid: sessionId } }))
+  }, [activeOrg?.id, activeProject?.id, sessionId])
 
   // Auto-grow composer
   useEffect(() => {
@@ -452,6 +615,7 @@ export default function VeraThread() {
     setInput('')
     setAttachments([])
     setStreaming(true)
+    void persistChatMessage(userMsg)
 
     const wire: Array<{ role: string; content: unknown }> = next.map(m => ({ role: m.role, content: m.content }))
     // Compose the outgoing user turn: typed text + the open draft as context
@@ -477,6 +641,9 @@ export default function VeraThread() {
     }
     const controller = new AbortController()
     abortRef.current = controller
+    let acc = ''
+    const assistantImages: string[] = []
+    const assistantVideos: string[] = []
 
     try {
       const res = await fetch(`${SUPA}/functions/v1/vera-chat`, {
@@ -499,7 +666,6 @@ export default function VeraThread() {
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
-      let acc = ''
 
       while (true) {
         const { done, value } = await reader.read()
@@ -527,11 +693,13 @@ export default function VeraThread() {
               ? { ...m, tools: (m.tools ?? []).map(tl => tl.id === ev.id ? { ...tl, status: 'done' } : tl) } : m))
           } else if (ev.type === 'image' && typeof ev.url === 'string') {
             const url = ev.url as string
+            assistantImages.push(url)
             setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, images: [...(m.images ?? []), url] } : m))
             // attach to the open draft if there is one
             setDraft(prev => prev ? { ...prev, media_url: url, media_type: 'image' } : prev)
           } else if (ev.type === 'video' && typeof ev.url === 'string') {
             const vurl = ev.url as string
+            assistantVideos.push(vurl)
             setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, videos: [...(m.videos ?? []), vurl] } : m))
             // attach to the open draft if there is one
             setDraft(prev => prev ? { ...prev, media_url: vurl, media_type: 'video' } : prev)
@@ -596,19 +764,31 @@ export default function VeraThread() {
           }
         }
       }
+      const finalAssistant: Message = {
+        id: assistantId,
+        role: 'assistant',
+        content: acc,
+        images: assistantImages.length ? assistantImages : undefined,
+        videos: assistantVideos.length ? assistantVideos : undefined,
+      }
       setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, pending: false } : m))
+      void persistChatMessage(finalAssistant)
     } catch (e) {
       if ((e as Error).name === 'AbortError') {
+        const stoppedAssistant: Message = { id: assistantId, role: 'assistant', content: acc }
         setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, pending: false } : m))
+        void persistChatMessage(stoppedAssistant)
       } else {
-        setMessages(prev => prev.map(m => m.id === assistantId
-          ? { ...m, pending: false, content: m.content || `⚠ ${(e as Error).message}` } : m))
+        const errorContent = acc || `Warning: ${(e as Error).message}`
+        const failedAssistant: Message = { id: assistantId, role: 'assistant', content: errorContent }
+        setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, pending: false, content: m.content || errorContent } : m))
+        void persistChatMessage(failedAssistant)
       }
     } finally {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [input, streaming, activeOrg?.id, activeProject?.id, user?.id, messages, location.pathname, sessionId, draft, attachments])
+  }, [input, streaming, activeOrg?.id, activeProject?.id, user?.id, messages, location.pathname, sessionId, draft, attachments, persistChatMessage])
 
   // Poll a backgrounded fal video job (submitted by vera-chat) until the MP4
   // is ready, then drop it into the chat and the open draft. Short polling
@@ -1279,15 +1459,15 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
   observations: { id: string; title: string; proposed_action: string | null }[]
   actions: LaunchAction[]
   onDismiss: (o: { title: string }) => void
-  setup: { audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null
+  setup: { business: boolean; audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null
   projectName: string
   onOpenBrain: () => void
   composer: ReactNode
 }) {
-  const setupDone = !!setup && setup.audience && setup.voice && setup.categories && setup.knowledge
+  const setupDone = !!setup && setup.business && setup.audience && setup.voice && setup.categories && setup.knowledge
   // Persona-first, SAM-clean: when the brain is thin, the FIRST card is "set up
   // the client" (routes to Brain). No separate checklist block.
-  const setupCard: LaunchAction = { icon: Sparkles, title: `Set up ${projectName}`, sub: 'Audience, voice, categories', prompt: '', action: 'brain' }
+  const setupCard: LaunchAction = { icon: Sparkles, title: `Set up ${projectName}`, sub: 'URL, business context, voice', prompt: '', action: 'brain' }
   const grid = (setup && !setupDone ? [setupCard, ...actions] : actions).slice(0, 6)
   return (
     <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: space[8] }}>

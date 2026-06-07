@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { LayoutList, LayoutGrid, Calendar as CalendarIcon, X, Layers } from 'lucide-react'
+import { AlertTriangle, Calendar as CalendarIcon, CalendarPlus, Check, ExternalLink, Filter, LayoutGrid, LayoutList, Layers, MessageSquare, Search, Send, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
@@ -11,7 +11,7 @@ import { PlatformPostPreview } from '../components/PlatformPostPreview'
 const APPROVAL_WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approval-webhook`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-// Platform + status chip helpers moved to ../components/Chip — neutral
+// Platform + status chip helpers moved to ../components/Chip, neutral
 // chips with coloured dots replace the older bright Tailwind pills.
 
 const STATUS_TABS = ['Draft', 'Pending Review', 'Changes Requested', 'Approved', 'Scheduled', 'Posted', 'Rejected'] as const
@@ -19,6 +19,21 @@ type StatusTab = typeof STATUS_TABS[number]
 const REVIEW_VIEWS = ['list', 'board', 'calendar'] as const
 type View = typeof REVIEW_VIEWS[number]
 type MediaFrame = { url: string; text?: string | null }
+type ReviewFilters = {
+  search: string
+  platform: string
+  media: string
+  owner: string
+  date: string
+}
+
+const DEFAULT_REVIEW_FILTERS: ReviewFilters = {
+  search: '',
+  platform: 'all',
+  media: 'all',
+  owner: 'all',
+  date: 'all',
+}
 
 // Status-tab → underlying DB status value. Scheduled and Posted are derived
 // delivery states: scheduled needs a date, posted needs a live URL.
@@ -52,6 +67,99 @@ function tabFor(post: Post): StatusTab {
 
 function lifecycleLabel(post: Post): string {
   return tabFor(post)
+}
+
+function uniqueValues(values: string[]) {
+  return Array.from(new Set(values.map(value => value.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+}
+
+function platformValue(post: Post) {
+  return post.channel?.trim() || 'Unassigned'
+}
+
+function postOwner(post: Post) {
+  return post.author?.trim() || post.profile_name?.trim() || 'Unassigned'
+}
+
+function mediaKind(post: Post) {
+  const type = (post.media_type ?? '').toLowerCase()
+  if (type.includes('carousel')) return 'carousel'
+  if (type.includes('video')) return 'video'
+  if (post.media_url || postMediaFrames(post).length > 0) return 'image'
+  return 'text'
+}
+
+function mediaKindLabel(kind: string) {
+  return kind.charAt(0).toUpperCase() + kind.slice(1)
+}
+
+function targetDate(post: Post) {
+  const raw = post.posted_at || post.scheduled_at || post.publish_date
+  if (!raw) return null
+  const date = new Date(raw)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function isThisWeek(date: Date | null) {
+  if (!date) return false
+  const start = mondayOf(new Date())
+  const end = new Date(start)
+  end.setDate(start.getDate() + 7)
+  return date >= start && date < end
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
+function formatDateOnly(value?: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+function matchesReviewFilters(post: Post, filters: ReviewFilters, campaignFilter: string, campaignsById: Map<string, Campaign>) {
+  if (campaignFilter === 'adhoc' && post.campaign_id) return false
+  if (campaignFilter !== 'all' && campaignFilter !== 'adhoc' && post.campaign_id !== campaignFilter) return false
+  if (filters.platform !== 'all' && platformValue(post) !== filters.platform) return false
+  if (filters.media !== 'all' && mediaKind(post) !== filters.media) return false
+  if (filters.owner !== 'all' && postOwner(post) !== filters.owner) return false
+  if (filters.date !== 'all') {
+    const date = targetDate(post)
+    if (filters.date === 'unscheduled' && date) return false
+    if (filters.date === 'scheduled' && tabFor(post) !== 'Scheduled') return false
+    if (filters.date === 'posted' && tabFor(post) !== 'Posted') return false
+    if (filters.date === 'this_week' && !isThisWeek(date)) return false
+  }
+  const query = filters.search.trim().toLowerCase()
+  if (!query) return true
+  const campaign = post.campaign_id ? campaignsById.get(post.campaign_id) : null
+  const haystack = [
+    post.title,
+    post.copy,
+    post.channel,
+    post.format,
+    post.status,
+    post.feedback,
+    campaign?.name,
+    campaign?.theme,
+  ].filter(Boolean).join(' ').toLowerCase()
+  return haystack.includes(query)
+}
+
+function postMeta(post: Post, campaign: Campaign | null) {
+  const status = tabFor(post)
+  if (status === 'Scheduled') return `Scheduled ${formatDateTime(post.scheduled_at || post.publish_date)}`
+  if (status === 'Posted') return post.posted_url ? 'Live URL saved' : `Posted ${formatDateTime(post.posted_at)}`
+  if (status === 'Changes Requested') return post.feedback ? `Feedback: ${post.feedback}` : 'Waiting on edits'
+  if (status === 'Approved') return targetDate(post) ? `Planned ${formatDateOnly(post.scheduled_at || post.publish_date)}` : 'Approved, not scheduled'
+  if (status === 'Rejected') return post.feedback ? `Rejected: ${post.feedback}` : 'Parked from publishing'
+  if (status === 'Draft') return 'Drafting'
+  return campaign ? `Campaign: ${campaign.name}` : 'Ready for review'
 }
 
 function storedView(value: string | null, allowCalendar: boolean): View | null {
@@ -90,15 +198,19 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
   const [view, setView] = useState<View>(initialView ?? 'list')
   const [dragOverTab, setDragOverTab] = useState<StatusTab | null>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [filters, setFilters] = useState<ReviewFilters>(DEFAULT_REVIEW_FILTERS)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const [bulkSaving, setBulkSaving] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
   const campaignFilter = searchParams.get('campaign') ?? 'all'   // 'all' | 'adhoc' | <campaign_id>
   const setCampaignFilter = (next: string) => {
+    const nextParams = new URLSearchParams(searchParams)
     if (next === 'all') {
-      searchParams.delete('campaign')
+      nextParams.delete('campaign')
     } else {
-      searchParams.set('campaign', next)
+      nextParams.set('campaign', next)
     }
-    setSearchParams(searchParams, { replace: true })
+    setSearchParams(nextParams, { replace: true })
   }
   const navigate = useNavigate()
   const preferenceScope = activeProject?.id ?? activeOrg?.id ?? 'global'
@@ -137,12 +249,12 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
     q.then(({ data }) => setCampaigns((data as Campaign[]) ?? []))
   }, [activeOrg?.id, activeProject?.id])
 
-  const campaignsById = new Map(campaigns.map(c => [c.id, c]))
+  const campaignsById = useMemo(() => new Map(campaigns.map(c => [c.id, c])), [campaigns])
 
   useEffect(() => {
     // Scope posts to active workspace + project. Without the project
     // filter, switching projects would show all posts from every project
-    // — the feature would feel dead.
+    // the feature would feel dead.
     if (!activeOrg?.id) { setPosts([]); setLoading(false); return }
     setLoading(true)
     let q = supabase.from('content_posts').select('*').order('created_at', { ascending: false }).limit(100)
@@ -188,12 +300,12 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
     return () => { supabase.removeChannel(channel) }
   }, [activeOrg?.id, activeProject?.id])
 
-  async function moveToTab(postId: string, targetTab: StatusTab) {
+  async function moveToTab(postId: string, targetTab: StatusTab, feedback?: string) {
     const rule = TAB_DROP_ACTION[targetTab]
     if (rule.kind === 'forbidden') {
       alert(targetTab === 'Scheduled'
         ? `Scheduling needs a date. Use the Calendar page to place this post.`
-        : `Can't drop here — "Posted" needs a live URL. Use the post detail page to mark it posted.`)
+        : `Can't drop here, "Posted" needs a live URL. Use the post detail page to mark it posted.`)
       return
     }
     setSaving(postId)
@@ -207,7 +319,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
             'apikey': SUPABASE_ANON_KEY,
             'Authorization': `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
           },
-          body: JSON.stringify({ post_id: postId, action: rule.action }),
+          body: JSON.stringify({ post_id: postId, action: rule.action, ...(feedback ? { feedback } : {}) }),
         })
         const data = await res.json()
         if (res.ok && data.post) {
@@ -225,57 +337,121 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
     setSaving(null)
   }
 
-  // Campaign filter narrows which posts feed into both views. 'all' = show all,
-  // 'adhoc' = only posts NOT tied to any campaign, otherwise = specific campaign.
-  const inFilter = (p: Post) => {
-    if (campaignFilter === 'all')   return true
-    if (campaignFilter === 'adhoc') return !p.campaign_id
-    return p.campaign_id === campaignFilter
-  }
-  const scoped = posts.filter(inFilter)
-  const filtered = scoped.filter(p => tabFor(p) === activeTab)
+  const scoped = useMemo(
+    () => posts.filter(post => matchesReviewFilters(post, filters, campaignFilter, campaignsById)),
+    [posts, filters, campaignFilter, campaignsById],
+  )
+  const filtered = useMemo(() => scoped.filter(p => tabFor(p) === activeTab), [scoped, activeTab])
 
   const tabCounts = STATUS_TABS.reduce((acc, tab) => {
     acc[tab] = scoped.filter(p => tabFor(p) === tab).length
     return acc
   }, {} as Record<StatusTab, number>)
+  const reviewMetrics = useMemo(() => ({
+    total: scoped.length,
+    pending: scoped.filter(p => tabFor(p) === 'Pending Review').length,
+    changes: scoped.filter(p => tabFor(p) === 'Changes Requested').length,
+    approved: scoped.filter(p => tabFor(p) === 'Approved').length,
+    scheduled: scoped.filter(p => tabFor(p) === 'Scheduled').length,
+    needsDate: scoped.filter(p => tabFor(p) === 'Approved' && !targetDate(p)).length,
+    posted: scoped.filter(p => tabFor(p) === 'Posted').length,
+    rejected: scoped.filter(p => tabFor(p) === 'Rejected').length,
+  }), [scoped])
+  const platformOptions = useMemo(() => uniqueValues(posts.map(platformValue)), [posts])
+  const ownerOptions = useMemo(() => uniqueValues(posts.map(postOwner)), [posts])
+  const mediaOptions = useMemo(() => uniqueValues(posts.map(mediaKind)), [posts])
+  const activeFilterCount = useMemo(() => (
+    Object.values(filters).filter(value => value !== 'all' && value !== '').length + (campaignFilter !== 'all' ? 1 : 0)
+  ), [filters, campaignFilter])
+  const selectedCount = selectedIds.size
   const postReviewPath = (postId: string) => activeProject?.slug ? `/p/${activeProject.slug}/review/${postId}` : `/review/${postId}`
   const calendarPath = activeProject?.slug ? `/p/${activeProject.slug}/calendar` : '/calendar'
 
+  useEffect(() => {
+    const visibleIds = new Set(scoped.map(post => post.id))
+    setSelectedIds(prev => {
+      let changed = false
+      const next = new Set<string>()
+      prev.forEach(id => {
+        if (visibleIds.has(id)) next.add(id)
+        else changed = true
+      })
+      return changed ? next : prev
+    })
+  }, [scoped])
+
+  function updateFilter(key: keyof ReviewFilters, value: string) {
+    setFilters(prev => ({ ...prev, [key]: value }))
+  }
+
+  function resetFilters() {
+    setFilters(DEFAULT_REVIEW_FILTERS)
+    setCampaignFilter('all')
+  }
+
+  function toggleSelected(postId: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(postId)) next.delete(postId)
+      else next.add(postId)
+      return next
+    })
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set())
+  }
+
+  async function requestChanges(postId: string) {
+    const feedback = window.prompt('What needs to change?')
+    if (!feedback?.trim()) return
+    await moveToTab(postId, 'Changes Requested', feedback.trim())
+  }
+
+  async function bulkMove(targetTab: StatusTab) {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    if (targetTab === 'Rejected' && !window.confirm('Reject selected posts?')) return
+    setBulkSaving(true)
+    try {
+      for (const id of ids) {
+        await moveToTab(id, targetTab)
+      }
+      clearSelection()
+    } finally {
+      setBulkSaving(false)
+    }
+  }
+
+  async function bulkRequestChanges() {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    const feedback = window.prompt('What should change on the selected posts?')
+    if (!feedback?.trim()) return
+    setBulkSaving(true)
+    try {
+      for (const id of ids) {
+        await moveToTab(id, 'Changes Requested', feedback.trim())
+      }
+      clearSelection()
+    } finally {
+      setBulkSaving(false)
+    }
+  }
+
   return (
-    <div className="p-6 h-full flex flex-col">
+    <div className="p-6 h-full min-h-0 min-w-0 overflow-hidden flex flex-col">
       {/* Page header */}
-      <div className="flex items-end justify-between mb-5 gap-4">
+      <div className="flex items-end justify-between mb-5 gap-4 flex-shrink-0">
         <div>
           <h1 className="text-[28px] leading-tight tracking-tight font-semibold" style={{ color: 'var(--ink)' }}>
             Review queue
           </h1>
           <p className="text-[13px] mt-1" style={{ color: 'var(--ghost)' }}>
-            {scoped.length} of {posts.length} posts · {tabCounts['Draft']} draft · {tabCounts['Pending Review']} pending review · {tabCounts['Changes Requested']} changes requested
+            {scoped.length} of {posts.length} posts, {tabCounts['Pending Review']} pending review, {tabCounts['Changes Requested']} changes requested
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {/* Campaign filter */}
-          {campaigns.length > 0 && (
-            <div className="inline-flex items-center gap-2 px-3 py-1.5"
-              style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
-              <Layers size={12} style={{ color: 'var(--ghost)' }} />
-              <select
-                value={campaignFilter}
-                onChange={e => setCampaignFilter(e.target.value)}
-                className="text-[12px] outline-none cursor-pointer"
-                style={{ background: 'transparent', color: 'var(--ink)', border: 'none', fontFamily: 'var(--font-body)' }}
-              >
-                <option value="all">All campaigns + ad-hoc</option>
-                <option value="adhoc">Ad-hoc only (no campaign)</option>
-                {campaigns.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.is_pinned ? '★ ' : ''}{c.name}{c.status !== 'active' ? ` · ${c.status}` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
         {/* View switcher */}
         <div className="inline-flex p-0.5" style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
           <button
@@ -291,7 +467,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
           >
             <LayoutList size={13} /> List
           </button>
-          {/* Calendar is its own rail surface — only offer the toggle there, */}
+          {/* Calendar is its own rail surface, only offer the toggle there, */}
           {/* so plain Review stays a pure pending inbox (list/board). */}
           {initialView === 'calendar' && (
           <button
@@ -325,6 +501,29 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
         </div>
       </div>
 
+      <ReviewMetrics metrics={reviewMetrics} />
+      <ReviewToolbar
+        filters={filters}
+        campaigns={campaigns}
+        campaignFilter={campaignFilter}
+        platformOptions={platformOptions}
+        ownerOptions={ownerOptions}
+        mediaOptions={mediaOptions}
+        activeFilterCount={activeFilterCount}
+        onCampaignChange={setCampaignFilter}
+        onFilterChange={updateFilter}
+        onReset={resetFilters}
+      />
+      <BulkActionBar
+        selectedCount={selectedCount}
+        bulkSaving={bulkSaving}
+        onClear={clearSelection}
+        onMoveToReview={() => bulkMove('Pending Review')}
+        onApprove={() => bulkMove('Approved')}
+        onRequestChanges={bulkRequestChanges}
+        onReject={() => bulkMove('Rejected')}
+      />
+
       {view === 'list' && (
         <ListView
           posts={posts}
@@ -337,9 +536,14 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
           setSelected={setSelected}
           saving={saving}
           moveToTab={moveToTab}
+          onRequestChanges={requestChanges}
           campaignsById={campaignsById}
           postReviewPath={postReviewPath}
           calendarPath={calendarPath}
+          selectedIds={selectedIds}
+          onToggleSelected={toggleSelected}
+          activeFilterCount={activeFilterCount}
+          onResetFilters={resetFilters}
         />
       )}
       {view === 'calendar' && (
@@ -358,16 +562,286 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
           setDragOverTab={setDragOverTab}
           campaignsById={campaignsById}
           onMove={moveToTab}
+          onRequestChanges={requestChanges}
           onOpen={(p) => navigate(postReviewPath(p.id))}
+          postReviewPath={postReviewPath}
+          calendarPath={calendarPath}
+          selectedIds={selectedIds}
+          onToggleSelected={toggleSelected}
         />
       )}
     </div>
   )
 }
 
+function ReviewMetrics({ metrics }: { metrics: {
+  total: number
+  pending: number
+  changes: number
+  approved: number
+  scheduled: number
+  needsDate: number
+  posted: number
+  rejected: number
+} }) {
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 mb-3 flex-shrink-0">
+      <MetricPill label="Visible" value={metrics.total} tone="neutral" />
+      <MetricPill label="Review" value={metrics.pending} tone="warning" />
+      <MetricPill label="Changes" value={metrics.changes} tone="warning" />
+      <MetricPill label="Approved" value={metrics.approved} tone="success" />
+      <MetricPill label="Scheduled" value={metrics.scheduled} tone="info" />
+      <MetricPill label="Needs date" value={metrics.needsDate} tone="danger" icon={<AlertTriangle size={13} />} />
+      <MetricPill label="Posted" value={metrics.posted} tone="success" />
+      <MetricPill label="Parked" value={metrics.rejected} tone="muted" />
+    </div>
+  )
+}
+
+function MetricPill({
+  label, value, tone, icon,
+}: {
+  label: string
+  value: number
+  tone: 'neutral' | 'warning' | 'success' | 'info' | 'danger' | 'muted'
+  icon?: React.ReactNode
+}) {
+  const color =
+    tone === 'warning' ? 'var(--warn)'
+    : tone === 'success' ? 'var(--success)'
+    : tone === 'info' ? 'var(--info)'
+    : tone === 'danger' ? 'var(--danger)'
+    : tone === 'muted' ? 'var(--ghost)'
+    : 'var(--ink)'
+  return (
+    <div
+      className="min-w-0 px-3 py-2"
+      style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-md)' }}
+    >
+      <div className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color }}>
+        {icon}
+        <span className="truncate">{label}</span>
+      </div>
+      <div className="text-[20px] leading-tight font-semibold mt-1" style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function ReviewToolbar({
+  filters,
+  campaigns,
+  campaignFilter,
+  platformOptions,
+  ownerOptions,
+  mediaOptions,
+  activeFilterCount,
+  onCampaignChange,
+  onFilterChange,
+  onReset,
+}: {
+  filters: ReviewFilters
+  campaigns: Campaign[]
+  campaignFilter: string
+  platformOptions: string[]
+  ownerOptions: string[]
+  mediaOptions: string[]
+  activeFilterCount: number
+  onCampaignChange: (value: string) => void
+  onFilterChange: (key: keyof ReviewFilters, value: string) => void
+  onReset: () => void
+}) {
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2 mb-3 p-2 flex-shrink-0"
+      style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-md)' }}
+    >
+      <div
+        className="flex items-center gap-2 min-w-[220px] flex-1 px-3 py-2"
+        style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '8px' }}
+      >
+        <Search size={14} style={{ color: 'var(--ghost)' }} />
+        <input
+          value={filters.search}
+          onChange={e => onFilterChange('search', e.target.value)}
+          placeholder="Search posts, copy, feedback"
+          className="w-full text-[13px] outline-none"
+          style={{ background: 'transparent', color: 'var(--ink)' }}
+        />
+      </div>
+      <FilterSelect
+        icon={<Layers size={13} />}
+        label="Campaign"
+        value={campaignFilter}
+        onChange={onCampaignChange}
+        options={[
+          { value: 'all', label: 'All campaigns' },
+          { value: 'adhoc', label: 'Ad-hoc only' },
+          ...campaigns.map(campaign => ({
+            value: campaign.id,
+            label: `${campaign.is_pinned ? '★ ' : ''}${campaign.name}${campaign.status !== 'active' ? `, ${campaign.status}` : ''}`,
+          })),
+        ]}
+      />
+      <FilterSelect
+        icon={<Filter size={13} />}
+        label="Platform"
+        value={filters.platform}
+        onChange={value => onFilterChange('platform', value)}
+        options={[{ value: 'all', label: 'All platforms' }, ...platformOptions.map(option => ({ value: option, label: option }))]}
+      />
+      <FilterSelect
+        label="Media"
+        value={filters.media}
+        onChange={value => onFilterChange('media', value)}
+        options={[{ value: 'all', label: 'All media' }, ...mediaOptions.map(option => ({ value: option, label: mediaKindLabel(option) }))]}
+      />
+      <FilterSelect
+        label="Owner"
+        value={filters.owner}
+        onChange={value => onFilterChange('owner', value)}
+        options={[{ value: 'all', label: 'All owners' }, ...ownerOptions.map(option => ({ value: option, label: option }))]}
+      />
+      <FilterSelect
+        label="Date"
+        value={filters.date}
+        onChange={value => onFilterChange('date', value)}
+        options={[
+          { value: 'all', label: 'Any date' },
+          { value: 'this_week', label: 'This week' },
+          { value: 'unscheduled', label: 'Unscheduled' },
+          { value: 'scheduled', label: 'Scheduled' },
+          { value: 'posted', label: 'Posted' },
+        ]}
+      />
+      {activeFilterCount > 0 && (
+        <button
+          type="button"
+          onClick={onReset}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-[12px] transition-colors"
+          style={{ color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '8px', background: 'var(--paper)' }}
+        >
+          <X size={13} /> Clear {activeFilterCount}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function FilterSelect({
+  icon,
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  icon?: React.ReactNode
+  label: string
+  value: string
+  onChange: (value: string) => void
+  options: Array<{ value: string; label: string }>
+}) {
+  return (
+    <label
+      className="inline-flex items-center gap-1.5 px-2.5 py-2 text-[12px]"
+      style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '8px', color: 'var(--ghost)' }}
+    >
+      {icon}
+      <span className="sr-only">{label}</span>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="outline-none cursor-pointer max-w-[180px]"
+        style={{ background: 'transparent', color: 'var(--ink)', border: 'none', fontFamily: 'var(--font-body)' }}
+        aria-label={label}
+      >
+        {options.map(option => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+function BulkActionBar({
+  selectedCount,
+  bulkSaving,
+  onClear,
+  onMoveToReview,
+  onApprove,
+  onRequestChanges,
+  onReject,
+}: {
+  selectedCount: number
+  bulkSaving: boolean
+  onClear: () => void
+  onMoveToReview: () => void
+  onApprove: () => void
+  onRequestChanges: () => void
+  onReject: () => void
+}) {
+  if (selectedCount === 0) return null
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2 mb-3 px-3 py-2 flex-shrink-0"
+      style={{ background: 'var(--accent-tint)', border: '1px solid var(--accent-rule)', borderRadius: 'var(--radius-md)' }}
+    >
+      <span className="text-[12px] font-medium mr-1" style={{ color: 'var(--ink)' }}>
+        {selectedCount} selected
+      </span>
+      <BulkButton icon={<Send size={13} />} label="Send to review" onClick={onMoveToReview} disabled={bulkSaving} />
+      <BulkButton icon={<Check size={13} />} label="Approve" onClick={onApprove} disabled={bulkSaving} />
+      <BulkButton icon={<MessageSquare size={13} />} label="Request changes" onClick={onRequestChanges} disabled={bulkSaving} />
+      <BulkButton icon={<X size={13} />} label="Reject" onClick={onReject} disabled={bulkSaving} danger />
+      <button
+        type="button"
+        onClick={onClear}
+        disabled={bulkSaving}
+        className="ml-auto text-[12px] px-2 py-1.5 disabled:opacity-50"
+        style={{ color: 'var(--ghost)' }}
+      >
+        Clear selection
+      </button>
+    </div>
+  )
+}
+
+function BulkButton({
+  icon,
+  label,
+  onClick,
+  disabled,
+  danger,
+}: {
+  icon: React.ReactNode
+  label: string
+  onClick: () => void
+  disabled: boolean
+  danger?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] font-medium transition-colors disabled:opacity-50"
+      style={{
+        background: 'var(--paper)',
+        color: danger ? 'var(--danger)' : 'var(--ink)',
+        border: '1px solid var(--paper-edge)',
+        borderRadius: '8px',
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  )
+}
+
 // ─── List view (existing UX, refactored) ─────────────────────────────────
 function ListView({
-  loading, activeTab, setActiveTab, tabCounts, filtered, selected, setSelected, saving, moveToTab, campaignsById, postReviewPath, calendarPath,
+  loading, activeTab, setActiveTab, tabCounts, filtered, selected, setSelected, saving, moveToTab, onRequestChanges, campaignsById, postReviewPath, calendarPath, selectedIds, onToggleSelected, activeFilterCount, onResetFilters,
 }: {
   posts: Post[]
   loading: boolean
@@ -378,10 +852,15 @@ function ListView({
   selected: Post | null
   setSelected: (p: Post | null) => void
   saving: string | null
-  moveToTab: (postId: string, target: StatusTab) => void | Promise<void>
+  moveToTab: (postId: string, target: StatusTab, feedback?: string) => void | Promise<void>
+  onRequestChanges: (postId: string) => void | Promise<void>
   campaignsById: Map<string, Campaign>
   postReviewPath: (postId: string) => string
   calendarPath: string
+  selectedIds: Set<string>
+  onToggleSelected: (postId: string) => void
+  activeFilterCount: number
+  onResetFilters: () => void
 }) {
   return (
     <div className="flex flex-1 gap-6 min-h-0">
@@ -421,12 +900,11 @@ function ListView({
           {loading ? (
             <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--ghost)' }}>Loading posts…</div>
           ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-40" style={{ color: 'var(--ghost)' }}>
-              <span className="font-display text-2xl mb-2" style={{ color: 'var(--mist)' }}>—</span>
-              <p className="text-sm">No posts in this queue</p>
-            </div>
+            <EmptyLaneState tab={activeTab} filtersActive={activeFilterCount > 0} onResetFilters={onResetFilters} />
           ) : filtered.map(post => {
             const campaign = post.campaign_id ? campaignsById.get(post.campaign_id) : null
+            const currentTab = tabFor(post)
+            const isSelected = selectedIds.has(post.id)
             return (
               <div
                 key={post.id}
@@ -434,12 +912,12 @@ function ListView({
                 className="cursor-pointer p-4 transition-all relative"
                 style={{
                   background: 'var(--paper)',
-                  border: `1px solid ${selected?.id === post.id ? 'var(--oxblood)' : 'var(--paper-edge)'}`,
+                  border: `1px solid ${selected?.id === post.id || isSelected ? 'var(--oxblood)' : 'var(--paper-edge)'}`,
                   borderRadius: 'var(--radius-lg)',
-                  boxShadow: selected?.id === post.id ? '0 1px 3px rgba(239,106,106,0.16)' : 'none',
+                  boxShadow: selected?.id === post.id || isSelected ? '0 1px 3px rgba(37,99,235,0.16)' : 'none',
                 }}
               >
-                {/* Campaign tint — left edge bar */}
+                {/* Campaign tint, left edge bar */}
                 {campaign && (
                   <span
                     className="absolute left-0 top-2 bottom-2 w-[2px]"
@@ -448,19 +926,69 @@ function ListView({
                   />
                 )}
                 <div className="flex items-start justify-between gap-3">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    aria-label={`Select ${post.title || 'post'}`}
+                    onClick={e => e.stopPropagation()}
+                    onChange={() => onToggleSelected(post.id)}
+                    className="mt-1 h-4 w-4 flex-shrink-0"
+                    style={{ accentColor: 'var(--accent)' }}
+                  />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center gap-2 mb-2 min-w-0">
                       <PlatformChip channel={post.channel} />
                       <StatusChip status={lifecycleLabel(post)} />
                       {campaign && (
                         <span className="text-[12px] truncate" style={{ color: 'var(--ghost)' }} title={campaign.theme || campaign.name}>
-                          · {campaign.name}
+                          {campaign.name}
                         </span>
                       )}
                       <span className="text-[12px] ml-auto" style={{ color: 'var(--mist)' }}>{relativeTime(post.created_at)}</span>
                     </div>
                     <p className="font-display text-[15px] leading-snug truncate" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 24, "wght" 500' }}>{post.title || 'Untitled post'}</p>
                     <p className="text-[12px] mt-1 line-clamp-2" style={{ color: 'var(--ink-quiet)' }}>{post.copy}</p>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-3 text-[11px]" style={{ color: 'var(--ghost)' }}>
+                      <span>{postMeta(post, campaign ?? null)}</span>
+                      <span>Media: {mediaKindLabel(mediaKind(post))}</span>
+                      <span>Owner: {postOwner(post)}</span>
+                      {currentTab === 'Posted' && post.posted_url && (
+                        <a
+                          href={post.posted_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 underline"
+                          style={{ color: 'var(--ink-quiet)' }}
+                        >
+                          <ExternalLink size={11} /> Destination
+                        </a>
+                      )}
+                    </div>
+                    {currentTab === 'Changes Requested' && post.feedback && (
+                      <p
+                        className="mt-2 text-[12px] line-clamp-2"
+                        style={{ color: 'var(--warn)', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.18)', borderRadius: '8px', padding: '6px 8px' }}
+                      >
+                        {post.feedback}
+                      </p>
+                    )}
+                    {currentTab === 'Rejected' && post.feedback && (
+                      <p
+                        className="mt-2 text-[12px] line-clamp-2"
+                        style={{ color: 'var(--ghost)', background: 'var(--fog)', border: '1px solid var(--paper-edge)', borderRadius: '8px', padding: '6px 8px' }}
+                      >
+                        {post.feedback}
+                      </p>
+                    )}
+                    <PostQuickActions
+                      post={post}
+                      saving={saving === post.id}
+                      onMove={moveToTab}
+                      onRequestChanges={onRequestChanges}
+                      detailPath={postReviewPath(post.id)}
+                      calendarPath={calendarPath}
+                    />
                   </div>
                   <PostMediaThumb post={post} className="w-24 h-24 flex-shrink-0" />
                 </div>
@@ -473,11 +1001,11 @@ function ListView({
       {/* Detail side panel */}
       <div className="w-96 flex-shrink-0">
         {selected ? (
-          <PostDetailPanel post={selected} onClose={() => setSelected(null)} saving={saving} onMove={moveToTab} detailPath={postReviewPath(selected.id)} calendarPath={calendarPath} />
+          <PostDetailPanel post={selected} onClose={() => setSelected(null)} saving={saving} onMove={moveToTab} onRequestChanges={onRequestChanges} detailPath={postReviewPath(selected.id)} calendarPath={calendarPath} />
         ) : (
           <div className="p-8 flex flex-col items-center justify-center text-center h-64"
             style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}>
-            <span className="font-display text-3xl mb-3" style={{ color: 'var(--mist)' }}>—</span>
+            <span className="text-[13px] font-medium mb-2" style={{ color: 'var(--ink-quiet)' }}>No post selected</span>
             <p className="text-sm" style={{ color: 'var(--ghost)' }}>Select a post to preview and take action</p>
           </div>
         )}
@@ -532,16 +1060,21 @@ function PostMediaThumb({ post, className = '' }: { post: Post; className?: stri
 
 // ─── Board view (lifecycle columns with HTML5 drag/drop) ───────────
 function BoardView({
-  posts, loading, tabCounts, dragOverTab, setDragOverTab, onMove, onOpen, campaignsById,
+  posts, loading, tabCounts, dragOverTab, setDragOverTab, onMove, onRequestChanges, onOpen, campaignsById, postReviewPath, calendarPath, selectedIds, onToggleSelected,
 }: {
   posts: Post[]
   loading: boolean
   tabCounts: Record<StatusTab, number>
   dragOverTab: StatusTab | null
   setDragOverTab: React.Dispatch<React.SetStateAction<StatusTab | null>>
-  onMove: (postId: string, target: StatusTab) => void | Promise<void>
+  onMove: (postId: string, target: StatusTab, feedback?: string) => void | Promise<void>
+  onRequestChanges: (postId: string) => void | Promise<void>
   onOpen: (p: Post) => void
   campaignsById: Map<string, Campaign>
+  postReviewPath: (postId: string) => string
+  calendarPath: string
+  selectedIds: Set<string>
+  onToggleSelected: (postId: string) => void
 }) {
   if (loading) {
     return <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--ghost)' }}>Loading posts…</div>
@@ -555,8 +1088,8 @@ function BoardView({
   }
 
   return (
-    <div className="flex-1 overflow-x-auto overflow-y-hidden">
-      <div className="flex gap-3 h-full min-w-fit pb-2">
+    <div className="flex-1 min-h-0 min-w-0 overflow-x-auto overflow-y-hidden pb-2">
+      <div className="grid grid-cols-7 gap-3 h-full min-w-[1540px]">
         {STATUS_TABS.map(tab => {
           const columnPosts = posts.filter(p => tabFor(p) === tab)
           const isDragTarget = dragOverTab === tab
@@ -571,7 +1104,7 @@ function BoardView({
               }}
               onDragLeave={() => setDragOverTab(curr => curr === tab ? null : curr)}
               onDrop={(e) => handleDrop(e, tab)}
-              className="flex flex-col flex-shrink-0 w-[280px]"
+              className="flex flex-col min-w-0"
               style={{
                 background: isDragTarget ? 'var(--oxblood-tint)' : 'var(--paper-warm)',
                 border: `1px dashed ${isDragTarget ? 'var(--oxblood)' : 'var(--paper-edge)'}`,
@@ -607,15 +1140,19 @@ function BoardView({
               {/* Cards */}
               <div className="flex-1 overflow-y-auto p-2 space-y-2">
                 {columnPosts.length === 0 ? (
-                  <div className="text-center py-6">
-                    <span className="font-display text-xl" style={{ color: 'var(--mist)' }}>—</span>
-                  </div>
+                  <EmptyLaneState tab={tab} compact />
                 ) : columnPosts.map(post => (
                   <BoardCard
                     key={post.id}
                     post={post}
                     campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
                     onOpen={() => onOpen(post)}
+                    onMove={onMove}
+                    onRequestChanges={onRequestChanges}
+                    detailPath={postReviewPath(post.id)}
+                    calendarPath={calendarPath}
+                    selected={selectedIds.has(post.id)}
+                    onToggleSelected={() => onToggleSelected(post.id)}
                     draggable={!isPosted(post)}
                   />
                 ))}
@@ -628,8 +1165,31 @@ function BoardView({
   )
 }
 
-function BoardCard({ post, campaign, onOpen, draggable }: { post: Post; campaign: Campaign | null; onOpen: () => void; draggable: boolean }) {
+function BoardCard({
+  post,
+  campaign,
+  onOpen,
+  onMove,
+  onRequestChanges,
+  detailPath,
+  calendarPath,
+  selected,
+  onToggleSelected,
+  draggable,
+}: {
+  post: Post
+  campaign: Campaign | null
+  onOpen: () => void
+  onMove: (postId: string, target: StatusTab, feedback?: string) => void | Promise<void>
+  onRequestChanges: (postId: string) => void | Promise<void>
+  detailPath: string
+  calendarPath: string
+  selected: boolean
+  onToggleSelected: () => void
+  draggable: boolean
+}) {
   const [isDragging, setIsDragging] = useState(false)
+  const currentTab = tabFor(post)
   return (
     <div
       draggable={draggable}
@@ -643,13 +1203,14 @@ function BoardCard({ post, campaign, onOpen, draggable }: { post: Post; campaign
       className="p-3 cursor-pointer group transition-all relative"
       style={{
         background: 'var(--paper)',
-        border: '1px solid var(--paper-edge)',
+        border: `1px solid ${selected ? 'var(--oxblood)' : 'var(--paper-edge)'}`,
         borderRadius: '3px',
         opacity: isDragging ? 0.4 : 1,
         cursor: draggable ? 'grab' : 'pointer',
+        boxShadow: selected ? '0 1px 3px rgba(37,99,235,0.14)' : 'none',
       }}
     >
-      {/* Campaign tint — left edge bar */}
+      {/* Campaign tint, left edge bar */}
       {campaign && (
         <span
           className="absolute left-0 top-1.5 bottom-1.5 w-[2px]"
@@ -657,14 +1218,27 @@ function BoardCard({ post, campaign, onOpen, draggable }: { post: Post; campaign
           title={`Campaign: ${campaign.name}`}
         />
       )}
-      <div className="flex items-center gap-2 mb-2">
-        <PlatformChip channel={post.channel} size="sm" />
-        {campaign && (
-          <span className="text-[11px] truncate max-w-[120px]" style={{ color: 'var(--ghost)' }} title={campaign.name}>
-            {campaign.name.replace(/^[A-Z][a-z]+ \d+ — /, '')}
-          </span>
-        )}
-        <span className="text-[11px] ml-auto" style={{ color: 'var(--mist)' }}>{relativeTime(post.created_at)}</span>
+      <div className="flex items-start gap-2 mb-2">
+        <input
+          type="checkbox"
+          checked={selected}
+          aria-label={`Select ${post.title || 'post'}`}
+          onClick={e => e.stopPropagation()}
+          onChange={onToggleSelected}
+          className="mt-0.5 h-4 w-4 flex-shrink-0"
+          style={{ accentColor: 'var(--accent)' }}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 min-w-0">
+            <PlatformChip channel={post.channel} size="sm" />
+            {campaign && (
+              <span className="text-[11px] truncate max-w-[120px]" style={{ color: 'var(--ghost)' }} title={campaign.name}>
+                {campaign.name.replace(/^[A-Z][a-z]+ \d+ - /, '')}
+              </span>
+            )}
+            <span className="text-[11px] ml-auto" style={{ color: 'var(--mist)' }}>{relativeTime(post.created_at)}</span>
+          </div>
+        </div>
       </div>
       <PostMediaThumb post={post} className="w-full h-24 mb-2" />
       <p className="text-[14px] font-medium leading-snug line-clamp-2 mb-1" style={{ color: 'var(--ink)' }}>
@@ -673,30 +1247,223 @@ function BoardCard({ post, campaign, onOpen, draggable }: { post: Post; campaign
       <p className="text-[13px] line-clamp-2" style={{ color: 'var(--ink-quiet)' }}>
         {post.copy?.replace(/^Subject:.+\n+/, '')}
       </p>
+      <div className="mt-2 flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--ghost)' }}>
+        {currentTab === 'Approved' && !targetDate(post) && <AlertTriangle size={12} style={{ color: 'var(--danger)' }} />}
+        <span className="line-clamp-2">{postMeta(post, campaign)}</span>
+      </div>
+      {currentTab === 'Changes Requested' && post.feedback && (
+        <p
+          className="mt-2 text-[11px] line-clamp-2"
+          style={{ color: 'var(--warn)', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.18)', borderRadius: '8px', padding: '5px 7px' }}
+        >
+          {post.feedback}
+        </p>
+      )}
       {isPosted(post) && post.posted_url && (
         <a
           href={post.posted_url}
           target="_blank"
           rel="noreferrer"
           onClick={(e) => e.stopPropagation()}
-          className="block mt-2 text-[10px] font-mono truncate underline"
+          className="inline-flex max-w-full items-center gap-1 mt-2 text-[10px] font-mono truncate underline"
           style={{ color: 'var(--ink-quiet)' }}
         >
-          {post.posted_url}
+          <ExternalLink size={10} />
+          <span className="truncate">Destination</span>
         </a>
+      )}
+      <PostQuickActions
+        post={post}
+        saving={false}
+        onMove={onMove}
+        onRequestChanges={onRequestChanges}
+        detailPath={detailPath}
+        calendarPath={calendarPath}
+        compact
+      />
+    </div>
+  )
+}
+
+function EmptyLaneState({
+  tab,
+  filtersActive = false,
+  onResetFilters,
+  compact = false,
+}: {
+  tab: StatusTab
+  filtersActive?: boolean
+  onResetFilters?: () => void
+  compact?: boolean
+}) {
+  const emptyCopy: Record<StatusTab, string> = {
+    'Draft': 'No drafts are waiting here',
+    'Pending Review': 'No posts need review',
+    'Changes Requested': 'No posts are waiting on edits',
+    'Approved': 'No approved posts are waiting',
+    'Scheduled': 'No posts are scheduled',
+    'Posted': 'No posts are marked posted',
+    'Rejected': 'No posts are parked',
+  }
+  return (
+    <div
+      className={`flex flex-col items-center justify-center text-center ${compact ? 'min-h-[96px] px-3 py-4' : 'h-48 px-6'}`}
+      style={{ color: 'var(--ghost)' }}
+    >
+      <span className="text-[12px] font-medium" style={{ color: 'var(--ink-quiet)' }}>
+        {filtersActive ? 'No matching posts' : emptyCopy[tab]}
+      </span>
+      <p className="text-[11px] mt-1 max-w-[240px]" style={{ color: 'var(--ghost)' }}>
+        {filtersActive ? 'Try clearing filters or switching status.' : 'This lane is clear.'}
+      </p>
+      {filtersActive && onResetFilters && (
+        <button
+          type="button"
+          onClick={onResetFilters}
+          className="mt-3 text-[12px] px-3 py-1.5"
+          style={{ color: 'var(--ink)', border: '1px solid var(--paper-edge)', background: 'var(--paper)', borderRadius: '8px' }}
+        >
+          Clear filters
+        </button>
       )}
     </div>
   )
 }
 
+function PostQuickActions({
+  post,
+  saving,
+  onMove,
+  onRequestChanges,
+  detailPath,
+  calendarPath,
+  compact = false,
+}: {
+  post: Post
+  saving: boolean
+  onMove: (postId: string, target: StatusTab, feedback?: string) => void | Promise<void>
+  onRequestChanges: (postId: string) => void | Promise<void>
+  detailPath: string
+  calendarPath: string
+  compact?: boolean
+}) {
+  const currentTab = tabFor(post)
+  const canApprove = isActionableReview(post.status) && !isPosted(post)
+  const canRequestChanges = ['Pending Review', 'Approved'].includes(currentTab)
+  const canReturnToReview = currentTab === 'Draft' || currentTab === 'Changes Requested'
+  const canReject = !['Rejected', 'Posted'].includes(currentTab)
+  return (
+    <div className={`flex items-center gap-1.5 ${compact ? 'mt-2' : 'mt-3'}`}>
+      {canReturnToReview && (
+        <IconActionButton
+          title={currentTab === 'Draft' ? 'Send to review' : 'Return to review'}
+          icon={<Send size={13} />}
+          onClick={() => onMove(post.id, 'Pending Review')}
+          disabled={saving}
+        />
+      )}
+      {canApprove && (
+        <IconActionButton title="Approve" icon={<Check size={13} />} onClick={() => onMove(post.id, 'Approved')} disabled={saving} />
+      )}
+      {canRequestChanges && (
+        <IconActionButton title="Request changes" icon={<MessageSquare size={13} />} onClick={() => onRequestChanges(post.id)} disabled={saving} />
+      )}
+      {currentTab === 'Approved' && !targetDate(post) && (
+        <IconActionLink href={calendarPath} title="Schedule in calendar" icon={<CalendarPlus size={13} />} tone="danger" />
+      )}
+      {currentTab === 'Scheduled' && (
+        <IconActionLink href={calendarPath} title="Open in calendar" icon={<CalendarIcon size={13} />} />
+      )}
+      {currentTab === 'Posted' && post.posted_url && (
+        <IconActionLink href={post.posted_url} title="Open destination" icon={<ExternalLink size={13} />} external />
+      )}
+      {canReject && (
+        <IconActionButton title="Reject" icon={<X size={13} />} onClick={() => onMove(post.id, 'Rejected')} disabled={saving} danger />
+      )}
+      <IconActionLink href={detailPath} title="Open detail" icon={<ExternalLink size={13} />} />
+    </div>
+  )
+}
+
+function IconActionButton({
+  title,
+  icon,
+  onClick,
+  disabled,
+  danger,
+}: {
+  title: string
+  icon: React.ReactNode
+  onClick: () => void
+  disabled: boolean
+  danger?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick()
+      }}
+      disabled={disabled}
+      className="inline-flex h-7 w-7 items-center justify-center transition-colors disabled:opacity-40"
+      style={{
+        color: danger ? 'var(--danger)' : 'var(--ink-quiet)',
+        background: 'var(--paper-warm)',
+        border: '1px solid var(--paper-edge)',
+        borderRadius: '8px',
+      }}
+    >
+      {icon}
+    </button>
+  )
+}
+
+function IconActionLink({
+  href,
+  title,
+  icon,
+  external,
+  tone,
+}: {
+  href: string
+  title: string
+  icon: React.ReactNode
+  external?: boolean
+  tone?: 'danger'
+}) {
+  return (
+    <a
+      href={href}
+      title={title}
+      aria-label={title}
+      target={external ? '_blank' : undefined}
+      rel={external ? 'noreferrer' : undefined}
+      onClick={event => event.stopPropagation()}
+      className="inline-flex h-7 w-7 items-center justify-center transition-colors"
+      style={{
+        color: tone === 'danger' ? 'var(--danger)' : 'var(--ink-quiet)',
+        background: 'var(--paper-warm)',
+        border: '1px solid var(--paper-edge)',
+        borderRadius: '8px',
+      }}
+    >
+      {icon}
+    </a>
+  )
+}
+
 // ─── Detail side panel (kept from list view; mostly unchanged for now) ────
 function PostDetailPanel({
-  post, onClose, saving, onMove, detailPath, calendarPath,
+  post, onClose, saving, onMove, onRequestChanges, detailPath, calendarPath,
 }: {
   post: Post
   onClose: () => void
   saving: string | null
-  onMove: (postId: string, target: StatusTab) => void | Promise<void>
+  onMove: (postId: string, target: StatusTab, feedback?: string) => void | Promise<void>
+  onRequestChanges: (postId: string) => void | Promise<void>
   detailPath: string
   calendarPath: string
 }) {
@@ -759,7 +1526,7 @@ function PostDetailPanel({
           </button>
         </>)}
         {canRequestChanges && (
-          <button onClick={() => onMove(post.id, 'Changes Requested')} disabled={saving === post.id}
+          <button onClick={() => onRequestChanges(post.id)} disabled={saving === post.id}
             className="w-full py-2 text-[13px] transition-colors disabled:opacity-50"
             style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
             Request changes
@@ -799,7 +1566,7 @@ function PostDetailPanel({
 // ─── Calendar view ──────────────────────────────────────────────────────
 // Week grid (Mon-Sun) showing posts on their target date. A post's date is:
 //   posted_at  > scheduled_at > publish_date
-// Drafts without a target date are EXCLUDED — they don't belong to a day
+// Drafts without a target date are EXCLUDED, they don't belong to a day
 // yet. Operator can navigate prev/next week or jump back to "this week".
 //
 // Visual: status-coded left border per event (draft/pending/scheduled/posted),
@@ -850,7 +1617,7 @@ function CalendarView({
   const todayKey = isoDay(today)
   const isCurrentWeek = isoDay(weekStart) === isoDay(mondayOf(today))
 
-  const weekLabel = `${days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${
+  const weekLabel = `${days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - ${
     days[6].toLocaleDateString(undefined, {
       month: days[0].getMonth() !== days[6].getMonth() ? 'short' : undefined,
       day: 'numeric',
