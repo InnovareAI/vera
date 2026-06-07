@@ -15,8 +15,21 @@ const DEFAULT_ALLOWED_RETURN_ORIGINS = [
   "http://127.0.0.1:5173",
 ]
 
-const PROVIDER_LABEL = "Google Search & Analytics OAuth"
+const PROVIDER_LABEL = "Google OAuth"
+const LEGACY_PROVIDER_LABEL = "Google Search & Analytics OAuth"
 const GOOGLE_KEY_PROVIDER = "google_oauth"
+const GOOGLE_SCOPES_BY_PROVIDER: Record<GoogleProvider, string[]> = {
+  google_search_console: [
+    "https://www.googleapis.com/auth/webmasters.readonly",
+  ],
+  google_analytics_4: [
+    "https://www.googleapis.com/auth/analytics.readonly",
+  ],
+  youtube: [
+    "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/yt-analytics.readonly",
+  ],
+}
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -38,6 +51,8 @@ type OAuthState = {
   exp: number
 }
 
+type GoogleProvider = "google_search_console" | "google_analytics_4" | "youtube"
+
 type TokenResponse = {
   access_token?: string
   refresh_token?: string
@@ -52,6 +67,35 @@ type TokenResponse = {
 type GscSite = { siteUrl?: string; permissionLevel?: string }
 type Ga4AccountSummary = { account?: string; displayName?: string; propertySummaries?: Ga4Property[] }
 type Ga4Property = { property?: string; displayName?: string; parent?: string; propertyType?: string }
+type GscResult = { ok: boolean; sites: GscSite[]; warning?: string }
+type Ga4Result = { ok: boolean; accountSummaries: Ga4AccountSummary[]; properties: Ga4Property[]; warning?: string }
+type YoutubeChannel = {
+  id?: string
+  snippet?: {
+    title?: string
+    customUrl?: string
+    description?: string
+    publishedAt?: string
+    thumbnails?: Record<string, { url?: string; width?: number; height?: number }>
+  }
+  contentDetails?: {
+    relatedPlaylists?: {
+      uploads?: string
+      likes?: string
+    }
+  }
+  statistics?: {
+    viewCount?: string
+    subscriberCount?: string
+    hiddenSubscriberCount?: boolean
+    videoCount?: string
+  }
+}
+type YoutubeResult = { ok: boolean; channels: YoutubeChannel[]; warning?: string }
+
+const EMPTY_GSC_RESULT: GscResult = { ok: true, sites: [] }
+const EMPTY_GA4_RESULT: Ga4Result = { ok: true, accountSummaries: [], properties: [] }
+const EMPTY_YOUTUBE_RESULT: YoutubeResult = { ok: true, channels: [] }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
@@ -75,15 +119,22 @@ Deno.serve(async (req) => {
     const token = await exchangeCode(code, redirectUri)
     if (!token.access_token) return redirectTo(state.value.return_url, "error", token.error_description ?? token.error ?? "Google did not return an access token")
 
+    const requestedProviders = normalizeProviders(state.value.providers)
+    const wantsGsc = requestedProviders.includes("google_search_console")
+    const wantsGa4 = requestedProviders.includes("google_analytics_4")
+    const wantsYoutube = requestedProviders.includes("youtube")
     const grantedScopes = (token.scope ?? "").split(/\s+/).filter(Boolean)
     const expiresAt = token.expires_in ? new Date(Date.now() + token.expires_in * 1000).toISOString() : null
-    const [gscResult, ga4Result] = await Promise.all([
-      fetchSearchConsoleSites(token.access_token),
-      fetchGa4AccountSummaries(token.access_token),
+    const [gscResult, ga4Result, youtubeResult] = await Promise.all([
+      wantsGsc ? fetchSearchConsoleSites(token.access_token) : Promise.resolve(EMPTY_GSC_RESULT),
+      wantsGa4 ? fetchGa4AccountSummaries(token.access_token) : Promise.resolve(EMPTY_GA4_RESULT),
+      wantsYoutube ? fetchYoutubeChannels(token.access_token) : Promise.resolve(EMPTY_YOUTUBE_RESULT),
     ])
 
     const supabase = createAdminClient()
     const existingKey = await loadExistingGoogleKey(supabase, state.value.project_id)
+    const existingConfig = recordValue(existingKey?.config)
+    const existingCapabilities = recordValue(existingKey?.capabilities)
     const shouldReplaceSecret = !!token.refresh_token || !existingKey?.secret_ciphertext
     const encrypted = shouldReplaceSecret ? await encryptSecret(JSON.stringify({
       access_token: token.access_token,
@@ -96,35 +147,50 @@ Deno.serve(async (req) => {
 
     const testedAt = new Date().toISOString()
     const tokenWarning = token.refresh_token || existingKey?.secret_ciphertext ? null : "Google did not return a refresh token. Reconnect with consent if long-running sync fails."
+    const mergedScopes = mergeStrings(stringArray(existingConfig.scopes), grantedScopes)
+    const mergedProviders = mergeStrings(stringArray(existingConfig.providers), requestedProviders)
+    const keyConfig = {
+      ...existingConfig,
+      scopes: mergedScopes,
+      token_type: token.token_type ?? "Bearer",
+      expires_at: expiresAt,
+      providers: mergedProviders,
+      connected_via: "google-oauth-callback",
+      ...(wantsGsc ? {
+        search_console_sites: gscResult.sites,
+        search_console_site_count: gscResult.sites.length,
+      } : {}),
+      ...(wantsGa4 ? {
+        ga4_account_summaries: ga4Result.accountSummaries,
+        ga4_properties: ga4Result.properties,
+        ga4_property_count: ga4Result.properties.length,
+      } : {}),
+      ...(wantsYoutube ? {
+        youtube_channels: youtubeResult.channels,
+        youtube_channel_count: youtubeResult.channels.length,
+      } : {}),
+    }
+    const keyCapabilities = {
+      ...existingCapabilities,
+      oauth: true,
+      refresh_token: !!token.refresh_token || !!existingKey?.secret_ciphertext,
+      ...(wantsGsc ? { search_console: true } : {}),
+      ...(wantsGa4 ? { ga4: true } : {}),
+      ...(wantsYoutube ? { youtube: true, youtube_analytics: true } : {}),
+    }
     const keyPayload = {
       org_id: state.value.org_id,
       project_id: state.value.project_id,
       provider: GOOGLE_KEY_PROVIDER,
       label: PROVIDER_LABEL,
-      config: {
-        scopes: grantedScopes,
-        token_type: token.token_type ?? "Bearer",
-        expires_at: expiresAt,
-        providers: state.value.providers,
-        search_console_sites: gscResult.sites,
-        ga4_account_summaries: ga4Result.accountSummaries,
-        ga4_properties: ga4Result.properties,
-        search_console_site_count: gscResult.sites.length,
-        ga4_property_count: ga4Result.properties.length,
-        connected_via: "google-oauth-callback",
-      },
+      config: keyConfig,
       models: [],
-      capabilities: {
-        search_console: true,
-        ga4: true,
-        oauth: true,
-        refresh_token: !!token.refresh_token || !!existingKey?.secret_ciphertext,
-      },
+      capabilities: keyCapabilities,
       secret_preview: shouldReplaceSecret
         ? token.refresh_token ? "refresh token saved" : "access token saved"
         : "existing refresh token kept",
       status: "active",
-      test_error: [tokenWarning, gscResult.warning, ga4Result.warning].filter(Boolean).join(" | ") || null,
+      test_error: [tokenWarning, gscResult.warning, ga4Result.warning, youtubeResult.warning].filter(Boolean).join(" | ") || null,
       last_tested_at: testedAt,
       created_by: existingKey?.id ? undefined : state.value.user_id,
       updated_by: state.value.user_id,
@@ -151,54 +217,92 @@ Deno.serve(async (req) => {
           .single()
     if (keyError) throw new Error(keyError.message)
 
-    await upsertIntegration(supabase, {
-      orgId: state.value.org_id,
-      projectId: state.value.project_id,
-      userId: state.value.user_id,
-      credentialRef: keyRow.id as string,
-      provider: "google_search_console",
-      category: "seo",
-      displayName: "Google Search Console",
-      primaryRef: gscResult.sites[0]?.siteUrl ?? "",
-      status: "connected",
-      healthStatus: gscResult.ok ? "healthy" : "stale",
-      healthDetail: gscResult.ok
-        ? `${gscResult.sites.length} Search Console site${gscResult.sites.length === 1 ? "" : "s"} available.`
-        : gscResult.warning ?? "Search Console token saved, but site listing needs attention.",
-      scopes: ["https://www.googleapis.com/auth/webmasters.readonly"],
-      capabilities: { read: true, ingest: true, analyze: true },
-      extraConfig: {
-        sites: gscResult.sites,
-        search_console_site_count: gscResult.sites.length,
-        warning: gscResult.warning,
-      },
-    })
+    const detailParts: string[] = []
 
-    await upsertIntegration(supabase, {
-      orgId: state.value.org_id,
-      projectId: state.value.project_id,
-      userId: state.value.user_id,
-      credentialRef: keyRow.id as string,
-      provider: "google_analytics_4",
-      category: "analytics",
-      displayName: "Google Analytics 4",
-      primaryRef: ga4Result.properties[0]?.property ?? "",
-      status: "connected",
-      healthStatus: ga4Result.ok ? "healthy" : "stale",
-      healthDetail: ga4Result.ok
-        ? `${ga4Result.properties.length} GA4 propert${ga4Result.properties.length === 1 ? "y" : "ies"} available.`
-        : ga4Result.warning ?? "GA4 token saved, but property listing needs attention.",
-      scopes: ["https://www.googleapis.com/auth/analytics.readonly"],
-      capabilities: { read: true, ingest: true, analyze: true },
-      extraConfig: {
-        account_summaries: ga4Result.accountSummaries,
-        properties: ga4Result.properties,
-        ga4_property_count: ga4Result.properties.length,
-        warning: ga4Result.warning,
-      },
-    })
+    if (wantsGsc) {
+      await upsertIntegration(supabase, {
+        orgId: state.value.org_id,
+        projectId: state.value.project_id,
+        userId: state.value.user_id,
+        credentialRef: keyRow.id as string,
+        provider: "google_search_console",
+        category: "seo",
+        displayName: "Google Search Console",
+        primaryRef: gscResult.sites[0]?.siteUrl ?? "",
+        status: "connected",
+        healthStatus: gscResult.ok ? "healthy" : "stale",
+        healthDetail: gscResult.ok
+          ? `${gscResult.sites.length} Search Console site${gscResult.sites.length === 1 ? "" : "s"} available.`
+          : gscResult.warning ?? "Search Console token saved, but site listing needs attention.",
+        scopes: GOOGLE_SCOPES_BY_PROVIDER.google_search_console,
+        capabilities: { read: true, ingest: true, analyze: true },
+        extraConfig: {
+          sites: gscResult.sites,
+          search_console_site_count: gscResult.sites.length,
+          warning: gscResult.warning,
+        },
+      })
+      detailParts.push(`${gscResult.sites.length} Search Console site${gscResult.sites.length === 1 ? "" : "s"}`)
+    }
 
-    return redirectTo(state.value.return_url, "success", `Connected Google. Found ${gscResult.sites.length} Search Console sites and ${ga4Result.properties.length} GA4 properties.`)
+    if (wantsGa4) {
+      await upsertIntegration(supabase, {
+        orgId: state.value.org_id,
+        projectId: state.value.project_id,
+        userId: state.value.user_id,
+        credentialRef: keyRow.id as string,
+        provider: "google_analytics_4",
+        category: "analytics",
+        displayName: "Google Analytics 4",
+        primaryRef: ga4Result.properties[0]?.property ?? "",
+        status: "connected",
+        healthStatus: ga4Result.ok ? "healthy" : "stale",
+        healthDetail: ga4Result.ok
+          ? `${ga4Result.properties.length} GA4 propert${ga4Result.properties.length === 1 ? "y" : "ies"} available.`
+          : ga4Result.warning ?? "GA4 token saved, but property listing needs attention.",
+        scopes: GOOGLE_SCOPES_BY_PROVIDER.google_analytics_4,
+        capabilities: { read: true, ingest: true, analyze: true },
+        extraConfig: {
+          account_summaries: ga4Result.accountSummaries,
+          properties: ga4Result.properties,
+          ga4_property_count: ga4Result.properties.length,
+          warning: ga4Result.warning,
+        },
+      })
+      detailParts.push(`${ga4Result.properties.length} GA4 propert${ga4Result.properties.length === 1 ? "y" : "ies"}`)
+    }
+
+    if (wantsYoutube) {
+      await upsertIntegration(supabase, {
+        orgId: state.value.org_id,
+        projectId: state.value.project_id,
+        userId: state.value.user_id,
+        credentialRef: keyRow.id as string,
+        provider: "youtube",
+        category: "social",
+        displayName: "YouTube",
+        primaryRef: youtubeResult.channels[0]?.id ?? youtubeResult.channels[0]?.snippet?.customUrl ?? "",
+        status: "connected",
+        healthStatus: youtubeResult.ok ? "healthy" : "stale",
+        healthDetail: youtubeResult.ok
+          ? `${youtubeResult.channels.length} YouTube channel${youtubeResult.channels.length === 1 ? "" : "s"} available.`
+          : youtubeResult.warning ?? "YouTube token saved, but channel listing needs attention.",
+        scopes: GOOGLE_SCOPES_BY_PROVIDER.youtube,
+        capabilities: { read: true, ingest: true, analyze: true },
+        extraConfig: {
+          channels: youtubeResult.channels,
+          youtube_channel_count: youtubeResult.channels.length,
+          warning: youtubeResult.warning,
+        },
+      })
+      detailParts.push(`${youtubeResult.channels.length} YouTube channel${youtubeResult.channels.length === 1 ? "" : "s"}`)
+    }
+
+    const detail = detailParts.length
+      ? `Connected Google. Found ${detailParts.join(" and ")}.`
+      : "Connected Google OAuth."
+
+    return redirectTo(state.value.return_url, "success", detail)
   } catch (error) {
     return redirectTo(state.value.return_url, "error", error instanceof Error ? error.message : "Google OAuth callback failed")
   }
@@ -227,7 +331,7 @@ async function exchangeCode(code: string, redirectUri: string): Promise<TokenRes
   return token
 }
 
-async function fetchSearchConsoleSites(accessToken: string): Promise<{ ok: boolean; sites: GscSite[]; warning?: string }> {
+async function fetchSearchConsoleSites(accessToken: string): Promise<GscResult> {
   const response = await fetch("https://www.googleapis.com/webmasters/v3/sites", {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
@@ -238,12 +342,7 @@ async function fetchSearchConsoleSites(accessToken: string): Promise<{ ok: boole
   return { ok: true, sites: body.siteEntry ?? [] }
 }
 
-async function fetchGa4AccountSummaries(accessToken: string): Promise<{
-  ok: boolean
-  accountSummaries: Ga4AccountSummary[]
-  properties: Ga4Property[]
-  warning?: string
-}> {
+async function fetchGa4AccountSummaries(accessToken: string): Promise<Ga4Result> {
   const response = await fetch("https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200", {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
@@ -267,19 +366,54 @@ async function fetchGa4AccountSummaries(accessToken: string): Promise<{
   }
 }
 
+async function fetchYoutubeChannels(accessToken: string): Promise<YoutubeResult> {
+  const url = new URL("https://www.googleapis.com/youtube/v3/channels")
+  url.searchParams.set("part", "snippet,contentDetails,statistics")
+  url.searchParams.set("mine", "true")
+  url.searchParams.set("maxResults", "50")
+
+  const response = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  const body = await response.json().catch(() => ({})) as {
+    items?: YoutubeChannel[]
+    error?: { message?: string }
+  }
+  if (!response.ok) {
+    return {
+      ok: false,
+      channels: [],
+      warning: body.error?.message ?? `YouTube returned HTTP ${response.status}`,
+    }
+  }
+  return { ok: true, channels: body.items ?? [] }
+}
+
 async function loadExistingGoogleKey(
   supabase: ReturnType<typeof createAdminClient>,
   projectId: string,
-): Promise<{ id: string; secret_ciphertext: string | null } | null> {
+): Promise<{
+  id: string
+  secret_ciphertext: string | null
+  config: Record<string, unknown> | null
+  capabilities: Record<string, unknown> | null
+} | null> {
   const { data, error } = await supabase
     .from("client_api_keys")
-    .select("id, secret_ciphertext")
+    .select("id, secret_ciphertext, config, capabilities, updated_at")
     .eq("project_id", projectId)
     .eq("provider", GOOGLE_KEY_PROVIDER)
-    .eq("label", PROVIDER_LABEL)
+    .in("label", [PROVIDER_LABEL, LEGACY_PROVIDER_LABEL])
+    .order("updated_at", { ascending: false })
+    .limit(1)
     .maybeSingle()
   if (error) throw new Error(error.message)
-  return data as { id: string; secret_ciphertext: string | null } | null
+  return data as {
+    id: string
+    secret_ciphertext: string | null
+    config: Record<string, unknown> | null
+    capabilities: Record<string, unknown> | null
+  } | null
 }
 
 async function upsertIntegration(
@@ -289,8 +423,8 @@ async function upsertIntegration(
     projectId: string
     userId: string
     credentialRef: string
-    provider: "google_search_console" | "google_analytics_4"
-    category: "seo" | "analytics"
+    provider: GoogleProvider
+    category: "seo" | "analytics" | "social"
     displayName: string
     primaryRef: string
     status: "connected"
@@ -301,21 +435,7 @@ async function upsertIntegration(
     extraConfig: Record<string, unknown>
   },
 ) {
-  const launch = input.provider === "google_search_console"
-    ? {
-      launch_priority: "wave_1",
-      workstream: "Search & analytics",
-      adapter_state: "Google OAuth connected. Build daily Search Console ingestion next.",
-      next_build: "Add scheduled Search Analytics pulls for queries, pages, countries, devices, and indexing checks.",
-      required_setup: ["Verified site property", "Daily ingestion schedule", "Content opportunity mapping"],
-    }
-    : {
-      launch_priority: "wave_1",
-      workstream: "Search & analytics",
-      adapter_state: "Google OAuth connected. Build GA4 report ingestion next.",
-      next_build: "Add GA4 property selection, traffic summaries, channel grouping, and page performance pulls.",
-      required_setup: ["GA4 property selection", "Reporting date ranges", "Quota guardrails"],
-    }
+  const launch = launchForProvider(input.provider)
 
   const { error } = await supabase
     .from("client_integrations")
@@ -349,6 +469,57 @@ async function upsertIntegration(
       created_by: input.userId,
     }, { onConflict: "project_id,provider,display_name" })
   if (error) throw new Error(error.message)
+}
+
+function launchForProvider(provider: GoogleProvider): Record<string, unknown> {
+  if (provider === "google_search_console") {
+    return {
+      launch_priority: "wave_1",
+      workstream: "Search & analytics",
+      adapter_state: "Google OAuth connected. Build daily Search Console ingestion next.",
+      next_build: "Add scheduled Search Analytics pulls for queries, pages, countries, devices, and indexing checks.",
+      required_setup: ["Verified site property", "Daily ingestion schedule", "Content opportunity mapping"],
+    }
+  }
+
+  if (provider === "google_analytics_4") {
+    return {
+      launch_priority: "wave_1",
+      workstream: "Search & analytics",
+      adapter_state: "Google OAuth connected. Build GA4 report ingestion next.",
+      next_build: "Add GA4 property selection, traffic summaries, channel grouping, and page performance pulls.",
+      required_setup: ["GA4 property selection", "Reporting date ranges", "Quota guardrails"],
+    }
+  }
+
+  return {
+    launch_priority: "wave_1",
+    workstream: "YouTube",
+    adapter_state: "Google OAuth connected. Build YouTube channel analytics ingestion next.",
+    next_build: "Add channel selection, video and Shorts performance pulls, metadata drafting, and upload dry runs before live publishing.",
+    required_setup: ["YouTube channel access", "YouTube Analytics reporting windows", "Quota guardrails", "Upload-scope approval before publishing"],
+  }
+}
+
+function normalizeProviders(value: unknown): GoogleProvider[] {
+  if (!Array.isArray(value)) return ["google_search_console", "google_analytics_4"]
+  const allowed = new Set<GoogleProvider>(["google_search_console", "google_analytics_4", "youtube"])
+  const providers = value.filter((provider): provider is GoogleProvider => typeof provider === "string" && allowed.has(provider as GoogleProvider))
+  return providers.length ? providers : ["google_search_console", "google_analytics_4"]
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
+}
+
+function mergeStrings(...lists: string[][]): string[] {
+  return Array.from(new Set(lists.flat()))
 }
 
 async function verifyState(value: string): Promise<{ ok: true; value: OAuthState } | { ok: false; error: string }> {

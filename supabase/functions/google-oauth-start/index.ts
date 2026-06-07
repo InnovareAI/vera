@@ -13,10 +13,18 @@ const DEFAULT_ALLOWED_RETURN_ORIGINS = [
   "http://127.0.0.1:5173",
 ]
 
-const GOOGLE_SCOPES = [
-  "https://www.googleapis.com/auth/webmasters.readonly",
-  "https://www.googleapis.com/auth/analytics.readonly",
-]
+const GOOGLE_SCOPES_BY_PROVIDER: Record<string, string[]> = {
+  google_search_console: [
+    "https://www.googleapis.com/auth/webmasters.readonly",
+  ],
+  google_analytics_4: [
+    "https://www.googleapis.com/auth/analytics.readonly",
+  ],
+  youtube: [
+    "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/yt-analytics.readonly",
+  ],
+}
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -70,6 +78,7 @@ Deno.serve(async (req) => {
 
   const returnUrl = normalizeReturnUrl(body.return_url)
   const providers = normalizeProviders(body.providers)
+  const scopes = scopesForProviders(providers)
   const redirectUri = Deno.env.get("GOOGLE_OAUTH_REDIRECT_URI") ?? DEFAULT_REDIRECT_URI
   const state = await signState({
     project_id: project.id,
@@ -85,7 +94,7 @@ Deno.serve(async (req) => {
     client_id: GOOGLE_CLIENT_ID,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: GOOGLE_SCOPES.join(" "),
+    scope: scopes.join(" "),
     access_type: "offline",
     include_granted_scopes: "true",
     prompt: "consent",
@@ -96,7 +105,7 @@ Deno.serve(async (req) => {
     ok: true,
     auth_url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
     redirect_uri: redirectUri,
-    scopes: GOOGLE_SCOPES,
+    scopes,
   })
 })
 
@@ -130,6 +139,10 @@ function normalizeProviders(value: unknown): string[] {
   const allowed = new Set(["google_search_console", "google_analytics_4", "youtube"])
   const providers = value.filter(provider => typeof provider === "string" && allowed.has(provider))
   return providers.length ? providers : ["google_search_console", "google_analytics_4"]
+}
+
+function scopesForProviders(providers: string[]): string[] {
+  return Array.from(new Set(providers.flatMap(provider => GOOGLE_SCOPES_BY_PROVIDER[provider] ?? [])))
 }
 
 function normalizeReturnUrl(value: unknown): string {

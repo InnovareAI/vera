@@ -220,20 +220,20 @@ const PROVIDERS: IntegrationTemplate[] = [
     group: 'Organic social',
     label: 'YouTube',
     eyebrow: 'Video channel',
-    description: 'Upload and publish YouTube videos or Shorts, manage metadata, and read channel and video analytics signals.',
+    description: 'Connect YouTube channel discovery and analytics signals. Publishing and uploads come after the upload adapter and approval path.',
     connectionKind: 'oauth',
-    credentialRoute: 'Google OAuth with YouTube upload and readonly scopes',
+    credentialRoute: 'Google OAuth with YouTube readonly and analytics scopes',
     primaryLabel: 'YouTube channel URL or ID',
     primaryPlaceholder: 'https://youtube.com/@brand',
-    scopes: ['youtube.upload', 'youtube.readonly', 'yt-analytics.readonly'],
-    capabilities: { read: true, ingest: true, analyze: true, publish: true, upload_media: true, schedule: true },
-    setupNote: 'Needs Google OAuth verification and YouTube upload review before public uploads are production-safe.',
+    scopes: ['youtube.readonly', 'yt-analytics.readonly'],
+    capabilities: { read: true, ingest: true, analyze: true },
+    setupNote: 'Connects the channel and analytics context now. Video upload and publishing need a separate Google upload-scope review.',
     launch: {
       priority: 'wave_1',
       workstream: 'YouTube',
-      adapterState: 'Needs Google OAuth, quota handling, and upload adapter',
-      nextBuild: 'Reuse Google OAuth, connect channel selection, then add metadata drafting and upload dry runs before live publishing.',
-      requirements: ['Google Cloud project', 'YouTube channel access', 'Upload scope approval', 'Quota and file-size safeguards'],
+      adapterState: 'Google OAuth path ready for channel and analytics access. Upload adapter comes next.',
+      nextBuild: 'Connect channel selection, then add video metadata drafting, upload dry runs, quota handling, and live publishing approval gates.',
+      requirements: ['Google Cloud project', 'YouTube channel access', 'YouTube readonly scope', 'YouTube analytics readonly scope'],
     },
     icon: Video,
     accent: '#dc2626',
@@ -519,6 +519,11 @@ function isWaveOne(template: IntegrationTemplate): boolean {
   return launchMeta(template).priority === 'wave_1'
 }
 
+function googleProvidersForSelection(provider: ClientIntegrationProvider): string[] {
+  if (provider === 'youtube') return ['youtube']
+  return ['google_search_console', 'google_analytics_4']
+}
+
 const WAVE_ONE_TEMPLATES = PROVIDERS.filter(isWaveOne)
 
 const STATUS_LABELS: Record<ClientIntegrationStatus, string> = {
@@ -623,7 +628,7 @@ export function ClientIntegrationsCard() {
   }))
   const draft = draftState.key === draftKey ? draftState.draft : makeDraft(selectedTemplate, selectedRow)
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
-  const isGoogleOauthProvider = selectedProvider === 'google_search_console' || selectedProvider === 'google_analytics_4'
+  const isGoogleOauthProvider = selectedProvider === 'google_search_console' || selectedProvider === 'google_analytics_4' || selectedProvider === 'youtube'
 
   function updateDraft(updater: (draft: Draft) => Draft) {
     setDraftState(prev => {
@@ -776,7 +781,7 @@ export function ClientIntegrationsCard() {
         headers,
         body: JSON.stringify({
           project_id: activeProject.id,
-          providers: ['google_search_console', 'google_analytics_4'],
+          providers: googleProvidersForSelection(selectedProvider),
           return_url: returnUrl.toString(),
         }),
       })
