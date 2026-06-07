@@ -40,6 +40,7 @@ type SkillAgent = 'strategist' | 'writer' | 'brand_guard' | 'publisher' | 'all'
 type Confidence = 'low' | 'medium' | 'high' | 'validated'
 type ScopeFilter = 'all' | 'global' | 'workspace' | 'client'
 type FormScope = 'workspace' | 'client'
+type ViewMode = 'constitution' | 'skills' | 'evals'
 
 type ExampleItem = {
   label?: string
@@ -80,6 +81,24 @@ interface SkillPerformance {
   edited_count: number
   approval_rate: number | null
   last_used_at: string | null
+}
+
+interface EvalScenario {
+  id: string
+  org_id: string | null
+  project_id?: string | null
+  name: string
+  category: 'constitution' | 'strategy' | 'copy' | 'platform' | 'brand' | 'compliance' | 'autonomy' | 'knowledge'
+  description: string
+  prompt: string
+  expected_behaviors: string[]
+  failure_modes: string[]
+  rubric: Record<string, number>
+  tags: string[]
+  source_refs?: ExampleItem[]
+  is_system: boolean
+  is_active: boolean
+  sort_order: number
 }
 
 const SKILL_TYPES: SkillType[] = ['platform', 'content', 'brand', 'persona', 'enrichment', 'tool']
@@ -201,6 +220,9 @@ export default function Skills() {
 
   const [skills, setSkills] = useState<Skill[]>([])
   const [performance, setPerformance] = useState<Record<string, SkillPerformance>>({})
+  const [evalScenarios, setEvalScenarios] = useState<EvalScenario[]>([])
+  const [evalError, setEvalError] = useState<string | null>(null)
+  const [view, setView] = useState<ViewMode>('constitution')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -220,11 +242,16 @@ export default function Skills() {
     if (activeOrgId) skillQuery = skillQuery.or(`org_id.is.null,org_id.eq.${activeOrgId}`)
     else skillQuery = skillQuery.is('org_id', null)
 
-    const [{ data: skillRows, error: skillErr }, { data: perfRows }] = await Promise.all([
+    let evalQuery = supabase.from('vera_evaluation_scenarios').select('*').order('sort_order').order('name')
+    if (activeOrgId) evalQuery = evalQuery.or(`org_id.is.null,org_id.eq.${activeOrgId}`)
+    else evalQuery = evalQuery.is('org_id', null)
+
+    const [{ data: skillRows, error: skillErr }, { data: perfRows }, { data: evalRows, error: evalErr }] = await Promise.all([
       skillQuery,
       activeOrgId
         ? supabase.from('skill_performance').select('*').or(`org_id.is.null,org_id.eq.${activeOrgId}`)
         : supabase.from('skill_performance').select('*').is('org_id', null),
+      evalQuery,
     ])
 
     if (skillErr) {
@@ -238,8 +265,14 @@ export default function Skills() {
       if (!skill.project_id) return true
       return skill.project_id === activeProjectId
     })
+    const visibleEvals = ((evalRows ?? []) as EvalScenario[]).filter(scenario => {
+      if (!scenario.project_id) return true
+      return scenario.project_id === activeProjectId
+    })
 
     setSkills(visible)
+    setEvalScenarios(visibleEvals)
+    setEvalError(evalErr?.message ?? null)
     setPerformance(Object.fromEntries(
       ((perfRows ?? []) as SkillPerformance[]).map(row => [row.skill_id, row]),
     ))
@@ -271,6 +304,31 @@ export default function Skills() {
     workspace: skills.filter(s => scopeOf(s) === 'workspace').length,
     client: skills.filter(s => scopeOf(s) === 'client').length,
   }), [skills])
+
+  const constitutionSkills = useMemo(() => {
+    const constitutionalNames = new Set([
+      'Vera Constitution',
+      'Anti-Sycophancy Marketing Challenge',
+      'Evidence and Claim Discipline',
+      'Human Approval Gates',
+      'Vera Evaluation Rubric',
+    ])
+    const constitutionalTags = new Set([
+      'constitution',
+      'anti-sycophancy',
+      'approval',
+      'autonomy',
+      'claims',
+      'evidence',
+      'evaluation',
+      'operating-model',
+      'safety',
+    ])
+    return skills.filter(skill =>
+      constitutionalNames.has(skill.name) ||
+      (skill.tags ?? []).some(tag => constitutionalTags.has(tag))
+    )
+  }, [skills])
 
   function openNew(scope: FormScope = activeProject?.id ? 'client' : 'workspace') {
     setEditingId(null)
@@ -434,8 +492,8 @@ export default function Skills() {
     <div style={{ padding: space[8], maxWidth: 1180 }}>
       <PageHeader
         eyebrow="AI Settings"
-        title="Skills Library"
-        subtitle="Reusable operating rules for Vera: platform best practices, compliance checks, tone adaptation, gotchas, examples, and client-specific overrides."
+        title="Vera Intelligence"
+        subtitle="The operating system behind Vera: constitutional principles, reusable skills, and repeatable evaluation scenarios."
         actions={
           <div style={{ display: 'flex', gap: space[2] }}>
             <Button variant="secondary" leading={<Plus size={14} />} onClick={() => openNew('workspace')} disabled={!activeOrg}>
@@ -448,6 +506,18 @@ export default function Skills() {
         }
       />
 
+      <ViewTabs view={view} setView={setView} />
+
+      {view === 'constitution' && (
+        <ConstitutionView skills={constitutionSkills} loading={loading} />
+      )}
+
+      {view === 'evals' && (
+        <EvaluationSuite scenarios={evalScenarios} loading={loading} error={evalError} />
+      )}
+
+      {view === 'skills' && (
+        <>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: space[3], marginBottom: space[5] }}>
         <Metric icon={Sparkles} label="Global Vera" value={counts.global} tone={color.accent} />
         <Metric icon={Layers} label="Workspace" value={counts.workspace} tone={color.dotBlue} />
@@ -524,8 +594,10 @@ export default function Skills() {
           ))}
         </div>
       )}
+        </>
+      )}
 
-      {showForm && (
+      {view === 'skills' && showForm && (
         <SkillForm
           form={form}
           setForm={setForm}
@@ -538,6 +610,207 @@ export default function Skills() {
           onSave={saveSkill}
         />
       )}
+    </div>
+  )
+}
+
+function ViewTabs({ view, setView }: { view: ViewMode; setView: (view: ViewMode) => void }) {
+  const tabs: Array<{ id: ViewMode; label: string; icon: ElementType }> = [
+    { id: 'constitution', label: 'Constitution', icon: ShieldCheck },
+    { id: 'skills', label: 'Skills', icon: Zap },
+    { id: 'evals', label: 'Evaluation Suite', icon: Target },
+  ]
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', margin: `${space[2]} 0 ${space[5]}` }}>
+      <div style={{ display: 'inline-flex', gap: 2, padding: 3, borderRadius: radius.md, background: color.paper2, border: `1px solid ${color.line}` }}>
+        {tabs.map(tab => {
+          const active = view === tab.id
+          const Icon = tab.icon
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setView(tab.id)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 7,
+                border: 0,
+                borderRadius: radius.sm,
+                padding: '7px 11px',
+                background: active ? color.surface : 'transparent',
+                color: active ? color.ink : color.ghost,
+                boxShadow: active ? '0 1px 2px rgba(15, 23, 42, 0.08)' : 'none',
+                cursor: 'pointer',
+                fontSize: t.size.sm,
+                fontWeight: active ? t.weight.semibold : t.weight.medium,
+              }}
+            >
+              <Icon size={14} strokeWidth={1.9} />
+              {tab.label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function ConstitutionView({ skills, loading }: { skills: Skill[]; loading: boolean }) {
+  if (loading) {
+    return <div style={{ padding: space[8], color: color.ghost, fontSize: t.size.sm }}>Loading constitution...</div>
+  }
+  if (!skills.length) {
+    return (
+      <EmptyState
+        icon={<ShieldCheck size={28} />}
+        title="Constitution not seeded yet"
+        body="Apply the constitution migration to seed Vera's core operating skills."
+      />
+    )
+  }
+
+  const primary = skills.find(skill => skill.name === 'Vera Constitution')
+  const supporting = skills.filter(skill => skill.id !== primary?.id)
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.05fr) minmax(280px, 0.95fr)', gap: space[5] }}>
+      <section style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[5] }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: space[2], marginBottom: space[3] }}>
+          <span style={{ width: 32, height: 32, borderRadius: radius.sm, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: color.accent, background: color.accentSoft }}>
+            <ShieldCheck size={17} />
+          </span>
+          <div>
+            <h2 style={{ margin: 0, color: color.ink, fontSize: t.size.h3, fontWeight: t.weight.semibold }}>Vera Constitution</h2>
+            <p style={{ margin: '4px 0 0', color: color.ghost, fontSize: t.size.cap }}>Runtime principles Vera applies before strategy, copy, review, and tool use.</p>
+          </div>
+        </div>
+        {primary ? (
+          <>
+            <p style={{ margin: '0 0 12px', color: color.ink2, fontSize: t.size.sm, lineHeight: 1.55 }}>{primary.description}</p>
+            <pre style={{ whiteSpace: 'pre-wrap', margin: 0, color: color.ink, background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.sm, padding: space[4], fontSize: t.size.sm, lineHeight: 1.55, fontFamily: t.family.sans }}>
+              {primary.prompt_module}
+            </pre>
+          </>
+        ) : (
+          <p style={{ margin: 0, color: color.ghost, fontSize: t.size.sm }}>The core constitution skill is not present yet.</p>
+        )}
+      </section>
+
+      <section style={{ display: 'flex', flexDirection: 'column', gap: space[3] }}>
+        {supporting.map(skill => (
+          <div key={skill.id} style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[4] }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: space[2], marginBottom: space[2], flexWrap: 'wrap' }}>
+              <Badge dot={typeDot[skill.type]}>{skill.type}</Badge>
+              <Badge dot={confidenceColor[skill.confidence ?? 'medium']}>{skill.confidence ?? 'medium'}</Badge>
+            </div>
+            <h3 style={{ margin: 0, color: color.ink, fontSize: t.size.body, fontWeight: t.weight.semibold }}>{skill.name}</h3>
+            <p style={{ margin: '6px 0 0', color: color.ghost, fontSize: t.size.sm, lineHeight: 1.45 }}>{skill.description}</p>
+            {skill.gotchas?.length ? (
+              <div style={{ marginTop: space[3] }}>
+                <p style={{ margin: '0 0 5px', color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold }}>Failure modes</p>
+                <List items={skill.gotchas.slice(0, 4)} empty="No failure modes recorded." />
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </section>
+    </div>
+  )
+}
+
+function EvaluationSuite({ scenarios, loading, error }: { scenarios: EvalScenario[]; loading: boolean; error: string | null }) {
+  if (loading) {
+    return <div style={{ padding: space[8], color: color.ghost, fontSize: t.size.sm }}>Loading evaluation suite...</div>
+  }
+  if (error) {
+    return (
+      <EmptyState
+        icon={<Target size={28} />}
+        title="Evaluation schema needed"
+        body={error}
+      />
+    )
+  }
+  if (!scenarios.length) {
+    return (
+      <EmptyState
+        icon={<Target size={28} />}
+        title="No evaluation scenarios"
+        body="Apply the evaluation migration or create workspace scenarios for Vera QA."
+      />
+    )
+  }
+
+  const categories = Array.from(new Set(scenarios.map(s => s.category)))
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: space[5] }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: space[3] }}>
+        <Metric icon={Target} label="Scenarios" value={scenarios.length} tone={color.accent} />
+        <Metric icon={ShieldCheck} label="Categories" value={categories.length} tone={color.dotBlue} />
+        <Metric icon={BookOpen} label="System tests" value={scenarios.filter(s => s.is_system).length} tone={color.dotGreen} />
+        <Metric icon={BarChart3} label="Active" value={scenarios.filter(s => s.is_active).length} tone={color.dotViolet} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: space[4] }}>
+        {scenarios.map(scenario => (
+          <EvalScenarioCard key={scenario.id} scenario={scenario} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function EvalScenarioCard({ scenario }: { scenario: EvalScenario }) {
+  const rubric = Object.entries(scenario.rubric ?? {})
+  const copyPrompt = () => {
+    void navigator.clipboard?.writeText(scenario.prompt)
+  }
+
+  return (
+    <article style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[4], display: 'flex', flexDirection: 'column', gap: space[3] }}>
+      <div>
+        <div style={{ display: 'flex', gap: space[2], alignItems: 'center', flexWrap: 'wrap', marginBottom: space[2] }}>
+          <Badge dot={color.accent}>{scenario.category}</Badge>
+          {scenario.is_system && <Badge>System</Badge>}
+          {!scenario.is_active && <Badge>Inactive</Badge>}
+        </div>
+        <h2 style={{ margin: 0, color: color.ink, fontSize: t.size.body, fontWeight: t.weight.semibold }}>{scenario.name}</h2>
+        <p style={{ margin: '6px 0 0', color: color.ghost, fontSize: t.size.sm, lineHeight: 1.45 }}>{scenario.description}</p>
+      </div>
+
+      <div style={{ background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.sm, padding: space[3] }}>
+        <p style={{ margin: '0 0 5px', color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold }}>Test prompt</p>
+        <p style={{ margin: 0, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.45 }}>{scenario.prompt}</p>
+      </div>
+
+      <DetailMini title="Expected behavior" items={scenario.expected_behaviors} />
+      <DetailMini title="Failure modes" items={scenario.failure_modes} />
+
+      {rubric.length > 0 && (
+        <div>
+          <p style={{ margin: '0 0 6px', color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold }}>Rubric</p>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {rubric.map(([key, value]) => <Badge key={key}>{`${key.replaceAll('_', ' ')}: ${value}`}</Badge>)}
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: space[3] }}>
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+          {(scenario.tags ?? []).slice(0, 4).map(tag => <Badge key={tag}>{tag}</Badge>)}
+        </div>
+        <Button variant="secondary" size="sm" leading={<Copy size={13} />} onClick={copyPrompt}>Copy prompt</Button>
+      </div>
+    </article>
+  )
+}
+
+function DetailMini({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div>
+      <p style={{ margin: '0 0 6px', color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold }}>{title}</p>
+      <List items={(items ?? []).slice(0, 5)} empty="None recorded." />
     </div>
   )
 }
