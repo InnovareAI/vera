@@ -1,6 +1,11 @@
-import { createClient } from "npm:@supabase/supabase-js"
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js"
+import type { Database } from "./database.types.ts"
 
-export type AdminClient = ReturnType<typeof createClient<any>>
+export type AdminClient = SupabaseClient<Database>
+
+export function createAdminClient(url: string, serviceKey: string): AdminClient {
+  return createClient<Database>(url, serviceKey)
+}
 
 export function jsonError(message: string, status: number, corsHeaders: Record<string, string>) {
   return new Response(JSON.stringify({ error: message }), {
@@ -33,16 +38,18 @@ export async function requireOrgMember(
 ): Promise<{ ok: true; userId: string | null; service: boolean } | { ok: false; response: Response }> {
   const auth = await requireSignedInOrService(req, supabase, serviceKey, corsHeaders)
   if (!auth.ok || auth.service) return auth
+  if (!auth.userId) return { ok: false, response: jsonError("Unauthorized", 401, corsHeaders) }
+  const userId = auth.userId
 
   const { data, error } = await supabase
     .from("org_members")
     .select("role")
     .eq("org_id", orgId)
-    .eq("user_id", auth.userId)
+    .eq("user_id", userId)
     .maybeSingle()
   if (error) return { ok: false, response: jsonError(error.message, 500, corsHeaders) }
   if (!data) return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
-  return auth
+  return { ok: true, userId, service: false }
 }
 
 export async function requireProjectMember(
@@ -69,12 +76,14 @@ export async function requireProjectMember(
     return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
   }
   if (auth.service) return { ok: true, userId: null, orgId, service: true }
+  if (!auth.userId) return { ok: false, response: jsonError("Unauthorized", 401, corsHeaders) }
+  const userId = auth.userId
 
   const [{ data: orgMember }, { data: projectMember }] = await Promise.all([
-    supabase.from("org_members").select("role").eq("org_id", orgId).eq("user_id", auth.userId).maybeSingle(),
-    supabase.from("project_members").select("role").eq("project_id", projectId).eq("user_id", auth.userId).maybeSingle(),
+    supabase.from("org_members").select("role").eq("org_id", orgId).eq("user_id", userId).maybeSingle(),
+    supabase.from("project_members").select("role").eq("project_id", projectId).eq("user_id", userId).maybeSingle(),
   ])
-  if (orgMember || projectMember) return { ok: true, userId: auth.userId, orgId, service: false }
+  if (orgMember || projectMember) return { ok: true, userId, orgId, service: false }
   return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
 }
 

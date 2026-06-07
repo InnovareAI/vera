@@ -12,6 +12,8 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from 'npm:@supabase/supabase-js'
+import type { Database, Json } from '../_shared/database.types.ts'
+import type { AdminClient } from '../_shared/auth.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -26,7 +28,7 @@ const STORAGE_BUCKET = 'vera-images'
 
 type Frame = { image_prompt?: string; text?: string | null }
 
-async function uploadToStorage(supabase: ReturnType<typeof createClient>, orgId: string, source: string): Promise<string> {
+async function uploadToStorage(supabase: AdminClient, orgId: string, source: string): Promise<string> {
   let bytes: Uint8Array
   let contentType: string
   if (source.startsWith('data:')) {
@@ -50,7 +52,7 @@ async function uploadToStorage(supabase: ReturnType<typeof createClient>, orgId:
 
 // Render one frame through the existing generate-image function (SSE), returning
 // a stored public URL.
-async function renderFrame(supabase: ReturnType<typeof createClient>, orgId: string, prompt: string, aspect: string): Promise<string> {
+async function renderFrame(supabase: AdminClient, orgId: string, prompt: string, aspect: string): Promise<string> {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-image`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_KEY}`, 'apikey': SERVICE_KEY },
@@ -82,7 +84,7 @@ async function renderFrame(supabase: ReturnType<typeof createClient>, orgId: str
   try { return await uploadToStorage(supabase, orgId, url) } catch { return url }
 }
 
-async function processJob(supabase: ReturnType<typeof createClient>, jobId: string, postId: string | null, frames: Frame[], aspect: string) {
+async function processJob(supabase: AdminClient, jobId: string, postId: string | null, frames: Frame[], aspect: string) {
   // Find the post's org for storage pathing.
   let orgId = ''
   if (postId) {
@@ -105,7 +107,7 @@ async function processJob(supabase: ReturnType<typeof createClient>, jobId: stri
       const meta = (ex && typeof (ex as { media_metadata?: unknown }).media_metadata === 'object' && (ex as { media_metadata?: unknown }).media_metadata)
         ? (ex as { media_metadata: Record<string, unknown> }).media_metadata : {}
       meta.frames = built
-      await supabase.from('content_posts').update({ media_url: built[0].url, media_type: 'carousel', media_metadata: meta }).eq('id', postId)
+      await supabase.from('content_posts').update({ media_url: built[0].url, media_type: 'carousel', media_metadata: meta as Json }).eq('id', postId)
     }
   }
   // Each frame gets up to 3 attempts — image endpoints throw the odd transient
@@ -143,7 +145,7 @@ Deno.serve(async (req) => {
     const frames = Array.isArray(body.frames) ? body.frames : []
     if (!frames.length) return new Response(JSON.stringify({ error: 'no frames' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     const aspect = body.aspect ?? body.aspect_ratio ?? 'square_hd'
-    const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
+    const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
 
     // Enqueue the job (durable record), then return immediately and process in
     // the background — the request isn't held open for the render.

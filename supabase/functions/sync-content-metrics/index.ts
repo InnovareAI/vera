@@ -621,7 +621,8 @@ function metaInsightMap(value: unknown): Record<string, number> {
       if (Number.isFinite(parsed)) map[name] = parsed
     }
     if (metricValue && typeof metricValue === "object" && name === "post_reactions_by_type_total") {
-      map.reactions = Object.values(metricValue as Record<string, unknown>).reduce((sum, raw) => sum + (toNumber(raw) ?? 0), 0)
+      map.reactions = Object.values(metricValue as Record<string, unknown>)
+        .reduce<number>((sum, raw) => sum + (toNumber(raw) ?? 0), 0)
     }
   }
   return map

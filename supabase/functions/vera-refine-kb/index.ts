@@ -147,7 +147,10 @@ Rules:
         }],
       })
 
-      const text = prop.content.filter((b): b is { type: 'text'; text: string } => b.type === 'text').map(b => b.text).join('')
+      const text = prop.content
+        .filter(b => b.type === 'text')
+        .map(b => b.text)
+        .join('')
       let parsed: { proposals?: Array<{ topic: string; themes?: string[]; source_id_prefixes: string[]; rationale: string; confidence: number }> } = {}
       try {
         parsed = JSON.parse(text.replace(/^```(json)?\s*|\s*```$/g, '').trim())

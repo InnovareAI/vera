@@ -29,6 +29,8 @@
 
 import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
+import type { Database } from '../_shared/database.types.ts'
+import type { AdminClient } from '../_shared/auth.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -216,7 +218,7 @@ function vec(v: number[]): string {
 // Storage and return a stable public URL. Replaces the previous flow where
 // base64 inlined into the SSE stream and never got persisted.
 async function uploadImageToStorage(
-  supabase: ReturnType<typeof createClient>,
+  supabase: AdminClient,
   orgId: string,
   source: string,
 ): Promise<string> {
@@ -619,7 +621,7 @@ interface WorkspaceContext {
 // so per-project rows can coexist with the org default without erroring. Returns
 // the { data } shape so existing callers (brandRes.data) are unchanged.
 async function loadBrandVoice(
-  supabase: ReturnType<typeof createClient>,
+  supabase: AdminClient,
   orgId: string,
   projectId?: string | null,
 ): Promise<{ data: Record<string, unknown> | null }> {
@@ -633,7 +635,7 @@ async function loadBrandVoice(
 }
 
 async function loadContext(
-  supabase: ReturnType<typeof createClient>,
+  supabase: AdminClient,
   orgId: string,
   userId: string | null,
   lastUserMessage?: string,
@@ -734,14 +736,14 @@ async function loadContext(
     projectKnowledge: projectId && lastUserMessage
       ? await retrieveProjectKnowledge(supabase, projectId, lastUserMessage)
       : [],
-    observations: await loadObservations(supabase, orgId, projectId),
+    observations: await loadObservations(supabase, orgId, projectId ?? null),
   }
 }
 
 // Open observations for the active org (scoped to project when set).
 // Capped at 6 — anything more crowds the system prompt.
 async function loadObservations(
-  supabase: ReturnType<typeof createClient>,
+  supabase: AdminClient,
   orgId: string,
   projectId: string | null,
 ): Promise<WorkspaceContext['observations']> {
@@ -761,7 +763,7 @@ async function loadObservations(
 // Project lookup — verifies the supplied project_id belongs to the org
 // (defense against client mismatch), returns the row that drives scope.
 async function loadActiveProject(
-  supabase: ReturnType<typeof createClient>,
+  supabase: AdminClient,
   orgId: string,
   projectId: string,
 ): Promise<WorkspaceContext['activeProject']> {
@@ -792,14 +794,16 @@ async function loadActiveProject(
 // Same pattern as retrieveKbHits but scoped to project_knowledge instead
 // of the workspace KB.
 async function retrieveProjectKnowledge(
-  supabase: ReturnType<typeof createClient>,
+  supabase: AdminClient,
   projectId: string,
   query: string,
 ): Promise<WorkspaceContext['projectKnowledge']> {
   if (query.length < 24) return []
   try {
     const embedding = await embedText(query)
-    const { data, error } = await supabase.rpc('project_knowledge_search', {
+    const { data, error } = await (supabase as unknown as {
+      rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>
+    }).rpc('project_knowledge_search', {
       p_project_id: projectId,
       p_embedding: embedding,
       p_match_count: 5,
@@ -811,7 +815,7 @@ async function retrieveProjectKnowledge(
       // semantically retrieved but the project still scopes the chat.
       return []
     }
-    return (data ?? []) as WorkspaceContext['projectKnowledge']
+    return (data ?? []) as unknown as WorkspaceContext['projectKnowledge']
   } catch {
     return []
   }
@@ -820,7 +824,7 @@ async function retrieveProjectKnowledge(
 // Quick KB stats (count of raw, count of articles, 5 most-recent titles).
 // Surfaced in the workspace context so VERA knows the KB exists + has scale.
 async function loadKbStats(
-  supabase: ReturnType<typeof createClient>,
+  supabase: AdminClient,
   orgId: string,
 ): Promise<WorkspaceContext['kbStats']> {
   const [rawRes, artRes, recentRes] = await Promise.all([
@@ -840,7 +844,7 @@ async function loadKbStats(
 // real source material before responding — without needing to explicitly
 // call kb_search.
 async function retrieveKbHits(
-  supabase: ReturnType<typeof createClient>,
+  supabase: AdminClient,
   orgId: string,
   query: string,
 ): Promise<WorkspaceContext['kbHits']> {
@@ -1436,7 +1440,7 @@ async function executeTool(
     orgId: string
     userId: string | null
     projectId: string | null
-    supabase: ReturnType<typeof createClient>
+    supabase: AdminClient
     supabaseUrl: string
     serviceKey: string
     emit: (event: Record<string, unknown>) => void
@@ -1474,7 +1478,7 @@ async function executeTool(
           row.hashtags = (input.hashtags as unknown[]).map(h => String(h).replace(/^#/, ''))
         }
         const { data, error } = await ctx.supabase
-          .from('content_posts').insert(row).select('*').single()
+          .from('content_posts').insert(row as Database['public']['Tables']['content_posts']['Insert']).select('*').single()
         if (error) return { result: `Couldn't save the draft: ${error.message}` }
         const post = data as Record<string, unknown>
         // Emit the copy immediately so the card appears fast…
@@ -1718,7 +1722,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           return { result: "I couldn't tell whether to change the copy, image, or video — ask the operator to be a touch more specific." }
         }
         updates.updated_at = new Date().toISOString()
-        const { data: updated, error: upErr } = await ctx.supabase.from('content_posts').update(updates).eq('id', postId).select('*').single()
+        const { data: updated, error: upErr } = await ctx.supabase.from('content_posts').update(updates as Database['public']['Tables']['content_posts']['Update']).eq('id', postId).select('*').single()
         if (upErr) return { result: `Couldn't save the change: ${upErr.message}` }
         if (updated) ctx.emit({ type: 'draft', post: updated })
         return { result: `Updated the ${changed || 'post'} on "${(updated as Record<string, unknown>)?.title ?? 'the post'}". Reply in ONE short line telling the operator what you changed.` }
@@ -1925,7 +1929,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         if (!frames.length) return { result: 'No carousel frames provided — pass one entry per frame.' }
         const aspect = (input.aspect_ratio as string) ?? 'square_hd'
         // Resolve the post to attach to (the caption save_draft just created).
-        let postId = (input.post_id as string) ?? null
+        let postId: string | null = typeof input.post_id === 'string' ? input.post_id : null
         if (!postId) {
           let q = ctx.supabase.from('content_posts').select('id').eq('org_id', ctx.orgId).is('media_url', null).order('created_at', { ascending: false }).limit(1)
           if (ctx.projectId) q = q.eq('project_id', ctx.projectId)
@@ -2112,6 +2116,10 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
 
       case 'create_skill': {
         const { name, type, description, prompt_module } = input as Record<string, string>
+        const skillTypes = new Set(['platform', 'content', 'brand', 'persona', 'enrichment', 'tool'])
+        const skillType = skillTypes.has(type)
+          ? type as Database['public']['Enums']['skill_type']
+          : 'content'
         const toExampleItems = (items: unknown) =>
           Array.isArray(items)
             ? items.map(item => ({ text: String(item).trim() })).filter(item => item.text)
@@ -2119,7 +2127,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         const { error } = await ctx.supabase.from('skills').insert({
           org_id: ctx.orgId,
           project_id: ctx.projectId ?? null,
-          type, name, description, prompt_module,
+          type: skillType, name, description, prompt_module,
           trigger_description: String(input.trigger_description ?? ''),
           gotchas: Array.isArray(input.gotchas) ? input.gotchas.map(item => String(item).trim()).filter(Boolean) : [],
           good_examples: toExampleItems(input.good_examples),
@@ -2142,13 +2150,14 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         const arrayFields = new Set(['tone', 'forbidden_phrases', 'required_phrases', 'writing_rules'])
         const { data: existing } = await ctx.supabase.from('brand_voice')
           .select('id, ' + field).eq('org_id', ctx.orgId).maybeSingle()
-        if (!existing?.id) {
+        const existingRow = existing as ({ id: string } & Record<string, unknown>) | null
+        if (!existingRow?.id) {
           // Bootstrap a row if none exists
           await ctx.supabase.from('brand_voice').insert({ org_id: ctx.orgId })
         }
         let newValue: unknown
         if (arrayFields.has(field)) {
-          const current = ((existing as Record<string, unknown> | null)?.[field] as string[] | null) ?? []
+          const current = (existingRow?.[field] as string[] | null) ?? []
           if (operation === 'append') newValue = Array.from(new Set([...current, value]))
           else if (operation === 'remove') newValue = current.filter(v => v !== value)
           else newValue = [value]
@@ -2156,7 +2165,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           newValue = value
         }
         const { error } = await ctx.supabase.from('brand_voice')
-          .update({ [field]: newValue, updated_at: new Date().toISOString() })
+          .update({ [field]: newValue, updated_at: new Date().toISOString() } as Database['public']['Tables']['brand_voice']['Update'])
           .eq('org_id', ctx.orgId)
         if (error) return { result: `Brand voice update failed: ${error.message}` }
         return { result: `Brand voice updated: ${field} (${operation}) → ${typeof newValue === 'object' ? JSON.stringify(newValue).slice(0, 200) : value.slice(0, 200)}` }
@@ -2618,8 +2627,6 @@ Do NOT fabricate claims. If sources contradict, surface the contradiction.`,
   }
 }
 
-type AdminClient = ReturnType<typeof createClient<any>>
-
 function jsonError(message: string, status: number) {
   return new Response(JSON.stringify({ error: message }), {
     status,
@@ -2723,7 +2730,7 @@ Deno.serve(async (req) => {
   }
 
   const anthropic = new Anthropic({ apiKey: anthropicKey })
-  const supabase = createClient(
+  const supabase = createClient<Database>(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
@@ -2824,8 +2831,16 @@ Deno.serve(async (req) => {
       // tool_use / tool_result blocks during the loop.
       type CBlock =
         | { type: 'text'; text: string }
+        | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
         | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
         | { type: 'tool_result'; tool_use_id: string; content: string }
+      type StreamEvent = {
+        type: string
+        message?: { usage?: Record<string, number | undefined> }
+        content_block?: { type: string; id?: string; name?: string }
+        delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: string }
+        usage?: { output_tokens?: number }
+      }
       type Msg = { role: 'user' | 'assistant'; content: string | CBlock[] }
       const convo: Msg[] = messages.map(m => ({ role: m.role, content: m.content }))
 
@@ -2852,7 +2867,7 @@ Deno.serve(async (req) => {
             stream: true,
           }
           if (enableThinking) {
-            (createParams as Record<string, unknown>).thinking = {
+            (createParams as unknown as Record<string, unknown>).thinking = {
               type: 'enabled', budget_tokens: 3000,
             }
           }
@@ -2864,8 +2879,8 @@ Deno.serve(async (req) => {
           let currentToolUse: { id: string; name: string; inputBuf: string } | null = null
           let stopReason: string | null = null
 
-          for await (const event of response) {
-            if (event.type === 'message_start' && event.message.usage) {
+          for await (const event of response as AsyncIterable<StreamEvent>) {
+            if (event.type === 'message_start' && event.message?.usage) {
               const u = event.message.usage as {
                 input_tokens?: number
                 cache_read_input_tokens?: number

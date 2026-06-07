@@ -21,7 +21,8 @@
 
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
-import { requireProjectMember } from '../_shared/auth.ts'
+import type { Database, Json } from '../_shared/database.types.ts'
+import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import { extractText, getDocumentProxy } from 'npm:unpdf@0.12.1'
 import mammoth from 'npm:mammoth@1.8.0'
 
@@ -135,7 +136,7 @@ Deno.serve(async (req) => {
   const project_id = body.project_id as string
   if (!project_id) return json(400, { error: 'project_id required' })
 
-  const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
+  const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
   const auth = await requireProjectMember(req, supabase, SERVICE_KEY, project_id, cors)
   if (!auth.ok) return auth.response
 
@@ -254,7 +255,7 @@ Deno.serve(async (req) => {
 // Falls back silently on error — the knowledge row stays usable for
 // retrieval even if classification fails.
 async function classifyAndStore(
-  supabase: ReturnType<typeof createClient>,
+  supabase: AdminClient,
   knowledgeId: string,
   content: string,
 ): Promise<void> {
@@ -326,7 +327,7 @@ Suggestion examples:
     await supabase.from('project_knowledge').update({
       kind: parsed.kind ?? 'other',
       summary: parsed.summary ?? null,
-      extracted: parsed.extracted ?? null,
+      extracted: (parsed.extracted ?? null) as Json | null,
       suggestion: parsed.suggestion ?? null,
       classified_at: new Date().toISOString(),
     }).eq('id', knowledgeId)
@@ -337,7 +338,7 @@ Suggestion examples:
 
 // ─── ingestText — chunks, embeds, writes to project_knowledge ────────
 async function ingestText(
-  supabase: ReturnType<typeof createClient>,
+  supabase: AdminClient,
   projectId: string,
   title: string,
   content: string,
@@ -368,7 +369,7 @@ async function ingestText(
       source_url: sourceUrl,
       file_name: fileName,
       file_size: fileSize,
-      embedding: headEmbedding,
+      embedding: headEmbedding as unknown as string,
     })
     .select()
     .single()
@@ -377,6 +378,7 @@ async function ingestText(
   // Agentic next step — VERA classifies the doc and proposes an action.
   // Fire-and-forget so the upload response stays fast; the UI polls or
   // re-fetches and shows the classification when ready (typically 1-3s).
+  // @ts-expect-error EdgeRuntime is provided by the Supabase edge runtime.
   EdgeRuntime.waitUntil(classifyAndStore(supabase, row.id as string, content))
 
   return json(200, { ok: true, id: row.id, chunks_ingested: chunks.length })

@@ -19,7 +19,8 @@
 
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
-import { requireObservationMember } from '../_shared/auth.ts'
+import type { Database } from '../_shared/database.types.ts'
+import { requireObservationMember, type AdminClient } from '../_shared/auth.ts'
 
 const cors = {
   'Access-Control-Allow-Origin':  '*',
@@ -39,7 +40,7 @@ Deno.serve(async (req) => {
   let body: { observation_id?: string }
   try { body = await req.json() } catch { return json(400, { error: 'invalid json' }) }
 
-  const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
+  const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
   const auth = await requireObservationMember(req, supabase, SERVICE_KEY, body.observation_id, cors)
   if (!auth.ok) return auth.response
   if (!body.observation_id) return json(400, { error: 'observation_id required' })
@@ -65,10 +66,12 @@ Deno.serve(async (req) => {
   const kind = obs.action_kind as string
   switch (kind) {
     case 'run_audit':
+      // @ts-expect-error EdgeRuntime is provided by the Supabase edge runtime.
       EdgeRuntime.waitUntil(runAudit(supabase, obs))
       return json(200, { ok: true, action: kind, status: 'started' })
 
     case 'draft_from_campaign':
+      // @ts-expect-error EdgeRuntime is provided by the Supabase edge runtime.
       EdgeRuntime.waitUntil(draftFromCampaign(supabase, obs))
       return json(200, { ok: true, action: kind, status: 'started' })
 
@@ -91,7 +94,7 @@ Deno.serve(async (req) => {
 })
 
 // ─── runAudit ─────────────────────────────────────────────────────────
-async function runAudit(supabase: ReturnType<typeof createClient>, obs: Record<string, unknown>) {
+async function runAudit(supabase: AdminClient, obs: Record<string, unknown>) {
   const orgId = (obs.action_payload as Record<string, unknown> | null)?.org_id as string
     ?? obs.org_id as string
   if (!orgId) return
@@ -142,7 +145,7 @@ async function runAudit(supabase: ReturnType<typeof createClient>, obs: Record<s
 }
 
 // ─── draftFromCampaign ────────────────────────────────────────────────
-async function draftFromCampaign(supabase: ReturnType<typeof createClient>, obs: Record<string, unknown>) {
+async function draftFromCampaign(supabase: AdminClient, obs: Record<string, unknown>) {
   const payload = (obs.action_payload as Record<string, unknown> | null) ?? {}
   const campaignId = payload.campaign_id as string | undefined
   if (!campaignId) {

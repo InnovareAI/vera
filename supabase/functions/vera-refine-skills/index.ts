@@ -198,8 +198,9 @@ Deno.serve(async (req) => {
       })
 
       const text = response.content
-        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-        .map(b => b.text).join('')
+        .filter(b => b.type === 'text')
+        .map(b => b.text)
+        .join('')
       const cleaned = text.replace(/^```(json)?\s*|\s*```$/g, '').trim()
 
       let refinement: Refinement

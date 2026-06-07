@@ -197,7 +197,10 @@ Required output JSON (no other keys):
     }],
   })
 
-  const text = resp.content.filter((b): b is { type: 'text'; text: string } => b.type === 'text').map(b => b.text).join('')
+  const text = resp.content
+    .filter(b => b.type === 'text')
+    .map(b => b.text)
+    .join('')
   const cleaned = text.replace(/^```(json)?\s*|\s*```$/g, '').trim()
   let parsed: Record<string, unknown>
   try {
@@ -352,14 +355,15 @@ async function discoverSitemapUrls(base: URL): Promise<Array<{ url: string; last
 }
 
 function parseSitemapXml(xml: string): Array<{ url: string; lastmod?: string }> {
-  return [...xml.matchAll(/<url>[\s\S]*?<\/url>/g)]
-    .map(m => {
-      const block = m[0]
-      const loc = block.match(/<loc>(.+?)<\/loc>/)?.[1]?.trim()
-      const lastmod = block.match(/<lastmod>(.+?)<\/lastmod>/)?.[1]?.trim()
-      return loc ? { url: loc, lastmod } : null
-    })
-    .filter((x): x is { url: string; lastmod?: string } => x !== null)
+  const urls: Array<{ url: string; lastmod?: string }> = []
+  for (const match of xml.matchAll(/<url>[\s\S]*?<\/url>/g)) {
+    const block = match[0]
+    const loc = block.match(/<loc>(.+?)<\/loc>/)?.[1]?.trim()
+    const lastmod = block.match(/<lastmod>(.+?)<\/lastmod>/)?.[1]?.trim()
+    if (!loc) continue
+    urls.push(lastmod ? { url: loc, lastmod } : { url: loc })
+  }
+  return urls
 }
 
 function sameDomain(url: string, base: URL): boolean {

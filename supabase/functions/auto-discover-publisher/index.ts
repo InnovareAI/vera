@@ -177,10 +177,10 @@ Deno.serve(async (req) => {
         : 'We couldn\'t auto-detect the repo. Add the GitHub repo (owner/name) and a fine-grained PAT with Contents: Read+Write.',
       fields: [
         ...(hint.repo ? [] : [
-          { name: 'repo', label: 'GitHub repo', type: 'text',
+          { name: 'repo', label: 'GitHub repo', type: 'text' as const,
             placeholder: 'owner/repo-name', note: 'Where your blog content lives.' },
         ]),
-        { name: 'github_pat', label: 'Personal Access Token', type: 'password',
+        { name: 'github_pat', label: 'Personal Access Token', type: 'password' as const,
           placeholder: 'github_pat_...', note: 'Fine-grained PAT with Contents: Read+Write on this repo.' },
       ],
     }

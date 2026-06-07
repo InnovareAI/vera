@@ -28,6 +28,19 @@ const USER_AGENT = 'Mozilla/5.0 (compatible; InnovareAI-SEO-Audit/0.1; +https://
 const MAX_INNER_PAGES = 4
 const MAX_PAGE_SIZE = 500_000  // 500KB cap per page
 
+type PageSpeedResult = {
+  lighthouseResult?: {
+    categories?: {
+      performance?: { score?: number | null }
+      [key: string]: unknown
+    }
+  }
+  loadingExperience?: {
+    metrics?: Record<string, unknown>
+  }
+  [key: string]: unknown
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return jsonError('Method not allowed', 405)
@@ -156,7 +169,7 @@ async function fetchText(url: string): Promise<string | null> {
   } catch { return null }
 }
 
-async function fetchPageSpeed(url: string): Promise<Record<string, unknown> | null> {
+async function fetchPageSpeed(url: string): Promise<PageSpeedResult | null> {
   try {
     const base = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed`
     const u = new URL(base)

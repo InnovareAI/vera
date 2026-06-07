@@ -15,7 +15,8 @@
 
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
-import { requirePublisherActionAccess } from '../_shared/auth.ts'
+import type { Database } from '../_shared/database.types.ts'
+import { requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
 import { renderMarkdown, slugify } from '../_shared/markdown.ts'
 import { makeGhostJwt } from '../_shared/ghost-jwt.ts'
 import type {
@@ -39,7 +40,7 @@ Deno.serve(async (req) => {
   try { body = await req.json() } catch { return json({ error: 'invalid JSON' }, 400) }
 
   const action = body.action as string
-  const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
+  const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
   const auth = await requirePublisherActionAccess(req, supabase, SERVICE_KEY, body, corsHeaders)
   if (!auth.ok) return auth.response
 
@@ -60,7 +61,7 @@ Deno.serve(async (req) => {
 })
 
 // ─── connect ────────────────────────────────────────────────────────────────
-async function connect(supabase: ReturnType<typeof createClient>, input: Record<string, unknown>): Promise<{
+async function connect(supabase: AdminClient, input: Record<string, unknown>): Promise<{
   ok: boolean; publisher_id?: string; health?: HealthCheckResult; error?: PublisherError
 }> {
   const org_id = input.org_id as string
@@ -151,7 +152,7 @@ async function connect(supabase: ReturnType<typeof createClient>, input: Record<
 }
 
 // ─── health_check ───────────────────────────────────────────────────────────
-async function health_check(supabase: ReturnType<typeof createClient>, input: Record<string, unknown>): Promise<HealthCheckResult> {
+async function health_check(supabase: AdminClient, input: Record<string, unknown>): Promise<HealthCheckResult> {
   const publisher_id = input.publisher_id as string
   const { config, creds } = await loadPublisher(supabase, publisher_id)
   const base_url = config.base_url as string
@@ -177,7 +178,7 @@ async function health_check(supabase: ReturnType<typeof createClient>, input: Re
 }
 
 // ─── dry_run ────────────────────────────────────────────────────────────────
-async function dry_run(supabase: ReturnType<typeof createClient>, input: Record<string, unknown>): Promise<DryRunResult> {
+async function dry_run(supabase: AdminClient, input: Record<string, unknown>): Promise<DryRunResult> {
   const post = input.post as PostInput
   // Ghost auto-suffixes colliding slugs server-side; we just render + propose.
   const rendered_html = renderMarkdown(post.body_md)
@@ -201,7 +202,7 @@ async function dry_run(supabase: ReturnType<typeof createClient>, input: Record<
 }
 
 // ─── publish ────────────────────────────────────────────────────────────────
-async function publish(supabase: ReturnType<typeof createClient>, input: Record<string, unknown>): Promise<PublishResult> {
+async function publish(supabase: AdminClient, input: Record<string, unknown>): Promise<PublishResult> {
   const publisher_id = input.publisher_id as string
   const post = input.post as PostInput
   const idempotency_key = input.idempotency_key as string
@@ -211,6 +212,10 @@ async function publish(supabase: ReturnType<typeof createClient>, input: Record<
   if (!idempotency_key) {
     return { ok: false, attempt_id: '', latency_ms: 0, error: typed('validation_failed',
       'idempotency_key required.', 'Pass a unique key per logical publish.') }
+  }
+
+  if (!post_id) {
+    return { ok: false, attempt_id: '', latency_ms: 0, error: typed('validation_failed', 'post_id required.', 'Publish actions must target a content post.') }
   }
 
   const { data: prior } = await supabase.from('publish_attempts')
@@ -224,7 +229,7 @@ async function publish(supabase: ReturnType<typeof createClient>, input: Record<
   }
 
   const { data: lockData } = await supabase.rpc('acquire_publish_lock', {
-    p_post_id: post_id, p_publisher_id: publisher_id, p_locked_by: null,
+    p_post_id: post_id, p_publisher_id: publisher_id, p_locked_by: null as unknown as string,
   })
   if (!lockData) {
     return { ok: false, attempt_id: '', latency_ms: Date.now() - t0, error: typed('validation_failed',
@@ -304,7 +309,7 @@ async function publish(supabase: ReturnType<typeof createClient>, input: Record<
 }
 
 // ─── verify ─────────────────────────────────────────────────────────────────
-async function verify(supabase: ReturnType<typeof createClient>, input: Record<string, unknown>): Promise<VerifyResult> {
+async function verify(supabase: AdminClient, input: Record<string, unknown>): Promise<VerifyResult> {
   const publisher_id = input.publisher_id as string
   const remote_id = input.remote_id as string
   const { config, creds } = await loadPublisher(supabase, publisher_id)
@@ -328,7 +333,7 @@ async function verify(supabase: ReturnType<typeof createClient>, input: Record<s
 }
 
 // ─── unpublish ──────────────────────────────────────────────────────────────
-async function unpublish(supabase: ReturnType<typeof createClient>, input: Record<string, unknown>): Promise<UnpublishResult> {
+async function unpublish(supabase: AdminClient, input: Record<string, unknown>): Promise<UnpublishResult> {
   const publisher_id = input.publisher_id as string
   const remote_id = input.remote_id as string
   const { config, creds } = await loadPublisher(supabase, publisher_id)
@@ -357,7 +362,7 @@ async function unpublish(supabase: ReturnType<typeof createClient>, input: Recor
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
-async function loadPublisher(supabase: ReturnType<typeof createClient>, publisher_id: string):
+async function loadPublisher(supabase: AdminClient, publisher_id: string):
 Promise<{ config: Record<string, unknown>; creds: { api_key: string }; org_id: string }> {
   const { data: pub } = await supabase.from('publishers')
     .select('config, org_id').eq('id', publisher_id).maybeSingle()
@@ -367,14 +372,14 @@ Promise<{ config: Record<string, unknown>; creds: { api_key: string }; org_id: s
   return { config: pub.config as Record<string, unknown>, creds: creds as { api_key: string }, org_id: pub.org_id as string }
 }
 
-async function updateHealth(supabase: ReturnType<typeof createClient>, id: string, status: 'healthy' | 'stale' | 'unknown', detail: string | null): Promise<void> {
+async function updateHealth(supabase: AdminClient, id: string, status: 'healthy' | 'stale' | 'unknown', detail: string | null): Promise<void> {
   await supabase.from('publishers').update({
     health_status: status, health_detail: detail, last_health_check: new Date().toISOString(),
   }).eq('id', id)
 }
 
 async function markAttempt(
-  supabase: ReturnType<typeof createClient>, attempt_id: string,
+  supabase: AdminClient, attempt_id: string,
   outcome: 'success' | 'failed', error_code: string | null,
   error_message: string | null, recovery_action: string | null,
   extras?: Record<string, unknown>,
