@@ -24,6 +24,7 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js"
+import { requireSignedInOrService } from "../_shared/auth.ts"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -50,14 +51,16 @@ Deno.serve(async (req) => {
     return jsonError("Invalid JSON body", 400)
   }
 
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+  const auth = await requireSignedInOrService(req, supabase, SUPABASE_SERVICE_ROLE_KEY, corsHeaders)
+  if (!auth.ok) return auth.response
+
   const post_id = body.post_id as string | undefined
   const repo = (body.repo as string | undefined) ?? DEFAULT_REPO
   const autoMarkPosted = body.auto_mark_posted !== false
 
   if (!post_id) return jsonError("post_id is required", 400)
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return jsonError(`Invalid repo format: ${repo}`, 400)
-
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
   // 1. Fetch the post
   const { data: post, error: postErr } = await supabase

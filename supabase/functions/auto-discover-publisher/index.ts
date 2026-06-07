@@ -29,6 +29,8 @@
 // }
 
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
+import { createClient } from 'npm:@supabase/supabase-js'
+import { requireSignedInOrService } from '../_shared/auth.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -37,10 +39,14 @@ const corsHeaders = {
 }
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405)
+  const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
+  const auth = await requireSignedInOrService(req, supabase, SERVICE_KEY, corsHeaders)
+  if (!auth.ok) return auth.response
 
   const { url: rawUrl } = await req.json().catch(() => ({}))
   if (!rawUrl || typeof rawUrl !== 'string') {

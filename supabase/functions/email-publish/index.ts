@@ -21,6 +21,7 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js"
+import { requireSignedInOrService } from "../_shared/auth.ts"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,6 +48,10 @@ Deno.serve(async (req) => {
     return jsonError("Invalid JSON body", 400)
   }
 
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+  const auth = await requireSignedInOrService(req, supabase, SUPABASE_SERVICE_ROLE_KEY, corsHeaders)
+  if (!auth.ok) return auth.response
+
   const post_id = body.post_id as string | undefined
   const rawRecipients = body.recipients
   const fromEmail = (body.from_email as string | undefined) ?? POSTMARK_FROM_EMAIL
@@ -62,8 +67,6 @@ Deno.serve(async (req) => {
     .filter(r => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r))
   if (!recipients.length) return jsonError("No valid email addresses in recipients", 400)
   if (recipients.length > 100) return jsonError("Too many recipients (max 100 per send)", 400)
-
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
   // 1. Fetch the post
   const { data: post, error: postErr } = await supabase

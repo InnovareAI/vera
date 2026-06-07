@@ -19,6 +19,7 @@
 
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
+import { requireSignedInOrService } from '../_shared/auth.ts'
 
 const cors = {
   'Access-Control-Allow-Origin':  '*',
@@ -40,6 +41,8 @@ Deno.serve(async (req) => {
   if (!body.observation_id) return json(400, { error: 'observation_id required' })
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
+  const auth = await requireSignedInOrService(req, supabase, SERVICE_KEY, cors)
+  if (!auth.ok) return auth.response
 
   const { data: obs, error: obsErr } = await supabase
     .from('agent_observations')
