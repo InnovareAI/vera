@@ -720,6 +720,8 @@ export function ClientIntegrationsCard() {
     const url = new URL(window.location.href)
     const unipileStatus = url.searchParams.get('unipile_status')
     if (unipileStatus !== 'success' && unipileStatus !== 'error') return
+    const requestedProjectId = url.searchParams.get('project_id')
+    if (requestedProjectId && project.id !== requestedProjectId) return
 
     const cleanUrl = () => {
       url.searchParams.delete('unipile_status')
@@ -930,6 +932,7 @@ export function ClientIntegrationsCard() {
       const returnUrl = new URL('/settings', window.location.origin)
       returnUrl.searchParams.set('tab', 'integrations')
       returnUrl.searchParams.set('provider', selectedProvider)
+      returnUrl.searchParams.set('project_id', activeProject.id)
 
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -976,6 +979,7 @@ export function ClientIntegrationsCard() {
       const returnUrl = new URL('/settings', window.location.origin)
       returnUrl.searchParams.set('tab', 'integrations')
       returnUrl.searchParams.set('provider', selectedProvider)
+      returnUrl.searchParams.set('project_id', activeProject.id)
 
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -1017,6 +1021,7 @@ export function ClientIntegrationsCard() {
       const returnUrl = new URL('/settings', window.location.origin)
       returnUrl.searchParams.set('tab', 'integrations')
       returnUrl.searchParams.set('provider', 'linkedin')
+      returnUrl.searchParams.set('project_id', activeProject.id)
 
       const response = await fetch(`${supabaseUrl.replace(/\/+$/, '')}/functions/v1/unipile-connect`, {
         method: 'POST',

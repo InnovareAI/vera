@@ -51,9 +51,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const location = useLocation()
   // URL pattern: /p/:projectSlug/* — when present, the slug in the URL
   // is authoritative for the active project. Otherwise we fall back to
-  // localStorage, then default, then first.
+  // project_id in the URL, localStorage, then default, then first.
   const urlMatch = useMatch('/p/:projectSlug/*')
   const urlSlug = urlMatch?.params.projectSlug ?? null
+  const queryProjectRef = new URLSearchParams(location.search).get('project_id')
 
   const [projects, setProjects] = useState<Project[]>([])
   const [activeSlug, setActiveSlug] = useState<string | null>(null)
@@ -103,6 +104,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         const stored = localStorage.getItem(storageKey)
         const pick =
           (urlSlug && list.find(p => p.slug === urlSlug)) ||
+          (queryProjectRef && list.find(p => p.id === queryProjectRef || p.slug === queryProjectRef)) ||
           (stored && list.find(p => p.slug === stored)) ||
           list.find(p => p.is_default) ||
           list[0] ||
@@ -131,6 +133,18 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [urlSlug, projects, activeSlug, activeOrg?.id])
+
+  useEffect(() => {
+    if (!queryProjectRef || projects.length === 0) return
+    const fromQuery = projects.find(p => p.id === queryProjectRef || p.slug === queryProjectRef)
+    if (fromQuery && fromQuery.slug !== activeSlug) {
+      queueMicrotask(() => setActiveSlug(fromQuery.slug))
+      if (activeOrg?.id) {
+        try { localStorage.setItem(`${ACTIVE_PROJECT_STORAGE}:${activeOrg.id}`, fromQuery.slug) }
+        catch { /* ignore */ }
+      }
+    }
+  }, [queryProjectRef, projects, activeSlug, activeOrg?.id])
 
   const switchProject = useCallback((slugOrId: string) => {
     const target = projects.find(p => p.slug === slugOrId || p.id === slugOrId)

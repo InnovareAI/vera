@@ -4,7 +4,7 @@ import type { BrandVoice, PlatformConfig } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 import {
   Settings2, Users, Mic2, Plug, Building2, Save,
-  Eye, EyeOff, CheckCircle2, XCircle, AlertCircle, Sun, Moon, Monitor
+  Eye, EyeOff, CheckCircle2, AlertCircle, Sun, Moon, Monitor
 } from 'lucide-react'
 import { PublishersCard } from '../components/PublishersCard'
 import { ClientIntegrationsCard } from '../components/ClientIntegrationsCard'
@@ -348,194 +348,6 @@ function BrandVoiceTab() {
   )
 }
 
-// ─── Unipile (LinkedIn) Connection ──────────────────────────────────────────
-// Standalone entry point for connect / reconnect / disconnect outside the
-// onboarding wizard. Handles the OAuth callback when this Settings page is
-// the return_url, so a "Reconnect" from here works without bouncing through
-// /onboarding/audit/:orgId.
-function UnipileConnectionCard() {
-  const { activeOrg, refetch } = useOrg()
-  const [state, setState] = useState<{
-    account_id: string | null
-    connected_at: string | null
-    last_check: string | null
-    health: 'healthy' | 'stale' | 'unknown' | 'never' | null
-  }>({ account_id: null, connected_at: null, last_check: null, health: null })
-  const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
-
-  // Load state + handle OAuth callback if we just returned from Unipile
-  useEffect(() => {
-    if (!activeOrg) return
-    const url = new URL(window.location.href)
-    const status = url.searchParams.get('unipile_status')
-    const accountId = url.searchParams.get('account_id')
-
-    const cleanUrl = () => {
-      url.searchParams.delete('unipile_status')
-      url.searchParams.delete('account_id')
-      url.searchParams.delete('org_id')
-      window.history.replaceState({}, '', url.toString())
-    }
-
-    if (status === 'success' && accountId) {
-      supabase.from('organizations').update({
-        unipile_account_id: accountId,
-        unipile_connected_at: new Date().toISOString(),
-        unipile_health_status: 'healthy',
-      }).eq('id', activeOrg.id).then(() => {
-        setMsg({ type: 'ok', text: 'LinkedIn connected.' })
-        cleanUrl()
-        loadState()
-      })
-      return
-    }
-    if (status === 'error') {
-      queueMicrotask(() => setMsg({ type: 'err', text: 'Connection was cancelled or failed.' }))
-      cleanUrl()
-    }
-
-    loadState()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeOrg?.id])
-
-  function loadState() {
-    if (!activeOrg) return
-    supabase.from('organizations')
-      .select('unipile_account_id, unipile_connected_at, unipile_last_health_check, unipile_health_status')
-      .eq('id', activeOrg.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!data) return
-        setState({
-          account_id: (data.unipile_account_id as string | null) ?? null,
-          connected_at: (data.unipile_connected_at as string | null) ?? null,
-          last_check: (data.unipile_last_health_check as string | null) ?? null,
-          health: ((data.unipile_health_status as string | null) ?? (data.unipile_account_id ? 'never' : null)) as 'healthy' | 'stale' | 'unknown' | 'never' | null,
-        })
-      })
-  }
-
-  async function connect() {
-    if (!activeOrg) return
-    setBusy(true)
-    setMsg(null)
-    try {
-      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
-      const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/unipile-connect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON}`, 'apikey': ANON },
-        body: JSON.stringify({
-          org_id: activeOrg.id,
-          return_url: `${window.location.origin}/settings`,
-        }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const { auth_url } = await res.json()
-      if (!auth_url) throw new Error('No auth_url returned')
-      window.location.href = auth_url
-    } catch (e) {
-      setMsg({ type: 'err', text: e instanceof Error ? e.message : String(e) })
-      setBusy(false)
-    }
-  }
-
-  async function disconnect() {
-    if (!activeOrg) return
-    if (!confirm('Disconnect LinkedIn? VERA will lose the ability to publish or audit until you reconnect.')) return
-    setBusy(true)
-    setMsg(null)
-    const { error } = await supabase.from('organizations').update({
-      unipile_account_id: null,
-      unipile_connected_at: null,
-      unipile_health_status: null,
-    }).eq('id', activeOrg.id)
-    setBusy(false)
-    if (error) setMsg({ type: 'err', text: error.message })
-    else {
-      setMsg({ type: 'ok', text: 'LinkedIn disconnected.' })
-      loadState()
-      refetch()
-    }
-  }
-
-  const connected = !!state.account_id
-  const healthDot = state.health === 'healthy' ? 'bg-emerald-500'
-    : state.health === 'stale'   ? 'bg-red-500'
-    : state.health === 'unknown' ? 'bg-amber-500'
-    : 'bg-gray-300'
-
-  return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4">
-      <div className="flex items-start gap-3">
-        <div className="w-9 h-9 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-bold flex-shrink-0">
-          Li
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-800">LinkedIn (Unipile)</span>
-            {connected && (
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-500">
-                <span className={`inline-block w-1.5 h-1.5 rounded-full ${healthDot}`} />
-                {state.health === 'healthy' ? 'Healthy'
-                  : state.health === 'stale' ? 'Stale, needs reconnect'
-                  : state.health === 'unknown' ? 'Unknown'
-                  : 'Not yet checked'}
-              </span>
-            )}
-          </div>
-          <p className="text-xs text-gray-500 mt-0.5">
-            {connected
-              ? `Account ${(state.account_id ?? '').slice(0, 8)}… · connected ${relTime(state.connected_at)}`
-              : 'Not connected. VERA can’t publish to LinkedIn or run audits until this is wired up.'}
-          </p>
-          {state.last_check && (
-            <p className="text-[11px] text-gray-400 mt-0.5">Last health check: {relTime(state.last_check)}</p>
-          )}
-        </div>
-        <div className="flex flex-col gap-1.5 flex-shrink-0">
-          {connected ? (
-            <>
-              <button onClick={connect} disabled={busy}
-                className="text-xs px-3 py-1.5 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
-                {busy ? '…' : 'Reconnect'}
-              </button>
-              <button onClick={disconnect} disabled={busy}
-                className="text-xs px-3 py-1.5 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50">
-                Disconnect
-              </button>
-            </>
-          ) : (
-            <button onClick={connect} disabled={busy}
-              className="text-xs px-3 py-1.5 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
-              {busy ? '…' : 'Connect'}
-            </button>
-          )}
-        </div>
-      </div>
-      {msg && (
-        <p className={`mt-3 text-xs flex items-center gap-1.5 ${msg.type === 'ok' ? 'text-emerald-600' : 'text-red-500'}`}>
-          {msg.type === 'ok' ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-          {msg.text}
-        </p>
-      )}
-    </div>
-  )
-}
-
-function relTime(iso: string | null): string {
-  if (!iso) return 'never'
-  const diff = Date.now() - new Date(iso).getTime()
-  const m = Math.floor(diff / 60_000)
-  if (m < 1) return 'just now'
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.floor(h / 24)
-  return `${d}d ago`
-}
-
 // ─── Integrations Tab ─────────────────────────────────────────────────────────
 function IntegrationsTab() {
   const { activeOrg } = useOrg()
@@ -582,9 +394,6 @@ function IntegrationsTab() {
         <h2 className="text-base font-semibold text-gray-900">Platform Integrations</h2>
         <p className="text-sm text-gray-500 mt-0.5">Configure settings and API keys for each publishing platform.</p>
       </div>
-
-      {/* Workspace-level Unipile connection, separate concern from the per-platform settings below */}
-      <UnipileConnectionCard />
 
       <ClientIntegrationsCard />
 
