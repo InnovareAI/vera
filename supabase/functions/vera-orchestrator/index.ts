@@ -13,10 +13,6 @@ const PLATFORM_LABELS: Record<string, string> = {
   reddit: 'Reddit', substack: 'Substack', medium: 'Medium',
 }
 
-// Platforms where the Researcher agent should default-fire because the
-// content benefits from current-state-of-the-world data + community context.
-// Strategist may still opt-out via run_researcher=false on irrelevant prompts.
-const RESEARCH_BIAS_PLATFORMS = new Set(['reddit', 'blog', 'substack', 'quora'])
 const FORMAT_LABELS: Record<string, string> = {
   thought_leadership: 'Thought Leadership', thread: 'Thread',
   cold_outreach: 'Cold Outreach', product_launch: 'Product Launch',
@@ -60,6 +56,22 @@ VERA senior marketing operating model:
   drifting into generic tips.
 `.trim()
 
+type SkillRow = {
+  id?: string
+  org_id?: string | null
+  project_id?: string | null
+  type: string
+  name: string
+  description: string
+  injected_into: string
+  prompt_module: string
+  trigger_when?: {
+    platform?: string
+    content_type?: string
+    [key: string]: unknown
+  }
+}
+
 // Web research via Perplexity Sonar through OpenRouter: single call returns
 // search + synthesis + citations. Replaces the previous Brave+Claude two-step.
 async function perplexityResearch(query: string): Promise<{ findings: string; citations: string[] }> {
@@ -100,7 +112,7 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
-  const { prompt, org_id, campaign_id, audience_id } = await req.json()
+  const { prompt, org_id, project_id, campaign_id, audience_id } = await req.json()
 
   if (!prompt) {
     return new Response(JSON.stringify({ error: 'prompt is required' }), {
@@ -154,9 +166,13 @@ Deno.serve(async (req) => {
           ? supabase.from('audiences').select('kind, name, pain_points, goals, attributes, notes, parent_id').eq('id', audience_id).maybeSingle()
           : Promise.resolve({ data: null, error: null })
 
-        const [{ data: skills }, { data: campaign }, { data: audience }] = await Promise.all([
+        const [{ data: skillRows }, { data: campaign }, { data: audience }] = await Promise.all([
           skillsQuery, campaignQuery, audienceQuery,
         ])
+        const skills = ((skillRows ?? []) as SkillRow[]).filter(s =>
+          (s.org_id === null || s.org_id === org_id) &&
+          (!s.project_id || s.project_id === project_id)
+        )
 
         // If the audience is a buyer_persona, fetch the parent ICP for full context
         const parentIcp = (audience?.parent_id)

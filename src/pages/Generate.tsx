@@ -302,12 +302,13 @@ const WELCOME: Message = {
   id: 'welcome',
   role: 'agent',
   agent: 'VERA',
-  content: "Hi, I'm VERA. Think of me as your creative partner — I turn ideas into content people actually feel something about. Tell me what you're working on, or just hand me a half-formed thought. I love a half-formed thought.",
+  content: "Hi, I'm VERA. Think of me as your creative partner. I turn ideas into content people actually feel something about. Tell me what you're working on, or just hand me a half-formed thought. I love a half-formed thought.",
 }
 
 async function runAgentPipeline(
   prompt: string,
   orgId: string | undefined,
+  projectId: string | null,
   campaignId: string | null,
   audienceId: string | null,
   onChunk: (agent: AgentName, chunk: string, done: boolean) => void
@@ -318,7 +319,7 @@ async function runAgentPipeline(
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
     },
-    body: JSON.stringify({ prompt, org_id: orgId, campaign_id: campaignId, audience_id: audienceId }),
+    body: JSON.stringify({ prompt, org_id: orgId, project_id: projectId, campaign_id: campaignId, audience_id: audienceId }),
   })
 
   if (!response.ok) {
@@ -469,7 +470,7 @@ export default function Generate() {
     let currentId: string | null = null
 
     try {
-      await runAgentPipeline(input, activeOrg?.id, selectedCampaignId, selectedAudienceId, (agent, chunk, done) => {
+      await runAgentPipeline(input, activeOrg?.id, activeProject?.id ?? null, selectedCampaignId, selectedAudienceId, (agent, chunk, done) => {
         // Reveal optional agents as they appear
         if (!CORE_AGENTS.includes(agent)) {
           setActiveAgents(prev => prev.includes(agent) ? prev : [...prev, agent])

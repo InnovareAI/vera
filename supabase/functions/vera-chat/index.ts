@@ -201,7 +201,7 @@ async function uploadImageToStorage(
   source: string,
 ): Promise<string> {
   let bytes: Uint8Array
-  let contentType = 'image/png'
+  let contentType: string
 
   if (source.startsWith('data:')) {
     // data:image/png;base64,XXXX
@@ -584,7 +584,16 @@ interface WorkspaceContext {
   latestAudit?: { kind: string; score?: number; grade?: string; created_at: string } | null
   pendingCount: number
   memories: Array<{ key: string; value: string; kind: string }>
-  skills: Array<{ name: string; type: string; description: string }>
+  skills: Array<{
+    org_id?: string | null
+    name: string
+    type: string
+    description: string
+    project_id?: string | null
+    trigger_description?: string | null
+    gotchas?: string[] | null
+    confidence?: string | null
+  }>
   skillPerformance: Map<string, { invocations: number; approval_rate: number | null }>
   kbStats: { raw_count: number; article_count: number; recent_titles: string[] }
   kbHits: Array<{ source: string; title: string; excerpt: string; similarity: number }>
@@ -640,6 +649,21 @@ async function loadContext(
   lastUserMessage?: string,
   projectId?: string | null,
 ): Promise<WorkspaceContext> {
+  const skillsQuery = supabase.from('skills')
+    .select('org_id, name, type, description, project_id, trigger_description, gotchas, confidence, sort_order')
+    .or(`org_id.is.null,org_id.eq.${orgId}`)
+    .eq('is_active', true)
+    .order('type')
+    .order('sort_order')
+    .limit(80)
+
+  const perfQuery = supabase.from('skill_performance')
+    .select('name, org_id, project_id, total_invocations, approval_rate, last_used_at')
+    .or(`org_id.is.null,org_id.eq.${orgId}`)
+    .gt('total_invocations', 0)
+    .order('total_invocations', { ascending: false })
+    .limit(50)
+
   // Parallel fetch — each query is small, no need to serialise.
   const [
     orgRes, brandRes, campRes, audRes, auditRes, pendingRes, memRes, skillsRes, perfRes,
@@ -657,22 +681,12 @@ async function loadContext(
       .eq('is_pinned', true)
       .order('created_at', { ascending: false })
       .limit(40),
-    // Skills: org-specific + system-global (org_id null). System skills are
-    // the platform/format library; org skills are operator-authored extensions.
-    supabase.from('skills').select('name, type, description, sort_order')
-      .or(`org_id.is.null,org_id.eq.${orgId}`)
-      .eq('is_active', true)
-      .order('type')
-      .order('sort_order')
-      .limit(60),
+    // Skills: global Vera, workspace, and the active project's client skills.
+    skillsQuery,
     // Skill performance — approval rate per skill (joined via the
     // skill_performance view). Only skills with at least 1 invocation
     // surface here; new skills with no signal stay description-only.
-    supabase.from('skill_performance').select('name, total_invocations, approval_rate, last_used_at')
-      .or(`org_id.is.null,org_id.eq.${orgId}`)
-      .gt('total_invocations', 0)
-      .order('total_invocations', { ascending: false })
-      .limit(40),
+    perfQuery,
   ])
 
   // Latest audit — pick the most recent regardless of kind, then pull score/grade
@@ -702,9 +716,13 @@ async function loadContext(
     latestAudit,
     pendingCount: pendingRes.count ?? 0,
     memories: (memRes.data ?? []) as Array<{ key: string; value: string; kind: string }>,
-    skills: (skillsRes.data ?? []) as Array<{ name: string; type: string; description: string }>,
+    skills: ((skillsRes.data ?? []) as WorkspaceContext['skills']).filter(s =>
+      (s.org_id === null || s.org_id === orgId) &&
+      (!s.project_id || s.project_id === projectId)
+    ),
     skillPerformance: new Map(
-      ((perfRes.data ?? []) as Array<{ name: string; total_invocations: number; approval_rate: number | null }>)
+      ((perfRes.data ?? []) as Array<{ name: string; org_id?: string | null; project_id?: string | null; total_invocations: number; approval_rate: number | null }>)
+        .filter(r => (r.org_id === null || r.org_id === orgId) && (!r.project_id || r.project_id === projectId))
         .map(r => [r.name, { invocations: r.total_invocations, approval_rate: r.approval_rate }]),
     ),
     kbStats: await loadKbStats(supabase, orgId),
@@ -926,7 +944,13 @@ function renderContext(ctx: WorkspaceContext, route: string): string {
         const perfTag = perf
           ? ` [${perf.approval_rate ?? '?'}% approved · ${perf.invocations} uses]`
           : ''
-        lines.push(`    - ${s.name}${perfTag}: ${s.description}`)
+        const scope = s.project_id ? 'client' : 'global/workspace'
+        const confidence = s.confidence ? ` · confidence: ${s.confidence}` : ''
+        lines.push(`    - ${s.name}${perfTag} (${scope}${confidence}): ${s.description}`)
+        if (s.trigger_description) lines.push(`      Trigger: ${s.trigger_description}`)
+        if (Array.isArray(s.gotchas) && s.gotchas.length) {
+          lines.push(`      Gotchas: ${s.gotchas.slice(0, 4).join('; ')}`)
+        }
       }
     }
   }
@@ -1147,7 +1171,7 @@ const TOOLS = [
   },
   {
     name: 'create_skill',
-    description: 'Add a new skill to the workspace library. Use when the operator says "teach yourself X", "remember to always do Y when drafting Z", "let\'s define a new pattern", or wants to encode a reusable craft pattern. The skill becomes available in every future chat turn via the workspace context.',
+    description: 'Add a new skill to the library. Use when the operator says "teach yourself X", "remember to always do Y when drafting Z", "let\'s define a new pattern", or gives a reusable platform, compliance, voice, or content process. If an active project is present, save client-specific rules as a client skill. Use global or workspace language only when the lesson clearly generalizes.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1157,8 +1181,15 @@ const TOOLS = [
           enum: ['platform', 'content', 'persona', 'brand', 'enrichment', 'tool'],
           description: 'Best-fit category. "content" for narrative patterns, "platform" for format recipes, "persona" for audience lenses, "brand" for guardrails.',
         },
-        description: { type: 'string', description: 'One-line description that appears in the skills index.' },
-        prompt_module: { type: 'string', description: 'The full instructional text — the recipe a writer follows. 200-400 words typical, opinionated and specific.' },
+        description: { type: 'string', description: 'Trigger-oriented description. Write for the model: when should this skill be used?' },
+        prompt_module: { type: 'string', description: 'The full instructional recipe. Include purpose, process, gotchas, and output format. 200-400 words typical, opinionated and specific.' },
+        trigger_description: { type: 'string', description: 'Plain-language trigger guidance for when Vera should use this skill.' },
+        gotchas: { type: 'array', items: { type: 'string' }, description: 'Common failure modes this skill should avoid.' },
+        good_examples: { type: 'array', items: { type: 'string' }, description: 'Good patterns or examples, one per item.' },
+        bad_examples: { type: 'array', items: { type: 'string' }, description: 'Avoid patterns or bad examples, one per item.' },
+        source_refs: { type: 'array', items: { type: 'string' }, description: 'Evidence or source references behind this skill.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Short tags for discovery.' },
+        confidence: { type: 'string', enum: ['low', 'medium', 'high', 'validated'], description: 'Use validated only when backed by repeated outcomes or strong sources.' },
       },
       required: ['name', 'type', 'description', 'prompt_module'],
     },
@@ -1680,6 +1711,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           body: JSON.stringify({
             prompt: brief,
             org_id: ctx.orgId,
+            project_id: ctx.projectId,
             campaign_id: asUuid(input.campaign_id),
             audience_id: asUuid(input.audience_id),
           }),
@@ -2006,17 +2038,19 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         const query = input.query as string
         const limit = Math.min((input.limit as number) ?? 5, 20)
         const { data, error } = await ctx.supabase.from('skills')
-          .select('name, type, description, prompt_module')
-          .or(`org_id.is.null,org_id.eq.${ctx.orgId}`)
+          .select('name, type, description, org_id, project_id, trigger_description, prompt_module, gotchas, good_examples, bad_examples, source_refs, confidence')
           .eq('is_active', true)
-          .or(`name.ilike.%${query}%,description.ilike.%${query}%,tags.cs.{${query}}`)
-          .limit(limit)
+          .or(`name.ilike.%${query}%,description.ilike.%${query}%,trigger_description.ilike.%${query}%,prompt_module.ilike.%${query}%`)
+          .limit(Math.max(limit * 3, 20))
         if (error) return { result: `Search failed: ${error.message}` }
-        if (!data?.length) return { result: `No skills matched "${query}".` }
-        const lines = (data as Array<Record<string, unknown>>).map(s =>
-          `${s.name} [${s.type}]\n  ${s.description}\n\nFull recipe:\n${(s.prompt_module as string).slice(0, 1200)}${(s.prompt_module as string).length > 1200 ? '…' : ''}`,
+        const scoped = ((data ?? []) as Array<Record<string, unknown>>)
+          .filter(s => (s.org_id === null || s.org_id === ctx.orgId) && (!s.project_id || s.project_id === ctx.projectId))
+          .slice(0, limit)
+        if (!scoped.length) return { result: `No skills matched "${query}".` }
+        const lines = scoped.map(s =>
+          `${s.name} [${s.type}${s.project_id ? ', client' : ', global/workspace'}]\n  ${s.description}${s.trigger_description ? `\n  Trigger: ${s.trigger_description}` : ''}${Array.isArray(s.gotchas) && s.gotchas.length ? `\n  Gotchas: ${(s.gotchas as string[]).slice(0, 6).join('; ')}` : ''}\n\nFull recipe:\n${(s.prompt_module as string).slice(0, 1200)}${(s.prompt_module as string).length > 1200 ? '…' : ''}`,
         )
-        return { result: `${data.length} skill(s) match "${query}":\n\n${lines.join('\n\n---\n\n')}` }
+        return { result: `${scoped.length} skill(s) match "${query}":\n\n${lines.join('\n\n---\n\n')}` }
       }
 
       case 'recall_memory': {
@@ -2039,14 +2073,27 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
 
       case 'create_skill': {
         const { name, type, description, prompt_module } = input as Record<string, string>
+        const toExampleItems = (items: unknown) =>
+          Array.isArray(items)
+            ? items.map(item => ({ text: String(item).trim() })).filter(item => item.text)
+            : []
         const { error } = await ctx.supabase.from('skills').insert({
           org_id: ctx.orgId,
+          project_id: ctx.projectId ?? null,
           type, name, description, prompt_module,
+          trigger_description: String(input.trigger_description ?? ''),
+          gotchas: Array.isArray(input.gotchas) ? input.gotchas.map(item => String(item).trim()).filter(Boolean) : [],
+          good_examples: toExampleItems(input.good_examples),
+          bad_examples: toExampleItems(input.bad_examples),
+          source_refs: toExampleItems(input.source_refs),
+          tags: Array.isArray(input.tags) ? input.tags.map(item => String(item).trim()).filter(Boolean) : [],
+          confidence: (input.confidence as string) ?? 'medium',
+          last_reviewed_at: new Date().toISOString(),
           injected_into: 'writer',
           is_active: true, is_system: false,
         })
         if (error) return { result: `Failed to create skill: ${error.message}` }
-        return { result: `Skill created: "${name}" [${type}]. It will be available in your next chat turn.` }
+        return { result: `Skill created: "${name}" [${type}]${ctx.projectId ? ' for this client' : ' for this workspace'}. It will be available in your next chat turn.` }
       }
 
       case 'update_brand_voice': {
@@ -2601,7 +2648,7 @@ Deno.serve(async (req) => {
 
   // Fetch workspace context (including KB hits for this turn). Non-fatal —
   // if it fails we fall back to a minimal prompt so chat still works.
-  let contextBlock = ''
+  let contextBlock: string
   try {
     const ctx = await loadContext(supabase, org_id, user_id ?? null, lastUserText, project_id ?? null)
     contextBlock = renderContext(ctx, route)

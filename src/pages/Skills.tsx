@@ -1,475 +1,856 @@
-import { useState, useEffect } from 'react'
-import { Plus, Sparkles, Copy, Pencil, Trash2, ChevronDown, ChevronUp, X, Check } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { CSSProperties, Dispatch, ElementType, ReactNode, SetStateAction } from 'react'
+import {
+  AlertTriangle,
+  BarChart3,
+  BookOpen,
+  Check,
+  Copy,
+  Layers,
+  Pencil,
+  Plus,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  Target,
+  Trash2,
+  X,
+  Zap,
+} from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useOrg } from '../lib/orgContext'
+import { useProject } from '../lib/projectContext'
+import { useRightRail } from '../lib/rightRailContext'
+import {
+  Button,
+  EmptyState,
+  Field,
+  Input,
+  PageHeader,
+  Select,
+  Textarea,
+  color,
+  radius,
+  space,
+  type as t,
+} from '../design'
 
 type SkillType = 'platform' | 'content' | 'brand' | 'persona' | 'enrichment' | 'tool'
 type SkillAgent = 'strategist' | 'writer' | 'brand_guard' | 'publisher' | 'all'
+type Confidence = 'low' | 'medium' | 'high' | 'validated'
+type ScopeFilter = 'all' | 'global' | 'workspace' | 'client'
+type FormScope = 'workspace' | 'client'
+
+type ExampleItem = {
+  label?: string
+  text?: string
+  ref?: string
+}
 
 interface Skill {
   id: string
   org_id: string | null
+  project_id?: string | null
   parent_id: string | null
   type: SkillType
   name: string
   description: string
   injected_into: SkillAgent
   prompt_module: string
-  trigger_when: Record<string, string>
+  trigger_when: Record<string, unknown>
+  trigger_description?: string
+  gotchas?: string[]
+  good_examples?: ExampleItem[]
+  bad_examples?: ExampleItem[]
+  source_refs?: ExampleItem[]
+  confidence?: Confidence
+  performance_notes?: string
+  last_reviewed_at?: string | null
   tags: string[]
   is_active: boolean
   is_system: boolean
   sort_order: number
 }
 
-const typeColors: Record<SkillType, string> = {
-  platform:    'bg-blue-100 text-blue-700',
-  content:     'bg-gray-100 text-gray-900',
-  brand:       'bg-amber-100 text-amber-700',
-  persona:     'bg-pink-100 text-pink-700',
-  enrichment:  'bg-emerald-100 text-emerald-700',
-  tool:        'bg-gray-100 text-gray-600',
-}
-
-const agentColors: Record<SkillAgent, string> = {
-  strategist:  'text-gray-700',
-  writer:      'text-gray-700',
-  brand_guard: 'text-amber-600',
-  publisher:   'text-emerald-600',
-  all:         'text-gray-500',
-}
-
-const agentLabels: Record<SkillAgent, string> = {
-  strategist:  'Strategist',
-  writer:      'Writer',
-  brand_guard: 'Brand Guard',
-  publisher:   'Publisher',
-  all:         'All agents',
+interface SkillPerformance {
+  skill_id: string
+  total_invocations: number
+  approved_count: number
+  rejected_count: number
+  edited_count: number
+  approval_rate: number | null
+  last_used_at: string | null
 }
 
 const SKILL_TYPES: SkillType[] = ['platform', 'content', 'brand', 'persona', 'enrichment', 'tool']
 const SKILL_AGENTS: SkillAgent[] = ['strategist', 'writer', 'brand_guard', 'publisher', 'all']
+const CONFIDENCE: Confidence[] = ['low', 'medium', 'high', 'validated']
+
+const agentLabel: Record<SkillAgent, string> = {
+  strategist: 'Strategist',
+  writer: 'Writer',
+  brand_guard: 'Brand Guard',
+  publisher: 'Publisher',
+  all: 'All agents',
+}
+
+const typeDot: Record<SkillType, string> = {
+  platform: color.dotBlue,
+  content: color.ink2,
+  brand: color.dotAmber,
+  persona: color.dotPink,
+  enrichment: color.dotGreen,
+  tool: color.dotViolet,
+}
+
+const confidenceColor: Record<Confidence, string> = {
+  low: color.warn,
+  medium: color.info,
+  high: color.success,
+  validated: color.accent,
+}
 
 const emptyForm = {
+  scope: 'client' as FormScope,
   name: '',
   type: 'content' as SkillType,
   description: '',
   injected_into: 'writer' as SkillAgent,
+  trigger_description: '',
+  trigger_when: '{\n  "platform": "linkedin"\n}',
   prompt_module: '',
+  gotchas: '',
+  good_examples: '',
+  bad_examples: '',
+  source_refs: '',
+  confidence: 'medium' as Confidence,
+  performance_notes: '',
   tags: '',
 }
 
-export default function Skills() {
-  const [skills, setSkills] = useState<Skill[]>([])
-  const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<SkillType | 'all'>('all')
-  const [tab, setTab] = useState<'library' | 'custom'>('library')
-  const [expanded, setExpanded] = useState<string | null>(null)
-  const [showForm, setShowForm] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState(emptyForm)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
+function linesToArray(value: string) {
+  return value
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+}
 
-  const [activeOrgId, setActiveOrgId] = useState<string | null>(null)
-  const [activeOrgName, setActiveOrgName] = useState<string | null>(null)
+function arrayToLines(value?: string[] | null) {
+  return (value ?? []).join('\n')
+}
+
+function textToExamples(value: string): ExampleItem[] {
+  return linesToArray(value).map(line => {
+    const idx = line.indexOf(':')
+    if (idx > 0 && idx < 48) {
+      return {
+        label: line.slice(0, idx).trim(),
+        text: line.slice(idx + 1).trim(),
+      }
+    }
+    return { text: line }
+  })
+}
+
+function examplesToText(value?: ExampleItem[] | null) {
+  if (!Array.isArray(value)) return ''
+  return value
+    .map(item => {
+      if (typeof item === 'string') return item
+      const label = item.label?.trim()
+      const text = (item.text ?? item.ref ?? '').trim()
+      if (!text) return ''
+      return label ? `${label}: ${text}` : text
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+function scopeOf(skill: Skill): ScopeFilter {
+  if (skill.is_system || (!skill.org_id && !skill.project_id)) return 'global'
+  if (skill.project_id) return 'client'
+  return 'workspace'
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return 'Never'
+  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function compactJson(value: Record<string, unknown>) {
+  if (!value || Object.keys(value).length === 0) return '{}'
+  return JSON.stringify(value, null, 2)
+}
+
+function parseJsonObject(value: string): Record<string, unknown> {
+  const trimmed = value.trim()
+  if (!trimmed) return {}
+  const parsed = JSON.parse(trimmed)
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+    throw new Error('Trigger JSON must be an object.')
+  }
+  return parsed as Record<string, unknown>
+}
+
+export default function Skills() {
+  const { activeOrg } = useOrg()
+  const { activeProject } = useProject()
+  useRightRail(null, [])
+
+  const [skills, setSkills] = useState<Skill[]>([])
+  const [performance, setPerformance] = useState<Record<string, SkillPerformance>>({})
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const [typeFilter, setTypeFilter] = useState<SkillType | 'all'>('all')
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all')
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState(emptyForm)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+
+    let skillQuery = supabase.from('skills').select('*').order('sort_order').order('name')
+    if (activeOrg?.id) skillQuery = skillQuery.or(`org_id.is.null,org_id.eq.${activeOrg.id}`)
+    else skillQuery = skillQuery.is('org_id', null)
+
+    const [{ data: skillRows, error: skillErr }, { data: perfRows }] = await Promise.all([
+      skillQuery,
+      activeOrg?.id
+        ? supabase.from('skill_performance').select('*').or(`org_id.is.null,org_id.eq.${activeOrg.id}`)
+        : supabase.from('skill_performance').select('*').is('org_id', null),
+    ])
+
+    if (skillErr) {
+      setError(skillErr.message)
+      setSkills([])
+      setLoading(false)
+      return
+    }
+
+    const activeProjectId = activeProject?.id ?? null
+    const visible = ((skillRows ?? []) as Skill[]).filter(skill => {
+      if (!skill.project_id) return true
+      return skill.project_id === activeProjectId
+    })
+
+    setSkills(visible)
+    setPerformance(Object.fromEntries(
+      ((perfRows ?? []) as SkillPerformance[]).map(row => [row.skill_id, row]),
+    ))
+    setLoading(false)
+  }, [activeOrg?.id, activeProject?.id])
+
+  useEffect(() => { load() }, [load])
 
   useEffect(() => {
-    // Resolve the active org from the most recent audit (same convention used
-    // on the Dashboard until proper auth lands). Without an active org, new
-    // skills land as global (org_id NULL).
-    supabase.from('linkedin_audits').select('org_id, created_at').order('created_at', { ascending: false }).limit(1)
-      .then(({ data }) => {
-        const oid = (data?.[0]?.org_id as string | undefined) ?? null
-        if (!oid) { fetchSkills(null); return }
-        setActiveOrgId(oid)
-        supabase.from('organizations').select('name').eq('id', oid).maybeSingle()
-          .then(({ data: org }) => setActiveOrgName((org?.name as string) ?? null))
-        fetchSkills(oid)
-      })
-  }, [])
-
-  async function fetchSkills(orgId: string | null) {
-    setLoading(true)
-    // Show global (org_id null) skills AND skills for the active org.
-    const q = supabase.from('skills').select('*').order('sort_order').order('name')
-    const { data } = orgId
-      ? await q.or(`org_id.is.null,org_id.eq.${orgId}`)
-      : await q.is('org_id', null)
-    setSkills(data ?? [])
-    setLoading(false)
-  }
-
-  async function toggleActive(skill: Skill) {
-    if (skill.is_system) return
-    await supabase.from('skills').update({ is_active: !skill.is_active }).eq('id', skill.id)
-    setSkills(prev => prev.map(s => s.id === skill.id ? { ...s, is_active: !s.is_active } : s))
-  }
-
-  async function forkSkill(skill: Skill) {
-    const { data } = await supabase.from('skills').insert({
-      parent_id: skill.id,
-      org_id: activeOrgId,
-      type: skill.type,
-      name: `${skill.name} (custom)`,
-      description: skill.description,
-      injected_into: skill.injected_into,
-      prompt_module: skill.prompt_module,
-      trigger_when: skill.trigger_when,
-      tags: skill.tags,
-      is_active: true,
-      is_system: false,
-    }).select().single()
-    if (data) {
-      setSkills(prev => [...prev, data])
-      setTab('custom')
-      openEdit(data)
+    if (!activeProject?.id && form.scope === 'client') {
+      setForm(prev => ({ ...prev, scope: 'workspace' }))
     }
-  }
+  }, [activeProject?.id, form.scope])
 
-  async function deleteSkill(id: string) {
-    await supabase.from('skills').delete().eq('id', id)
-    setSkills(prev => prev.filter(s => s.id !== id))
+  const filtered = useMemo(() => {
+    const term = query.trim().toLowerCase()
+    return skills.filter(skill => {
+      const typeMatch = typeFilter === 'all' || skill.type === typeFilter
+      const scopeMatch = scopeFilter === 'all' || scopeOf(skill) === scopeFilter
+      const text = [
+        skill.name,
+        skill.description,
+        skill.trigger_description,
+        skill.prompt_module,
+        ...(skill.tags ?? []),
+        ...(skill.gotchas ?? []),
+      ].join(' ').toLowerCase()
+      return typeMatch && scopeMatch && (!term || text.includes(term))
+    })
+  }, [skills, query, typeFilter, scopeFilter])
+
+  const counts = useMemo(() => ({
+    global: skills.filter(s => scopeOf(s) === 'global').length,
+    workspace: skills.filter(s => scopeOf(s) === 'workspace').length,
+    client: skills.filter(s => scopeOf(s) === 'client').length,
+  }), [skills])
+
+  function openNew(scope: FormScope = activeProject?.id ? 'client' : 'workspace') {
+    setEditingId(null)
+    setForm({ ...emptyForm, scope })
+    setShowForm(true)
+    setError(null)
   }
 
   function openEdit(skill: Skill) {
     setEditingId(skill.id)
     setForm({
+      scope: scopeOf(skill) === 'client' ? 'client' : 'workspace',
       name: skill.name,
       type: skill.type,
       description: skill.description,
       injected_into: skill.injected_into,
+      trigger_description: skill.trigger_description ?? '',
+      trigger_when: compactJson(skill.trigger_when ?? {}),
       prompt_module: skill.prompt_module,
-      tags: skill.tags.join(', '),
+      gotchas: arrayToLines(skill.gotchas),
+      good_examples: examplesToText(skill.good_examples),
+      bad_examples: examplesToText(skill.bad_examples),
+      source_refs: examplesToText(skill.source_refs),
+      confidence: skill.confidence ?? 'medium',
+      performance_notes: skill.performance_notes ?? '',
+      tags: (skill.tags ?? []).join(', '),
     })
     setShowForm(true)
+    setError(null)
   }
 
-  function openNew() {
-    setEditingId(null)
-    setForm(emptyForm)
-    setShowForm(true)
+  async function forkSkill(skill: Skill, scope: FormScope = activeProject?.id ? 'client' : 'workspace') {
+    if (!activeOrg?.id) {
+      setError('Pick a workspace before creating custom skills.')
+      return
+    }
+    if (scope === 'client' && !activeProject?.id) {
+      setError('Pick a client before creating a client skill.')
+      return
+    }
+
+    const payload = {
+      parent_id: skill.id,
+      org_id: activeOrg.id,
+      project_id: scope === 'client' ? activeProject?.id : null,
+      type: skill.type,
+      name: `${skill.name} custom`,
+      description: skill.description,
+      injected_into: skill.injected_into,
+      prompt_module: skill.prompt_module,
+      trigger_when: skill.trigger_when ?? {},
+      trigger_description: skill.trigger_description ?? '',
+      gotchas: skill.gotchas ?? [],
+      good_examples: skill.good_examples ?? [],
+      bad_examples: skill.bad_examples ?? [],
+      source_refs: skill.source_refs ?? [],
+      confidence: skill.confidence ?? 'medium',
+      performance_notes: skill.performance_notes ?? '',
+      tags: skill.tags ?? [],
+      is_active: true,
+      is_system: false,
+    }
+
+    const { data, error: insertErr } = await supabase.from('skills').insert(payload).select().single()
+    if (insertErr) {
+      setError(insertErr.message)
+      return
+    }
+    if (data) {
+      setSkills(prev => [...prev, data as Skill])
+      openEdit(data as Skill)
+    }
+  }
+
+  async function toggleActive(skill: Skill) {
+    if (skill.is_system) return
+    const { error: updateErr } = await supabase.from('skills').update({ is_active: !skill.is_active }).eq('id', skill.id)
+    if (updateErr) {
+      setError(updateErr.message)
+      return
+    }
+    setSkills(prev => prev.map(s => s.id === skill.id ? { ...s, is_active: !s.is_active } : s))
+  }
+
+  async function deleteSkill(skill: Skill) {
+    if (skill.is_system) return
+    if (!confirm(`Delete "${skill.name}"? Vera will stop using this skill.`)) return
+    const { error: deleteErr } = await supabase.from('skills').delete().eq('id', skill.id)
+    if (deleteErr) {
+      setError(deleteErr.message)
+      return
+    }
+    setSkills(prev => prev.filter(s => s.id !== skill.id))
   }
 
   async function saveSkill() {
-    if (!form.name.trim() || !form.prompt_module.trim()) return
+    if (!activeOrg?.id) {
+      setError('Pick a workspace before saving skills.')
+      return
+    }
+    if (form.scope === 'client' && !activeProject?.id) {
+      setError('Pick a client before saving a client skill.')
+      return
+    }
+    if (!form.name.trim() || !form.description.trim() || !form.prompt_module.trim()) {
+      setError('Name, description, and prompt module are required.')
+      return
+    }
+
+    let trigger_when: Record<string, unknown>
+    try {
+      trigger_when = parseJsonObject(form.trigger_when)
+    } catch (parseErr) {
+      setError(parseErr instanceof Error ? parseErr.message : 'Trigger JSON is invalid.')
+      return
+    }
+
     setSaving(true)
+    setError(null)
 
     const payload = {
-      name: form.name.trim(),
+      org_id: activeOrg.id,
+      project_id: form.scope === 'client' ? activeProject?.id : null,
       type: form.type,
+      name: form.name.trim(),
       description: form.description.trim(),
       injected_into: form.injected_into,
+      trigger_description: form.trigger_description.trim(),
       prompt_module: form.prompt_module.trim(),
-      tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
+      trigger_when,
+      gotchas: linesToArray(form.gotchas),
+      good_examples: textToExamples(form.good_examples),
+      bad_examples: textToExamples(form.bad_examples),
+      source_refs: textToExamples(form.source_refs),
+      confidence: form.confidence,
+      performance_notes: form.performance_notes.trim(),
+      tags: form.tags.split(',').map(tag => tag.trim()).filter(Boolean),
       is_system: false,
       is_active: true,
-      org_id: editingId ? undefined : activeOrgId,  // only set org_id on insert; preserve on update
+      last_reviewed_at: new Date().toISOString(),
     }
 
-    if (editingId) {
-      const { data } = await supabase.from('skills').update(payload).eq('id', editingId).select().single()
-      if (data) setSkills(prev => prev.map(s => s.id === editingId ? data : s))
-    } else {
-      const { data } = await supabase.from('skills').insert(payload).select().single()
-      if (data) setSkills(prev => [...prev, data])
-    }
+    const { data, error: saveErr } = editingId
+      ? await supabase.from('skills').update(payload).eq('id', editingId).select().single()
+      : await supabase.from('skills').insert(payload).select().single()
 
     setSaving(false)
-    setSaved(true)
-    setTimeout(() => { setSaved(false); setShowForm(false) }, 800)
+    if (saveErr) {
+      setError(saveErr.message)
+      return
+    }
+    if (data) {
+      const saved = data as Skill
+      setSkills(prev => editingId ? prev.map(s => s.id === saved.id ? saved : s) : [...prev, saved])
+      setShowForm(false)
+      setEditingId(null)
+    }
   }
 
-  const displayed = skills.filter(s => {
-    const tabMatch = tab === 'library' ? s.is_system : !s.is_system
-    const typeMatch = filter === 'all' || s.type === filter
-    return tabMatch && typeMatch
-  })
-
-  const customCount = skills.filter(s => !s.is_system).length
-
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="px-8 py-5 border-b border-gray-100 bg-white flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center">
-            <Sparkles size={14} className="text-gray-700" />
+    <div style={{ padding: space[8], maxWidth: 1180 }}>
+      <PageHeader
+        eyebrow="AI Settings"
+        title="Skills Library"
+        subtitle="Reusable operating rules for Vera: platform best practices, compliance checks, tone adaptation, gotchas, examples, and client-specific overrides."
+        actions={
+          <div style={{ display: 'flex', gap: space[2] }}>
+            <Button variant="secondary" leading={<Plus size={14} />} onClick={() => openNew('workspace')} disabled={!activeOrg}>
+              Workspace skill
+            </Button>
+            <Button variant="primary" leading={<Plus size={14} />} onClick={() => openNew('client')} disabled={!activeProject}>
+              Client skill
+            </Button>
           </div>
-          <div>
-            <h1 className="text-sm font-semibold text-gray-900">Skills</h1>
-            <p className="text-xs text-gray-400">
-              Prompt modules injected into agents at runtime
-              {activeOrgName && <span className="ml-1">· editing for <span className="font-semibold text-gray-600">{activeOrgName}</span></span>}
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={openNew}
-          className="flex items-center gap-1.5 bg-gray-900 text-white text-xs font-semibold px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors"
+        }
+      />
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: space[3], marginBottom: space[5] }}>
+        <Metric icon={Sparkles} label="Global Vera" value={counts.global} tone={color.accent} />
+        <Metric icon={Layers} label="Workspace" value={counts.workspace} tone={color.dotBlue} />
+        <Metric icon={BookOpen} label={activeProject ? 'Active client' : 'Client'} value={counts.client} tone={color.dotGreen} />
+        <Metric icon={BarChart3} label="With signal" value={Object.keys(performance).length} tone={color.dotViolet} />
+      </div>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(220px, 1fr) 180px 220px',
+          gap: space[3],
+          alignItems: 'center',
+          marginBottom: space[5],
+        }}
+      >
+        <Input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search skills, gotchas, platforms, sources"
+          leading={<Search size={15} />}
+        />
+        <Select value={typeFilter} onChange={e => setTypeFilter(e.target.value as SkillType | 'all')}>
+          <option value="all">All types</option>
+          {SKILL_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+        </Select>
+        <Select value={scopeFilter} onChange={e => setScopeFilter(e.target.value as ScopeFilter)}>
+          <option value="all">All scopes</option>
+          <option value="global">Global Vera</option>
+          <option value="workspace">Workspace</option>
+          <option value="client">Active client</option>
+        </Select>
+      </div>
+
+      {error && (
+        <div
+          style={{
+            marginBottom: space[4],
+            padding: space[4],
+            border: `1px solid ${color.danger}`,
+            borderRadius: radius.md,
+            color: color.danger,
+            background: 'rgba(185,28,28,0.06)',
+            fontSize: t.size.sm,
+          }}
         >
-          <Plus size={13} />
-          New skill
-        </button>
-      </div>
-
-      {/* Tabs + filters */}
-      <div className="px-8 py-3 border-b border-gray-100 bg-white flex items-center justify-between">
-        <div className="flex gap-1">
-          <button
-            onClick={() => setTab('library')}
-            className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${tab === 'library' ? 'bg-gray-900 text-white' : 'text-gray-500 hover:text-gray-800'}`}
-          >
-            Library
-          </button>
-          <button
-            onClick={() => setTab('custom')}
-            className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${tab === 'custom' ? 'bg-gray-900 text-white' : 'text-gray-500 hover:text-gray-800'}`}
-          >
-            Custom
-            {customCount > 0 && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${tab === 'custom' ? 'bg-white/20' : 'bg-gray-100'}`}>
-                {customCount}
-              </span>
-            )}
-          </button>
-        </div>
-
-        <div className="flex gap-1.5">
-          {(['all', ...SKILL_TYPES] as const).map(t => (
-            <button
-              key={t}
-              onClick={() => setFilter(t)}
-              className={`text-[11px] font-medium px-2.5 py-1 rounded-full capitalize transition-colors ${
-                filter === t
-                  ? t === 'all' ? 'bg-gray-900 text-white' : typeColors[t as SkillType]
-                  : 'bg-gray-50 text-gray-400 hover:text-gray-700'
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Skills grid */}
-      <div className="flex-1 overflow-y-auto px-8 py-6">
-        {loading ? (
-          <div className="flex items-center justify-center h-40 text-sm text-gray-400">Loading skills…</div>
-        ) : displayed.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-40 gap-3">
-            <p className="text-sm text-gray-400">
-              {tab === 'custom' ? 'No custom skills yet.' : 'No skills match this filter.'}
-            </p>
-            {tab === 'custom' && (
-              <button onClick={openNew} className="text-xs text-gray-700 font-semibold hover:underline">
-                Create your first skill →
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {displayed.map(skill => (
-              <div key={skill.id} className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-                <div className="px-4 py-3 flex items-center gap-3">
-                  {/* Type badge */}
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize flex-shrink-0 ${typeColors[skill.type]}`}>
-                    {skill.type}
-                  </span>
-
-                  {/* Name + description */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-gray-800 truncate">{skill.name}</p>
-                      {skill.parent_id && (
-                        <span className="text-[9px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded-full">forked</span>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-400 truncate">{skill.description}</p>
-                  </div>
-
-                  {/* Agent tag */}
-                  <span className={`text-[11px] font-semibold flex-shrink-0 ${agentColors[skill.injected_into]}`}>
-                    → {agentLabels[skill.injected_into]}
-                  </span>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    {skill.is_system ? (
-                      <button
-                        onClick={() => forkSkill(skill)}
-                        title="Fork and customise"
-                        className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-50 transition-colors"
-                      >
-                        <Copy size={13} />
-                      </button>
-                    ) : (
-                      <>
-                        {/* Active toggle */}
-                        <button
-                          onClick={() => toggleActive(skill)}
-                          className={`relative w-8 h-4 rounded-full transition-colors flex-shrink-0 ${skill.is_active ? 'bg-gray-500' : 'bg-gray-200'}`}
-                        >
-                          <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${skill.is_active ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                        </button>
-                        <button
-                          onClick={() => openEdit(skill)}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-blue-50 transition-colors"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          onClick={() => deleteSkill(skill.id)}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </>
-                    )}
-
-                    {/* Expand prompt */}
-                    <button
-                      onClick={() => setExpanded(expanded === skill.id ? null : skill.id)}
-                      className="p-1.5 rounded-lg text-gray-300 hover:text-gray-500 transition-colors"
-                    >
-                      {expanded === skill.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Expanded prompt */}
-                {expanded === skill.id && (
-                  <div className="px-4 pb-3 pt-0 border-t border-gray-50">
-                    <p className="text-[11px] font-semibold text-gray-400 mb-1.5 mt-2">Prompt module</p>
-                    <pre className="text-xs text-gray-600 bg-gray-50 rounded-lg p-3 whitespace-pre-wrap leading-relaxed font-mono">
-                      {skill.prompt_module}
-                    </pre>
-                    {skill.tags.length > 0 && (
-                      <div className="flex gap-1 mt-2 flex-wrap">
-                        {skill.tags.map(tag => (
-                          <span key={tag} className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Slide-over form */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex">
-          <div className="flex-1 bg-black/20" onClick={() => setShowForm(false)} />
-          <div className="w-[480px] bg-white h-full shadow-2xl flex flex-col">
-            {/* Form header */}
-            <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-900">
-                {editingId ? 'Edit skill' : 'New skill'}
-              </h2>
-              <button onClick={() => setShowForm(false)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100">
-                <X size={15} />
-              </button>
-            </div>
-
-            {/* Form body */}
-            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-              {/* Name */}
-              <div>
-                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide block mb-1.5">Name</label>
-                <input
-                  value={form.name}
-                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="e.g. LinkedIn Thought Leadership"
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-gray-50"
-                />
-              </div>
-
-              {/* Type + Agent row */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide block mb-1.5">Type</label>
-                  <select
-                    value={form.type}
-                    onChange={e => setForm(f => ({ ...f, type: e.target.value as SkillType }))}
-                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-gray-50"
-                  >
-                    {SKILL_TYPES.map(t => <option key={t} value={t} className="capitalize">{t}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide block mb-1.5">Inject into</label>
-                  <select
-                    value={form.injected_into}
-                    onChange={e => setForm(f => ({ ...f, injected_into: e.target.value as SkillAgent }))}
-                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-gray-50"
-                  >
-                    {SKILL_AGENTS.map(a => <option key={a} value={a}>{agentLabels[a]}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              {/* Description */}
-              <div>
-                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide block mb-1.5">
-                  Description <span className="text-gray-400 font-normal normal-case">(shown to Strategist for skill selection)</span>
-                </label>
-                <input
-                  value={form.description}
-                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                  placeholder="e.g. Formats content for LinkedIn with professional tone and strong hook"
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-gray-50"
-                />
-              </div>
-
-              {/* Prompt module */}
-              <div>
-                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide block mb-1.5">
-                  Prompt module <span className="text-gray-400 font-normal normal-case">(injected into agent system prompt)</span>
-                </label>
-                <textarea
-                  value={form.prompt_module}
-                  onChange={e => setForm(f => ({ ...f, prompt_module: e.target.value }))}
-                  placeholder="Write the instructions that will be injected into the agent's system prompt when this skill is active…"
-                  rows={8}
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-gray-50 font-mono leading-relaxed resize-none"
-                />
-              </div>
-
-              {/* Tags */}
-              <div>
-                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide block mb-1.5">Tags <span className="text-gray-400 font-normal normal-case">(comma-separated)</span></label>
-                <input
-                  value={form.tags}
-                  onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
-                  placeholder="linkedin, thought-leadership, b2b"
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gray-300 bg-gray-50"
-                />
-              </div>
-            </div>
-
-            {/* Form footer */}
-            <div className="px-6 py-4 border-t border-gray-100 flex gap-3">
-              <button
-                onClick={() => setShowForm(false)}
-                className="flex-1 text-sm text-gray-600 border border-gray-200 rounded-lg py-2.5 hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveSkill}
-                disabled={saving || !form.name.trim() || !form.prompt_module.trim()}
-                className="flex-1 text-sm font-semibold bg-gray-900 text-white rounded-lg py-2.5 hover:bg-gray-800 disabled:opacity-40 transition-colors flex items-center justify-center gap-2"
-              >
-                {saved ? <><Check size={14} /> Saved</> : saving ? 'Saving…' : editingId ? 'Save changes' : 'Create skill'}
-              </button>
-            </div>
-          </div>
+          {error}
         </div>
       )}
+
+      {loading ? (
+        <div style={{ padding: space[8], color: color.ghost, fontSize: t.size.sm }}>Loading skills...</div>
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={<Zap size={28} />}
+          title="No skills found"
+          body="Change the filters or create a client skill for this workspace."
+          actions={<Button variant="secondary" leading={<Plus size={14} />} onClick={() => openNew()}>Create skill</Button>}
+        />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: space[3] }}>
+          {filtered.map(skill => (
+            <SkillRow
+              key={skill.id}
+              skill={skill}
+              performance={performance[skill.id]}
+              expanded={expanded === skill.id}
+              onToggle={() => setExpanded(expanded === skill.id ? null : skill.id)}
+              onFork={() => forkSkill(skill)}
+              onEdit={() => openEdit(skill)}
+              onDelete={() => deleteSkill(skill)}
+              onActive={() => toggleActive(skill)}
+            />
+          ))}
+        </div>
+      )}
+
+      {showForm && (
+        <SkillForm
+          form={form}
+          setForm={setForm}
+          editing={!!editingId}
+          saving={saving}
+          activeProjectName={activeProject?.name ?? null}
+          canUseClientScope={!!activeProject?.id}
+          error={error}
+          onClose={() => { setShowForm(false); setEditingId(null); setError(null) }}
+          onSave={saveSkill}
+        />
+      )}
+    </div>
+  )
+}
+
+function Metric({ icon: Icon, label, value, tone }: { icon: ElementType; label: string; value: number; tone: string }) {
+  return (
+    <div style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[4], display: 'flex', alignItems: 'center', gap: space[3] }}>
+      <span style={{ width: 30, height: 30, borderRadius: radius.sm, background: color.paper2, color: tone, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon size={16} strokeWidth={1.9} />
+      </span>
+      <div>
+        <div style={{ color: color.ink, fontSize: t.size.h4, fontWeight: t.weight.semibold, lineHeight: 1 }}>{value}</div>
+        <div style={{ color: color.ghost, fontSize: t.size.cap, marginTop: 3 }}>{label}</div>
+      </div>
+    </div>
+  )
+}
+
+function SkillRow({
+  skill,
+  performance,
+  expanded,
+  onToggle,
+  onFork,
+  onEdit,
+  onDelete,
+  onActive,
+}: {
+  skill: Skill
+  performance?: SkillPerformance
+  expanded: boolean
+  onToggle: () => void
+  onFork: () => void
+  onEdit: () => void
+  onDelete: () => void
+  onActive: () => void
+}) {
+  const scope = scopeOf(skill)
+  const conf = skill.confidence ?? 'medium'
+  const canEdit = !skill.is_system
+
+  return (
+    <div style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: space[4], padding: space[4], alignItems: 'start' }}>
+        <button onClick={onToggle} style={{ border: 0, background: 'transparent', padding: 0, textAlign: 'left', cursor: 'pointer', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], marginBottom: space[2], flexWrap: 'wrap' }}>
+            <Badge dot={typeDot[skill.type]}>{skill.type}</Badge>
+            <Badge>{scope === 'global' ? 'Global Vera' : scope === 'client' ? 'Client' : 'Workspace'}</Badge>
+            <Badge dot={confidenceColor[conf]}>{conf}</Badge>
+            {!skill.is_active && <Badge>Inactive</Badge>}
+            {skill.parent_id && <Badge>Forked</Badge>}
+          </div>
+          <h2 style={{ margin: 0, color: color.ink, fontSize: t.size.body, fontWeight: t.weight.semibold, lineHeight: 1.25 }}>{skill.name}</h2>
+          <p style={{ margin: '5px 0 0', color: color.ghost, fontSize: t.size.sm, lineHeight: 1.45 }}>{skill.description}</p>
+          {skill.trigger_description && (
+            <p style={{ margin: '8px 0 0', color: color.ink2, fontSize: t.size.cap, lineHeight: 1.45 }}>
+              <b style={{ color: color.ink }}>Trigger:</b> {skill.trigger_description}
+            </p>
+          )}
+        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: space[2] }}>
+          <SkillPerformanceMini performance={performance} />
+          {skill.is_system ? (
+            <Button variant="secondary" size="sm" leading={<Copy size={13} />} onClick={onFork}>Fork</Button>
+          ) : (
+            <>
+              <button
+                onClick={onActive}
+                title={skill.is_active ? 'Disable skill' : 'Enable skill'}
+                style={{
+                  width: 34,
+                  height: 18,
+                  borderRadius: 999,
+                  border: 0,
+                  background: skill.is_active ? color.accent : color.line2,
+                  padding: 2,
+                  cursor: 'pointer',
+                }}
+              >
+                <span style={{ display: 'block', width: 14, height: 14, borderRadius: '50%', background: '#fff', transform: skill.is_active ? 'translateX(16px)' : 'translateX(0)', transition: 'transform 120ms var(--ease)' }} />
+              </button>
+              <Button variant="ghost" size="sm" iconOnly leading={<Pencil size={14} />} onClick={onEdit} />
+              <Button variant="ghost" size="sm" iconOnly leading={<Trash2 size={14} />} onClick={onDelete} />
+            </>
+          )}
+          {!canEdit && <Button variant="ghost" size="sm" iconOnly leading={<BookOpen size={14} />} onClick={onToggle} />}
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{ borderTop: `1px solid ${color.line}`, background: color.paper2, padding: space[4], display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[4] }}>
+          <DetailBlock title="Prompt module" icon={Sparkles} wide>
+            <pre style={preStyle}>{skill.prompt_module}</pre>
+          </DetailBlock>
+          <DetailBlock title="Gotchas" icon={AlertTriangle}>
+            <List items={skill.gotchas ?? []} empty="No gotchas captured yet." />
+          </DetailBlock>
+          <DetailBlock title="Good examples" icon={Check}>
+            <ExampleList items={skill.good_examples ?? []} empty="No good examples yet." />
+          </DetailBlock>
+          <DetailBlock title="Avoid examples" icon={ShieldCheck}>
+            <ExampleList items={skill.bad_examples ?? []} empty="No avoid examples yet." />
+          </DetailBlock>
+          <DetailBlock title="Sources" icon={BookOpen}>
+            <ExampleList items={skill.source_refs ?? []} empty="No sources linked yet." />
+          </DetailBlock>
+          <DetailBlock title="Trigger JSON" icon={Target}>
+            <pre style={preStyle}>{compactJson(skill.trigger_when ?? {})}</pre>
+          </DetailBlock>
+          <DetailBlock title="Performance notes" icon={BarChart3}>
+            <p style={{ margin: 0, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.5 }}>{skill.performance_notes || 'No manual performance notes yet.'}</p>
+            <p style={{ margin: '8px 0 0', color: color.ghost, fontSize: t.size.cap }}>Last reviewed: {formatDate(skill.last_reviewed_at)}</p>
+          </DetailBlock>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SkillPerformanceMini({ performance }: { performance?: SkillPerformance }) {
+  if (!performance || performance.total_invocations === 0) {
+    return <span style={{ color: color.ghost, fontSize: t.size.cap, whiteSpace: 'nowrap' }}>No signal</span>
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.15, minWidth: 72 }}>
+      <span style={{ color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold }}>
+        {performance.approval_rate ?? 0}% approved
+      </span>
+      <span style={{ color: color.ghost, fontSize: t.size.micro }}>
+        {performance.total_invocations} use{performance.total_invocations === 1 ? '' : 's'}
+      </span>
+    </div>
+  )
+}
+
+function Badge({ children, dot }: { children: string; dot?: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: color.ink2, background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.pill, padding: '2px 8px', fontSize: t.size.micro, fontWeight: t.weight.medium }}>
+      {dot && <span style={{ width: 6, height: 6, borderRadius: '50%', background: dot }} />}
+      {children}
+    </span>
+  )
+}
+
+const preStyle: CSSProperties = {
+  margin: 0,
+  color: color.ink2,
+  fontSize: t.size.cap,
+  lineHeight: 1.55,
+  whiteSpace: 'pre-wrap',
+  fontFamily: t.family.mono,
+}
+
+function DetailBlock({ title, icon: Icon, children, wide }: { title: string; icon: ElementType; children: ReactNode; wide?: boolean }) {
+  return (
+    <section style={{ gridColumn: wide ? '1 / -1' : undefined, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[4] }}>
+      <h3 style={{ margin: `0 0 ${space[3]}`, color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold, display: 'flex', alignItems: 'center', gap: space[2] }}>
+        <Icon size={14} color={color.ghost} />
+        {title}
+      </h3>
+      {children}
+    </section>
+  )
+}
+
+function List({ items, empty }: { items: string[]; empty: string }) {
+  if (!items.length) return <p style={{ margin: 0, color: color.ghost, fontSize: t.size.cap }}>{empty}</p>
+  return (
+    <ul style={{ margin: 0, paddingLeft: 16, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.5 }}>
+      {items.map(item => <li key={item}>{item}</li>)}
+    </ul>
+  )
+}
+
+function ExampleList({ items, empty }: { items: ExampleItem[]; empty: string }) {
+  if (!Array.isArray(items) || !items.length) return <p style={{ margin: 0, color: color.ghost, fontSize: t.size.cap }}>{empty}</p>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
+      {items.map((item, index) => (
+        <p key={`${item.label ?? ''}-${index}`} style={{ margin: 0, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.5 }}>
+          {item.label && <b style={{ color: color.ink }}>{item.label}: </b>}
+          {item.text ?? item.ref}
+        </p>
+      ))}
+    </div>
+  )
+}
+
+function SkillForm({
+  form,
+  setForm,
+  editing,
+  saving,
+  activeProjectName,
+  canUseClientScope,
+  error,
+  onClose,
+  onSave,
+}: {
+  form: typeof emptyForm
+  setForm: Dispatch<SetStateAction<typeof emptyForm>>
+  editing: boolean
+  saving: boolean
+  activeProjectName: string | null
+  canUseClientScope: boolean
+  error: string | null
+  onClose: () => void
+  onSave: () => void
+}) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex' }}>
+      <button aria-label="Close" onClick={onClose} style={{ flex: 1, border: 0, background: 'rgba(0,0,0,0.22)' }} />
+      <aside style={{ width: 'min(620px, 94vw)', height: '100%', background: color.surface, borderLeft: `1px solid ${color.line}`, boxShadow: 'var(--shadow-modal)', display: 'flex', flexDirection: 'column' }}>
+        <header style={{ padding: space[6], borderBottom: `1px solid ${color.line}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[4] }}>
+          <div>
+            <h2 style={{ margin: 0, color: color.ink, fontSize: t.size.h3, fontWeight: t.weight.semibold }}>{editing ? 'Edit skill' : 'Create skill'}</h2>
+            <p style={{ margin: '5px 0 0', color: color.ghost, fontSize: t.size.cap }}>Write descriptions for Vera: when to trigger, what to avoid, and what evidence supports the skill.</p>
+          </div>
+          <Button variant="ghost" iconOnly leading={<X size={16} />} onClick={onClose} />
+        </header>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: space[6], display: 'flex', flexDirection: 'column', gap: space[5] }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[4] }}>
+            <Field label="Scope">
+              <Select value={form.scope} onChange={e => setForm(prev => ({ ...prev, scope: e.target.value as FormScope }))}>
+                <option value="workspace">Workspace skill</option>
+                <option value="client" disabled={!canUseClientScope}>Client skill{activeProjectName ? `: ${activeProjectName}` : ''}</option>
+              </Select>
+            </Field>
+            <Field label="Confidence">
+              <Select value={form.confidence} onChange={e => setForm(prev => ({ ...prev, confidence: e.target.value as Confidence }))}>
+                {CONFIDENCE.map(conf => <option key={conf} value={conf}>{conf}</option>)}
+              </Select>
+            </Field>
+          </div>
+
+          <Field label="Name">
+            <Input value={form.name} onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))} placeholder="LinkedIn founder voice audit" />
+          </Field>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[4] }}>
+            <Field label="Type">
+              <Select value={form.type} onChange={e => setForm(prev => ({ ...prev, type: e.target.value as SkillType }))}>
+                {SKILL_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+              </Select>
+            </Field>
+            <Field label="Inject into">
+              <Select value={form.injected_into} onChange={e => setForm(prev => ({ ...prev, injected_into: e.target.value as SkillAgent }))}>
+                {SKILL_AGENTS.map(agent => <option key={agent} value={agent}>{agentLabel[agent]}</option>)}
+              </Select>
+            </Field>
+          </div>
+
+          <Field label="Description" helper="This is for the model. Describe when Vera should use the skill, not just what it is.">
+            <Textarea rows={3} value={form.description} onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))} placeholder="Use when reviewing LinkedIn posts for hook strength, proof, voice, and platform fit." />
+          </Field>
+
+          <Field label="Trigger guidance">
+            <Textarea rows={3} value={form.trigger_description} onChange={e => setForm(prev => ({ ...prev, trigger_description: e.target.value }))} placeholder="Trigger when the operator asks for a LinkedIn audit, founder voice check, or post rewrite." />
+          </Field>
+
+          <Field label="Prompt module">
+            <Textarea rows={9} value={form.prompt_module} onChange={e => setForm(prev => ({ ...prev, prompt_module: e.target.value }))} placeholder="Purpose, process, gotchas, output format." style={{ fontFamily: t.family.mono }} />
+          </Field>
+
+          <Field label="Gotchas" helper="One per line. These should come from failures, rejected posts, compliance issues, and repeated manual edits.">
+            <Textarea rows={5} value={form.gotchas} onChange={e => setForm(prev => ({ ...prev, gotchas: e.target.value }))} placeholder={'Generic opener\nUnsupported authority claim\nCTA asks too much'} />
+          </Field>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[4] }}>
+            <Field label="Good examples" helper="One per line. Use Label: example when useful.">
+              <Textarea rows={5} value={form.good_examples} onChange={e => setForm(prev => ({ ...prev, good_examples: e.target.value }))} />
+            </Field>
+            <Field label="Avoid examples" helper="One per line.">
+              <Textarea rows={5} value={form.bad_examples} onChange={e => setForm(prev => ({ ...prev, bad_examples: e.target.value }))} />
+            </Field>
+          </div>
+
+          <Field label="Sources" helper="One per line. Example: General Vera KB: LinkedIn audit rules.">
+            <Textarea rows={4} value={form.source_refs} onChange={e => setForm(prev => ({ ...prev, source_refs: e.target.value }))} />
+          </Field>
+
+          <Field label="Trigger JSON" helper="Used by the Strategist and Writer to auto-match platform, format, or job. Must be valid JSON.">
+            <Textarea rows={5} value={form.trigger_when} onChange={e => setForm(prev => ({ ...prev, trigger_when: e.target.value }))} style={{ fontFamily: t.family.mono }} />
+          </Field>
+
+          <Field label="Performance notes">
+            <Textarea rows={3} value={form.performance_notes} onChange={e => setForm(prev => ({ ...prev, performance_notes: e.target.value }))} placeholder="What reviewers or performance data have taught us about this skill." />
+          </Field>
+
+          <Field label="Tags">
+            <Input value={form.tags} onChange={e => setForm(prev => ({ ...prev, tags: e.target.value }))} placeholder="linkedin, voice, audit" />
+          </Field>
+
+          {error && (
+            <div style={{ color: color.danger, fontSize: t.size.sm, background: 'rgba(185,28,28,0.06)', border: `1px solid ${color.danger}`, borderRadius: radius.md, padding: space[3] }}>
+              {error}
+            </div>
+          )}
+        </div>
+
+        <footer style={{ padding: space[5], borderTop: `1px solid ${color.line}`, display: 'flex', justifyContent: 'flex-end', gap: space[3] }}>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={saving} leading={<Check size={14} />} onClick={onSave}>
+            {editing ? 'Save changes' : 'Create skill'}
+          </Button>
+        </footer>
+      </aside>
     </div>
   )
 }
