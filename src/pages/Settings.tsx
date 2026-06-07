@@ -21,7 +21,16 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
 
 function initialSettingsTab(): Tab {
   if (typeof window === 'undefined') return 'workspace'
-  const value = new URL(window.location.href).searchParams.get('tab')
+  const params = new URL(window.location.href).searchParams
+  if (
+    params.has('provider')
+    || params.has('google_status')
+    || params.has('meta_status')
+    || params.has('unipile_status')
+  ) {
+    return 'integrations'
+  }
+  const value = params.get('tab')
   return TABS.some(tab => tab.id === value) ? value as Tab : 'workspace'
 }
 
