@@ -35,6 +35,39 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const UNIPILE_DSN = Deno.env.get("UNIPILE_DSN")
 const UNIPILE_API_KEY = Deno.env.get("UNIPILE_API_KEY")
+const PUBLISH_CLAIM_STALE_MS = 15 * 60 * 1000
+
+function createAdminClient() {
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+}
+
+type SupabaseAdminClient = ReturnType<typeof createAdminClient>
+type JsonRecord = Record<string, unknown>
+
+type PostRow = {
+  id: string
+  org_id: string | null
+  project_id: string | null
+  channel: string | null
+  copy: string | null
+  hashtags: unknown
+  media_url: string | null
+  title: string | null
+  posted_at: string | null
+}
+
+type ClientIntegrationRow = {
+  id: string
+  provider: string
+  status: string
+  config: JsonRecord | null
+  external_ref: JsonRecord | null
+  health_status: string | null
+}
+
+type PublishClaim =
+  | { ok: true }
+  | { ok: false; message: string; status: number }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders })
@@ -50,7 +83,7 @@ Deno.serve(async (req) => {
     return jsonError("Invalid JSON body", 400)
   }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+  const supabase = createAdminClient()
   const auth = await requirePostMember(req, supabase, SUPABASE_SERVICE_ROLE_KEY, body.post_id as string | undefined, corsHeaders)
   if (!auth.ok) return auth.response
 
@@ -61,14 +94,15 @@ Deno.serve(async (req) => {
   if (!post_id) return jsonError("post_id is required", 400)
 
   // 1. Look up the post + the org's Unipile account
-  const { data: post, error: postErr } = await supabase
+  const { data: postData, error: postErr } = await supabase
     .from("content_posts")
     .select("id, org_id, project_id, channel, copy, hashtags, media_url, title, posted_at")
     .eq("id", post_id)
     .maybeSingle()
 
   if (postErr) return jsonError(`Post lookup failed: ${postErr.message}`, 500)
-  if (!post) return jsonError(`No post with id ${post_id}`, 404)
+  if (!postData) return jsonError(`No post with id ${post_id}`, 404)
+  const post = postData as PostRow
   if (post.posted_at) return jsonError("Post is already marked posted; refusing to re-publish.", 409)
 
   const channel = (post.channel ?? "").toLowerCase()
@@ -82,16 +116,22 @@ Deno.serve(async (req) => {
   // that have no project_id.
   let unipileAccountId: string | null = null
   if (post.project_id) {
-    const { data: conn } = await supabase
-      .from("social_connections")
-      .select("unipile_account_id")
+    const integrationProvider = integrationProviderForChannel(channel)
+    const { data: integrationData, error: integrationErr } = await supabase
+      .from("client_integrations")
+      .select("id, provider, status, config, external_ref, health_status")
       .eq("project_id", post.project_id)
-      .eq("provider", channel)
+      .eq("provider", integrationProvider)
       .eq("status", "connected")
+      .order("updated_at", { ascending: false })
+      .limit(1)
       .maybeSingle()
-    unipileAccountId = (conn?.unipile_account_id as string | null) ?? null
+    if (integrationErr) return jsonError(`Client integration lookup failed: ${integrationErr.message}`, 500)
+
+    const integration = integrationData as ClientIntegrationRow | null
+    unipileAccountId = getUnipileAccountId(integration)
     if (!unipileAccountId) {
-      return jsonError(`No connected ${channel} account for this client — connect it first.`, 400)
+      return jsonError(`No connected ${channel} Unipile account for this client. Connect it in client integrations first.`, 400)
     }
   }
   if (!post.project_id && !unipileAccountId && channel === "linkedin" && post.org_id) {
@@ -148,48 +188,58 @@ Deno.serve(async (req) => {
   const text = textParts.join("\n\n").trim()
   if (!text) return jsonError("Post has no copy to publish.", 400)
 
+  const claim = await claimPublish(supabase, post, channel)
+  if (!claim.ok) return jsonError(claim.message, claim.status)
+
   // 4. Build the request. JSON when no media; multipart/form-data when media_url
   //    is set — Unipile does not document a remote-URL field for attachments.
   const mediaUrl = post.media_url as string | null | undefined
   let unipileRes: Response
-  if (mediaUrl) {
-    // Fetch the image and re-upload as a file part
-    const imgRes = await fetch(mediaUrl)
-    if (!imgRes.ok) {
-      return jsonError(`Could not fetch media_url (${imgRes.status})`, 502)
+  try {
+    if (mediaUrl) {
+      // Fetch the image and re-upload as a file part
+      const imgRes = await fetch(mediaUrl)
+      if (!imgRes.ok) {
+        await releasePublishClaim(supabase, post_id, `Could not fetch media_url (${imgRes.status})`)
+        return jsonError(`Could not fetch media_url (${imgRes.status})`, 502)
+      }
+      const imgBlob = await imgRes.blob()
+      const contentType = imgRes.headers.get("content-type") ?? "image/jpeg"
+      const ext = contentType.split("/")[1]?.split(";")[0] ?? "jpg"
+      const filename = `post-${post_id.slice(0, 8)}.${ext}`
+
+      const form = new FormData()
+      form.append("account_id", unipileAccountId)
+      form.append("text", text)
+      if (asOrganization) form.append("as_organization", asOrganization)
+      form.append("attachments", new File([imgBlob], filename, { type: contentType }))
+
+      unipileRes = await fetch(`https://${UNIPILE_DSN}/api/v1/posts`, {
+        method: "POST",
+        headers: { "X-API-KEY": UNIPILE_API_KEY, "Accept": "application/json" },
+        body: form,
+      })
+    } else {
+      const payload: Record<string, unknown> = {
+        account_id: unipileAccountId,
+        text,
+      }
+      if (asOrganization) payload.as_organization = asOrganization
+
+      unipileRes = await fetch(`https://${UNIPILE_DSN}/api/v1/posts`, {
+        method: "POST",
+        headers: {
+          "X-API-KEY": UNIPILE_API_KEY,
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      })
     }
-    const imgBlob = await imgRes.blob()
-    const contentType = imgRes.headers.get("content-type") ?? "image/jpeg"
-    const ext = contentType.split("/")[1]?.split(";")[0] ?? "jpg"
-    const filename = `post-${post_id.slice(0, 8)}.${ext}`
-
-    const form = new FormData()
-    form.append("account_id", unipileAccountId)
-    form.append("text", text)
-    if (asOrganization) form.append("as_organization", asOrganization)
-    form.append("attachments", new File([imgBlob], filename, { type: contentType }))
-
-    unipileRes = await fetch(`https://${UNIPILE_DSN}/api/v1/posts`, {
-      method: "POST",
-      headers: { "X-API-KEY": UNIPILE_API_KEY, "Accept": "application/json" },
-      body: form,
-    })
-  } else {
-    const payload: Record<string, unknown> = {
-      account_id: unipileAccountId,
-      text,
-    }
-    if (asOrganization) payload.as_organization = asOrganization
-
-    unipileRes = await fetch(`https://${UNIPILE_DSN}/api/v1/posts`, {
-      method: "POST",
-      headers: {
-        "X-API-KEY": UNIPILE_API_KEY,
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await markPublishClaimError(supabase, post_id, message)
+    return jsonError(`Unipile publish request failed: ${message}`, 502)
   }
 
   // 5. Parse the response. Shape is undocumented; we log everything and pull
@@ -200,6 +250,7 @@ Deno.serve(async (req) => {
 
   if (!unipileRes.ok) {
     console.error("unipile-post failed", { status: unipileRes.status, body: responseText.slice(0, 500) })
+    await releasePublishClaim(supabase, post_id, `Unipile returned ${unipileRes.status}: ${responseText.slice(0, 300)}`)
     return jsonError(
       `Unipile returned ${unipileRes.status}: ${responseText.slice(0, 300)}`,
       unipileRes.status >= 500 ? 502 : 400,
@@ -208,6 +259,7 @@ Deno.serve(async (req) => {
   console.log("unipile-post raw response", JSON.stringify(unipileBody).slice(0, 800))
 
   const { urn, posted_url } = extractUrlAndUrn(unipileBody)
+  await completePublishClaim(supabase, post, urn, posted_url)
 
   // 6. Optionally close the loop: route through approval-webhook so the DB
   //    write + Slack notify run through the single hub.
@@ -249,6 +301,138 @@ Deno.serve(async (req) => {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   })
 })
+
+function integrationProviderForChannel(channel: string): string {
+  if (channel === "linkedin") return "linkedin"
+  if (channel === "instagram") return "meta_instagram"
+  return channel
+}
+
+function getUnipileAccountId(integration: ClientIntegrationRow | null): string | null {
+  return firstString(
+    integration?.external_ref?.unipile_account_id,
+    integration?.config?.unipile_account_id,
+    integration?.external_ref?.account_id,
+  )
+}
+
+async function claimPublish(
+  supabase: SupabaseAdminClient,
+  post: PostRow,
+  channel: string,
+): Promise<PublishClaim> {
+  const row = {
+    post_id: post.id,
+    org_id: post.org_id,
+    project_id: post.project_id,
+    channel,
+    claim_status: "in_progress",
+    claimed_by: "unipile-post",
+    locked_at: new Date().toISOString(),
+  }
+
+  const firstAttempt = await supabase.from("content_post_publish_claims").insert(row)
+  if (!firstAttempt.error) return { ok: true }
+  if (firstAttempt.error.code !== "23505") {
+    console.error("publish claim insert failed", firstAttempt.error)
+    return { ok: false, status: 500, message: `Publish claim failed: ${firstAttempt.error.message}` }
+  }
+
+  const { data: existingData, error: lookupError } = await supabase
+    .from("content_post_publish_claims")
+    .select("post_id, claim_status, locked_at, completed_at")
+    .eq("post_id", post.id)
+    .maybeSingle()
+
+  if (lookupError) {
+    console.error("publish claim lookup failed", lookupError)
+    return { ok: false, status: 500, message: `Publish claim lookup failed: ${lookupError.message}` }
+  }
+
+  const existing = existingData as { claim_status?: string; locked_at?: string; completed_at?: string | null } | null
+  if (!existing) {
+    const retry = await supabase.from("content_post_publish_claims").insert(row)
+    if (!retry.error) return { ok: true }
+    return { ok: false, status: 409, message: "Publish is already in progress for this post." }
+  }
+
+  if (existing.claim_status === "completed" || existing.completed_at) {
+    return { ok: false, status: 409, message: "Post has already been published or claimed as published." }
+  }
+
+  const lockedAt = existing.locked_at ? Date.parse(existing.locked_at) : Number.NaN
+  const isStale = Number.isFinite(lockedAt) && Date.now() - lockedAt > PUBLISH_CLAIM_STALE_MS
+  if (!isStale) {
+    return { ok: false, status: 409, message: "Publish is already in progress for this post." }
+  }
+
+  const staleCutoff = new Date(Date.now() - PUBLISH_CLAIM_STALE_MS).toISOString()
+  const staleDelete = await supabase
+    .from("content_post_publish_claims")
+    .delete()
+    .eq("post_id", post.id)
+    .eq("claim_status", "in_progress")
+    .lte("locked_at", staleCutoff)
+
+  if (staleDelete.error) {
+    console.error("stale publish claim cleanup failed", staleDelete.error)
+    return { ok: false, status: 500, message: `Stale publish claim cleanup failed: ${staleDelete.error.message}` }
+  }
+
+  const retry = await supabase.from("content_post_publish_claims").insert(row)
+  if (!retry.error) return { ok: true }
+  if (retry.error.code === "23505") {
+    return { ok: false, status: 409, message: "Publish is already in progress for this post." }
+  }
+  console.error("stale publish claim retry failed", retry.error)
+  return { ok: false, status: 500, message: `Publish claim retry failed: ${retry.error.message}` }
+}
+
+async function releasePublishClaim(supabase: SupabaseAdminClient, postId: string, reason: string) {
+  const { error } = await supabase
+    .from("content_post_publish_claims")
+    .delete()
+    .eq("post_id", postId)
+    .eq("claim_status", "in_progress")
+  if (error) console.error("publish claim release failed", { postId, reason, error })
+}
+
+async function markPublishClaimError(supabase: SupabaseAdminClient, postId: string, reason: string) {
+  const { error } = await supabase
+    .from("content_post_publish_claims")
+    .update({ last_error: reason.slice(0, 1000) })
+    .eq("post_id", postId)
+    .eq("claim_status", "in_progress")
+  if (error) console.error("publish claim error update failed", { postId, reason, error })
+}
+
+async function completePublishClaim(
+  supabase: SupabaseAdminClient,
+  post: PostRow,
+  urn?: string,
+  postedUrl?: string,
+) {
+  const { error } = await supabase
+    .from("content_post_publish_claims")
+    .update({
+      claim_status: "completed",
+      completed_at: new Date().toISOString(),
+      org_id: post.org_id,
+      project_id: post.project_id,
+      remote_id: urn ?? null,
+      remote_url: postedUrl ?? null,
+      last_error: null,
+    })
+    .eq("post_id", post.id)
+  if (error) console.error("publish claim completion update failed", { post_id: post.id, error })
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim()
+  }
+  return null
+}
 
 // Unipile's response field names aren't documented for POST /api/v1/posts.
 // Probe the common candidates; fall back to deriving from a URN.

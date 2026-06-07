@@ -938,6 +938,73 @@ export type Database = {
           },
         ]
       }
+      content_post_publish_claims: {
+        Row: {
+          channel: string
+          claim_status: string
+          claimed_by: string
+          completed_at: string | null
+          last_error: string | null
+          locked_at: string
+          org_id: string | null
+          post_id: string
+          project_id: string | null
+          remote_id: string | null
+          remote_url: string | null
+          updated_at: string
+        }
+        Insert: {
+          channel: string
+          claim_status?: string
+          claimed_by?: string
+          completed_at?: string | null
+          last_error?: string | null
+          locked_at?: string
+          org_id?: string | null
+          post_id: string
+          project_id?: string | null
+          remote_id?: string | null
+          remote_url?: string | null
+          updated_at?: string
+        }
+        Update: {
+          channel?: string
+          claim_status?: string
+          claimed_by?: string
+          completed_at?: string | null
+          last_error?: string | null
+          locked_at?: string
+          org_id?: string | null
+          post_id?: string
+          project_id?: string | null
+          remote_id?: string | null
+          remote_url?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "content_post_publish_claims_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "content_post_publish_claims_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: true
+            referencedRelation: "content_posts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "content_post_publish_claims_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       content_posts: {
         Row: {
           agent_outputs: Json | null
@@ -3550,4 +3617,3 @@ export const Constants = {
     },
   },
 } as const
-

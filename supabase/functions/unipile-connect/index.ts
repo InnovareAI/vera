@@ -41,8 +41,8 @@ Deno.serve(async (req) => {
 
   // Which network to connect. Unipile's create-post publishes to LinkedIn +
   // Instagram (X returns with V2). Default LinkedIn for backward compatibility.
-  // project_id is optional: when present the connection is per-client (a
-  // social_connections row); without it, it's the legacy org-level connection.
+  // project_id is optional: when present the frontend stores the connection in
+  // client_integrations; without it, this is the legacy org-level connection.
   const ALLOWED = new Set(['LINKEDIN', 'INSTAGRAM', 'X'])
   const provider = String(providerRaw ?? 'LINKEDIN').toUpperCase()
   if (!ALLOWED.has(provider)) {
