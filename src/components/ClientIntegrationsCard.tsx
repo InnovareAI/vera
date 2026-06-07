@@ -1169,9 +1169,13 @@ export function ClientIntegrationsCard() {
               <button
                 type="button"
                 key={template.provider}
+                data-integration-tile={template.provider}
                 onClick={() => {
                   setSelectedProvider(template.provider)
                   setMessage(null)
+                  if (template.provider === 'linkedin') {
+                    void connectUnipile()
+                  }
                 }}
                 className="text-left"
                 style={{
