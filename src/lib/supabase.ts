@@ -67,6 +67,13 @@ export interface Post {
   created_by?: string
   posted_at?: string | null
   posted_url?: string | null
+  provider?: string | null
+  provider_account_id?: string | null
+  provider_post_id?: string | null
+  provider_page_id?: string | null
+  provider_media_id?: string | null
+  provider_permalink?: string | null
+  last_metric_sync_at?: string | null
   created_at: string
   updated_at: string
 }
@@ -283,4 +290,22 @@ export interface ClientIntegration {
   updated_by?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface ContentMetricSnapshot {
+  id: string
+  org_id: string
+  project_id: string
+  post_id?: string | null
+  provider: ClientIntegrationProvider | string
+  provider_account_id?: string | null
+  provider_object_id?: string | null
+  object_type: string
+  metric_name: string
+  metric_value: number
+  metric_period: string
+  metric_time?: string | null
+  pulled_at: string
+  raw: Record<string, unknown>
+  created_at: string
 }

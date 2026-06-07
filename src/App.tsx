@@ -22,7 +22,7 @@ import Settings from './pages/Settings'
 import AcrossClients from './pages/AcrossClients'   // "/" — the shelf
 import VeraThread from './pages/VeraThread'          // /p/:slug/vera
 import Brain from './pages/Brain'                    // /p/:slug/brain
-import Measure from './pages/Measure'                // /p/:slug/measure
+import Measure from './pages/Measure'                // /p/:slug/measure, visible label: Performance
 import ReviewLink from './pages/ReviewLink'          // /r/:reviewToken — public, tokened review link
 import ApprovalIndex from './pages/ApprovalIndex'
 import AcceptInvite from './pages/AcceptInvite'
@@ -79,7 +79,7 @@ export default function App() {
                 <Route path="review"     element={<RedirectFlatToProject section="review" />} />
                 <Route path="review/:id" element={<RedirectReviewDetailToProject />} />
                 <Route path="knowledge"  element={<RedirectFlatToProject section="knowledge" />} />
-                <Route path="audit"      element={<RedirectFlatToProject section="measure" />} />{/* LinkedIn audit removed — land on Measure */}
+                <Route path="audit"      element={<RedirectFlatToProject section="measure" />} />{/* LinkedIn audit removed - land on Performance */}
                 <Route path="intel"      element={<RedirectFlatToProject section="measure" />} />
                 <Route path="library"    element={<RedirectFlatToProject section="review" />} />{/* Library dissolves → Review */}
                 <Route path="calendar"   element={<RedirectFlatToProject section="calendar" />} />{/* flat → project calendar */}

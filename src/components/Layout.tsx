@@ -480,7 +480,7 @@ export default function Layout() {
 
           <RailLabel>Client</RailLabel>
           <RailItem to={p('brain')}     icon={Brain}           label="Brain" />
-          <RailItem to={p('measure')}   icon={BarChart3}       label="Measure" />
+          <RailItem to={p('measure')}   icon={BarChart3}       label="Performance" />
         </nav>
 
         <RailRecents />
