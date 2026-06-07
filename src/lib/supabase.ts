@@ -216,6 +216,7 @@ export type ClientIntegrationProvider =
   | 'pinterest'
   | 'reddit'
   | 'bluesky'
+  | 'medium'
   | 'wordpress'
   | 'webflow'
   | 'contentful'

@@ -41,7 +41,7 @@ import { useProject } from '../lib/projectContext'
 interface IntegrationTemplate {
   provider: ClientIntegrationProvider
   category: ClientIntegrationCategory
-  group: 'Search & analytics' | 'Organic social' | 'Publishing & CMS'
+  group: 'Search & analytics' | 'Organic social' | 'Content platforms' | 'Publishing & CMS'
   label: string
   eyebrow: string
   description: string
@@ -262,6 +262,23 @@ const PROVIDERS: IntegrationTemplate[] = [
     accent: '#0284c7',
   },
   {
+    provider: 'medium',
+    category: 'content_source',
+    group: 'Content platforms',
+    label: 'Medium',
+    eyebrow: 'Manual publishing',
+    description: 'Ingest Medium profile or publication RSS, analyze long-form tone, and prepare approved drafts for manual publishing.',
+    connectionKind: 'manual',
+    credentialRoute: 'No API token required. Use RSS for reading and manual handoff for publishing',
+    primaryLabel: 'Medium profile or publication URL',
+    primaryPlaceholder: 'https://medium.com/@brand',
+    scopes: ['rss.read', 'manual.publish'],
+    capabilities: { read: true, ingest: true, analyze: true },
+    setupNote: 'Use Medium RSS for source ingestion. Final publishing stays manual because Medium does not support new official API integrations.',
+    icon: FileCode2,
+    accent: '#111827',
+  },
+  {
     provider: 'wordpress',
     category: 'publisher',
     group: 'Publishing & CMS',
@@ -418,6 +435,7 @@ const PROVIDERS: IntegrationTemplate[] = [
 
 const PROVIDER_GROUPS: IntegrationTemplate['group'][] = [
   'Organic social',
+  'Content platforms',
   'Search & analytics',
   'Publishing & CMS',
 ]
@@ -642,7 +660,7 @@ export function ClientIntegrationsCard() {
             Agentic integrations
           </p>
           <p style={{ color: 'var(--ink-2)', fontSize: 'var(--t-sm)', lineHeight: 1.5, margin: '5px 0 0', maxWidth: 680 }}>
-            Register organic social, search, analytics, WordPress, and CMS routes per client space. Vera reads these capability records before she analyzes, ingests, or publishes anything.
+            Register organic social, content platforms, search, analytics, WordPress, and CMS routes per client space. Vera reads these capability records before she analyzes, ingests, or publishes anything.
           </p>
         </div>
         <div className="grid grid-cols-3 gap-2 min-w-[260px]">

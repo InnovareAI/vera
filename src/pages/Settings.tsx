@@ -19,10 +19,10 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'integrations', label: 'Integrations', icon: Plug },
 ]
 
-const PLATFORMS = ['linkedin', 'twitter', 'instagram', 'facebook', 'quora']
+const PLATFORMS = ['linkedin', 'twitter', 'instagram', 'facebook', 'quora', 'medium']
 const PLATFORM_LABELS: Record<string, string> = {
   linkedin: 'LinkedIn', twitter: 'X (Twitter)', instagram: 'Instagram',
-  facebook: 'Facebook', quora: 'Quora',
+  facebook: 'Facebook', quora: 'Quora', medium: 'Medium',
 }
 
 // ─── Workspace Tab ────────────────────────────────────────────────────────────
@@ -590,6 +590,7 @@ function IntegrationsTab() {
                   platform === 'twitter'  ? 'bg-sky-100 text-sky-700' :
                   platform === 'instagram' ? 'bg-pink-100 text-pink-700' :
                   platform === 'facebook' ? 'bg-indigo-100 text-indigo-700' :
+                  platform === 'medium' ? 'bg-stone-100 text-stone-700' :
                   'bg-red-100 text-red-700'
                 }`}>
                   {PLATFORM_LABELS[platform].slice(0, 2).toUpperCase()}
@@ -615,7 +616,7 @@ function IntegrationsTab() {
                       value={config.char_limit ?? ''}
                       onChange={e => update(platform, { char_limit: Number(e.target.value) || undefined })}
                       className="input w-full"
-                      placeholder={platform === 'twitter' ? '280' : '3000'}
+                      placeholder={platform === 'twitter' ? '280' : platform === 'medium' ? '10000' : '3000'}
                     />
                   </div>
                   <div>
@@ -650,28 +651,37 @@ function IntegrationsTab() {
                   />
                 </div>
 
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 flex items-center justify-between">
-                    <span>API / Access Token</span>
-                    <button onClick={() => setReveal(r => ({...r, [platform]: !r[platform]}))}
-                      className="text-gray-400 hover:text-gray-600">
-                      {isRevealed ? <EyeOff size={12} /> : <Eye size={12} />}
-                    </button>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={isRevealed ? 'text' : 'password'}
-                      value={(config as Record<string, unknown>)['access_token'] as string ?? ''}
-                      onChange={e => update(platform, { access_token: e.target.value } as Partial<PlatformConfig>)}
-                      className="input w-full pr-8"
-                      placeholder="Stored encrypted · not used directly by VERA yet"
-                    />
+                {platform === 'medium' ? (
+                  <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                    <p className="text-xs font-medium text-gray-700">Manual publishing</p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      No API token needed. Add the Medium profile or publication URL in Agentic integrations for RSS ingestion and manual handoff.
+                    </p>
                   </div>
-                  <p className="text-[10px] text-gray-400 mt-1">
-                    <AlertCircle size={10} className="inline mr-0.5" />
-                    API keys are stored in your Supabase project; auto-posting coming soon.
-                  </p>
-                </div>
+                ) : (
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 flex items-center justify-between">
+                      <span>API / Access Token</span>
+                      <button onClick={() => setReveal(r => ({...r, [platform]: !r[platform]}))}
+                        className="text-gray-400 hover:text-gray-600">
+                        {isRevealed ? <EyeOff size={12} /> : <Eye size={12} />}
+                      </button>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={isRevealed ? 'text' : 'password'}
+                        value={(config as Record<string, unknown>)['access_token'] as string ?? ''}
+                        onChange={e => update(platform, { access_token: e.target.value } as Partial<PlatformConfig>)}
+                        className="input w-full pr-8"
+                        placeholder="Stored encrypted · not used directly by VERA yet"
+                      />
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      <AlertCircle size={10} className="inline mr-0.5" />
+                      API keys are stored in your Supabase project; auto-posting coming soon.
+                    </p>
+                  </div>
+                )}
 
                 <button onClick={() => handleSave(platform)} disabled={saving === platform}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 disabled:opacity-50 transition-colors">
