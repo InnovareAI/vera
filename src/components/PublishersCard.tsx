@@ -1,4 +1,4 @@
-// Connected blogs / CMS / Git publishers — Settings → Integrations.
+// Connected blogs / CMS / Git publishers, Settings to Integrations.
 //
 // One-screen connect flow: operator pastes URL → auto-discover-publisher
 // runs → shows what we found + asks for ONLY the credential the platform
@@ -44,7 +44,7 @@ export function PublishersCard() {
         <div>
           <p className="text-sm font-semibold text-gray-900">Connected blogs & CMSes</p>
           <p className="text-xs text-gray-500 mt-0.5">
-            Auto-detects WordPress / Ghost / static sites on Vercel-Netlify-CF Pages. One URL — we discover the rest.
+            Auto-detects WordPress / Ghost / static sites on Vercel-Netlify-CF Pages. One URL, we discover the rest.
           </p>
         </div>
         <button onClick={() => setWizardOpen(true)}
@@ -120,7 +120,7 @@ interface Discovery {
   message?: string
 }
 
-// Manual-pick platforms — for cases where auto-detection can't see the
+// Manual-pick platforms, for cases where auto-detection can't see the
 // CMS (Strapi self-hosted on a different domain than the rendered site,
 // or operators who already know what they want).
 const MANUAL_PLATFORMS: Record<string, { label: string; kind: string; fields: Array<{ name: string; label: string; type: 'text' | 'password'; placeholder?: string; note?: string }>; hint: string }> = {
@@ -240,7 +240,7 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
           github_pat: creds.github_pat,
         })
       } else {
-        // Webflow / Contentful / Sanity — pass every field from credential_needed
+        // Webflow / Contentful / Sanity, pass every field from credential_needed
         // verbatim. The credential_needed.fields[] schema enumerates exactly what
         // the connector wants, so we forward all of them.
         for (const f of discovery.credential_needed.fields) {
@@ -258,7 +258,7 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
         setError({ message: data.error?.message ?? 'Connection failed.', recovery: data.error?.recovery_action })
         return
       }
-      // Connected — close + refresh
+      // Connected, close + refresh
       onClose()
       window.location.reload()
     } catch (e) {
@@ -269,7 +269,7 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
   const canSubmit = !!discovery?.credential_needed && discovery.credential_needed.fields.every(f => {
     if (f.name === 'repo') return !!editRepo.trim() || !!discovery.hint.repo
     // Fields with default placeholders (environment_id, dataset) auto-fill
-    // from placeholder if operator doesn't type — we still want them required-on-submit.
+    // from placeholder if operator doesn't type, we still want them required-on-submit.
     return !!(creds[f.name]?.trim() || f.placeholder)
   }) && !submitting
 
@@ -279,12 +279,12 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
         <div className="px-6 py-4 border-b border-gray-100">
           <p className="text-sm font-semibold text-gray-900">Add a blog</p>
           <p className="text-xs text-gray-500 mt-0.5">
-            Paste your blog URL — we'll auto-discover the platform and pre-fill everything we can.
+            Paste your blog URL, we will auto-discover the platform and pre-fill everything we can.
           </p>
         </div>
 
         <div className="px-6 py-5 space-y-5">
-          {/* URL input — hidden when operator picked a manual platform */}
+          {/* URL input, hidden when operator picked a manual platform */}
           {!manualKind && (
             <div>
               <label className="text-xs font-medium text-gray-700 block mb-1.5">Where does your blog live?</label>
@@ -308,7 +308,7 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* When discovery returns nothing useful — offer the manual platform list */}
+          {/* When discovery returns nothing useful, offer the manual platform list */}
           {discovery && !discovery.credential_needed && !manualKind && (
             <div className="p-3 rounded-lg bg-gray-50 border border-gray-200">
               <p className="text-xs font-medium text-gray-700 mb-2">We couldn't auto-detect a supported platform at that URL. Pick manually:</p>
@@ -324,7 +324,7 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* Manual-pick mode banner — back button */}
+          {/* Manual-pick mode banner, back button */}
           {manualKind && (
             <div className="flex items-center justify-between p-2.5 rounded-lg bg-gray-50 border border-gray-200">
               <p className="text-xs text-gray-700">
@@ -341,7 +341,7 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
           {discovery?.sniffed_blog_url && discovery.original_url && (
             <div className="p-3 rounded-lg bg-blue-50 border border-blue-200">
               <p className="text-xs font-medium text-blue-900">
-                Couldn't find a blog at <code className="bg-blue-100 px-1 rounded">{discovery.original_url}</code> — but we found one at <code className="bg-blue-100 px-1 rounded">{discovery.sniffed_blog_url}</code>.
+                Couldn't find a blog at <code className="bg-blue-100 px-1 rounded">{discovery.original_url}</code>, but we found one at <code className="bg-blue-100 px-1 rounded">{discovery.sniffed_blog_url}</code>.
               </p>
               <p className="text-[11px] text-blue-700 mt-1">
                 We're using that. If wrong, paste the actual blog URL above and Discover again.

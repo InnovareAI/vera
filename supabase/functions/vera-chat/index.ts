@@ -619,6 +619,18 @@ interface WorkspaceContext {
   skillPerformance: Map<string, { invocations: number; approval_rate: number | null }>
   kbStats: { raw_count: number; article_count: number; recent_titles: string[] }
   kbHits: Array<{ source: string; title: string; excerpt: string; similarity: number }>
+  integrations: Array<{
+    provider: string
+    category: string
+    display_name: string
+    status: string
+    connection_kind: string
+    scopes: string[] | null
+    capabilities: Record<string, unknown> | null
+    health_status: string | null
+    health_detail: string | null
+    last_sync_at: string | null
+  }>
   // Phase 2b — active project scope + its top-N relevant knowledge items.
   // When project_id is supplied, this defines VERA's scope for the turn.
   // Absent / null = workspace-level chat (default brand context only).
@@ -686,9 +698,18 @@ async function loadContext(
     .order('total_invocations', { ascending: false })
     .limit(50)
 
+  const integrationsQuery = projectId
+    ? supabase.from('client_integrations')
+        .select('provider, category, display_name, status, connection_kind, scopes, capabilities, health_status, health_detail, last_sync_at')
+        .eq('project_id', projectId)
+        .order('category')
+        .order('display_name')
+        .limit(30)
+    : Promise.resolve({ data: [], error: null })
+
   // Parallel fetch — each query is small, no need to serialise.
   const [
-    orgRes, brandRes, campRes, audRes, auditRes, pendingRes, memRes, skillsRes, perfRes,
+    orgRes, brandRes, campRes, audRes, auditRes, pendingRes, memRes, skillsRes, perfRes, integrationsRes,
   ] = await Promise.all([
     supabase.from('organizations').select('name').eq('id', orgId).maybeSingle(),
     loadBrandVoice(supabase, orgId, projectId),
@@ -709,6 +730,7 @@ async function loadContext(
     // skill_performance view). Only skills with at least 1 invocation
     // surface here; new skills with no signal stay description-only.
     perfQuery,
+    integrationsQuery,
   ])
 
   // Latest audit — pick the most recent regardless of kind, then pull score/grade
@@ -749,6 +771,9 @@ async function loadContext(
     ),
     kbStats: await loadKbStats(supabase, orgId),
     kbHits: lastUserMessage ? await retrieveKbHits(supabase, orgId, lastUserMessage) : [],
+    integrations: ((integrationsRes.data ?? []) as WorkspaceContext['integrations']).filter(row =>
+      row.status !== 'revoked'
+    ),
     activeProject: projectId ? await loadActiveProject(supabase, orgId, projectId) : undefined,
     projectKnowledge: projectId && lastUserMessage
       ? await retrieveProjectKnowledge(supabase, projectId, lastUserMessage)
@@ -880,6 +905,13 @@ async function retrieveKbHits(
   return (data ?? []) as WorkspaceContext['kbHits']
 }
 
+function formatIntegrationCapabilities(capabilities: Record<string, unknown> | null): string {
+  const active = Object.entries(capabilities ?? {})
+    .filter(([, value]) => value === true)
+    .map(([key]) => key)
+  return active.length ? active.join(', ') : 'none'
+}
+
 function renderContext(ctx: WorkspaceContext, route: string): string {
   const lines: string[] = []
   lines.push(`<workspace_context>`)
@@ -945,6 +977,21 @@ function renderContext(ctx: WorkspaceContext, route: string): string {
   }
 
   lines.push(`Pending review: ${ctx.pendingCount} post${ctx.pendingCount === 1 ? '' : 's'}`)
+
+  if (ctx.integrations.length) {
+    lines.push(`Integrations (${ctx.integrations.length}) for the active project:`)
+    lines.push(`  Treat status=connected as usable. Treat status=pending or not_connected as setup work only. Never infer credentials from this list.`)
+    for (const integration of ctx.integrations) {
+      const scopes = integration.scopes?.length ? integration.scopes.join(', ') : 'none'
+      const caps = formatIntegrationCapabilities(integration.capabilities)
+      lines.push(`  - ${integration.display_name} [${integration.provider}/${integration.category}] status=${integration.status}; health=${integration.health_status ?? 'unknown'}; connection=${integration.connection_kind}; capabilities=${caps}; scopes=${scopes}`)
+      if (integration.status !== 'connected' && integration.health_detail) {
+        lines.push(`    Setup note: ${integration.health_detail}`)
+      }
+    }
+  } else if (ctx.activeProject) {
+    lines.push(`Integrations: none registered for this project. For external search, analytics, or CMS work, propose setup before claiming live access.`)
+  }
 
   if (ctx.memories.length) {
     lines.push(`Memories (${ctx.memories.length}):`)

@@ -202,3 +202,73 @@ export interface PlatformConfig {
   created_at: string
   updated_at: string
 }
+
+export type ClientIntegrationProvider =
+  | 'google_search_console'
+  | 'google_analytics_4'
+  | 'wordpress'
+  | 'webflow'
+  | 'contentful'
+  | 'sanity'
+  | 'strapi'
+  | 'hubspot_cms'
+  | 'ghost'
+  | 'shopify_blog'
+  | 'custom_cms'
+
+export type ClientIntegrationCategory =
+  | 'analytics'
+  | 'seo'
+  | 'publisher'
+  | 'cms'
+  | 'content_source'
+
+export type ClientIntegrationStatus =
+  | 'not_connected'
+  | 'pending'
+  | 'connected'
+  | 'error'
+  | 'paused'
+  | 'revoked'
+
+export type ClientIntegrationConnectionKind =
+  | 'oauth'
+  | 'api_key'
+  | 'app_password'
+  | 'webhook'
+  | 'manual'
+  | 'publisher'
+
+export interface IntegrationCapabilities {
+  read?: boolean
+  ingest?: boolean
+  analyze?: boolean
+  publish?: boolean
+  upload_media?: boolean
+  schedule?: boolean
+  [key: string]: boolean | undefined
+}
+
+export interface ClientIntegration {
+  id: string
+  org_id: string
+  project_id: string
+  provider: ClientIntegrationProvider
+  category: ClientIntegrationCategory
+  display_name: string
+  status: ClientIntegrationStatus
+  connection_kind: ClientIntegrationConnectionKind
+  config: Record<string, unknown>
+  capabilities: IntegrationCapabilities
+  scopes: string[]
+  credential_ref?: string | null
+  external_ref: Record<string, unknown>
+  health_status: 'unknown' | 'healthy' | 'stale' | 'error'
+  health_detail?: string | null
+  last_sync_at?: string | null
+  last_health_check?: string | null
+  created_by?: string | null
+  updated_by?: string | null
+  created_at: string
+  updated_at: string
+}

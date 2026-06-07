@@ -7,6 +7,7 @@ import {
   Eye, EyeOff, CheckCircle2, XCircle, AlertCircle, Sun, Moon, Monitor
 } from 'lucide-react'
 import { PublishersCard } from '../components/PublishersCard'
+import { ClientIntegrationsCard } from '../components/ClientIntegrationsCard'
 import { useTheme, type Theme } from '../lib/themeContext'
 
 type Tab = 'workspace' | 'team' | 'brand' | 'integrations'
@@ -463,7 +464,7 @@ function UnipileConnectionCard() {
               <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-500">
                 <span className={`inline-block w-1.5 h-1.5 rounded-full ${healthDot}`} />
                 {state.health === 'healthy' ? 'Healthy'
-                  : state.health === 'stale' ? 'Stale — needs reconnect'
+                  : state.health === 'stale' ? 'Stale, needs reconnect'
                   : state.health === 'unknown' ? 'Unknown'
                   : 'Not yet checked'}
               </span>
@@ -561,14 +562,16 @@ function IntegrationsTab() {
   }
 
   return (
-    <div className="max-w-xl space-y-5">
+    <div className="max-w-5xl space-y-5">
       <div>
         <h2 className="text-base font-semibold text-gray-900">Platform Integrations</h2>
         <p className="text-sm text-gray-500 mt-0.5">Configure settings and API keys for each publishing platform.</p>
       </div>
 
-      {/* Workspace-level Unipile connection — separate concern from the per-platform settings below */}
+      {/* Workspace-level Unipile connection, separate concern from the per-platform settings below */}
       <UnipileConnectionCard />
+
+      <ClientIntegrationsCard />
 
       {/* Connected blogs / CMSes / Git publishers */}
       <PublishersCard />
@@ -666,7 +669,7 @@ function IntegrationsTab() {
                   </div>
                   <p className="text-[10px] text-gray-400 mt-1">
                     <AlertCircle size={10} className="inline mr-0.5" />
-                    API keys are stored in your Supabase project — auto-posting coming soon.
+                    API keys are stored in your Supabase project; auto-posting coming soon.
                   </p>
                 </div>
 
