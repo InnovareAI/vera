@@ -80,12 +80,12 @@ const PROVIDERS: IntegrationTemplate[] = [
     primaryPlaceholder: 'https://example.com/',
     scopes: ['webmasters.readonly', 'site_verification.read'],
     capabilities: { read: true, ingest: true, analyze: true },
-    setupNote: 'Needs Google OAuth and a Search Console ingestion adapter before live reads.',
+    setupNote: 'Connect Google first, then choose verified sites for scheduled Search Console ingestion.',
     launch: {
       priority: 'wave_1',
       workstream: 'Search & analytics',
-      adapterState: 'Needs Google OAuth and ingestion adapter',
-      nextBuild: 'Create one Google OAuth flow shared by Search Console, GA4, and YouTube.',
+      adapterState: 'Google OAuth bridge ready. Needs Search Console ingestion adapter',
+      nextBuild: 'Sync verified sites, then add daily Search Analytics pulls for queries, landing pages, countries, devices, and indexing checks.',
       requirements: ['Google Cloud project', 'OAuth consent screen', 'Verified site property', 'Daily ingestion schedule'],
     },
     icon: Search,
@@ -104,12 +104,12 @@ const PROVIDERS: IntegrationTemplate[] = [
     primaryPlaceholder: 'properties/123456789',
     scopes: ['analytics.readonly'],
     capabilities: { read: true, ingest: true, analyze: true },
-    setupNote: 'Needs Google OAuth and a GA4 reporting adapter before live reads.',
+    setupNote: 'Connect Google first, then choose GA4 properties for scheduled performance reporting.',
     launch: {
       priority: 'wave_1',
       workstream: 'Search & analytics',
-      adapterState: 'Needs Google OAuth and reporting adapter',
-      nextBuild: 'Reuse the Google OAuth flow and add GA4 property sync, traffic summaries, and content performance pulls.',
+      adapterState: 'Google OAuth bridge ready. Needs GA4 reporting adapter',
+      nextBuild: 'Sync account summaries, add property selection, then pull traffic summaries, acquisition channels, conversions, and page performance.',
       requirements: ['Google Cloud project', 'GA4 property access', 'Analytics readonly scope', 'Quota guardrails'],
     },
     icon: BarChart3,
@@ -495,6 +495,14 @@ const PROVIDER_GROUPS: IntegrationTemplate['group'][] = [
 const DEFAULT_PROVIDER: ClientIntegrationProvider = 'google_search_console'
 const DEFAULT_TEMPLATE = PROVIDERS.find(provider => provider.provider === DEFAULT_PROVIDER) ?? PROVIDERS[0]
 
+function initialProviderFromUrl(): ClientIntegrationProvider {
+  if (typeof window === 'undefined') return DEFAULT_PROVIDER
+  const value = new URL(window.location.href).searchParams.get('provider')
+  return PROVIDERS.some(template => template.provider === value)
+    ? value as ClientIntegrationProvider
+    : DEFAULT_PROVIDER
+}
+
 const DEFAULT_LAUNCH = {
   priority: 'later',
   workstream: 'Other',
@@ -603,7 +611,8 @@ export function ClientIntegrationsCard() {
   const [rows, setRows] = useState<ClientIntegration[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [selectedProvider, setSelectedProvider] = useState<ClientIntegrationProvider>(DEFAULT_PROVIDER)
+  const [connectingGoogle, setConnectingGoogle] = useState(false)
+  const [selectedProvider, setSelectedProvider] = useState<ClientIntegrationProvider>(() => initialProviderFromUrl())
   const selectedTemplate = PROVIDERS.find(p => p.provider === selectedProvider) ?? PROVIDERS[0]
   const rowByProvider = useMemo(() => new Map(rows.map(row => [row.provider, row])), [rows])
   const selectedRow = rowByProvider.get(selectedProvider)
@@ -614,6 +623,7 @@ export function ClientIntegrationsCard() {
   }))
   const draft = draftState.key === draftKey ? draftState.draft : makeDraft(selectedTemplate, selectedRow)
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const isGoogleOauthProvider = selectedProvider === 'google_search_console' || selectedProvider === 'google_analytics_4'
 
   function updateDraft(updater: (draft: Draft) => Draft) {
     setDraftState(prev => {
@@ -648,6 +658,24 @@ export function ClientIntegrationsCard() {
     load()
     return () => { cancelled = true }
   }, [activeProjectId])
+
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    const googleStatus = url.searchParams.get('google_status')
+    const googleDetail = url.searchParams.get('google_detail')
+
+    if (googleStatus === 'success' || googleStatus === 'error') {
+      queueMicrotask(() => {
+        setMessage({
+          type: googleStatus === 'success' ? 'ok' : 'err',
+          text: googleDetail || (googleStatus === 'success' ? 'Google connected.' : 'Google connection failed.'),
+        })
+      })
+      url.searchParams.delete('google_status')
+      url.searchParams.delete('google_detail')
+      window.history.replaceState({}, '', url.toString())
+    }
+  }, [])
 
   async function saveIntegration(nextStatus?: ClientIntegrationStatus) {
     if (!activeProject) return
@@ -716,6 +744,52 @@ export function ClientIntegrationsCard() {
     setRows(prev => prev.filter(row => row.id !== selectedRow.id))
     setDraftState({ key: `${selectedProvider}:new:`, draft: makeDraft(selectedTemplate) })
     setMessage({ type: 'ok', text: `${selectedTemplate.label} removed.` })
+  }
+
+  async function connectGoogle() {
+    if (!activeProject) return
+    setConnectingGoogle(true)
+    setMessage(null)
+
+    try {
+      const { data, error } = await supabase.auth.getSession()
+      if (error) throw error
+      const token = data.session?.access_token
+      if (!token) throw new Error('Sign in again before connecting Google.')
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+      if (!supabaseUrl) throw new Error('Supabase URL is not configured.')
+
+      const returnUrl = new URL('/settings', window.location.origin)
+      returnUrl.searchParams.set('tab', 'integrations')
+      returnUrl.searchParams.set('provider', selectedProvider)
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      }
+      if (anonKey) headers.apikey = anonKey
+
+      const response = await fetch(`${supabaseUrl.replace(/\/+$/, '')}/functions/v1/google-oauth-start`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          project_id: activeProject.id,
+          providers: ['google_search_console', 'google_analytics_4'],
+          return_url: returnUrl.toString(),
+        }),
+      })
+      const body = await response.json().catch(() => ({})) as { auth_url?: string; error?: string }
+      if (!response.ok || !body.auth_url) {
+        throw new Error(body.error ?? `Google OAuth returned HTTP ${response.status}`)
+      }
+
+      window.location.assign(body.auth_url)
+    } catch (error) {
+      setConnectingGoogle(false)
+      setMessage({ type: 'err', text: error instanceof Error ? error.message : 'Google connection failed.' })
+    }
   }
 
   async function createFirstWavePlan() {
@@ -1202,6 +1276,23 @@ export function ClientIntegrationsCard() {
                   <KeyRound size={14} />
                   Mark needs auth
                 </button>
+                {isGoogleOauthProvider && (
+                  <button
+                    type="button"
+                    onClick={connectGoogle}
+                    disabled={saving || connectingGoogle}
+                    className="inline-flex items-center gap-2"
+                    style={{
+                      ...secondaryButtonStyle,
+                      color: selectedTemplate.accent,
+                      borderColor: selectedTemplate.accent,
+                      opacity: saving || connectingGoogle ? 0.65 : 1,
+                    }}
+                  >
+                    {connectingGoogle ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
+                    Connect Google
+                  </button>
+                )}
               </div>
               {selectedRow && (
                 <button

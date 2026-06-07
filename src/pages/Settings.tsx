@@ -19,6 +19,12 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'integrations', label: 'Integrations', icon: Plug },
 ]
 
+function initialSettingsTab(): Tab {
+  if (typeof window === 'undefined') return 'workspace'
+  const value = new URL(window.location.href).searchParams.get('tab')
+  return TABS.some(tab => tab.id === value) ? value as Tab : 'workspace'
+}
+
 const PLATFORMS = ['linkedin', 'twitter', 'instagram', 'facebook', 'youtube', 'quora', 'medium']
 const PLATFORM_LABELS: Record<string, string> = {
   linkedin: 'LinkedIn', twitter: 'X (Twitter)', instagram: 'Instagram',
@@ -775,7 +781,7 @@ function TagField({ label, hint, items, input, setInput, onAdd, onRemove, color 
 
 // ─── Main Settings Page ───────────────────────────────────────────────────────
 export default function Settings() {
-  const [tab, setTab] = useState<Tab>('workspace')
+  const [tab, setTab] = useState<Tab>(() => initialSettingsTab())
   const { activeOrg, loading } = useOrg()
 
   if (loading) return (
