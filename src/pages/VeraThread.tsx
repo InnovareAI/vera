@@ -21,7 +21,7 @@ import { useToast } from '../design'
 import { color, space, type as t, radius } from '../design'
 import { PlatformPostPreview } from '../components/PlatformPostPreview'
 import Markdown from '../components/Markdown'
-import { downloadMarkdown, downloadPdf } from '../lib/exportDoc'
+import { downloadMarkdown } from '../lib/exportDoc'
 import { hasBusinessContext, parseProjectInstructions } from '../lib/businessContext'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
@@ -1458,8 +1458,8 @@ function Bubble({ m, onPin }: { m: Message; onPin?: (content: string) => void })
               onClick={() => downloadMarkdown(m.content, m.videos ?? [])}>
               <FileText size={13} /> .md
             </button>
-            <button title="Download as PDF (images embedded; videos as shareable links)" style={actBtn} disabled={pdfBusy}
-              onClick={async () => { setPdfBusy(true); try { await downloadPdf(m.content, m.images ?? [], m.videos ?? []) } finally { setPdfBusy(false) } }}>
+            <button title="Download as PDF — selectable text, images embedded, videos as clickable links" style={actBtn} disabled={pdfBusy}
+              onClick={async () => { setPdfBusy(true); try { const { downloadPdf } = await import('../lib/exportPdf'); await downloadPdf(m.content, m.images ?? [], m.videos ?? []) } catch { /* ignore */ } finally { setPdfBusy(false) } }}>
               <FileText size={13} /> {pdfBusy ? 'PDF…' : '.pdf'}
             </button>
           </div>
