@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, X } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, Copy, Pin, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -20,6 +20,7 @@ import { useRightRail } from '../lib/rightRailContext'
 import { useToast } from '../design'
 import { color, space, type as t, radius } from '../design'
 import { PlatformPostPreview } from '../components/PlatformPostPreview'
+import Markdown from '../components/Markdown'
 import { hasBusinessContext, parseProjectInstructions } from '../lib/businessContext'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
@@ -406,20 +407,22 @@ export default function VeraThread() {
     }
   }, [activeProject?.id, sessionId, historyLoaded, messages])
 
-  // Restore the last open draft on load. The post itself survives in
-  // content_posts, but the interactive preview card is client state that a
-  // refresh wipes — which read as "the post is gone". Re-open the most recent
-  // draft for this client (unless one is already open or a New chat cleared it)
-  // so the card + its saved media come back. content_posts isn't session-keyed,
-  // so this is per-client, which matches "reopen what I was last working on".
+  // Restore the open draft on load — but ONLY the draft that belongs to THIS
+  // session. The card is client state that a refresh wipes, so a mid-work
+  // refresh should bring it back. The earlier version reopened the latest post
+  // for the whole client, which surfaced a STALE draft in a brand-new chat
+  // (and made Vera talk about "this draft" the operator never created). We now
+  // key the open draft to the session via localStorage: a fresh chat has no
+  // key → no draft → nothing phantom for Vera to reference.
   useEffect(() => {
-    if (!activeProject?.id) return
+    if (!activeProject?.id || !sessionId) return
+    let did: string | null = null
+    try { did = localStorage.getItem(`vera-draft:${sessionId}`) } catch { /* ignore */ }
+    if (!did) return  // this session never opened a draft — don't surface a stale one
     let cancelled = false
     supabase.from('content_posts')
       .select('*')
-      .eq('project_id', activeProject.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
+      .eq('id', did)
       .maybeSingle()
       .then(({ data }) => {
         if (cancelled || !data) return
@@ -427,7 +430,26 @@ export default function VeraThread() {
         setDraftHistory(prev => (prev.length ? prev : [data as Post]))
       })
     return () => { cancelled = true }
-  }, [activeProject?.id])
+  }, [activeProject?.id, sessionId])
+
+  // Does this workspace still need its own Anthropic key? True only for a
+  // non-master client space with no active Anthropic key — those run on the
+  // shared Haiku fallback, so the welcome nudges them to bring their own.
+  const [needsKey, setNeedsKey] = useState(false)
+  useEffect(() => {
+    if (!activeOrg?.id || !activeProject?.id) { setNeedsKey(false); return }
+    let cancelled = false
+    void (async () => {
+      const [{ data: org }, { data: key }] = await Promise.all([
+        supabase.from('organizations').select('is_master').eq('id', activeOrg.id).maybeSingle(),
+        supabase.from('client_api_keys').select('id').eq('project_id', activeProject.id).eq('provider', 'anthropic').eq('status', 'active').limit(1).maybeSingle(),
+      ])
+      if (cancelled) return
+      const isMaster = !!(org as { is_master?: boolean } | null)?.is_master
+      setNeedsKey(!isMaster && !key)
+    })()
+    return () => { cancelled = true }
+  }, [activeOrg?.id, activeProject?.id])
 
   // Resume any in-flight video renders on load. A render that was still going
   // when the page was refreshed / closed used to be lost forever (its fal
@@ -681,6 +703,11 @@ export default function VeraThread() {
           user_id: user?.id ?? null,
           project_id: activeProject?.id ?? null,
           session_id: sessionId || null,
+          // Share the client-generated ids so the edge writes the SAME row the
+          // frontend upserts — one row per message, not two with different ids
+          // (the duplicate rows were what made a refresh drop the last message).
+          user_message_id: userMsg.id,
+          assistant_message_id: assistantId,
           route: location.pathname,
         }),
       })
@@ -763,6 +790,9 @@ export default function VeraThread() {
             const post = ev.post as Post
             streamDraftId = (post.id as string) ?? streamDraftId
             setDraft(post)
+            // Remember this is THIS session's open draft, so a refresh restores
+            // it (and a fresh chat doesn't surface someone else's stale draft).
+            if (post.id && sessionId) { try { localStorage.setItem(`vera-draft:${sessionId}`, post.id as string) } catch { /* ignore */ } }
             // Keep every version so the operator can flip back through drafts
             // (tester: tweaking made the previous draft vanish).
             setDraftHistory(prev => [...prev, post])
@@ -945,6 +975,25 @@ export default function VeraThread() {
     if (activeProject?.id) { try { localStorage.setItem(`vera-session:${activeProject.id}`, sid) } catch { /* ignore */ } }
     setDraft(null); setDraftHistory([]); setCampaign(null); setInput('')
     setMessages([]); setSessionId(sid)
+    setTimeout(() => taRef.current?.focus(), 0)
+  }
+
+  // "Pin to new chat" — start a fresh conversation carrying this result in as
+  // context. We persist the pinned text as the new session's first message so
+  // the session-load effect (which would otherwise wipe in-memory messages on
+  // session switch) rehydrates it; the next turn then has it in context.
+  async function pinToNewChat(content: string) {
+    if (!activeProject?.id || !content) return
+    if (streaming) abortRef.current?.abort()
+    const sid = crypto.randomUUID()
+    const pinned = `📌 **Pinned from a previous chat**\n\n${content}`
+    try {
+      await supabase.from('chat_messages').insert({ project_id: activeProject.id, session_id: sid, role: 'assistant', content: pinned })
+    } catch { /* ignore — still open the fresh chat */ }
+    try { localStorage.setItem(`vera-session:${activeProject.id}`, sid) } catch { /* ignore */ }
+    setDraft(null); setDraftHistory([]); setCampaign(null); setInput('')
+    setSessionId(sid)   // load effect fetches the pinned message into the new thread
+    window.dispatchEvent(new CustomEvent('vera:session', { detail: { sid } }))  // refresh Recents
     setTimeout(() => taRef.current?.focus(), 0)
   }
 
@@ -1206,7 +1255,7 @@ export default function VeraThread() {
         onNextVersion={draftIdx >= 0 && draftIdx < draftHistory.length - 1 ? () => setDraft(draftHistory[draftIdx + 1]) : undefined}
       />
     ) : campaign ? (
-      <CampaignArtifact campaign={campaign} onOpenPost={p => setDraft(p as unknown as Post)} />
+      <CampaignArtifact campaign={campaign} onOpenPost={p => { const post = p as unknown as Post; if (post.id && sessionId) { try { localStorage.setItem(`vera-draft:${sessionId}`, post.id) } catch { /* ignore */ } } setDraft(post) }} />
     ) : <ArtifactEmpty />,
     [draft?.id, draft?.media_url, draft?.media_metadata, draft?.review_token, draft?.status, approving, sending, campaign?.id, campaign?.posts?.length, draftIdx, draftHistory.length, user?.id, user?.email],
     // Wide, readable artifact panel — this is the working surface, not a
@@ -1292,10 +1341,11 @@ export default function VeraThread() {
           <Idle onRun={pr => send(pr)} observations={observations} actions={buildLaunchActions(stats)} onDismiss={dismissObservation}
             setup={setup} projectName={activeProject?.name ?? 'this client'}
             onOpenBrain={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/brain`) }}
+            needsKey={needsKey} onAddKey={() => navigate('/clients')}
             composer={renderComposer('idle')} />
         ) : (
           <div style={{ maxWidth: 680, margin: '0 auto', padding: `0 ${space[8]}`, display: 'flex', flexDirection: 'column', gap: space[7] }}>
-            {messages.map(m => <Bubble key={m.id} m={m} />)}
+            {messages.map(m => <Bubble key={m.id} m={m} onPin={pinToNewChat} />)}
           </div>
         )}
       </div>
@@ -1310,7 +1360,9 @@ export default function VeraThread() {
 }
 
 // ─── message bubble ─────────────────────────────────────────────────
-function Bubble({ m }: { m: Message }) {
+function Bubble({ m, onPin }: { m: Message; onPin?: (content: string) => void }) {
+  const [copied, setCopied] = useState(false)
+  const actBtn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', border: 'none', background: 'transparent', color: color.ghost, fontSize: t.size.cap, fontWeight: t.weight.medium, cursor: 'pointer', borderRadius: radius.sm }
   if (m.role === 'user') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: space[2] }}>
@@ -1383,8 +1435,23 @@ function Bubble({ m }: { m: Message }) {
           </div>
         )}
         {(m.content || m.pending) && (
-          <div style={{ fontSize: t.size.lg, lineHeight: 1.62, color: color.ink, whiteSpace: 'pre-wrap' }}>
-            {m.content || <Dots />}
+          m.content
+            ? <Markdown content={m.content} />
+            : <div style={{ fontSize: t.size.lg, lineHeight: 1.62, color: color.ink }}><Dots /></div>
+        )}
+        {/* result actions — Claude-style, under a completed answer */}
+        {m.content && !m.pending && (
+          <div style={{ display: 'flex', gap: 2, marginTop: -2 }}>
+            <button title="Copy this result" style={actBtn}
+              onClick={() => { try { void navigator.clipboard?.writeText(m.content) } catch { /* ignore */ } setCopied(true); setTimeout(() => setCopied(false), 1500) }}>
+              {copied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
+            </button>
+            {onPin && (
+              <button title="Start a new conversation seeded with this result" style={actBtn}
+                onClick={() => onPin(m.content)}>
+                <Pin size={13} /> Pin to new chat
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1550,7 +1617,7 @@ function buildLaunchActions(stats: { pending: number; campaigns: number }): Laun
   return a.slice(0, 6)
 }
 
-function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain, composer }: {
+function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain, needsKey, onAddKey, composer }: {
   onRun: (prompt: string) => void
   observations: { id: string; title: string; proposed_action: string | null }[]
   actions: LaunchAction[]
@@ -1558,6 +1625,8 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
   setup: { business: boolean; audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null
   projectName: string
   onOpenBrain: () => void
+  needsKey?: boolean
+  onAddKey?: () => void
   composer: ReactNode
 }) {
   const setupDone = !!setup && setup.business && setup.audience && setup.voice && setup.categories && setup.knowledge
@@ -1574,6 +1643,22 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
       <p style={{ fontSize: t.size.body, color: color.ghost, marginBottom: space[5], textAlign: 'center', maxWidth: '44ch' }}>
         Bring Vera a brief, a question, or an idea you want to move forward.
       </p>
+
+      {needsKey && (
+        <div style={{ width: '100%', maxWidth: 640, marginBottom: space[5], padding: space[5], background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.lg, textAlign: 'left' }}>
+          <div style={{ fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink, marginBottom: 4 }}>Welcome to Vera, your AI content partner</div>
+          <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.6, margin: `0 0 ${space[3]}` }}>
+            Vera drafts posts, plans multi-week campaigns, and creates images, carousels, and videos for each client. <strong>Start exploring right now</strong> — the shared setup is ready to go, so you can generate content and get a feel for it. It's tuned for straightforward work while shared; when you want full quality and heavier production, add your own Anthropic key (it stays on the shared model until you do).
+          </p>
+          <ol style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.7, margin: `0 0 ${space[3]}`, paddingLeft: 18 }}>
+            <li>Create a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" style={{ color: color.accent, fontWeight: t.weight.medium }}>console.anthropic.com/settings/keys</a></li>
+            <li>Open <strong>Clients → your client space → Provider keys</strong> and paste it in.</li>
+          </ol>
+          <button onClick={onAddKey} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: radius.pill, border: 'none', background: color.accent, color: '#fff', fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
+            Add your Anthropic key →
+          </button>
+        </div>
+      )}
 
       {composer}
 

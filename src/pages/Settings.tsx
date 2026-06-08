@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import type { BrandVoice, PlatformConfig } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
+import { useProject } from '../lib/projectContext'
 import {
   Settings2, Users, Mic2, Plug, Building2, Save,
   Eye, EyeOff, CheckCircle2, AlertCircle, Sun, Moon, Monitor
@@ -195,50 +196,82 @@ function AppearancePreference() {
 
 // ─── Access Tab ───────────────────────────────────────────────────────────────
 function TeamTab() {
+  const { projects } = useProject()
+  const [projectId, setProjectId] = useState('')
+  const [email, setEmail] = useState('')
+  const [role, setRole] = useState<'viewer' | 'reviewer' | 'editor' | 'owner'>('viewer')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+
+  useEffect(() => { if (!projectId && projects.length) setProjectId(projects[0].id) }, [projects, projectId])
+
+  async function sendInvite() {
+    const addr = email.trim().toLowerCase()
+    if (!projectId) { setMsg({ kind: 'err', text: 'Pick a client space first.' }); return }
+    if (!addr.includes('@')) { setMsg({ kind: 'err', text: 'Enter a valid email address.' }); return }
+    setBusy(true); setMsg(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/client-invites`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: `Bearer ${session?.access_token ?? ''}` },
+        body: JSON.stringify({ action: 'create', project_id: projectId, email: addr, role }),
+      })
+      const data = await res.json().catch(() => ({})) as { error?: string }
+      if (!res.ok) throw new Error(data.error ?? `Invite failed (HTTP ${res.status})`)
+      const where = projects.find(p => p.id === projectId)?.name ?? 'the client space'
+      setEmail('')
+      setMsg({ kind: 'ok', text: `Invited ${addr} as ${role} to ${where}. An email is on its way.` })
+    } catch (e) {
+      setMsg({ kind: 'err', text: e instanceof Error ? e.message : 'Invite could not be sent.' })
+    } finally { setBusy(false) }
+  }
+
+  const input = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white'
   return (
     <div className="max-w-xl space-y-5">
       <div>
         <h2 className="text-base font-semibold text-gray-900">Access Management</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Access is managed per client space, not from this workspace settings page.</p>
+        <p className="text-sm text-gray-500 mt-0.5">Invite someone into a client space and set their role. Organisation-wide staff access is coming later — for now, access is scoped per client.</p>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
-        <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
-          <Users size={18} />
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-gray-700">Client space</label>
+          <select value={projectId} onChange={e => setProjectId(e.target.value)} className={input}>
+            {projects.length === 0 && <option value="">No client spaces yet — add a client first</option>}
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
         </div>
-        <div>
-          <p className="text-sm font-semibold text-gray-900">Use Client management for invites and roles</p>
-          <p className="text-sm text-gray-500 mt-1">
-            Client spaces are the source of truth for client users, view and write permissions, pending invites, and client API keys.
-          </p>
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-gray-700">Email</label>
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="person@company.com" className={input} />
         </div>
-        <div className="grid grid-cols-1 gap-2">
-          {['Invite clients by email', 'Assign viewer, commenter, editor, or admin roles', 'Revoke pending invites and remove client access'].map(item => (
-            <div key={item} className="flex items-center gap-2 text-sm text-gray-700">
-              <CheckCircle2 size={14} className="text-emerald-600 flex-shrink-0" />
-              <span>{item}</span>
-            </div>
-          ))}
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-gray-700">Role</label>
+          <select value={role} onChange={e => setRole(e.target.value as typeof role)} className={input}>
+            <option value="viewer">Viewer — can view</option>
+            <option value="reviewer">Reviewer — can comment &amp; approve</option>
+            <option value="editor">Editor — can create &amp; edit</option>
+            <option value="owner">Owner — full access</option>
+          </select>
         </div>
-        <button
-          type="button"
-          onClick={() => { window.location.href = '/clients' }}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
-        >
-          <Users size={14} />
-          Open client management
-        </button>
+        {msg && <p className={`text-sm ${msg.kind === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}>{msg.text}</p>}
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={sendInvite} disabled={busy || !projectId}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors disabled:opacity-50">
+            <Users size={14} /> {busy ? 'Sending…' : 'Send invite'}
+          </button>
+          <button type="button" onClick={() => { window.location.href = '/clients' }} className="text-sm text-gray-500 hover:text-gray-700">
+            Manage all access, roles &amp; pending invites →
+          </button>
+        </div>
       </div>
 
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
         <div className="flex items-start gap-3">
           <AlertCircle size={16} className="text-amber-700 mt-0.5 flex-shrink-0" />
-          <div>
-            <p className="text-sm font-medium text-amber-900">Workspace team management is not active yet</p>
-            <p className="text-xs text-amber-800 mt-1">
-              We will add organisation-level staff access later. For now, keep permissions scoped to client spaces.
-            </p>
-          </div>
+          <p className="text-xs text-amber-800">Invites are scoped to one client space. To give someone several clients, invite them to each. Organisation-wide staff access is on the roadmap.</p>
         </div>
       </div>
     </div>

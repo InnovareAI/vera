@@ -96,11 +96,10 @@ const roleOptions: Array<{ value: ProjectRole; label: string; help: string }> = 
 ]
 
 const providerOptions = [
-  { value: 'openai', label: 'OpenAI' },
+  // Only Anthropic (text) BYOK is wired today — generation runs on the client's
+  // own Anthropic key. Image-capable providers (OpenAI/Gemini) are intentionally
+  // not offered yet, since image generation still runs on the platform keys.
   { value: 'anthropic', label: 'Anthropic' },
-  { value: 'google', label: 'Google Gemini' },
-  { value: 'azure_openai', label: 'Azure OpenAI' },
-  { value: 'other', label: 'Other' },
 ]
 
 const panelStyle: CSSProperties = {
@@ -135,7 +134,7 @@ export default function AcrossClients() {
 
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<ProjectRole>('viewer')
-  const [keyProvider, setKeyProvider] = useState('openai')
+  const [keyProvider, setKeyProvider] = useState('anthropic')
   const [keyLabel, setKeyLabel] = useState('Primary key')
   const [keySecret, setKeySecret] = useState('')
   const [keyConfig, setKeyConfig] = useState('')

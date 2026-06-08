@@ -42,9 +42,26 @@ const corsHeaders = {
 // run_pipeline, generate_image). Haiku would narrate "Draft saved" in prose
 // without actually invoking save_draft — leaving an empty draft card.
 const MODEL = 'claude-sonnet-4-6'
+const HAIKU_MODEL = 'claude-haiku-4-5'   // fallback for connected workspaces with no LLM key linked yet
+
+// Decrypt a client's stored BYOK key. Mirrors client-secrets' encryptSecret:
+// AES-GCM, key = SHA-256(envKey), payload "aes-gcm:v1:<b64 iv>:<b64 ciphertext>".
+const CLIENT_KEY_ENC = Deno.env.get('CLIENT_API_KEY_ENCRYPTION_KEY') ?? Deno.env.get('VAULT_ENC_KEY') ?? ''
+async function decryptClientSecret(payload: string): Promise<string | null> {
+  try {
+    if (!CLIENT_KEY_ENC || !payload) return null
+    const parts = payload.split(':')
+    if (parts.length !== 4 || parts[0] !== 'aes-gcm') return null
+    const b64 = (s: string) => Uint8Array.from(atob(s), c => c.charCodeAt(0))
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(CLIENT_KEY_ENC))
+    const key = await crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['decrypt'])
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(parts[2]) }, key, b64(parts[3]))
+    return new TextDecoder().decode(plain)
+  } catch { return null }
+}
 // Roomy enough for a full post written into save_draft's `copy` arg plus the
 // rest of the tool call — 1024 risked truncating before the tool call landed.
-const MAX_TOKENS = 2048
+const MAX_TOKENS = 8192   // ~6k words — fits a full strategy doc/brief inline; it's a ceiling, not a target
 const STORAGE_BUCKET = 'vera-images'
 const EMBEDDING_MODEL = 'text-embedding-3-small'  // 1536 dim, $0.02/M tokens
 const EMBEDDING_DIM = 1536
@@ -278,6 +295,15 @@ Personality:
   confident opinions, never preachy.
 - American spelling. Short paragraphs. Cut anything that isn't
   load-bearing.
+- NEVER open with a greeting ("Hey!", "Hi there", "Hello"). Start with the
+  substance.
+- NEVER deflect with a generic "What would you like to do?" / "How can I
+  help?" / "Let me know what you'd like." That is the laziest possible reply.
+  When the operator's ask is short, vague, or a draft is open with no explicit
+  instruction, TAKE INITIATIVE: in one line say what you see, then either do the
+  obvious next thing or offer 2-3 SPECIFIC moves ("tighten the hook", "add a
+  visual", "make it a Reel", "send it for approval"). A reply that asks the
+  operator to restate what they already implied is a failure.
 
 Output mechanics (these separate writing that reads as human from writing that
 reads as AI, and they apply to BOTH your chat replies AND every post, caption,
@@ -352,6 +378,27 @@ Using skills:
 - If a useful pattern isn't in the skills list, just write good copy —
   don't invent a skill name. Skills are the operator's vocabulary, not
   yours.
+
+DELIVER IN THIS TURN — NEVER STALL: produce the actual deliverable in the SAME
+reply, every time. If the operator asks for analysis, a synthesis, a brand-voice
+or positioning write-up, a summary, or any output that has no dedicated tool, the
+deliverable IS your chat message — WRITE IT NOW, in full, as formatted text.
+NEVER reply "let me build it", "still building", "running the synthesis now",
+"give me a moment", "now let me synthesize", or any promise-to-do-it-later and
+then stop — you cannot do work "in the background" between turns, so if you
+announce it you MUST produce it in the same response. If something genuinely
+can't be done now (a tool failed, or you're missing required input), say so
+plainly and ask for exactly what you need — never leave the operator waiting on a
+deliverable that never arrives. For a brand-voice / positioning document
+specifically: write the full document in the reply, and if it should persist to
+the client's Brain, also call update_brand_voice.
+
+FORMATTING: the chat renders Markdown, so USE it — headings (##), **bold**,
+bullet/numbered lists, and Markdown tables for any structured data (calendars,
+comparisons, schedules). Write the Markdown DIRECTLY. NEVER wrap your whole reply
+in a \`\`\`markdown fence (or any code fence) and never say "copy this as a file" —
+that turns the document into an unreadable monospace blob. Reserve code fences
+for actual code/config snippets only.
 
 Tool use:
 You have a tool palette. Call tools without asking permission — just use
@@ -2710,6 +2757,8 @@ Deno.serve(async (req) => {
     user_id?: string | null
     project_id?: string | null    // Phase 2b — active project for scope
     session_id?: string | null    // chat session — groups a "New chat" thread
+    user_message_id?: string | null      // client id → write ONE row, not a dup
+    assistant_message_id?: string | null
     route?: string
   }
   try {
@@ -2720,7 +2769,7 @@ Deno.serve(async (req) => {
     })
   }
 
-  const { messages, org_id, user_id, project_id, session_id, route = '/' } = body
+  const { messages, org_id, user_id, project_id, session_id, user_message_id, assistant_message_id, route = '/' } = body
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return new Response(JSON.stringify({ error: 'messages required (non-empty array)' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -2739,7 +2788,6 @@ Deno.serve(async (req) => {
     })
   }
 
-  const anthropic = new Anthropic({ apiKey: anthropicKey })
   const supabase = createClient<Database>(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
@@ -2792,13 +2840,14 @@ Deno.serve(async (req) => {
         }
       }
     }
-    await supabase.from('chat_messages').insert({
+    await supabase.from('chat_messages').upsert({
+      ...(user_message_id ? { id: user_message_id } : {}),
       org_id, user_id: effectiveUserId, role: 'user',
       project_id: project_id ?? null,
       session_id: session_id ?? null,
       content: userText, route,
       attachments: userAttachments,
-    })
+    }, { onConflict: 'id' })
   }
 
   // System prompt as a two-block array so Anthropic prompt caching can
@@ -2819,6 +2868,31 @@ Deno.serve(async (req) => {
   // (lastUserText already computed above for KB retrieval.)
   const analyticalCues = /\b(analy[sz]e|think hard|deep dive|deep take|strategy|strategi[sz]e|teardown|critique|interpret|reason through|walk through the trade|trade-?offs?)\b/
   const enableThinking = analyticalCues.test(lastUserText.toLowerCase())
+
+  // Model + key selection per workspace:
+  //   • the agency's own (master) org → Sonnet on the InnovareAI key
+  //   • client space with its OWN Anthropic key → Sonnet on THEIR key (BYOK)
+  //   • everyone else → Haiku on the InnovareAI key (the fallback until they
+  //     bring their own Anthropic key — the only provider key we offer/use)
+  let effectiveModel = MODEL
+  let effectiveApiKey = anthropicKey   // InnovareAI / platform key (default)
+  try {
+    const { data: orgRow } = await supabase.from('organizations').select('is_master').eq('id', org_id).maybeSingle()
+    const isMaster = !!(orgRow as { is_master?: boolean } | null)?.is_master
+    if (!isMaster && project_id) {
+      const { data: ownAnthropic } = await supabase.from('client_api_keys')
+        .select('secret_ciphertext').eq('project_id', project_id).eq('provider', 'anthropic').eq('status', 'active')
+        .order('updated_at', { ascending: false }).limit(1).maybeSingle()
+      const cipher = (ownAnthropic as { secret_ciphertext?: string } | null)?.secret_ciphertext
+      const clientKey = cipher ? await decryptClientSecret(cipher) : null
+      if (clientKey) effectiveApiKey = clientKey   // BYOK: their key, full Sonnet
+      else effectiveModel = HAIKU_MODEL             // no key → Haiku fallback
+    }
+  } catch { /* keep platform defaults on any lookup/decrypt error */ }
+  // Haiku doesn't accept Sonnet's extended-thinking param — only enable on Sonnet.
+  const useThinking = enableThinking && effectiveModel === MODEL
+  // Build the Anthropic client with the resolved key (client BYOK or platform).
+  const anthropic = new Anthropic({ apiKey: effectiveApiKey })
 
   // Anthropic-managed web search — server-side tool. Adds live world
   // knowledge ("what did competitors publish this week?", "latest stat on
@@ -2866,8 +2940,8 @@ Deno.serve(async (req) => {
         // tool calls, append tool_result, repeat. Capped at MAX_TOOL_ROUNDS.
         for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
           const createParams: Parameters<typeof anthropic.messages.create>[0] = {
-            model: MODEL,
-            max_tokens: enableThinking ? Math.max(MAX_TOKENS, 4096) : MAX_TOKENS,
+            model: effectiveModel,
+            max_tokens: useThinking ? Math.max(MAX_TOKENS, 16384) : MAX_TOKENS,
             system: systemBlocks,
             tools: [
               ...SERVER_TOOLS,
@@ -2876,7 +2950,7 @@ Deno.serve(async (req) => {
             messages: convo as Parameters<typeof anthropic.messages.create>[0]['messages'],
             stream: true,
           }
-          if (enableThinking) {
+          if (useThinking) {
             (createParams as unknown as Record<string, unknown>).thinking = {
               type: 'enabled', budget_tokens: 3000,
             }
@@ -2993,14 +3067,15 @@ Deno.serve(async (req) => {
           url,
           generated_by: 'tool',
         }))
-        await supabase.from('chat_messages').insert({
+        await supabase.from('chat_messages').upsert({
+          ...(assistant_message_id ? { id: assistant_message_id } : {}),
           org_id, user_id: effectiveUserId, role: 'assistant',
           project_id: project_id ?? null,
           session_id: session_id ?? null,
           content: fullText, route,
           tokens_in: totalTokensIn, tokens_out: totalTokensOut,
           attachments,
-        })
+        }, { onConflict: 'id' })
 
         send({
           type: 'done',

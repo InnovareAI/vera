@@ -13,6 +13,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
+import { requireOrgMember, type AdminClient } from '../_shared/auth.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -44,6 +45,11 @@ Deno.serve(async (req) => {
   if (!UNIPILE_DSN || !UNIPILE_API_KEY) return jsonResponse({ success: false, error: 'UNIPILE not configured' }, 500)
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+  // Caller must be the service (internal) or an org member — never anonymous,
+  // and never another tenant reading this org's audit.
+  const access = await requireOrgMember(req, supabase as unknown as AdminClient, SUPABASE_SERVICE_ROLE_KEY, org_id, corsHeaders)
+  if (!access.ok) return access.response
 
   // 1) Get connected LinkedIn account + the org's channel URLs (channel_profiles
   //    is the source of truth for "which profile to audit"; the Unipile session

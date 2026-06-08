@@ -14,6 +14,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database, Json } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
+import { requirePostMember } from '../_shared/auth.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -146,6 +147,12 @@ Deno.serve(async (req) => {
     if (!frames.length) return new Response(JSON.stringify({ error: 'no frames' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     const aspect = body.aspect ?? body.aspect_ratio ?? 'square_hd'
     const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
+
+    // Caller must be the service (vera-chat internal) or a signed-in member who
+    // owns the target post — never an anonymous caller. Mirrors the other
+    // service-role functions' guards (close the only-unguarded media endpoint).
+    const access = await requirePostMember(req, supabase, SERVICE_KEY, body.post_id ?? null, corsHeaders)
+    if (!access.ok) return access.response
 
     // Enqueue the job (durable record), then return immediately and process in
     // the background — the request isn't held open for the render.
