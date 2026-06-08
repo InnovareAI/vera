@@ -21,6 +21,7 @@ import { useToast } from '../design'
 import { color, space, type as t, radius } from '../design'
 import { PlatformPostPreview } from '../components/PlatformPostPreview'
 import Markdown from '../components/Markdown'
+import { downloadMarkdown, downloadPdf } from '../lib/exportDoc'
 import { hasBusinessContext, parseProjectInstructions } from '../lib/businessContext'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
@@ -1362,6 +1363,7 @@ export default function VeraThread() {
 // ─── message bubble ─────────────────────────────────────────────────
 function Bubble({ m, onPin }: { m: Message; onPin?: (content: string) => void }) {
   const [copied, setCopied] = useState(false)
+  const [pdfBusy, setPdfBusy] = useState(false)
   const actBtn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', border: 'none', background: 'transparent', color: color.ghost, fontSize: t.size.cap, fontWeight: t.weight.medium, cursor: 'pointer', borderRadius: radius.sm }
   if (m.role === 'user') {
     return (
@@ -1452,6 +1454,14 @@ function Bubble({ m, onPin }: { m: Message; onPin?: (content: string) => void })
                 <Pin size={13} /> Pin to new chat
               </button>
             )}
+            <button title="Download as Markdown (text only)" style={actBtn}
+              onClick={() => downloadMarkdown(m.content)}>
+              <FileText size={13} /> .md
+            </button>
+            <button title="Download as PDF (with any generated images)" style={actBtn} disabled={pdfBusy}
+              onClick={async () => { setPdfBusy(true); try { await downloadPdf(m.content, m.images ?? []) } finally { setPdfBusy(false) } }}>
+              <FileText size={13} /> {pdfBusy ? 'PDF…' : '.pdf'}
+            </button>
           </div>
         )}
       </div>
