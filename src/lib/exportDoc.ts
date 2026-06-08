@@ -9,8 +9,12 @@ function filename(ext: string): string {
   return `vera-${stamp}.${ext}`
 }
 
-export function downloadMarkdown(content: string): void {
-  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+export function downloadMarkdown(content: string, videos: string[] = []): void {
+  let md = clean(content)
+  if (videos.length) {
+    md += '\n\n' + videos.map((u, i) => `**Video${videos.length > 1 ? ` ${i + 1}` : ''}:** [Watch ▶](${u})`).join('\n')
+  }
+  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -39,6 +43,8 @@ const PDF_CSS = `
   .vera-pdf pre { background: #f6f7f8; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px; overflow: hidden; white-space: pre-wrap; }
   .vera-pdf .vera-pdf-images { margin-top: 12px; }
   .vera-pdf .vera-pdf-images img { display: block; max-width: 100%; border: 1px solid #e5e7eb; border-radius: 8px; margin: 10px 0; }
+  .vera-pdf .vera-pdf-videos { margin-top: 12px; }
+  .vera-pdf .vera-pdf-vidlink { font-size: 11px; color: #2563eb; word-break: break-all; margin: 3px 0; }
 `
 
 // Strip the draft-context tail the composer appends to user turns, so an export
@@ -47,7 +53,7 @@ function clean(md: string): string {
   return md.split('\n---\n[The draft currently open')[0].trim()
 }
 
-export async function downloadPdf(content: string, images: string[] = []): Promise<void> {
+export async function downloadPdf(content: string, images: string[] = [], videos: string[] = []): Promise<void> {
   const [markedMod, html2pdfMod] = await Promise.all([import('marked'), import('html2pdf.js')])
   const marked = (markedMod as { marked: { parse: (s: string) => string | Promise<string> } }).marked
   const html2pdf = (html2pdfMod as unknown as { default: () => { set: (o: Record<string, unknown>) => { from: (e: HTMLElement) => { save: () => Promise<void> } } } }).default
@@ -56,10 +62,15 @@ export async function downloadPdf(content: string, images: string[] = []): Promi
   const imgHtml = images.length
     ? `<div class="vera-pdf-images">${images.map(u => `<img crossorigin="anonymous" src="${u}" />`).join('')}</div>`
     : ''
+  // Videos can't live in a static PDF — include the shareable link instead, as
+  // the full URL text (the rasterized PDF can't carry a clickable link).
+  const vidHtml = videos.length
+    ? `<div class="vera-pdf-videos"><p style="font-weight:600;margin-bottom:4px">${videos.length > 1 ? 'Videos' : 'Video'} (open to view):</p>${videos.map(u => `<p class="vera-pdf-vidlink">▶ ${u}</p>`).join('')}</div>`
+    : ''
 
   const el = document.createElement('div')
   el.className = 'vera-pdf'
-  el.innerHTML = `<style>${PDF_CSS}</style>${bodyHtml}${imgHtml}`
+  el.innerHTML = `<style>${PDF_CSS}</style>${bodyHtml}${imgHtml}${vidHtml}`
   el.style.position = 'fixed'
   el.style.left = '-10000px'
   el.style.top = '0'

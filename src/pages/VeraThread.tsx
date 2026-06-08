@@ -1454,12 +1454,12 @@ function Bubble({ m, onPin }: { m: Message; onPin?: (content: string) => void })
                 <Pin size={13} /> Pin to new chat
               </button>
             )}
-            <button title="Download as Markdown (text only)" style={actBtn}
-              onClick={() => downloadMarkdown(m.content)}>
+            <button title="Download as Markdown (text + any video links)" style={actBtn}
+              onClick={() => downloadMarkdown(m.content, m.videos ?? [])}>
               <FileText size={13} /> .md
             </button>
-            <button title="Download as PDF (with any generated images)" style={actBtn} disabled={pdfBusy}
-              onClick={async () => { setPdfBusy(true); try { await downloadPdf(m.content, m.images ?? []) } finally { setPdfBusy(false) } }}>
+            <button title="Download as PDF (images embedded; videos as shareable links)" style={actBtn} disabled={pdfBusy}
+              onClick={async () => { setPdfBusy(true); try { await downloadPdf(m.content, m.images ?? [], m.videos ?? []) } finally { setPdfBusy(false) } }}>
               <FileText size={13} /> {pdfBusy ? 'PDF…' : '.pdf'}
             </button>
           </div>
