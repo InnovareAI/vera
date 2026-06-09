@@ -712,6 +712,15 @@ async function loadContext(
         .limit(30)
     : Promise.resolve({ data: [], error: null })
 
+  // Pending-review count for the active scope. Project-scoped when a client
+  // workspace is open, so VERA's "what's pending?" matches the Review queue
+  // (otherwise it counts every client's posts org-wide — the cross-client leak).
+  let pendingQuery = supabase.from('content_posts')
+    .select('id', { count: 'exact', head: true })
+    .eq('org_id', orgId)
+    .eq('status', 'pending')
+  if (projectId) pendingQuery = pendingQuery.eq('project_id', projectId)
+
   // Parallel fetch — each query is small, no need to serialise.
   const [
     orgRes, brandRes, campRes, audRes, auditRes, pendingRes, memRes, skillsRes, perfRes, integrationsRes,
@@ -721,7 +730,7 @@ async function loadContext(
     supabase.from('campaigns').select('name, theme, status').eq('org_id', orgId).eq('status', 'active').limit(10),
     supabase.from('audiences').select('kind, name, is_primary').eq('org_id', orgId).limit(10),
     supabase.from('linkedin_audits').select('kind, result, created_at').eq('org_id', orgId).order('created_at', { ascending: false }).limit(2),
-    supabase.from('content_posts').select('id', { count: 'exact', head: true }).eq('org_id', orgId).eq('status', 'pending'),
+    pendingQuery,
     // Workspace-wide memories (user_id null) + this user's personal memories.
     supabase.from('vera_memories').select('key, value, kind')
       .eq('org_id', orgId)
@@ -2090,6 +2099,9 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           .eq('status', 'pending')
           .order('created_at', { ascending: false })
           .limit(limit)
+        // Scope to the active client so the queue matches the Review surface —
+        // without this, VERA lists every workspace's pending posts org-wide.
+        if (ctx.projectId) q = q.eq('project_id', ctx.projectId)
         if (channel) q = q.eq('channel', channel)
         const { data, error } = await q
         if (error) return { result: `Query failed: ${error.message}` }
@@ -2113,7 +2125,12 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           .eq('org_id', ctx.orgId)
           .limit(1)
         if (postId) q = q.eq('id', postId)
-        else if (match) q = q.ilike('title', `%${match}%`)
+        else if (match) {
+          q = q.ilike('title', `%${match}%`)
+          // A fuzzy title match must stay inside the active client, so VERA
+          // never opens another workspace's post on a coincidental title hit.
+          if (ctx.projectId) q = q.eq('project_id', ctx.projectId)
+        }
         else return { result: 'Either post_id or match_title is required.' }
         const { data, error } = await q.maybeSingle()
         if (error) return { result: `Lookup failed: ${error.message}` }
@@ -2231,10 +2248,13 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
       case 'summarize_recent_activity': {
         const days = (input.days as number) ?? 7
         const since = new Date(Date.now() - days * 86400000).toISOString()
+        // Activity rollup stays inside the active client when one is open.
+        let recentPostsQuery = ctx.supabase.from('content_posts')
+          .select('status, channel, created_at, posted_at, updated_at')
+          .eq('org_id', ctx.orgId).gte('updated_at', since)
+        if (ctx.projectId) recentPostsQuery = recentPostsQuery.eq('project_id', ctx.projectId)
         const [postsRes, auditsRes] = await Promise.all([
-          ctx.supabase.from('content_posts')
-            .select('status, channel, created_at, posted_at, updated_at')
-            .eq('org_id', ctx.orgId).gte('updated_at', since),
+          recentPostsQuery,
           ctx.supabase.from('linkedin_audits')
             .select('kind, created_at')
             .eq('org_id', ctx.orgId).gte('created_at', since),
