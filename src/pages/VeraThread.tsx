@@ -22,6 +22,7 @@ import { color, space, type as t, radius } from '../design'
 import { PlatformPostPreview } from '../components/PlatformPostPreview'
 import Markdown from '../components/Markdown'
 import { downloadMarkdown } from '../lib/exportDoc'
+import { markdownToText } from '../lib/mdToText'
 import { hasBusinessContext, parseProjectInstructions } from '../lib/businessContext'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
@@ -1452,8 +1453,8 @@ function Bubble({ m, onPin }: { m: Message; onPin?: (content: string) => void })
         {/* result actions — Claude-style, under a completed answer */}
         {m.content && !m.pending && (
           <div style={{ display: 'flex', gap: 2, marginTop: -2 }}>
-            <button title="Copy this result" style={actBtn}
-              onClick={() => { try { void navigator.clipboard?.writeText(m.content) } catch { /* ignore */ } setCopied(true); setTimeout(() => setCopied(false), 1500) }}>
+            <button title="Copy as plain text — keeps bold, drops Markdown symbols" style={actBtn}
+              onClick={() => { try { void navigator.clipboard?.writeText(markdownToText(m.content)) } catch { /* ignore */ } setCopied(true); setTimeout(() => setCopied(false), 1500) }}>
               {copied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
             </button>
             {onPin && (
