@@ -81,6 +81,7 @@ export default function ReviewDetail() {
   const [showFeedback, setShowFeedback] = useState(false)
   const [feedback, setFeedback] = useState('')
   const [copied, setCopied] = useState(false)
+  const [shareCopied, setShareCopied] = useState(false)
   const [postedUrl, setPostedUrl] = useState('')
   const [marking, setMarking] = useState(false)
   const [emailRecipients, setEmailRecipients] = useState('')
@@ -311,6 +312,31 @@ export default function ReviewDetail() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  // Public, no-login review link. Every post gets a review_token by default;
+  // mint one if a legacy post is missing it. The /r/<token> page is served by
+  // the service-role review-link function, so anyone with the link can open it
+  // (and approve / leave feedback) without an account.
+  async function copyShareLink() {
+    if (!post) return
+    let token = post.review_token ?? null
+    if (!token) {
+      const bytes = crypto.getRandomValues(new Uint8Array(24))
+      token = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+      const { data, error: tokenErr } = await supabase
+        .from('content_posts')
+        .update({ review_token: token, review_token_revoked_at: null })
+        .eq('id', post.id)
+        .select('review_token')
+        .single()
+      if (tokenErr) { setError('Could not create a share link.'); return }
+      token = (data as { review_token?: string | null } | null)?.review_token ?? token
+      setPost({ ...post, review_token: token } as Post)
+    }
+    await navigator.clipboard.writeText(`${window.location.origin}/r/${token}`)
+    setShareCopied(true)
+    setTimeout(() => setShareCopied(false), 2000)
+  }
+
   if (loading) {
     return <div className="flex items-center justify-center h-64 text-gray-400 text-sm">Loading post…</div>
   }
@@ -362,8 +388,16 @@ export default function ReviewDetail() {
           <h1 className="text-lg font-semibold text-gray-900">Review</h1>
           <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${statusBadge.cls}`}>{statusBadge.text}</span>
         </div>
-        <div className="text-xs text-gray-500">
-          {post.channel} · {post.format} · Content Generator
+        <div className="flex items-center gap-3">
+          <button
+            onClick={copyShareLink}
+            title="Copy a public link anyone can open without logging in, to review and leave feedback"
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors">
+            {shareCopied ? <><Check className="w-3.5 h-3.5" /> Link copied</> : <><ExternalLink className="w-3.5 h-3.5" /> Copy public link</>}
+          </button>
+          <div className="text-xs text-gray-500">
+            {post.channel} · {post.format} · Content Generator
+          </div>
         </div>
       </div>
 
