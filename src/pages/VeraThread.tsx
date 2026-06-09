@@ -628,10 +628,18 @@ export default function VeraThread() {
   // Resume a chat from the rail's Recents (when already mounted on Vera).
   const pickSessionRef = useRef<(sid: string) => void>(() => {})
   useEffect(() => { pickSessionRef.current = pickSession })
+  // Track the live session id for the listener below (its effect has [] deps,
+  // so a captured `sessionId` would be stale).
+  const sessionIdRef = useRef(sessionId)
+  useEffect(() => { sessionIdRef.current = sessionId }, [sessionId])
   useEffect(() => {
     const h = (e: Event) => {
       const sid = (e as CustomEvent).detail?.sid
-      if (sid) pickSessionRef.current(sid)
+      // Only switch for a DIFFERENT session. persistChatMessage fires this event
+      // on every save (to refresh the rail's Recents) with the CURRENT session —
+      // pickSession on that would clear the open draft, making the rail vanish on
+      // every message. Ignore same-session pings.
+      if (sid && sid !== sessionIdRef.current) pickSessionRef.current(sid)
     }
     window.addEventListener('vera:session', h)
     return () => window.removeEventListener('vera:session', h)
