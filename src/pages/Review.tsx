@@ -864,7 +864,7 @@ function ListView({
 }) {
   return (
     <div className="flex flex-1 gap-6 min-h-0">
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Tabs */}
         <div className="flex gap-1 mb-4 p-0.5 overflow-x-auto" style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
           {STATUS_TABS.map(tab => (
@@ -896,7 +896,7 @@ function ListView({
           ))}
         </div>
 
-        <div className="flex-1 overflow-auto space-y-2">
+        <div className="flex-1 min-h-0 overflow-auto space-y-2">
           {loading ? (
             <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--ghost)' }}>Loading posts…</div>
           ) : filtered.length === 0 ? (
@@ -1104,7 +1104,7 @@ function BoardView({
               }}
               onDragLeave={() => setDragOverTab(curr => curr === tab ? null : curr)}
               onDrop={(e) => handleDrop(e, tab)}
-              className="flex flex-col min-w-0"
+              className="flex flex-col min-w-0 min-h-0"
               style={{
                 background: isDragTarget ? 'var(--oxblood-tint)' : 'var(--paper-warm)',
                 border: `1px dashed ${isDragTarget ? 'var(--oxblood)' : 'var(--paper-edge)'}`,
@@ -1138,7 +1138,7 @@ function BoardView({
               </div>
 
               {/* Cards */}
-              <div className="flex-1 overflow-y-auto p-2 space-y-2">
+              <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
                 {columnPosts.length === 0 ? (
                   <EmptyLaneState tab={tab} compact />
                 ) : columnPosts.map(post => (
