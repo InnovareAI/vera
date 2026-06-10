@@ -129,11 +129,15 @@ function RequireAuth() {
 // the duplication that made the UI confusing). No project yet → the shelf
 // at /clients, which shows the "add a client" empty state.
 function RootIndex() {
-  const { loading: orgLoading } = useOrg()
+  const { loading: orgLoading, isOrgMember } = useOrg()
   const { activeProject, projects, loading } = useProject()
   if (orgLoading || loading) return null   // wait for both to settle — don't race to /clients
-  if (activeProject) return <Navigate to={`/p/${activeProject.slug}/vera`} replace />
-  if (projects.length > 0) return <Navigate to={`/p/${projects[0].slug}/vera`} replace />
+  // Agency staff (org members) drive generation, so they land on VERA. A client
+  // collaborator invited to a single client space lands on Review, where the
+  // content already generated for them lives, instead of an empty chat.
+  const home = isOrgMember ? 'vera' : 'review'
+  if (activeProject) return <Navigate to={`/p/${activeProject.slug}/${home}`} replace />
+  if (projects.length > 0) return <Navigate to={`/p/${projects[0].slug}/${home}`} replace />
   return <Navigate to="/clients" replace />
 }
 

@@ -23,6 +23,10 @@ interface OrgContextType {
   activeRole: string | null
   orgs: OrgMember[]
   loading: boolean
+  // True when the user has a real org_members row (agency staff). False when the
+  // workspace was derived from project memberships only (a client collaborator
+  // invited to a single client space). Drives where they land on entry.
+  isOrgMember: boolean
   switchOrg: (orgId: string) => void
   refetch: () => void
 }
@@ -32,6 +36,7 @@ const OrgContext = createContext<OrgContextType>({
   activeRole: null,
   orgs: [],
   loading: true,
+  isOrgMember: false,
   switchOrg: () => {},
   refetch: () => {},
 })
@@ -41,6 +46,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [orgs, setOrgs] = useState<OrgMember[]>([])
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [isOrgMember, setIsOrgMember] = useState(false)
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
@@ -72,6 +78,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       }))
       const richest = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]
       const stored = localStorage.getItem('activeOrgId')
+      setIsOrgMember(false)
       setOrgs(synthetic)
       setActiveOrgId(prev => {
         if (prev && synthetic.find(m => m.org_id === prev)) return prev
@@ -95,6 +102,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         const members = (data as unknown as OrgMember[]) || []
         if (members.length === 0) { loadFromProjects(); return }
+        setIsOrgMember(true)
         setOrgs(members)
         setActiveOrgId(prev => {
           if (prev && members.find(m => m.org_id === prev)) return prev
@@ -124,7 +132,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const activeRole = activeMember?.role ?? null
 
   return (
-    <OrgContext.Provider value={{ activeOrg, activeRole, orgs, loading, switchOrg, refetch }}>
+    <OrgContext.Provider value={{ activeOrg, activeRole, orgs, loading, isOrgMember, switchOrg, refetch }}>
       {children}
     </OrgContext.Provider>
   )
