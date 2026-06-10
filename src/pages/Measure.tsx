@@ -25,6 +25,16 @@ import type { Campaign, ClientIntegration, ContentMetricSnapshot, Post } from '.
 import { useProject } from '../lib/projectContext'
 import { useOrg } from '../lib/orgContext'
 import { Button, PageHeader, SectionLabel, color, radius, space, type as t } from '../design'
+import Markdown from '../components/Markdown'
+
+type RedditListen = {
+  id: string
+  topic: string
+  synthesis: string
+  sources: Array<{ title: string; url: string }>
+  model?: string | null
+  created_at: string
+}
 
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
 const FN_URL = (name: string) => `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${name}`
@@ -118,6 +128,11 @@ export default function Measure() {
   const [sortKey, setSortKey] = useState<SortKey>('date')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [showIntegrations, setShowIntegrations] = useState(false)
+  // Reddit listening (read-only market intel via the reddit-listen edge fn).
+  const [listens, setListens] = useState<RedditListen[]>([])
+  const [listenTopic, setListenTopic] = useState('')
+  const [listening, setListening] = useState(false)
+  const [listenError, setListenError] = useState<string | null>(null)
 
   const loadData = useCallback(async (projectId?: string | null) => {
     if (!projectId) {
@@ -174,6 +189,49 @@ export default function Measure() {
     const task = window.setTimeout(() => { void loadData(projectId) }, 0)
     return () => window.clearTimeout(task)
   }, [activeProject?.id, loadData])
+
+  // Past Reddit listens for this client (newest first).
+  useEffect(() => {
+    const projectId = activeProject?.id
+    if (!projectId) { setListens([]); return }
+    let cancelled = false
+    supabase
+      .from('reddit_listens')
+      .select('id, topic, synthesis, sources, model, created_at')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false })
+      .limit(10)
+      .then(({ data }) => { if (!cancelled) setListens((data ?? []) as RedditListen[]) })
+    return () => { cancelled = true }
+  }, [activeProject?.id])
+
+  async function runListen() {
+    const projectId = activeProject?.id
+    const topic = listenTopic.trim()
+    if (!projectId || !topic || listening) return
+    setListening(true)
+    setListenError(null)
+    try {
+      const { data } = await supabase.auth.getSession()
+      const token = data.session?.access_token
+      if (!token) { setListenError('Sign in to run Reddit listening.'); setListening(false); return }
+      const response = await fetch(FN_URL('reddit-listen'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ project_id: projectId, topic }),
+      })
+      const json = await response.json() as { ok?: boolean; listen?: RedditListen; error?: string }
+      if (!response.ok || json.error || !json.listen) {
+        setListenError(json.error ?? `Reddit listening failed with HTTP ${response.status}`)
+      } else {
+        setListens(prev => [json.listen as RedditListen, ...prev])
+        setListenTopic('')
+      }
+    } catch (listenErr) {
+      setListenError(listenErr instanceof Error ? listenErr.message : 'Reddit listening failed.')
+    }
+    setListening(false)
+  }
 
   async function syncMetrics() {
     if (!activeProject?.id) return
@@ -355,6 +413,21 @@ export default function Measure() {
           {showIntegrations && (
             <IntegrationHealthPanel providers={providerReadiness} />
           )}
+
+          <section style={{ marginTop: space[8] }}>
+            <SectionLabel style={{ marginBottom: space[3] }} action="Read-only · we never post to Reddit">
+              Reddit listening
+            </SectionLabel>
+            <RedditListeningPanel
+              topic={listenTopic}
+              onTopic={setListenTopic}
+              listening={listening}
+              error={listenError}
+              onRun={runListen}
+              listens={listens}
+              disabled={!activeProject?.id}
+            />
+          </section>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(320px, 0.45fr)', gap: space[6], alignItems: 'start', marginTop: space[8] }}>
             <section>
@@ -824,6 +897,98 @@ function PostCard({ row, mode }: { row: PostRowData; mode: 'top' | 'attention' }
         <span>{formatNumber(row.views || row.reach)} views</span>
         <span>{formatNumber(row.engagements)} eng.</span>
         <span style={{ color: mode === 'attention' ? color.warn : color.success, fontWeight: t.weight.semibold }}>{formatRate(row.engagementRate)}</span>
+      </div>
+    </div>
+  )
+}
+
+function formatListenDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  } catch { return iso }
+}
+
+function RedditListeningPanel({ topic, onTopic, listening, error, onRun, listens, disabled }: {
+  topic: string
+  onTopic: (v: string) => void
+  listening: boolean
+  error: string | null
+  onRun: () => void
+  listens: RedditListen[]
+  disabled: boolean
+}) {
+  const card: CSSProperties = {
+    background: color.surface,
+    border: `1px solid ${color.line}`,
+    borderRadius: radius.lg,
+    padding: space[5],
+  }
+  return (
+    <div style={card}>
+      <p style={{ fontSize: t.size.cap, color: color.ghost, margin: `0 0 ${space[3]}`, lineHeight: 1.5 }}>
+        Pull what buyers are actually saying on Reddit about a topic. VERA reads and summarizes, it never posts. Use the pain points and phrasing to sharpen LinkedIn, cold email, and landing pages.
+      </p>
+      <div style={{ display: 'flex', gap: space[2], alignItems: 'flex-start' }}>
+        <input
+          value={topic}
+          onChange={e => onTopic(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onRun() } }}
+          placeholder="e.g. cold email deliverability for B2B SaaS"
+          disabled={disabled || listening}
+          style={{
+            flex: 1,
+            padding: '10px 12px',
+            fontSize: t.size.sm,
+            border: `1px solid ${color.line}`,
+            borderRadius: radius.md,
+            background: color.paper,
+            color: color.ink,
+            outline: 'none',
+          }}
+        />
+        <Button
+          variant="primary"
+          leading={listening ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+          onClick={onRun}
+          disabled={disabled || listening || !topic.trim()}
+        >
+          {listening ? 'Listening' : 'Listen'}
+        </Button>
+      </div>
+      {disabled && (
+        <p style={{ fontSize: t.size.micro, color: color.faint, marginTop: space[2] }}>Pick a client to run Reddit listening.</p>
+      )}
+      {error && <div style={{ marginTop: space[3] }}><Notice tone="danger" text={error} /></div>}
+
+      <div style={{ marginTop: space[5], display: 'flex', flexDirection: 'column', gap: space[4] }}>
+        {listens.length === 0 ? (
+          <p style={{ fontSize: t.size.cap, color: color.faint, margin: 0 }}>No listens yet. Enter a topic above to pull the first one.</p>
+        ) : listens.map(listen => (
+          <article key={listen.id} style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[4], background: color.paper }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: space[3], marginBottom: space[2] }}>
+              <span style={{ fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink }}>{listen.topic}</span>
+              <span style={{ fontSize: t.size.micro, color: color.faint, whiteSpace: 'nowrap' }}>{formatListenDate(listen.created_at)}</span>
+            </div>
+            <div style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.55 }}>
+              <Markdown content={listen.synthesis} />
+            </div>
+            {listen.sources?.length > 0 && (
+              <div style={{ marginTop: space[3], borderTop: `1px solid ${color.line}`, paddingTop: space[3] }}>
+                <div style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.06em', color: color.ghost, marginBottom: space[2] }}>
+                  Source threads ({listen.sources.length})
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {listen.sources.map((s, i) => (
+                    <a key={i} href={s.url} target="_blank" rel="noopener noreferrer"
+                      style={{ fontSize: t.size.cap, color: color.accent, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {s.title || s.url}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+          </article>
+        ))}
       </div>
     </div>
   )

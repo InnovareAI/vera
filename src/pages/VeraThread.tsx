@@ -993,13 +993,23 @@ export default function VeraThread() {
   // the session-load effect (which would otherwise wipe in-memory messages on
   // session switch) rehydrates it; the next turn then has it in context.
   async function pinToNewChat(content: string) {
-    if (!activeProject?.id || !content) return
+    if (!activeOrg?.id || !activeProject?.id || !content) return
     if (streaming) abortRef.current?.abort()
     const sid = crypto.randomUUID()
     const pinned = `📌 **Pinned from a previous chat**\n\n${content}`
-    try {
-      await supabase.from('chat_messages').insert({ project_id: activeProject.id, session_id: sid, role: 'assistant', content: pinned })
-    } catch { /* ignore — still open the fresh chat */ }
+    const { error } = await supabase.from('chat_messages').insert({
+      org_id: activeOrg.id,
+      project_id: activeProject.id,
+      user_id: user?.id ?? null,
+      session_id: sid,
+      role: 'assistant',
+      content: pinned,
+      route: location.pathname,
+    })
+    if (error) {
+      push({ kind: 'danger', title: "Couldn't pin result", body: error.message })
+      return
+    }
     try { localStorage.setItem(`vera-session:${activeProject.id}`, sid) } catch { /* ignore */ }
     setDraft(null); setDraftHistory([]); setCampaign(null); setInput('')
     setSessionId(sid)   // load effect fetches the pinned message into the new thread
