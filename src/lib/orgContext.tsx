@@ -7,7 +7,7 @@ export interface OrgInfo {
   id: string
   name: string
   slug: string
-  org_type: string
+  org_type?: string
   logo_url?: string
   plan: string
 }
@@ -96,11 +96,13 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     // still land in a usable workspace instead of an empty one.
     supabase
       .from('org_members')
-      .select('org_id, role, organizations(id, name, slug, org_type, logo_url, plan)')
+      .select('org_id, role, organizations(id, name, slug, logo_url, plan)')
       .eq('user_id', user.id)
-      .then(({ data }) => {
+      .then(({ data, error }) => {
         if (cancelled) return
-        const members = (data as unknown as OrgMember[]) || []
+        // Any failure (or no rows) falls back to the project-derived workspace,
+        // so an invited member never lands on a blank app while loading hangs.
+        const members = (error ? [] : (data as unknown as OrgMember[])) || []
         if (members.length === 0) { loadFromProjects(); return }
         setIsOrgMember(true)
         setOrgs(members)
@@ -110,6 +112,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         })
         setLoading(false)
       })
+      .catch(() => { if (!cancelled) loadFromProjects() })
     return () => { cancelled = true }
   }, [user, tick])
 
