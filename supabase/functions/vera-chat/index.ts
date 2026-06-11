@@ -2760,7 +2760,7 @@ const MAX_TOOL_ROUNDS = 5  // safety cap so a tool loop can't run forever
 // Text model used when a project runs its chat on its own OpenRouter key.
 // OpenRouter serves Claude, so quality matches; override per deployment if the
 // slug changes.
-const OPENROUTER_TEXT_MODEL = Deno.env.get('OPENROUTER_TEXT_MODEL') ?? 'anthropic/claude-sonnet-4.5'
+const OPENROUTER_TEXT_MODEL = Deno.env.get('OPENROUTER_TEXT_MODEL') ?? 'anthropic/claude-sonnet-4.6'
 
 // Isolated OpenRouter (OpenAI-format) agent loop for a project running its text
 // on its own OpenRouter key. Reuses executeTool and emits the SAME SSE events as
