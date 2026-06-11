@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
   const auth = await requireSignedInOrService(req, supabase, SERVICE_KEY, corsHeaders)
   if (!auth.ok) return auth.response
 
-  const { prompt, model = 'nano-banana', image_size = 'square_hd', num_images = 1, quality = 'high', project_id } = await req.json().catch(() => ({}))
+  const { prompt, model = 'nano-banana-pro', image_size = 'square_hd', num_images = 1, quality = 'high', project_id } = await req.json().catch(() => ({}))
   if (!prompt) return jsonError('prompt is required', 400)
 
   // Per-client OpenRouter BYOK. When a project has its own active OpenRouter

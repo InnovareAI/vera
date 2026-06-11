@@ -57,7 +57,7 @@ async function renderFrame(supabase: AdminClient, orgId: string, prompt: string,
   const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-image`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_KEY}`, 'apikey': SERVICE_KEY },
-    body: JSON.stringify({ prompt, model: 'nano-banana', image_size: aspect, quality: 'high', project_id: projectId }),
+    body: JSON.stringify({ prompt, model: 'nano-banana-pro', image_size: aspect, quality: 'high', project_id: projectId }),
   })
   if (!res.ok || !res.body) throw new Error(`generate-image HTTP ${res.status}`)
   const reader = res.body.getReader()
