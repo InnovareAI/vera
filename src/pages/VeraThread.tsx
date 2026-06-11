@@ -391,7 +391,13 @@ export default function VeraThread() {
         if (cancelled) return
         const rows = (data ?? []) as Array<{ id: string; role: 'user' | 'assistant'; content: string | null; attachments?: StoredAttachment[] | null }>
         const stored = rows.reverse().map(rowToMessage)
-        setMessages(prev => stored.length ? mergeMessages(stored, prev) : prev)
+        // The project-scoped DB query is the source of truth for this
+        // (project, session). Keep only still-pending local messages and drop
+        // cached content — so a cross-project localStorage cache can never keep
+        // another client's chat on screen when the DB has nothing here. Purge
+        // the stale key so it can't flash on the next load either.
+        setMessages(prev => mergeMessages(stored, prev.filter(m => m.pending)))
+        if (!stored.length) { try { localStorage.removeItem(key) } catch { /* ignore */ } }
         setHistoryLoaded(true)
       }, () => {
         if (!cancelled) setHistoryLoaded(true)
