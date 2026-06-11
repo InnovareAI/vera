@@ -12,7 +12,7 @@ import { useState, useEffect, useRef } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   MessageSquare, CheckSquare, Brain,
-  BarChart3, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid, CalendarDays, Library, Plus, Clock, ChevronRight, ChevronLeft,
+  BarChart3, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid, CalendarDays, Library, Plus, Clock, ChevronRight, ChevronLeft, KeyRound,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
@@ -481,6 +481,7 @@ export default function Layout() {
           <RailLabel>Client</RailLabel>
           <RailItem to={p('brain')}     icon={Brain}           label="Brain" />
           <RailItem to={p('measure')}   icon={BarChart3}       label="Performance" />
+          <RailItem to={p('keys')}      icon={KeyRound}        label="API keys" />
         </nav>
 
         <RailRecents />

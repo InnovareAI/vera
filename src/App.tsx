@@ -28,6 +28,7 @@ import Measure from './pages/Measure'                // /p/:slug/measure, visibl
 import ReviewLink from './pages/ReviewLink'          // /r/:reviewToken — public, tokened review link
 import ApprovalIndex from './pages/ApprovalIndex'
 import AcceptInvite from './pages/AcceptInvite'
+import ClientKeys from './pages/ClientKeys'          // /p/:slug/keys — a client's own provider keys
 
 export default function App() {
   // Top-level boundary catches anything that escapes a route boundary —
@@ -72,6 +73,7 @@ export default function App() {
                   <Route path="knowledge"  element={<Knowledge />} />{/* legacy KB — folds into Brain next */}
                   <Route path="brain"      element={<Brain />} />
                   <Route path="measure"    element={<Measure />} />
+                  <Route path="keys"       element={<ClientKeys />} />{/* the client's own provider keys */}
                 </Route>
 
                 {/* ── Flat → project redirect shims ──                        */}
