@@ -93,7 +93,7 @@ const OR_MODELS: Record<string, string> = {
 // Nano Banana (Gemini 2.5 Flash Image) on OpenRouter — the default image tier
 // for a client running on its own OpenRouter key. Kept out of OR_MODELS so the
 // plain "nano-banana" alias still routes to FAL for platform (non-BYOK) clients.
-const OR_NANO_BANANA = 'google/gemini-2.5-flash-image-preview'
+const OR_NANO_BANANA = 'google/gemini-2.5-flash-image'
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders })
