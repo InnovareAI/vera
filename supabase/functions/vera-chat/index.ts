@@ -2757,6 +2757,95 @@ async function authorizeMemberRequest(
 
 const MAX_TOOL_ROUNDS = 5  // safety cap so a tool loop can't run forever
 
+// Text model used when a project runs its chat on its own OpenRouter key.
+// OpenRouter serves Claude, so quality matches; override per deployment if the
+// slug changes.
+const OPENROUTER_TEXT_MODEL = Deno.env.get('OPENROUTER_TEXT_MODEL') ?? 'anthropic/claude-sonnet-4.5'
+
+// Isolated OpenRouter (OpenAI-format) agent loop for a project running its text
+// on its own OpenRouter key. Reuses executeTool and emits the SAME SSE events as
+// the Anthropic path, so the frontend is identical. Other clients never enter
+// this path. No extended thinking / no Anthropic web_search here (OpenAI-format).
+async function runOpenRouterAgent(opts: {
+  apiKey: string
+  model: string
+  systemText: string
+  convo: Array<{ role: string; content: unknown }>
+  tools: Array<{ name: string; description?: string; input_schema?: unknown }>
+  send: (event: Record<string, unknown>) => void
+  toolCtx: Parameters<typeof executeTool>[2]
+}): Promise<{ fullText: string; generatedImages: string[]; tokensIn: number; tokensOut: number }> {
+  const { apiKey, model, systemText, convo, tools, send, toolCtx } = opts
+  const oaTools = tools.map(t => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description ?? '',
+      parameters: (t.input_schema as object) ?? { type: 'object', properties: {} },
+    },
+  }))
+  const msgs: Array<Record<string, unknown>> = [{ role: 'system', content: systemText }]
+  for (const m of convo) {
+    const content = typeof m.content === 'string'
+      ? m.content
+      : Array.isArray(m.content)
+        ? (m.content as Array<{ text?: string }>).map(b => b.text ?? '').join('')
+        : ''
+    msgs.push({ role: m.role, content })
+  }
+
+  let fullText = ''
+  const generatedImages: string[] = []
+  let tokensIn = 0, tokensOut = 0
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://vera.innovareai.com',
+        'X-Title': 'VERA',
+      },
+      body: JSON.stringify({ model, messages: msgs, tools: oaTools, tool_choice: 'auto', max_tokens: MAX_TOKENS }),
+      signal: AbortSignal.timeout(300_000),
+    })
+    if (!res.ok) {
+      const err = await res.text().catch(() => '')
+      send({ type: 'delta', text: `\n\n(OpenRouter error ${res.status}: ${err.slice(0, 200)})` })
+      break
+    }
+    const data = await res.json() as {
+      choices?: Array<{ message?: { content?: string | null; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> } }>
+      usage?: { prompt_tokens?: number; completion_tokens?: number }
+    }
+    tokensIn += data.usage?.prompt_tokens ?? 0
+    tokensOut += data.usage?.completion_tokens ?? 0
+    const message = data.choices?.[0]?.message
+    const toolCalls = message?.tool_calls ?? []
+
+    if (toolCalls.length) {
+      msgs.push({ role: 'assistant', content: message?.content ?? '', tool_calls: toolCalls })
+      for (const tc of toolCalls) {
+        let input: Record<string, unknown> = {}
+        try { input = tc.function.arguments ? JSON.parse(tc.function.arguments) : {} } catch { /* ignore bad args */ }
+        send({ type: 'tool_start', tool: tc.function.name, id: tc.id })
+        const exec = await executeTool(tc.function.name, input, toolCtx)
+        if (exec.image_url) { generatedImages.push(exec.image_url); send({ type: 'image', url: exec.image_url, tool: tc.function.name }) }
+        if (exec.video_url) send({ type: 'video', url: exec.video_url, tool: tc.function.name })
+        send({ type: 'tool_end', tool: tc.function.name, id: tc.id, result: exec.result })
+        msgs.push({ role: 'tool', tool_call_id: tc.id, content: exec.result })
+      }
+      continue
+    }
+
+    const text = (message?.content ?? '').toString()
+    if (text) { fullText += text; send({ type: 'delta', text }) }
+    break
+  }
+  return { fullText, generatedImages, tokensIn, tokensOut }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') {
@@ -2910,6 +2999,20 @@ Deno.serve(async (req) => {
       else effectiveModel = HAIKU_MODEL             // no key → Haiku fallback
     }
   } catch { /* keep platform defaults on any lookup/decrypt error */ }
+
+  // Per-client OpenRouter text routing: a project with its own active OpenRouter
+  // key runs its chat/LLM through OpenRouter on that key, off the platform key
+  // (same trigger as its image routing). null = use the Anthropic path.
+  let clientOpenRouterKey: string | null = null
+  if (project_id) {
+    try {
+      const { data: orRow } = await supabase.from('client_api_keys')
+        .select('secret_ciphertext').eq('project_id', project_id).eq('provider', 'openrouter').eq('status', 'active')
+        .order('updated_at', { ascending: false }).limit(1).maybeSingle()
+      const cipher = (orRow as { secret_ciphertext?: string } | null)?.secret_ciphertext
+      if (cipher) clientOpenRouterKey = await decryptClientSecret(cipher)
+    } catch { /* fall back to the Anthropic path on any lookup/decrypt error */ }
+  }
   // Haiku doesn't accept Sonnet's extended-thinking param — only enable on Sonnet.
   const useThinking = enableThinking && effectiveModel === MODEL
   // Build the Anthropic client with the resolved key (client BYOK or platform).
@@ -2957,6 +3060,31 @@ Deno.serve(async (req) => {
       let totalCacheCreate = 0
 
       try {
+        if (clientOpenRouterKey) {
+          // This project runs its text on its own OpenRouter key (off platform).
+          const r = await runOpenRouterAgent({
+            apiKey: clientOpenRouterKey,
+            model: OPENROUTER_TEXT_MODEL,
+            systemText: (systemBlocks as Array<{ text?: string }>).map(b => b.text ?? '').join('\n\n'),
+            convo,
+            tools: TOOLS as unknown as Array<{ name: string; description?: string; input_schema?: unknown }>,
+            send,
+            toolCtx: {
+              orgId: org_id,
+              userId: effectiveUserId,
+              projectId: project_id ?? null,
+              supabase,
+              supabaseUrl,
+              serviceKey,
+              emit: send,
+              userPrompt: lastUserText ?? null,
+            },
+          })
+          fullText = r.fullText
+          generatedImages.push(...r.generatedImages)
+          totalTokensIn += r.tokensIn
+          totalTokensOut += r.tokensOut
+        } else {
         // Tool-use loop: call Anthropic, check stop_reason, execute any
         // tool calls, append tool_result, repeat. Capped at MAX_TOOL_ROUNDS.
         for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -3078,6 +3206,7 @@ Deno.serve(async (req) => {
 
           // No more tools — stream is done
           break
+        }
         }
 
         // Persist assistant turn. fullText covers all text deltas across all
