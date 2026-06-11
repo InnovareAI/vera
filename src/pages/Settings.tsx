@@ -199,7 +199,9 @@ function TeamTab() {
   const { projects } = useProject()
   const [projectId, setProjectId] = useState('')
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState<'viewer' | 'reviewer' | 'editor' | 'owner'>('viewer')
+  // Default to Editor so a joining collaborator can edit content out of the box.
+  // Viewer stays selectable for view-only stakeholders.
+  const [role, setRole] = useState<'viewer' | 'reviewer' | 'editor' | 'owner'>('editor')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
 

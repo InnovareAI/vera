@@ -133,7 +133,7 @@ export default function AcrossClients() {
   const [busyAction, setBusyAction] = useState<string | null>(null)
 
   const [inviteEmail, setInviteEmail] = useState('')
-  const [inviteRole, setInviteRole] = useState<ProjectRole>('viewer')
+  const [inviteRole, setInviteRole] = useState<ProjectRole>('editor')
   const [keyProvider, setKeyProvider] = useState('anthropic')
   const [keyLabel, setKeyLabel] = useState('Primary key')
   const [keySecret, setKeySecret] = useState('')

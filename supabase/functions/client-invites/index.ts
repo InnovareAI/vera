@@ -300,7 +300,9 @@ function normalizeEmail(email: string | undefined) {
 }
 
 function normalizeRole(role: string | undefined) {
-  return ["owner", "editor", "reviewer", "viewer"].includes(role ?? "") ? role! : "viewer"
+  // Editor is the default for a collaborator when no explicit role is sent, so a
+  // joining member can edit content. Valid roles pass through unchanged.
+  return ["owner", "editor", "reviewer", "viewer"].includes(role ?? "") ? role! : "editor"
 }
 
 function originFor(req: Request) {
