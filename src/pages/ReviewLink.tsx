@@ -30,9 +30,14 @@ export default function ReviewLink() {
   const [saved, setSaved] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState<'approved' | 'changes_requested' | null>(null)
+  const [editedCopy, setEditedCopy] = useState('')
+  const [copyDirty, setCopyDirty] = useState(false)
+  const [savingCopy, setSavingCopy] = useState(false)
+  const [copySaved, setCopySaved] = useState(false)
 
   const draftKey = `review-feedback:${reviewToken}`
   const nameKey = `review-reviewer:${reviewToken}`
+  const copyKey = `review-copy:${reviewToken}`
 
   useEffect(() => {
     if (!reviewToken) { setErr('No review token specified.'); setLoading(false); return }
@@ -50,7 +55,15 @@ export default function ReviewLink() {
         if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`)
         return data.post as Post
       })
-      .then(data => { if (!cancelled) setPost(data) })
+      .then(data => {
+        if (cancelled) return
+        setPost(data)
+        // Show the saved copy, unless there's an unsaved local edit to restore.
+        let initial = data.copy ?? ''
+        try { const d = localStorage.getItem(copyKey); if (d !== null) initial = d } catch { /* ignore */ }
+        setEditedCopy(initial)
+        setCopyDirty(initial !== (data.copy ?? ''))
+      })
       .catch(() => { if (!cancelled) setErr('This post could not be found, or the link has expired.') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
@@ -63,6 +76,36 @@ export default function ReviewLink() {
   const onName = (v: string) => {
     setReviewer(v)
     try { localStorage.setItem(nameKey, v) } catch { /* ignore */ }
+  }
+  const onEditCopy = (v: string) => {
+    setEditedCopy(v)
+    setCopyDirty(v !== (post?.copy ?? ''))
+    setCopySaved(false)
+    try { localStorage.setItem(copyKey, v) } catch { /* ignore */ }
+  }
+
+  // Persist reviewer edits to the copy via the share token. Edits auto-save to
+  // localStorage on every keystroke (above), so a failed save never loses them.
+  async function saveCopy() {
+    if (!reviewToken || savingCopy || !copyDirty) return
+    setSavingCopy(true); setErr('')
+    try {
+      const res = await fetch(`${SUPA}/functions/v1/review-link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: `Bearer ${ANON}` },
+        body: JSON.stringify({ token: reviewToken, copy: editedCopy }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`)
+      setPost(data.post as Post)
+      setEditedCopy((data.post as Post).copy ?? editedCopy)
+      setCopyDirty(false); setCopySaved(true)
+      try { localStorage.removeItem(copyKey) } catch { /* ignore */ }
+    } catch (e) {
+      setErr(`Couldn't save your edits (${(e as Error).message}). They're saved on this device, try again.`)
+    } finally {
+      setSavingCopy(false)
+    }
   }
 
   async function act(action: 'approved' | 'changes_requested') {
@@ -129,9 +172,25 @@ export default function ReviewLink() {
             </div>
           </div>
 
-          {/* CENTER — the output (asset) */}
-          <div style={{ flex: '1 1 380px', minWidth: 300 }}>
-            <PlatformPostPreview post={post} density="standard" autoplayMedia={false} />
+          {/* CENTER: the asset preview + an always-editable copy field */}
+          <div style={{ flex: '1 1 380px', minWidth: 300, display: 'flex', flexDirection: 'column', gap: space[3] }}>
+            <PlatformPostPreview post={{ ...post, copy: editedCopy }} density="standard" autoplayMedia={false} />
+            <div style={cardStyle}>
+              <div style={{ padding: `${space[3]} ${space[5]}`, borderBottom: `1px solid ${color.line}`, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.ink2 }}>Edit copy</span>
+                <span style={{ fontSize: t.size.micro, color: copySaved && !copyDirty ? color.success : color.faint }}>
+                  {savingCopy ? 'Saving' : copyDirty ? 'Unsaved edits' : copySaved ? 'Saved' : 'Editable'}
+                </span>
+              </div>
+              <div style={{ padding: space[4] }}>
+                <textarea value={editedCopy} onChange={e => onEditCopy(e.target.value)}
+                  style={{ ...inputStyle, width: '100%', minHeight: 200, lineHeight: 1.55, resize: 'vertical' }} />
+                <button onClick={saveCopy} disabled={savingCopy || !copyDirty}
+                  style={{ marginTop: space[3], padding: '10px 16px', borderRadius: radius.md, border: 'none', cursor: (savingCopy || !copyDirty) ? 'default' : 'pointer', background: color.ink, color: '#fff', fontSize: t.size.sm, fontWeight: t.weight.semibold, opacity: (savingCopy || !copyDirty) ? 0.5 : 1 }}>
+                  {savingCopy ? 'Saving changes' : 'Save changes'}
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* RIGHT — feedback */}
