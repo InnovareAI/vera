@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import {
   Bookmark,
@@ -249,14 +250,11 @@ function MediaBlock({
     <div style={shell}>
       <div style={{ position: 'relative', aspectRatio: spec.aspectRatio, background: '#050505' }}>
         {post.media_type === 'video' ? (
-          <video
+          <VideoWithFallback
             src={src}
             controls={density !== 'compact'}
             autoPlay={autoplayMedia}
-            muted
             loop={autoplayMedia}
-            playsInline
-            preload="metadata"
             style={mediaStyle}
           />
         ) : (
@@ -264,6 +262,39 @@ function MediaBlock({
         )}
       </div>
     </div>
+  )
+}
+
+// fal.media video links are flaky (intermittent 503), so a failed load shows a
+// clear placeholder with a direct link instead of a black box.
+function VideoWithFallback({ src, controls, autoPlay, loop, style }: {
+  src: string
+  controls: boolean
+  autoPlay: boolean
+  loop: boolean
+  style: CSSProperties
+}) {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return (
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 16, textAlign: 'center' }}>
+        <div style={{ fontSize: t.size.cap, color: '#e6e6e6' }}>Video preview unavailable right now.</div>
+        <a href={src} target="_blank" rel="noopener noreferrer" style={{ fontSize: t.size.cap, color: '#8ab4ff', textDecoration: 'underline' }}>Open the video directly</a>
+      </div>
+    )
+  }
+  return (
+    <video
+      src={src}
+      controls={controls}
+      autoPlay={autoPlay}
+      muted
+      loop={loop}
+      playsInline
+      preload="metadata"
+      style={style}
+      onError={() => setFailed(true)}
+    />
   )
 }
 
