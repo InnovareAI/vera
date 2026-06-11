@@ -25,6 +25,22 @@ const FAL_API_KEY = Deno.env.get('FAL_API_KEY')
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
 
+// Per-client OpenRouter BYOK. Decrypts a client's stored OpenRouter key
+// (client_api_keys.secret_ciphertext), same AES-GCM scheme as vera-chat.
+const CLIENT_KEY_ENC = Deno.env.get('CLIENT_API_KEY_ENCRYPTION_KEY') ?? Deno.env.get('VAULT_ENC_KEY') ?? ''
+async function decryptClientSecret(payload: string): Promise<string | null> {
+  try {
+    if (!CLIENT_KEY_ENC || !payload) return null
+    const parts = payload.split(':')
+    if (parts.length !== 4 || parts[0] !== 'aes-gcm') return null
+    const b64 = (s: string) => Uint8Array.from(atob(s), c => c.charCodeAt(0))
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(CLIENT_KEY_ENC))
+    const key = await crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['decrypt'])
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(parts[2]) }, key, b64(parts[3]))
+    return new TextDecoder().decode(plain)
+  } catch { return null }
+}
+
 // FAL-routed models. Default for everything except premium hero images.
 const FAL_MODELS: Record<string, string> = {
   // DEFAULT — Gemini 2.5 Flash Image. Wins on rendering text/typography
@@ -82,21 +98,38 @@ Deno.serve(async (req) => {
   const auth = await requireSignedInOrService(req, supabase, SERVICE_KEY, corsHeaders)
   if (!auth.ok) return auth.response
 
-  const { prompt, model = 'nano-banana', image_size = 'square_hd', num_images = 1, quality = 'high' } = await req.json().catch(() => ({}))
+  const { prompt, model = 'nano-banana', image_size = 'square_hd', num_images = 1, quality = 'high', project_id } = await req.json().catch(() => ({}))
   if (!prompt) return jsonError('prompt is required', 400)
 
+  // Per-client OpenRouter BYOK. When a project has its own active OpenRouter
+  // key, ALL of its image generation runs through OpenRouter on that key — never
+  // the platform OpenRouter / FAL / OpenAI keys. A client can run entirely on
+  // its own key.
+  let clientOpenRouterKey: string | null = null
+  if (typeof project_id === 'string' && project_id) {
+    const { data: orRow } = await supabase.from('client_api_keys')
+      .select('secret_ciphertext').eq('project_id', project_id).eq('provider', 'openrouter').eq('status', 'active')
+      .order('updated_at', { ascending: false }).limit(1).maybeSingle()
+    const cipher = (orRow as { secret_ciphertext?: string } | null)?.secret_ciphertext
+    if (cipher) clientOpenRouterKey = await decryptClientSecret(cipher)
+  }
+
   // Route by alias: OpenAI-direct > OpenRouter > FAL. Direct fal-ai/<slug>
-  // identifiers still flow through FAL as escape hatches.
-  const useOpenAI = model in OPENAI_MODELS
-  const useOR = !useOpenAI && model in OR_MODELS
+  // identifiers still flow through FAL as escape hatches. A client OpenRouter
+  // key forces the OpenRouter runner regardless of the requested alias.
+  let useOpenAI = model in OPENAI_MODELS
+  let useOR = !useOpenAI && model in OR_MODELS
+  if (clientOpenRouterKey) { useOpenAI = false; useOR = true }
   const slug = useOpenAI
     ? OPENAI_MODELS[model]
     : useOR
-      ? OR_MODELS[model]
+      ? (OR_MODELS[model] ?? OR_MODELS['nano-banana-pro'])
       : (FAL_MODELS[model] ?? model)
+  // A client's own key when present; otherwise the platform OpenRouter key.
+  const openRouterKey = clientOpenRouterKey ?? OPENROUTER_API_KEY
 
   if (useOpenAI && !OPENAI_API_KEY) return jsonError('OPENAI_API_KEY not configured on the server.', 500)
-  if (useOR && !OPENROUTER_API_KEY) return jsonError('OPENROUTER_API_KEY not configured on the server.', 500)
+  if (useOR && !openRouterKey) return jsonError('No OpenRouter key available for this image request.', 500)
   if (!useOpenAI && !useOR && !FAL_API_KEY) return jsonError('FAL_API_KEY not configured on the server.', 500)
 
   const encoder = new TextEncoder()
@@ -112,7 +145,7 @@ Deno.serve(async (req) => {
         if (useOpenAI) {
           await runOpenAI(slug, prompt, quality, image_size, num_images, send, elapsed)
         } else if (useOR) {
-          await runOpenRouter(slug, prompt, quality, send, elapsed)
+          await runOpenRouter(slug, prompt, quality, send, elapsed, openRouterKey!)
         } else {
           await runFal(slug, prompt, image_size, num_images, send, elapsed)
         }
@@ -271,6 +304,7 @@ async function runOpenRouter(
   quality: string,
   send: (event: string, data: unknown) => void,
   elapsed: () => number,
+  apiKey: string,
 ): Promise<void> {
   send('started', { provider: 'openrouter', model_used: slug })
   // Heartbeat ticker so the SSE stays alive during the long OR call.
@@ -286,7 +320,7 @@ async function runOpenRouter(
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': 'https://content-studio-innovareai.netlify.app',
         'X-Title': 'KAI Image Generation',

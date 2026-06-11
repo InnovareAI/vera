@@ -53,11 +53,11 @@ async function uploadToStorage(supabase: AdminClient, orgId: string, source: str
 
 // Render one frame through the existing generate-image function (SSE), returning
 // a stored public URL.
-async function renderFrame(supabase: AdminClient, orgId: string, prompt: string, aspect: string): Promise<string> {
+async function renderFrame(supabase: AdminClient, orgId: string, prompt: string, aspect: string, projectId: string | null): Promise<string> {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-image`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_KEY}`, 'apikey': SERVICE_KEY },
-    body: JSON.stringify({ prompt, model: 'nano-banana-pro', image_size: aspect, quality: 'high' }),
+    body: JSON.stringify({ prompt, model: 'nano-banana-pro', image_size: aspect, quality: 'high', project_id: projectId }),
   })
   if (!res.ok || !res.body) throw new Error(`generate-image HTTP ${res.status}`)
   const reader = res.body.getReader()
@@ -85,7 +85,7 @@ async function renderFrame(supabase: AdminClient, orgId: string, prompt: string,
   try { return await uploadToStorage(supabase, orgId, url) } catch { return url }
 }
 
-async function processJob(supabase: AdminClient, jobId: string, postId: string | null, frames: Frame[], aspect: string) {
+async function processJob(supabase: AdminClient, jobId: string, postId: string | null, frames: Frame[], aspect: string, projectId: string | null) {
   // Find the post's org for storage pathing.
   let orgId = ''
   if (postId) {
@@ -117,7 +117,7 @@ async function processJob(supabase: AdminClient, jobId: string, postId: string |
   await Promise.all(frames.map(async (f, i) => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const url = await renderFrame(supabase, orgId, f.image_prompt ?? '', aspect)
+        const url = await renderFrame(supabase, orgId, f.image_prompt ?? '', aspect, projectId)
         slots[i] = { url, text: f.text ?? null }
         break
       } catch (e) {
@@ -169,7 +169,7 @@ Deno.serve(async (req) => {
     const jobId = (job as { id: string }).id
 
     // @ts-expect-error EdgeRuntime is provided by the supabase edge runtime
-    EdgeRuntime.waitUntil(processJob(supabase, jobId, body.post_id ?? null, frames, aspect))
+    EdgeRuntime.waitUntil(processJob(supabase, jobId, body.post_id ?? null, frames, aspect, body.project_id ?? null))
 
     return new Response(JSON.stringify({ job_id: jobId, status: 'processing', total: frames.length }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

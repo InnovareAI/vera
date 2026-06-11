@@ -1558,7 +1558,7 @@ async function executeTool(
             const imgRes = await fetch(`${ctx.supabaseUrl}/functions/v1/generate-image`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
-              body: JSON.stringify({ prompt: imagePrompt, model: 'nano-banana', image_size: 'square_hd' }),
+              body: JSON.stringify({ prompt: imagePrompt, model: 'nano-banana', image_size: 'square_hd', project_id: ctx.projectId }),
               signal: AbortSignal.timeout(28000),
             })
             if (imgRes.ok && imgRes.body) {
@@ -1749,7 +1749,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           try {
             const fn = imgPrompt ? 'generate-image' : 'generate-video'
             const body = imgPrompt
-              ? { prompt: imgPrompt, model: 'nano-banana', image_size: 'square_hd' }
+              ? { prompt: imgPrompt, model: 'nano-banana', image_size: 'square_hd', project_id: ctx.projectId }
               : { prompt: vidPrompt, model: 'veo-3', aspect_ratio: '16:9' }
             const res = await fetch(`${ctx.supabaseUrl}/functions/v1/${fn}`, {
               method: 'POST',
@@ -1921,6 +1921,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
               model: 'nano-banana-pro',
               image_size: (input.aspect_ratio as string) ?? 'square_hd',
               quality: 'high',
+              project_id: ctx.projectId,
             }
 
         const res = await fetch(`${ctx.supabaseUrl}/functions/v1/${target}`, {
