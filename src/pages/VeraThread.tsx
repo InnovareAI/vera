@@ -365,11 +365,34 @@ export default function VeraThread() {
 
   // Establish the active chat session per client (persisted in localStorage).
   useEffect(() => {
-    if (!activeProject?.id) { setSessionId(''); return }
-    const key = `vera-session:${activeProject.id}`
-    let sid = localStorage.getItem(key)
-    if (!sid) { sid = crypto.randomUUID(); try { localStorage.setItem(key, sid) } catch { /* ignore */ } }
-    setSessionId(sid)
+    const pid = activeProject?.id
+    if (!pid) { setSessionId(''); return }
+    const key = `vera-session:${pid}`
+    const stored = localStorage.getItem(key)
+    if (stored) { setSessionId(stored); return }
+    // No active-session pointer (new browser, cleared storage, or after a
+    // logout/login). Reopen the project's MOST RECENT session instead of a blank
+    // new chat, so a refresh never buries the last conversation in history.
+    // Scoped to project_id, so it only ever surfaces this client's own sessions.
+    let cancelled = false
+    supabase.from('chat_messages')
+      .select('session_id')
+      .eq('project_id', pid)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .then(({ data }) => {
+        if (cancelled) return
+        const recent = (data as Array<{ session_id: string }> | null)?.[0]?.session_id
+        const sid = recent ?? crypto.randomUUID()
+        try { localStorage.setItem(key, sid) } catch { /* ignore */ }
+        setSessionId(sid)
+      }, () => {
+        if (cancelled) return
+        const sid = crypto.randomUUID()
+        try { localStorage.setItem(key, sid) } catch { /* ignore */ }
+        setSessionId(sid)
+      })
+    return () => { cancelled = true }
   }, [activeProject?.id])
 
   // Load the current session's messages (re-runs on session switch / New chat).
