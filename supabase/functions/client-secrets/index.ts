@@ -149,6 +149,7 @@ async function discoverProvider(provider: string, secret: string, config: Record
     if (provider === "openai") return discoverOpenAI(secret)
     if (provider === "anthropic") return discoverAnthropic(secret)
     if (provider === "google") return discoverGemini(secret)
+    if (provider === "openrouter") return discoverOpenRouter(secret)
     if (provider === "azure_openai") return discoverAzureOpenAI(secret, config)
 
     const capabilities = { chat: true }
@@ -175,6 +176,18 @@ async function discoverOpenAI(secret: string): Promise<DiscoveryResult> {
     .map(model => buildModel("openai", model.id!))
 
   return { ok: true, models, capabilities: aggregateCapabilities(models) }
+}
+
+async function discoverOpenRouter(secret: string): Promise<DiscoveryResult> {
+  // Validate against an authenticated endpoint (the model catalogue is public,
+  // so fetching it can't confirm the key). 200 here means the key is live.
+  const response = await fetch("https://openrouter.ai/api/v1/key", {
+    headers: { Authorization: `Bearer ${secret}` },
+  })
+  if (!response.ok) return { ok: false, error: `OpenRouter rejected this key: ${await providerError(response)}` }
+  // OpenRouter routes both chat and image models (Flux, Nano Banana). The full
+  // catalogue isn't synced here to avoid storing hundreds of model rows.
+  return { ok: true, models: [], capabilities: { chat: true, image: true } }
 }
 
 async function discoverAnthropic(secret: string): Promise<DiscoveryResult> {
