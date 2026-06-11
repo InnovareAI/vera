@@ -112,7 +112,6 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         })
         setLoading(false)
       })
-      .catch(() => { if (!cancelled) loadFromProjects() })
     return () => { cancelled = true }
   }, [user, tick])
 
