@@ -90,6 +90,10 @@ const OR_MODELS: Record<string, string> = {
   'nano-banana-2':     'google/gemini-3.1-flash-image-preview',
   'nano-banana-pro':   'google/gemini-3-pro-image-preview',
 }
+// Nano Banana (Gemini 2.5 Flash Image) on OpenRouter — the default image tier
+// for a client running on its own OpenRouter key. Kept out of OR_MODELS so the
+// plain "nano-banana" alias still routes to FAL for platform (non-BYOK) clients.
+const OR_NANO_BANANA = 'google/gemini-2.5-flash-image-preview'
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders })
@@ -123,7 +127,7 @@ Deno.serve(async (req) => {
   const slug = useOpenAI
     ? OPENAI_MODELS[model]
     : useOR
-      ? (OR_MODELS[model] ?? OR_MODELS['nano-banana-pro'])
+      ? (OR_MODELS[model] ?? OR_NANO_BANANA)
       : (FAL_MODELS[model] ?? model)
   // A client's own key when present; otherwise the platform OpenRouter key.
   const openRouterKey = clientOpenRouterKey ?? OPENROUTER_API_KEY

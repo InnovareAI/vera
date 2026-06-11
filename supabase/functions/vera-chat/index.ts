@@ -1918,7 +1918,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           ? input
           : {
               prompt: input.prompt,
-              model: 'nano-banana-pro',
+              model: 'nano-banana',
               image_size: (input.aspect_ratio as string) ?? 'square_hd',
               quality: 'high',
               project_id: ctx.projectId,
