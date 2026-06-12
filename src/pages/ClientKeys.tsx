@@ -4,7 +4,7 @@
 // canManageProject — the space owner / org admins); listing + revoking are
 // direct, gated by client_api_keys RLS (can_project_manage).
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Activity, Bot, CheckCircle2, Clapperboard, Clock3, ImagePlus, KeyRound, Lock, RefreshCw, Trash2, type LucideIcon } from 'lucide-react'
+import { Activity, Bot, CheckCircle2, Clapperboard, Clock3, Crown, ImagePlus, KeyRound, Lock, RefreshCw, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { useProject } from '../lib/projectContext'
@@ -35,6 +35,18 @@ type GenerationUsageRow = {
   created_at: string
 }
 
+type AiPolicy = {
+  images_enabled: boolean
+  standard_video_enabled: boolean
+  premium_media_enabled: boolean
+}
+
+const DEFAULT_AI_POLICY: AiPolicy = {
+  images_enabled: true,
+  standard_video_enabled: false,
+  premium_media_enabled: false,
+}
+
 const PROVIDERS = [
   { value: 'openrouter', label: 'OpenRouter (text + images)' },
   { value: 'anthropic', label: 'Anthropic (text)' },
@@ -44,7 +56,7 @@ const PROVIDERS = [
 const providerLabel = (v: string) => PROVIDERS.find(p => p.value === v)?.label ?? v
 
 export default function ClientKeys() {
-  const { activeProject } = useProject()
+  const { activeProject, refetch } = useProject()
   const { session } = useAuth()
   const { push } = useToast()
   const [keys, setKeys] = useState<ClientApiKey[]>([])
@@ -57,6 +69,8 @@ export default function ClientKeys() {
   const [usageRows, setUsageRows] = useState<GenerationUsageRow[]>([])
   const [usageLoading, setUsageLoading] = useState(true)
   const [usageError, setUsageError] = useState<string | null>(null)
+  const [aiPolicy, setAiPolicy] = useState<AiPolicy>(DEFAULT_AI_POLICY)
+  const [policySaving, setPolicySaving] = useState(false)
 
   const load = useCallback(async () => {
     if (!activeProject?.id) { setKeys([]); setLoading(false); return }
@@ -99,6 +113,10 @@ export default function ClientKeys() {
   }, [activeProject?.id])
 
   useEffect(() => { void loadUsage() }, [loadUsage])
+
+  useEffect(() => {
+    setAiPolicy(parseAiPolicy(activeProject?.ai_policy))
+  }, [activeProject?.id, activeProject?.ai_policy])
 
   async function saveKey() {
     if (!activeProject?.id || !session?.access_token) return
@@ -143,6 +161,29 @@ export default function ClientKeys() {
     await load()
   }
 
+  async function saveAiPolicy(next: AiPolicy) {
+    if (!activeProject?.id) return
+    const prev = aiPolicy
+    setAiPolicy(next)
+    setPolicySaving(true)
+    const { error } = await supabase
+      .from('projects')
+      .update({ ai_policy: next })
+      .eq('id', activeProject.id)
+    setPolicySaving(false)
+    if (error) {
+      setAiPolicy(prev)
+      push({ kind: 'danger', title: 'Policy update failed', body: error.message })
+      return
+    }
+    refetch()
+    push({ kind: 'success', title: 'AI usage policy updated' })
+  }
+
+  function togglePolicy(key: keyof AiPolicy, value: boolean) {
+    void saveAiPolicy({ ...aiPolicy, [key]: value })
+  }
+
   const usageSummary = useMemo(() => summarizeUsage(usageRows), [usageRows])
 
   if (!activeProject) return null
@@ -162,8 +203,10 @@ export default function ClientKeys() {
     {
       icon: ImagePlus,
       title: 'Image generation',
-      ready: activeProviders.has('openrouter') || activeProviders.has('openai') || activeProviders.has('fal'),
-      body: activeProviders.has('openrouter')
+      ready: aiPolicy.images_enabled && (activeProviders.has('openrouter') || activeProviders.has('openai') || activeProviders.has('fal')),
+      body: !aiPolicy.images_enabled
+        ? 'Locked by policy. Vera will not generate images for this client space.'
+        : activeProviders.has('openrouter')
         ? 'Nano Banana and supported image models can run through this client OpenRouter key.'
         : activeProviders.has('openai')
           ? 'Premium OpenAI image generation is available for this client.'
@@ -174,9 +217,11 @@ export default function ClientKeys() {
     {
       icon: Clapperboard,
       title: 'Video rendering',
-      ready: activeProviders.has('fal') || activeProviders.has('fal_ai'),
-      body: activeProviders.has('fal') || activeProviders.has('fal_ai')
-        ? 'Client-owned FAL is active. Video rendering can run from this client budget.'
+      ready: aiPolicy.standard_video_enabled && (activeProviders.has('fal') || activeProviders.has('fal_ai')),
+      body: !aiPolicy.standard_video_enabled
+        ? 'Locked by policy. Vera will use storyboards and briefs instead of real video renders.'
+        : activeProviders.has('fal') || activeProviders.has('fal_ai')
+          ? 'Client-owned FAL is active. Video rendering can run from this client budget.'
         : 'Locked. Real video rendering requires a client-owned FAL key. Vera will use storyboards and briefs instead.',
     },
   ]
@@ -198,6 +243,42 @@ export default function ClientKeys() {
           {clientCapabilities.map(item => (
             <CapabilityCard key={item.title} {...item} />
           ))}
+        </div>
+      </section>
+
+      <section style={{ marginBottom: space[8] }}>
+        <SectionLabel style={{ marginBottom: space[3] }} action={policySaving ? 'Saving...' : 'Auto-save'}>AI usage policy</SectionLabel>
+        <div style={card}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: space[3] }}>
+            <PolicyToggle
+              icon={ImagePlus}
+              title="Image generation"
+              body="Allow standard image generation through client-owned OpenRouter, FAL, or OpenAI keys."
+              checked={aiPolicy.images_enabled}
+              disabled={policySaving}
+              onChange={value => togglePolicy('images_enabled', value)}
+            />
+            <PolicyToggle
+              icon={Clapperboard}
+              title="Standard video"
+              body="Allow real video renders only when this client also has its own active FAL key."
+              checked={aiPolicy.standard_video_enabled}
+              disabled={policySaving}
+              onChange={value => togglePolicy('standard_video_enabled', value)}
+            />
+            <PolicyToggle
+              icon={Crown}
+              title="Premium media"
+              body="Allow premium image and video models only for client budgets that explicitly cover them."
+              checked={aiPolicy.premium_media_enabled}
+              disabled={policySaving}
+              onChange={value => togglePolicy('premium_media_enabled', value)}
+              danger
+            />
+          </div>
+          <p style={{ fontSize: t.size.micro, color: color.faint, margin: `${space[3]} 0 0`, lineHeight: 1.5 }}>
+            Text generation stays available through the selected text provider. Video still requires a client-owned FAL key even when enabled here.
+          </p>
         </div>
       </section>
 
@@ -312,6 +393,52 @@ export default function ClientKeys() {
         )}
       </section>
     </div>
+  )
+}
+
+function PolicyToggle({
+  icon: Icon,
+  title,
+  body,
+  checked,
+  disabled,
+  danger,
+  onChange,
+}: {
+  icon: LucideIcon
+  title: string
+  body: string
+  checked: boolean
+  disabled?: boolean
+  danger?: boolean
+  onChange: (value: boolean) => void
+}) {
+  const accent = danger ? color.danger : checked ? color.success : color.ghost
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: space[3], background: checked ? 'var(--success-tint)' : color.paper2, border: `1px solid ${checked ? 'var(--success-line)' : color.line}`, borderRadius: radius.md, padding: space[4], minHeight: 154, cursor: disabled ? 'wait' : 'pointer' }}>
+      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3] }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>
+          <Icon size={16} style={{ color: accent }} />
+          {title}
+        </span>
+        <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', width: 38, height: 22, borderRadius: radius.pill, background: checked ? color.success : color.line2, transition: 'background 120ms ease' }}>
+          <span style={{ width: 18, height: 18, borderRadius: radius.pill, background: '#fff', transform: checked ? 'translateX(18px)' : 'translateX(2px)', transition: 'transform 120ms ease', boxShadow: '0 1px 3px rgba(0,0,0,0.18)' }} />
+        </span>
+      </span>
+      <span style={{ color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>{body}</span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: checked ? color.success : color.ghost, fontSize: t.size.micro, fontWeight: t.weight.semibold, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        {checked ? <ShieldCheck size={12} /> : <Lock size={12} />}
+        {checked ? 'Enabled' : 'Locked'}
+      </span>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={event => onChange(event.currentTarget.checked)}
+        style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+        aria-label={title}
+      />
+    </label>
   )
 }
 
@@ -433,6 +560,16 @@ function summarizeUsage(rows: GenerationUsageRow[]) {
 
 function safeMetadata(value: UsageMetadata | null): UsageMetadata {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function parseAiPolicy(value: unknown): AiPolicy {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return DEFAULT_AI_POLICY
+  const raw = value as Record<string, unknown>
+  return {
+    images_enabled: typeof raw.images_enabled === 'boolean' ? raw.images_enabled : DEFAULT_AI_POLICY.images_enabled,
+    standard_video_enabled: typeof raw.standard_video_enabled === 'boolean' ? raw.standard_video_enabled : DEFAULT_AI_POLICY.standard_video_enabled,
+    premium_media_enabled: typeof raw.premium_media_enabled === 'boolean' ? raw.premium_media_enabled : DEFAULT_AI_POLICY.premium_media_enabled,
+  }
 }
 
 function numberFromMetadata(value: unknown, fallback: number) {

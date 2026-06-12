@@ -2111,6 +2111,7 @@ export type Database = {
       }
       projects: {
         Row: {
+          ai_policy: Json
           created_at: string
           description: string | null
           id: string
@@ -2124,6 +2125,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          ai_policy?: Json
           created_at?: string
           description?: string | null
           id?: string
@@ -2137,6 +2139,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          ai_policy?: Json
           created_at?: string
           description?: string | null
           id?: string

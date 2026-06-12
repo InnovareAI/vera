@@ -76,7 +76,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setLoading(true)
     supabase
       .from('projects')
-      .select('id, org_id, name, slug, description, instructions, is_starred, is_archived, is_default, created_at, updated_at')
+      .select('id, org_id, name, slug, description, instructions, ai_policy, is_starred, is_archived, is_default, created_at, updated_at')
       .eq('org_id', activeOrg.id)
       .eq('is_archived', false)
       .order('is_starred', { ascending: false })

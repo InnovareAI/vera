@@ -31,6 +31,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
+import { DEFAULT_AI_POLICY, loadProjectAiPolicy } from '../_shared/ai-policy.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 
 const corsHeaders = {
@@ -3989,7 +3990,15 @@ Deno.serve(async (req) => {
       clientHasFalKey = false
     }
   }
-  const allowVideoGeneration = clientHasFalKey
+  let aiPolicy = DEFAULT_AI_POLICY
+  if (projectId) {
+    try {
+      aiPolicy = await loadProjectAiPolicy(supabase, projectId)
+    } catch {
+      aiPolicy = DEFAULT_AI_POLICY
+    }
+  }
+  const allowVideoGeneration = clientHasFalKey && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled)
   const enabledTools = allowVideoGeneration
     ? TOOLS
     : TOOLS.filter(tool => tool.name !== 'generate_video')
@@ -3998,7 +4007,9 @@ Deno.serve(async (req) => {
       type: 'text' as const,
       text: [
         '<media_capabilities>',
-        'Real video generation is unavailable in this client space because no client-owned FAL key is configured.',
+        clientHasFalKey
+          ? 'Real video generation is unavailable in this client space because the client AI usage policy disables video generation.'
+          : 'Real video generation is unavailable in this client space because no client-owned FAL key is configured.',
         'Do not offer, promise, or call generate_video. If the operator asks for video, create a written production brief with generate_video_brief instead.',
         '</media_capabilities>',
       ].join('\n'),

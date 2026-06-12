@@ -14,6 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember, requireSignedInOrService } from "../_shared/auth.ts"
+import { loadProjectAiPolicy } from "../_shared/ai-policy.ts"
 import { loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
 
@@ -133,6 +134,13 @@ Deno.serve(async (req) => {
   const resolved = resolveVideoModel(model, !!image_url)
   if (!resolved.ok) return resolved.response
   const { alias, model: selectedModel, slug } = resolved
+  const aiPolicy = await loadProjectAiPolicy(supabase, projectId)
+  if (selectedModel.tier === 'standard' && !aiPolicy.standardVideoEnabled) {
+    return jsonError('Video generation is disabled for this client space. Enable standard video in the client AI usage policy first.', 403)
+  }
+  if (selectedModel.tier === 'premium' && !aiPolicy.premiumMediaEnabled) {
+    return jsonError(`Premium video model "${alias}" is disabled for this client space. Enable premium media only when this client budget explicitly covers it.`, 402)
+  }
   if (selectedModel.kind === 'image' && !image_url) {
     return jsonError(`${alias} is an image-to-video model and requires image_url.`, 400)
   }

@@ -105,6 +105,7 @@ export interface Project {
   slug: string
   description: string | null
   instructions: string | null
+  ai_policy?: Record<string, unknown> | null
   is_starred: boolean
   is_archived: boolean
   is_default: boolean

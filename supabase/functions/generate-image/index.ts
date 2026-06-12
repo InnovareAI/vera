@@ -14,6 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember } from "../_shared/auth.ts"
+import { loadProjectAiPolicy } from "../_shared/ai-policy.ts"
 import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
 
@@ -106,6 +107,11 @@ Deno.serve(async (req) => {
 
   const access = await requireProjectMember(req, supabase, SERVICE_KEY, projectId, corsHeaders)
   if (!access.ok) return access.response
+  const aiPolicy = await loadProjectAiPolicy(supabase, projectId)
+  if (!aiPolicy.imagesEnabled) return jsonError('Image generation is disabled for this client space.', 403)
+  if (isPremiumImageModel(model) && !aiPolicy.premiumMediaEnabled) {
+    return jsonError('Premium image models are disabled for this client space. Use nano-banana, Seedream, Qwen, or another standard model.', 402)
+  }
   const mediaKeys = await resolveMediaKeys(supabase, projectId, access.orgId)
   if (!mediaKeys.ok) return mediaKeys.response
 
@@ -405,6 +411,26 @@ async function runOpenRouter(
 }
 
 function delay(ms: number) { return new Promise(r => setTimeout(r, ms)) }
+
+const PREMIUM_IMAGE_ALIASES = new Set([
+  'gpt-image',
+  'gpt-image-2',
+  'gpt-image-2-fal',
+  'imagen',
+  'imagen-4',
+  'ideogram',
+  'ideogram-3',
+  'recraft',
+  'recraft-v3',
+])
+
+function isPremiumImageModel(value: unknown): boolean {
+  if (typeof value !== 'string') return false
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) return false
+  if (PREMIUM_IMAGE_ALIASES.has(normalized)) return true
+  return normalized.includes('gpt-image-2') || normalized.includes('/gpt-image-2')
+}
 
 type MediaKeys = {
   isPlatformMediaProject: boolean
