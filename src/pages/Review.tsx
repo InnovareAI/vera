@@ -5,8 +5,12 @@ import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
 import type { Post, Campaign } from '../lib/supabase'
+import type { BusinessContext } from '../lib/businessContext'
+import { parseProjectInstructions } from '../lib/businessContext'
+import { approvalRouteForPost } from '../lib/approvalRouting'
 import { PlatformChip, StatusChip } from '../components/Chip'
 import { PlatformPostPreview } from '../components/PlatformPostPreview'
+import { ApprovalRouteChip, ApprovalRouteSection } from '../components/ApprovalRoute'
 
 const APPROVAL_WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approval-webhook`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -216,6 +220,10 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
   const preferenceScope = activeProject?.id ?? activeOrg?.id ?? 'global'
   const reviewViewPreferenceKey = `vera-review-view:${preferenceScope}`
   const reviewTabPreferenceKey = `vera-review-tab:${preferenceScope}`
+  const businessContext = useMemo(
+    () => parseProjectInstructions(activeProject?.instructions).businessContext,
+    [activeProject?.instructions],
+  )
 
   useEffect(() => {
     if (initialView) {
@@ -544,6 +552,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
           onToggleSelected={toggleSelected}
           activeFilterCount={activeFilterCount}
           onResetFilters={resetFilters}
+          businessContext={businessContext}
         />
       )}
       {view === 'calendar' && (
@@ -568,6 +577,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
           calendarPath={calendarPath}
           selectedIds={selectedIds}
           onToggleSelected={toggleSelected}
+          businessContext={businessContext}
         />
       )}
     </div>
@@ -841,7 +851,7 @@ function BulkButton({
 
 // ─── List view (existing UX, refactored) ─────────────────────────────────
 function ListView({
-  loading, activeTab, setActiveTab, tabCounts, filtered, selected, setSelected, saving, moveToTab, onRequestChanges, campaignsById, postReviewPath, calendarPath, selectedIds, onToggleSelected, activeFilterCount, onResetFilters,
+  loading, activeTab, setActiveTab, tabCounts, filtered, selected, setSelected, saving, moveToTab, onRequestChanges, campaignsById, postReviewPath, calendarPath, selectedIds, onToggleSelected, activeFilterCount, onResetFilters, businessContext,
 }: {
   posts: Post[]
   loading: boolean
@@ -861,6 +871,7 @@ function ListView({
   onToggleSelected: (postId: string) => void
   activeFilterCount: number
   onResetFilters: () => void
+  businessContext: BusinessContext
 }) {
   return (
     <div className="flex flex-1 gap-6 min-h-0">
@@ -905,6 +916,7 @@ function ListView({
             const campaign = post.campaign_id ? campaignsById.get(post.campaign_id) : null
             const currentTab = tabFor(post)
             const isSelected = selectedIds.has(post.id)
+            const approvalRoute = approvalRouteForPost(post, businessContext)
             return (
               <div
                 key={post.id}
@@ -952,6 +964,7 @@ function ListView({
                       <span>{postMeta(post, campaign ?? null)}</span>
                       <span>Media: {mediaKindLabel(mediaKind(post))}</span>
                       <span>Owner: {postOwner(post)}</span>
+                      <ApprovalRouteChip route={approvalRoute} />
                       {currentTab === 'Posted' && post.posted_url && (
                         <a
                           href={post.posted_url}
@@ -1001,7 +1014,7 @@ function ListView({
       {/* Detail side panel */}
       <div className="w-96 flex-shrink-0">
         {selected ? (
-          <PostDetailPanel post={selected} onClose={() => setSelected(null)} saving={saving} onMove={moveToTab} onRequestChanges={onRequestChanges} detailPath={postReviewPath(selected.id)} calendarPath={calendarPath} />
+          <PostDetailPanel post={selected} onClose={() => setSelected(null)} saving={saving} onMove={moveToTab} onRequestChanges={onRequestChanges} detailPath={postReviewPath(selected.id)} calendarPath={calendarPath} businessContext={businessContext} />
         ) : (
           <div className="p-8 flex flex-col items-center justify-center text-center h-64"
             style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}>
@@ -1060,7 +1073,7 @@ function PostMediaThumb({ post, className = '' }: { post: Post; className?: stri
 
 // ─── Board view (lifecycle columns with HTML5 drag/drop) ───────────
 function BoardView({
-  posts, loading, tabCounts, dragOverTab, setDragOverTab, onMove, onRequestChanges, onOpen, campaignsById, postReviewPath, calendarPath, selectedIds, onToggleSelected,
+  posts, loading, tabCounts, dragOverTab, setDragOverTab, onMove, onRequestChanges, onOpen, campaignsById, postReviewPath, calendarPath, selectedIds, onToggleSelected, businessContext,
 }: {
   posts: Post[]
   loading: boolean
@@ -1075,6 +1088,7 @@ function BoardView({
   calendarPath: string
   selectedIds: Set<string>
   onToggleSelected: (postId: string) => void
+  businessContext: BusinessContext
 }) {
   if (loading) {
     return <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--ghost)' }}>Loading posts…</div>
@@ -1154,6 +1168,7 @@ function BoardView({
                     selected={selectedIds.has(post.id)}
                     onToggleSelected={() => onToggleSelected(post.id)}
                     draggable={!isPosted(post)}
+                    businessContext={businessContext}
                   />
                 ))}
               </div>
@@ -1176,6 +1191,7 @@ function BoardCard({
   selected,
   onToggleSelected,
   draggable,
+  businessContext,
 }: {
   post: Post
   campaign: Campaign | null
@@ -1187,9 +1203,11 @@ function BoardCard({
   selected: boolean
   onToggleSelected: () => void
   draggable: boolean
+  businessContext: BusinessContext
 }) {
   const [isDragging, setIsDragging] = useState(false)
   const currentTab = tabFor(post)
+  const approvalRoute = approvalRouteForPost(post, businessContext)
   return (
     <div
       draggable={draggable}
@@ -1250,6 +1268,9 @@ function BoardCard({
       <div className="mt-2 flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--ghost)' }}>
         {currentTab === 'Approved' && !targetDate(post) && <AlertTriangle size={12} style={{ color: 'var(--danger)' }} />}
         <span className="line-clamp-2">{postMeta(post, campaign)}</span>
+      </div>
+      <div className="mt-2">
+        <ApprovalRouteChip route={approvalRoute} compact />
       </div>
       {currentTab === 'Changes Requested' && post.feedback && (
         <p
@@ -1457,7 +1478,7 @@ function IconActionLink({
 
 // ─── Detail side panel (kept from list view; mostly unchanged for now) ────
 function PostDetailPanel({
-  post, onClose, saving, onMove, onRequestChanges, detailPath, calendarPath,
+  post, onClose, saving, onMove, onRequestChanges, detailPath, calendarPath, businessContext,
 }: {
   post: Post
   onClose: () => void
@@ -1466,6 +1487,7 @@ function PostDetailPanel({
   onRequestChanges: (postId: string) => void | Promise<void>
   detailPath: string
   calendarPath: string
+  businessContext: BusinessContext
 }) {
   const currentTab = tabFor(post)
   const isDateScheduled = !!(post.scheduled_at || post.publish_date)
@@ -1473,6 +1495,7 @@ function PostDetailPanel({
   const canReject = !['Rejected', 'Posted'].includes(currentTab)
   const canRequestChanges = ['Pending Review', 'Approved'].includes(currentTab)
   const canReturnToReview = currentTab === 'Draft' || currentTab === 'Changes Requested'
+  const approvalRoute = approvalRouteForPost(post, businessContext)
   return (
     <div className="sticky top-0 p-5"
       style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}>
@@ -1492,6 +1515,7 @@ function PostDetailPanel({
       {post.model_used && (
         <p className="text-[10px] uppercase tracking-wider font-mono mb-4" style={{ color: 'var(--mist)' }}>Generated by {post.model_used}</p>
       )}
+      <ApprovalRouteSection route={approvalRoute} dense />
       {isPosted(post) && (
         <div className="mb-4 p-3 text-[12px]"
           style={{ background: 'var(--fog)', border: '1px solid var(--oxblood-rule)', borderRadius: '3px' }}>

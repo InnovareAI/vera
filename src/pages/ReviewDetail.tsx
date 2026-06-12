@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { Copy, Check, ExternalLink, ArrowLeft, Sparkles, Loader2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
+import { parseProjectInstructions } from '../lib/businessContext'
+import { approvalRouteForPost } from '../lib/approvalRouting'
 import { PublishToConnectedBlog } from '../components/PublishToConnectedBlog'
 import { PlatformPostPreview } from '../components/PlatformPostPreview'
+import { ApprovalRouteSection } from '../components/ApprovalRoute'
 import { useProject } from '../lib/projectContext'
 
 const APPROVAL_WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approval-webhook`
@@ -89,6 +92,10 @@ export default function ReviewDetail() {
   const [refining, setRefining] = useState(false)
   const [refineStatus, setRefineStatus] = useState('')
   const reviewQueuePath = activeProject?.slug ? `/p/${activeProject.slug}/review` : '/review'
+  const businessContext = useMemo(
+    () => parseProjectInstructions(activeProject?.instructions).businessContext,
+    [activeProject?.instructions],
+  )
 
   useEffect(() => {
     if (!id) {
@@ -362,6 +369,7 @@ export default function ReviewDetail() {
   const composerInfo = composerForChannel(post.channel, post.copy)
   const composerUrl = composerInfo.url
   const compliance = Array.isArray(post.compliance_checks) ? (post.compliance_checks as Array<{ pass?: boolean; label?: string }>) : []
+  const approvalRoute = approvalRouteForPost(post, businessContext)
   const statusBadge = isPosted
     ? { text: 'Posted', cls: 'bg-violet-50 text-gray-900 border-violet-200' }
     : isScheduled
@@ -402,6 +410,10 @@ export default function ReviewDetail() {
       </div>
 
       <PlatformPostPreview post={post} density="standard" autoplayMedia={false} />
+
+      <div className="bg-white rounded-xl border border-gray-200 px-4 mt-4">
+        <ApprovalRouteSection route={approvalRoute} />
+      </div>
 
       {/* Refine with VERA — feedback → in-place revision of copy/image/video */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 mt-4">
