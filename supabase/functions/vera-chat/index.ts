@@ -1181,7 +1181,7 @@ const TOOLS = [
   },
   {
     name: 'generate_image',
-    description: 'Generate a single image via Gemini 3 Pro Image for cases that are NOT multi-panel infographics — hero images, social cards, posters, illustrations, brand visuals. The prompt argument must be a dense, specific image-gen prompt (see the "Image generation prompt (Gemini-tier)" skill).',
+    description: 'Generate a single image through Vera\'s cost-aware image router. Default is the cheap/fast prototype tier (Seedream where available, Nano Banana fallback), not OpenAI. OpenAI Image Gen 2 is premium-only and must never be implied by ordinary hero/social image requests. The prompt argument must be a dense, specific image-gen prompt.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1995,7 +1995,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           ? { ...input, project_id: ctx.projectId }
           : {
               prompt: input.prompt,
-              model: 'nano-banana-pro',
+              model: 'seedream-4.5',
               image_size: (input.aspect_ratio as string) ?? 'square_hd',
               quality: 'high',
               project_id: ctx.projectId,

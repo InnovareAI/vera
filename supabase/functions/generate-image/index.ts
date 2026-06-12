@@ -27,21 +27,32 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const FAL_API_KEY = Deno.env.get('FAL_API_KEY')
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
+const DEFAULT_IMAGE_MODEL = Deno.env.get('DEFAULT_IMAGE_MODEL') ?? 'seedream-4.5'
 
-// FAL-routed models. Default for everything except premium hero images.
+// FAL-routed models. Seedream 4.5 is the default cheap/fast prototype tier;
+// Nano Banana remains the safe Google fallback/standard option.
 const FAL_MODELS: Record<string, string> = {
-  // DEFAULT — Gemini 2.5 Flash Image. Wins on rendering text/typography
-  // inside images (critical for branded posters, wordmarks). ~8s, ~$0.04/MP.
+  // Gemini 2.5 Flash Image. Wins on editing consistency and remains a safe
+  // Google standard option. Around the same cost band as Seedream.
   'nano-banana':     'fal-ai/gemini-25-flash-image',
-  // Seedream V4 — ByteDance, $0.03/image. Higher photo realism + skin
-  // texture, honors portrait/landscape aspect presets. No good for embedded text.
+  // Seedream — ByteDance. Cheap, fast, strong enough for prototyping and
+  // many production marketing visuals.
   'seedream':        'fal-ai/bytedance/seedream/v4/text-to-image',
   'seedream-v4':     'fal-ai/bytedance/seedream/v4/text-to-image',
+  'seedream-4.5':    'fal-ai/bytedance/seedream/v4.5/text-to-image',
+  'seedream-v4.5':   'fal-ai/bytedance/seedream/v4.5/text-to-image',
+  'seedream-5-lite': 'fal-ai/bytedance/seedream/v5/lite/text-to-image',
+  'seedream-v5-lite':'fal-ai/bytedance/seedream/v5/lite/text-to-image',
   // FLUX 1.1 Pro — photorealistic.
   'flux-pro':        'fal-ai/flux-pro/v1.1',
   'flux-1.1-pro':    'fal-ai/flux-pro/v1.1',
-  // Qwen — cheapest at $0.02/MP.
+  // Qwen / Z-Image — cheap Chinese image models for text-heavy layouts and
+  // rapid draft exploration.
   'qwen':            'fal-ai/qwen-image',
+  'qwen-image':      'fal-ai/qwen-image',
+  'qwen-image-2':    'fal-ai/qwen-image-2/text-to-image',
+  'qwen-image-2-pro':'fal-ai/qwen-image-2/pro/text-to-image',
+  'z-image-turbo':   'fal-ai/z-image/turbo',
   // FAL-routed GPT Image 2 (escape hatch — typically more expensive than the OR route below)
   'gpt-image-2-fal': 'fal-ai/gpt-image-2',
   // Ideogram 3 — best-in-class English text rendering. Built for
@@ -60,11 +71,10 @@ const FAL_MODELS: Record<string, string> = {
   'imagen':          'fal-ai/imagen4/preview',
 }
 
-// OpenAI-direct models. ~50% cheaper than FAL on GPT Image 2 and gives
-// granular quality control (low/medium/high). Needed for fashion / cosmetics
-// hero work where photorealism + brand-mark precision matter.
+// OpenAI-direct models. Premium only. Never default and never selected by
+// generic aliases like "hero", because that makes normal marketing image
+// requests too easy to route onto the expensive OpenAI image tier.
 const OPENAI_MODELS: Record<string, string> = {
-  'hero':          'gpt-image-2',
   'gpt-image-2':   'gpt-image-2',
   'gpt-image':     'gpt-image-2',  // alias
 }
@@ -76,10 +86,12 @@ const OPENAI_MODELS: Record<string, string> = {
 const OR_MODELS: Record<string, string> = {
   'nano-banana-2':     'google/gemini-3.1-flash-image-preview',
   'nano-banana-pro':   'google/gemini-3-pro-image-preview',
+  'seedream':          'bytedance-seed/seedream-4.5',
+  'seedream-4.5':      'bytedance-seed/seedream-4.5',
+  'seedream-v4.5':     'bytedance-seed/seedream-4.5',
 }
-// Nano Banana (Gemini 2.5 Flash Image) on OpenRouter — the default image tier
-// for a client running on its own OpenRouter key. Kept out of OR_MODELS so the
-// plain "nano-banana" alias still routes to FAL for platform (non-BYOK) clients.
+// Nano Banana (Gemini 2.5 Flash Image) on OpenRouter. Kept out of OR_MODELS so
+// the plain "nano-banana" alias still routes to FAL when a FAL key is present.
 const OR_NANO_BANANA = 'google/gemini-2.5-flash-image'
 
 Deno.serve(async (req) => {
@@ -87,7 +99,7 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return jsonError('Method not allowed', 405)
   const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
 
-  const { prompt, model = 'nano-banana-pro', image_size = 'square_hd', num_images = 1, quality = 'high', project_id } = await req.json().catch(() => ({}))
+  const { prompt, model = DEFAULT_IMAGE_MODEL, image_size = 'square_hd', num_images = 1, quality = 'high', project_id } = await req.json().catch(() => ({}))
   if (!prompt) return jsonError('prompt is required', 400)
   const projectId = typeof project_id === 'string' ? project_id.trim() : ''
   if (!projectId) return jsonError('project_id is required for image generation', 400)
@@ -97,11 +109,18 @@ Deno.serve(async (req) => {
   const mediaKeys = await resolveMediaKeys(supabase, projectId, access.orgId)
   if (!mediaKeys.ok) return mediaKeys.response
 
-  // Route by alias: OpenAI-direct > OpenRouter > FAL. A client OpenRouter key
-  // forces OpenRouter for image generation, preserving BYOK isolation.
-  let useOpenAI = model in OPENAI_MODELS
-  let useOR = !useOpenAI && model in OR_MODELS
-  if (mediaKeys.openRouterKey) { useOpenAI = false; useOR = true }
+  // Route by alias: explicit OpenAI premium > supported OpenRouter image
+  // models > FAL. A client OpenRouter key is used only for aliases we know
+  // OpenRouter supports, so FAL-only aliases fail cleanly instead of silently
+  // changing model.
+  const platformOpenRouterAvailable = mediaKeys.isPlatformMediaProject && !!OPENROUTER_API_KEY
+  const wantsNanoBanana = model === 'nano-banana'
+  const supportsOpenRouter = model in OR_MODELS || wantsNanoBanana
+  const useOpenAI = model in OPENAI_MODELS
+  const useOR = !useOpenAI && (
+    (!!mediaKeys.openRouterKey && supportsOpenRouter) ||
+    (!mediaKeys.falKey && platformOpenRouterAvailable && supportsOpenRouter)
+  )
 
   if (!mediaKeys.isPlatformMediaProject) {
     const hasClientKeyForRoute =

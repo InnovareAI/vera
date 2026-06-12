@@ -147,10 +147,10 @@ Deno.serve(async (req) => {
     return jsonError('Invalid JSON body', 400)
   }
 
-  // Default to nano-banana-pro (Gemini 3.0 Pro Image via OpenRouter) — better
-  // at complex multi-panel infographic layouts than the fast `nano-banana`
-  // model. Operators can override with model='nano-banana' for speed/cost.
-  const { title, subtitle, sections, stats, audience, style = 'editorial', model = 'nano-banana-pro' } = body
+  // Default to Seedream 4.5 for cheap, fast prototype-quality marketing
+  // assets. Operators can explicitly override to Qwen Image for text-heavy
+  // layouts or a premium model for final brand-critical output.
+  const { title, subtitle, sections, stats, audience, style = 'editorial', model = 'seedream-4.5' } = body
   const projectId = typeof body.project_id === 'string' ? body.project_id.trim() : ''
 
   if (!title) return jsonError('title is required', 400)
