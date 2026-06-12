@@ -14,7 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember, requireSignedInOrService } from "../_shared/auth.ts"
-import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { isPlatformFalEnabled, isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -248,19 +248,18 @@ async function resolveFalKey(
   orgId: string,
 ): Promise<{ ok: true; key: string; source: 'platform' | 'client' } | { ok: false; response: Response }> {
   try {
-    if (await isPlatformMediaProject(supabase, projectId, orgId)) {
+    const clientKey = await loadClientApiKey(supabase, projectId, ['fal', 'fal_ai'])
+    if (clientKey) return { ok: true, key: clientKey.key, source: 'client' }
+
+    if (isPlatformFalEnabled() && await isPlatformMediaProject(supabase, projectId, orgId)) {
       if (!FAL_API_KEY) return { ok: false, response: jsonError('FAL_API_KEY not configured on the server.', 500) }
       return { ok: true, key: FAL_API_KEY, source: 'platform' }
     }
 
-    const clientKey = await loadClientApiKey(supabase, projectId, ['fal', 'fal_ai'])
-    if (!clientKey) {
-      return {
-        ok: false,
-        response: jsonError('Video generation requires this client space to use its own FAL key.', 403),
-      }
+    return {
+      ok: false,
+      response: jsonError('Video generation requires this client space to use its own FAL key.', 403),
     }
-    return { ok: true, key: clientKey.key, source: 'client' }
   } catch (error) {
     return {
       ok: false,

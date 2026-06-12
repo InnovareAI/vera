@@ -14,7 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember } from "../_shared/auth.ts"
-import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { isPlatformFalEnabled, isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -120,7 +120,7 @@ Deno.serve(async (req) => {
       : (FAL_MODELS[model] ?? model)
   const openRouterKey = mediaKeys.openRouterKey ?? (mediaKeys.isPlatformMediaProject ? OPENROUTER_API_KEY : null)
   const openAIKey = mediaKeys.openAIKey ?? (mediaKeys.isPlatformMediaProject ? OPENAI_API_KEY : null)
-  const falKey = mediaKeys.falKey ?? (mediaKeys.isPlatformMediaProject ? FAL_API_KEY : null)
+  const falKey = mediaKeys.falKey ?? (mediaKeys.isPlatformMediaProject && isPlatformFalEnabled() ? FAL_API_KEY : null)
 
   if (useOpenAI && !openAIKey) return jsonError('No OpenAI key available for this image request.', 500)
   if (useOR && !openRouterKey) return jsonError('No OpenRouter key available for this image request.', 500)

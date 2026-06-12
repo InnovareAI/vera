@@ -3,6 +3,7 @@ import type { AdminClient } from "./auth.ts"
 const CLIENT_KEY_ENC = Deno.env.get("CLIENT_API_KEY_ENCRYPTION_KEY") ?? Deno.env.get("VAULT_ENC_KEY") ?? ""
 const PLATFORM_MEDIA_PROJECT_IDS = parseList(Deno.env.get("PLATFORM_MEDIA_PROJECT_IDS") ?? "")
 const PLATFORM_MEDIA_PROJECT_SLUGS = parseList(Deno.env.get("PLATFORM_MEDIA_PROJECT_SLUGS") ?? "innovareai-brand")
+const PLATFORM_FAL_ENABLED = Deno.env.get("PLATFORM_FAL_ENABLED") === "true"
 
 export async function decryptClientSecret(payload: string): Promise<string | null> {
   try {
@@ -80,6 +81,10 @@ export async function loadClientApiKey(
   }
 
   return { key, provider: row.provider }
+}
+
+export function isPlatformFalEnabled(): boolean {
+  return PLATFORM_FAL_ENABLED
 }
 
 function parseList(value: string): Set<string> {

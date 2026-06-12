@@ -31,7 +31,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
-import { isPlatformMediaProject } from '../_shared/client-media-keys.ts'
+import { isPlatformFalEnabled, isPlatformMediaProject } from '../_shared/client-media-keys.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -3025,7 +3025,7 @@ Deno.serve(async (req) => {
   let allowPlatformMediaProject = false
   if (project_id) {
     try {
-      allowPlatformMediaProject = await isPlatformMediaProject(supabase, project_id, org_id)
+      allowPlatformMediaProject = isPlatformFalEnabled() && await isPlatformMediaProject(supabase, project_id, org_id)
     } catch {
       allowPlatformMediaProject = false
     }
