@@ -26,6 +26,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? 'http://kong:8000'
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 const PUBLIC_BASE = Deno.env.get('PUBLIC_SUPABASE_URL') || Deno.env.get('SUPABASE_PUBLIC_URL') || 'https://supabase-content-eu.innovareai.com'
 const STORAGE_BUCKET = 'vera-images'
+const STORYBOARD_IMAGE_MODEL = Deno.env.get('STORYBOARD_IMAGE_MODEL') ?? 'nano-banana'
 
 type Frame = { image_prompt?: string; text?: string | null }
 
@@ -66,7 +67,7 @@ async function renderFrame(
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_KEY}`, 'apikey': SERVICE_KEY },
     body: JSON.stringify({
       prompt,
-      model: 'seedream-4.5',
+      model: STORYBOARD_IMAGE_MODEL,
       image_size: aspect,
       quality: 'high',
       project_id: projectId,
@@ -183,7 +184,7 @@ Deno.serve(async (req) => {
       post_id: body.post_id ?? null,
       project_id: body.project_id ?? null,
       session_id: body.session_id ?? null,
-      spec: { frames, aspect },
+      spec: { frames, aspect, model: STORYBOARD_IMAGE_MODEL },
       status: 'processing',
       attempts: 1,
     }).select('id').single()

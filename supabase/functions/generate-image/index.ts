@@ -116,9 +116,10 @@ Deno.serve(async (req) => {
   const platformOpenRouterAvailable = mediaKeys.isPlatformMediaProject && !!OPENROUTER_API_KEY
   const wantsNanoBanana = model === 'nano-banana'
   const supportsOpenRouter = model in OR_MODELS || wantsNanoBanana
+  const falPreferredForModel = wantsNanoBanana && (!!mediaKeys.falKey || platformFalAvailable)
   const useOpenAI = model in OPENAI_MODELS
   const useOR = !useOpenAI && (
-    (!!mediaKeys.openRouterKey && supportsOpenRouter) ||
+    (!!mediaKeys.openRouterKey && supportsOpenRouter && !falPreferredForModel) ||
     (!mediaKeys.falKey && !platformFalAvailable && platformOpenRouterAvailable && supportsOpenRouter)
   )
 
