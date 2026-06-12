@@ -5,6 +5,14 @@ export type SpendEstimate = {
   detail: string
 }
 
+export type ImageRouteProvider = 'openrouter' | 'openai' | 'fal'
+
+export type ImageProviderAvailability = {
+  hasOpenRouter?: boolean
+  hasOpenAI?: boolean
+  hasFal?: boolean
+}
+
 export type ModelPricingGuide = {
   provider: string
   modelKey: string
@@ -46,6 +54,37 @@ export type ModelOption = {
   label: string
 }
 
+export type ModelRecommendationInput = {
+  textReady: boolean
+  imageReady: boolean
+  videoReady: boolean
+  hasOpenRouter: boolean
+  hasAnthropic: boolean
+  hasOpenAI: boolean
+  hasFal: boolean
+  imagesEnabled: boolean
+  standardVideoEnabled: boolean
+  premiumMediaEnabled: boolean
+  defaultTextModel: string | null
+  defaultImageModel: string
+  defaultVideoModel: string
+  defaultImageVideoModel: string
+  monthlyBudgetUsd: number | null
+}
+
+export type ModelRecommendation = {
+  role: 'Text' | 'Image' | 'Video'
+  task: string
+  model: string
+  provider: string
+  status: string
+  estimate: SpendEstimate
+  reason: string
+  escalation: string
+  tone: 'success' | 'warn' | 'danger' | 'info'
+  requiresApproval: boolean
+}
+
 export const MODEL_PRICE_GUIDE_LAST_REVIEWED = '2026-06-13'
 
 export const IMAGE_MODEL_OPTIONS: ModelOption[] = [
@@ -69,6 +108,30 @@ export const IMAGE_VIDEO_MODEL_OPTIONS: ModelOption[] = [
 ]
 
 const PREMIUM_IMAGE_MODELS = new Set(['ideogram', 'recraft', 'imagen-4', 'gpt-image-2'])
+const OPENROUTER_IMAGE_MODELS = new Set(['nano-banana', 'nano-banana-2', 'nano-banana-pro'])
+const OPENAI_IMAGE_MODELS = new Set(['gpt-image', 'gpt-image-2'])
+const FAL_IMAGE_MODELS = new Set([
+  'nano-banana',
+  'seedream',
+  'seedream-v4',
+  'seedream-4.5',
+  'seedream-v4.5',
+  'seedream-5-lite',
+  'seedream-v5-lite',
+  'qwen',
+  'qwen-image',
+  'qwen-image-2',
+  'qwen-image-2-pro',
+  'z-image-turbo',
+  'flux-pro',
+  'flux-1.1-pro',
+  'ideogram',
+  'ideogram-3',
+  'recraft',
+  'recraft-v3',
+  'imagen',
+  'imagen-4',
+])
 const TEXT_ESTIMATE_INPUT_TOKENS = 4_500
 const TEXT_ESTIMATE_OUTPUT_TOKENS = 1_200
 const DEFAULT_PRICING_CATALOG: ModelPricingGuide[] = [
@@ -97,6 +160,22 @@ export function isPremiumImageModel(model: string | null | undefined) {
   return !!model && PREMIUM_IMAGE_MODELS.has(model)
 }
 
+export function imageModelProvider(model: string | null | undefined, availability: ImageProviderAvailability): ImageRouteProvider | null {
+  const alias = modelAlias(model)
+  if (!alias) return null
+  if (OPENAI_IMAGE_MODELS.has(alias) && availability.hasOpenAI) return 'openai'
+  if (FAL_IMAGE_MODELS.has(alias) && availability.hasFal) return 'fal'
+  if (OPENROUTER_IMAGE_MODELS.has(alias) && availability.hasOpenRouter) return 'openrouter'
+  return null
+}
+
+export function imageModelProviderLabel(provider: ImageRouteProvider | null | undefined) {
+  if (provider === 'openrouter') return 'Client OpenRouter'
+  if (provider === 'openai') return 'Client OpenAI'
+  if (provider === 'fal') return 'Client FAL'
+  return 'No matching key'
+}
+
 export function modelLabel(value: string | null | undefined) {
   if (!value) return ''
   const option = [
@@ -107,6 +186,17 @@ export function modelLabel(value: string | null | undefined) {
   if (option) return option.label.split(',')[0]
   const labels: Record<string, string> = {
     'nano-banana-2': 'Nano Banana 2',
+    'nano-banana-pro': 'Nano Banana Pro',
+    'gemini-flash-class': 'Gemini Flash class',
+    'google/gemini-2.5-flash': 'Gemini 2.5 Flash',
+    'google/gemini-2.5-flash-lite': 'Gemini 2.5 Flash Lite',
+    'claude-haiku-class': 'Claude Haiku class',
+    'claude-sonnet-class': 'Claude Sonnet class',
+    'qwen-image': 'Qwen Image',
+    'z-image-turbo': 'Z-Image Turbo',
+    'seedream-v4.5': 'Seedream v4.5',
+    'hailuo': 'Hailuo',
+    'hailuo-i2v': 'Hailuo I2V',
   }
   return labels[value] ?? value
 }
@@ -200,6 +290,117 @@ export function videoSpendEstimate(model: string, ready: boolean, premium: boole
   }
 }
 
+export function buildModelRecommendations(input: ModelRecommendationInput, catalog?: ModelPricingGuide[]): ModelRecommendation[] {
+  const textProvider = !input.textReady
+    ? 'missing'
+    : input.hasOpenRouter
+      ? 'openrouter'
+      : input.hasAnthropic
+        ? 'anthropic'
+        : 'platform'
+  const recommendedTextModel = input.defaultTextModel
+    || (input.hasOpenRouter ? 'google/gemini-2.5-flash' : input.hasAnthropic ? 'claude-haiku-class' : 'gemini-flash-class')
+  const defaultImagePremium = isPremiumImageModel(input.defaultImageModel)
+  const recommendedImageModel = !defaultImagePremium ? input.defaultImageModel : 'nano-banana'
+  const imageProvider = imageModelProvider(recommendedImageModel, input)
+  const textRecommendation: ModelRecommendation = !input.textReady
+    ? {
+        role: 'Text',
+        task: 'High-volume content drafts',
+        model: 'Gemini Flash class',
+        provider: 'Client key required',
+        status: 'Locked',
+        estimate: textSpendEstimate(input.defaultTextModel, 'missing', catalog),
+        reason: 'Text generation should not run on platform spend for client work.',
+        escalation: 'Add client OpenRouter first. Use Anthropic only when the client prefers that provider.',
+        tone: 'danger',
+        requiresApproval: false,
+      }
+    : {
+        role: 'Text',
+        task: 'High-volume content drafts',
+        model: modelLabel(recommendedTextModel),
+        provider: textProvider === 'openrouter' ? 'Client OpenRouter' : textProvider === 'anthropic' ? 'Client Anthropic' : 'Platform approved',
+        status: textProvider === 'platform' ? 'Operator only' : 'Recommended',
+        estimate: textSpendEstimate(recommendedTextModel, textProvider, catalog),
+        reason: textProvider === 'openrouter'
+          ? 'Gemini Flash class is the default recommendation for inexpensive drafts, rewrites, variants, summaries, and non-critical content planning.'
+          : 'Use the available client text provider and keep the model visible before generation.',
+        escalation: 'Use Sonnet-class reasoning for positioning, final copy judgment, synthesis across sources, or high-stakes strategy.',
+        tone: textProvider === 'platform' ? 'warn' : 'success',
+        requiresApproval: textProvider === 'platform',
+      }
+
+  const imageRecommendation: ModelRecommendation = !input.imagesEnabled
+    ? {
+        role: 'Image',
+        task: 'Visual prototypes',
+        model: modelLabel(recommendedImageModel),
+        provider: 'Policy locked',
+        status: 'Prompt only',
+        estimate: imageSpendEstimate(recommendedImageModel, false, false, false, catalog),
+        reason: 'Image generation is disabled for this client space.',
+        escalation: 'Keep output as prompts, storyboards, or production briefs until the client enables images.',
+        tone: 'info',
+        requiresApproval: false,
+      }
+    : !input.imageReady
+      ? {
+          role: 'Image',
+          task: 'Visual prototypes',
+          model: modelLabel(recommendedImageModel),
+          provider: imageModelProviderLabel(imageProvider),
+          status: 'Locked',
+          estimate: imageSpendEstimate(recommendedImageModel, true, false, false, catalog),
+          reason: `${modelLabel(recommendedImageModel)} needs a matching client image route. OpenAI keys only cover OpenAI image models.`,
+          escalation: 'Add client OpenRouter for Nano Banana, or client FAL for Seedream, Qwen, Ideogram, Recraft, Imagen, and other FAL-routed models.',
+          tone: 'danger',
+          requiresApproval: false,
+        }
+      : {
+          role: 'Image',
+          task: 'Visual prototypes',
+          model: modelLabel(recommendedImageModel),
+          provider: imageProvider ? imageModelProviderLabel(imageProvider) : 'Platform media',
+          status: defaultImagePremium ? 'Safer fallback' : 'Recommended',
+          estimate: imageSpendEstimate(recommendedImageModel, true, true, false, catalog),
+          reason: imageProvider
+            ? 'Nano Banana should remain the default for strong text-in-image, editing, and fast content prototypes. Seedream is the bulk alternate when FAL is available.'
+            : 'Approved platform media can support operator-only image work, but normal client work should still move to client-owned keys.',
+          escalation: 'Use OpenAI Image Gen 2, Imagen, Ideogram, or Recraft only for approved premium production needs.',
+          tone: defaultImagePremium ? 'warn' : 'success',
+          requiresApproval: false,
+        }
+
+  const videoRecommendation: ModelRecommendation = !input.videoReady
+    ? {
+        role: 'Video',
+        task: 'Storyboards before renders',
+        model: 'Storyboard only',
+        provider: input.hasFal ? 'Client FAL policy locked' : 'Client FAL required',
+        status: 'No render',
+        estimate: videoSpendEstimate(input.defaultVideoModel, false, false, catalog),
+        reason: 'Video is the cost sink. Vera should storyboard, frame, prompt, and estimate before any real clip is rendered.',
+        escalation: 'Enable standard video only with a client FAL key and a monthly cap.',
+        tone: 'warn',
+        requiresApproval: false,
+      }
+    : {
+        role: 'Video',
+        task: 'Approved prototype clip',
+        model: `${modelLabel(input.defaultVideoModel)} / ${modelLabel(input.defaultImageVideoModel)}`,
+        provider: input.hasFal ? 'Client FAL' : 'Platform approved',
+        status: input.premiumMediaEnabled ? 'Approval gated' : 'Recommended',
+        estimate: videoSpendEstimate(input.defaultVideoModel, true, input.premiumMediaEnabled, catalog),
+        reason: 'Use Hailuo-class standard video for prototypes after storyboard approval. Do not default to Kling or other premium models.',
+        escalation: 'Kling, Veo, Sora, and Seedance need explicit premium approval, budget visibility, and a clear production reason.',
+        tone: input.premiumMediaEnabled ? 'warn' : 'success',
+        requiresApproval: true,
+      }
+
+  return [textRecommendation, imageRecommendation, videoRecommendation]
+}
+
 function money(value: number) {
   if (value <= 0) return '$0'
   if (value < 0.01) return '<$0.01'
@@ -288,6 +489,10 @@ function numericValue(value: number | string | null | undefined) {
 
 function stringValue(value: string | null | undefined) {
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function modelAlias(value: string | null | undefined) {
+  return typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : ''
 }
 
 function ensureApprovalDetail(detail: string) {

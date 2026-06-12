@@ -32,12 +32,9 @@ import {
   demandChannelsFromContext,
 } from '../lib/demandModel'
 import {
-  imageSpendEstimate,
-  isPremiumImageModel,
+  buildModelRecommendations,
+  imageModelProvider,
   latestPricingReviewDate,
-  modelLabel,
-  textSpendEstimate,
-  videoSpendEstimate,
   type ModelPricingGuide,
   type SpendEstimate,
 } from '../lib/modelEconomics'
@@ -688,6 +685,10 @@ export default function VeraThread() {
       }
       const hasPlatformImageEntitlement = entitlementRows.some(row => row.capability === 'platform_fal_image' && entitlementApplies(row))
       const hasPlatformVideoEntitlement = entitlementRows.some(row => row.capability === 'platform_fal_video' && entitlementApplies(row))
+      const clientImageRoute = imageModelProvider(aiPolicy.defaultImageModel, { hasOpenRouter, hasOpenAI, hasFal })
+      const platformImageRoute = platformMediaProject && hasPlatformImageEntitlement
+        ? imageModelProvider(aiPolicy.defaultImageModel, { hasOpenRouter: true, hasOpenAI: true, hasFal: false })
+        : null
       setProviderCapabilities({
         loaded: true,
         isMaster,
@@ -701,7 +702,7 @@ export default function VeraThread() {
         hasPlatformImageEntitlement,
         hasPlatformVideoEntitlement,
         textReady: platformMediaProject || hasAnthropic || hasOpenRouter,
-        imageReady: aiPolicy.imagesEnabled && ((platformMediaProject && hasPlatformImageEntitlement) || hasOpenRouter || hasOpenAI || hasFal),
+        imageReady: aiPolicy.imagesEnabled && (!!clientImageRoute || !!platformImageRoute),
         videoReady: (hasFal && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled)) || hasPlatformVideoEntitlement,
         needsTextKey: !platformMediaProject && !hasAnthropic && !hasOpenRouter,
         defaultTextModel: aiPolicy.defaultTextModel,
@@ -1930,122 +1931,31 @@ type ModelRouteRecommendation = {
 }
 
 function modelRouteRecommendations(capabilities: ProviderCapabilities, pricingCatalog?: ModelPricingGuide[]): ModelRouteRecommendation[] {
-  const textModel = capabilities.defaultTextModel
-    ? modelLabel(capabilities.defaultTextModel)
-    : 'provider default, prefer Gemini-class low-cost routing when quality is sufficient'
-  const imageModel = modelLabel(capabilities.defaultImageModel)
-  const videoModel = modelLabel(capabilities.defaultVideoModel)
-  const imageVideoModel = modelLabel(capabilities.defaultImageVideoModel)
-  const imagePremium = isPremiumImageModel(capabilities.defaultImageModel)
-  const textProvider = !capabilities.textReady
-    ? 'missing'
-    : capabilities.hasOpenRouter
-      ? 'openrouter'
-      : capabilities.hasAnthropic
-        ? 'anthropic'
-        : 'platform'
-
-  const text = !capabilities.textReady
-    ? {
-        icon: KeyRound,
-        label: 'Text',
-        status: 'Missing client key',
-        cost: 'No spend until key is added',
-        estimate: textSpendEstimate(capabilities.defaultTextModel, 'missing', pricingCatalog),
-        body: 'Add client OpenRouter or Anthropic. Do not fall back to platform text spend for client work.',
-        tone: 'danger' as const,
-      }
-    : capabilities.hasOpenRouter
-      ? {
-          icon: KeyRound,
-          label: 'Text',
-          status: 'Client OpenRouter',
-          cost: 'Low variable token cost',
-          estimate: textSpendEstimate(capabilities.defaultTextModel, textProvider, pricingCatalog),
-          body: `Use the client OpenRouter key. Default: ${textModel}.`,
-          tone: 'success' as const,
-        }
-      : capabilities.hasAnthropic
-        ? {
-            icon: KeyRound,
-            label: 'Text',
-            status: 'Client Anthropic',
-            cost: 'Medium token cost',
-            estimate: textSpendEstimate(capabilities.defaultTextModel, textProvider, pricingCatalog),
-            body: `Use the client Anthropic key. Default: ${textModel || 'provider default'}. Add OpenRouter for higher-volume cost control.`,
-            tone: 'success' as const,
-          }
-        : {
-            icon: KeyRound,
-            label: 'Text',
-            status: 'Platform approved',
-            cost: 'Platform spend',
-            estimate: textSpendEstimate(capabilities.defaultTextModel, 'platform', pricingCatalog),
-            body: 'Platform text is only acceptable inside approved InnovareAI workspaces.',
-            tone: 'warn' as const,
-          }
-
-  const image = !capabilities.imagesEnabled
-    ? {
-        icon: ImagePlus,
-        label: 'Image',
-        status: 'Disabled by policy',
-        cost: 'No image spend',
-        estimate: imageSpendEstimate(capabilities.defaultImageModel, false, false, imagePremium, pricingCatalog),
-        body: 'Image and carousel rendering are disabled for this client space.',
-        tone: 'info' as const,
-      }
-    : !capabilities.imageReady
-      ? {
-          icon: ImagePlus,
-          label: 'Image',
-          status: 'Prompt only',
-          cost: 'No image spend',
-          estimate: imageSpendEstimate(capabilities.defaultImageModel, true, false, imagePremium, pricingCatalog),
-          body: 'Keep image work as a prompt, storyboard, or production brief until a client key or entitlement is available.',
-          tone: 'danger' as const,
-        }
-      : imagePremium
-        ? {
-            icon: ImagePlus,
-            label: 'Image',
-            status: capabilities.premiumMediaEnabled ? 'Premium selected' : 'Premium default needs review',
-            cost: 'Premium image spend',
-            estimate: imageSpendEstimate(capabilities.defaultImageModel, true, true, true, pricingCatalog),
-            body: `${imageModel} is a premium default. Use only when the client budget and production need justify it.`,
-            tone: 'warn' as const,
-          }
-        : {
-            icon: ImagePlus,
-            label: 'Image',
-            status: 'Standard prototype tier',
-            cost: 'Standard image spend',
-            estimate: imageSpendEstimate(capabilities.defaultImageModel, true, true, false, pricingCatalog),
-            body: `Default: ${imageModel}. Use Nano Banana or Seedream-style routes before premium image models.`,
-            tone: 'success' as const,
-          }
-
-  const video = !capabilities.videoReady
-    ? {
-        icon: Clapperboard,
-        label: 'Video',
-        status: 'Storyboard only',
-        cost: 'No video spend',
-        estimate: videoSpendEstimate(capabilities.defaultVideoModel, false, false, pricingCatalog),
-        body: 'Real renders require a client-owned FAL key or an approved platform video entitlement.',
-        tone: 'danger' as const,
-      }
-    : {
-        icon: Clapperboard,
-        label: 'Video',
-        status: capabilities.premiumMediaEnabled ? 'Render approved' : 'Standard render',
-        cost: capabilities.premiumMediaEnabled ? 'Premium video risk' : 'Standard video spend',
-        estimate: videoSpendEstimate(capabilities.defaultVideoModel, true, capabilities.premiumMediaEnabled, pricingCatalog),
-        body: `Storyboard first. Text-to-video: ${videoModel}. Image-to-video: ${imageVideoModel}.`,
-        tone: capabilities.premiumMediaEnabled ? 'warn' as const : 'success' as const,
-      }
-
-  return [text, image, video]
+  return buildModelRecommendations({
+    textReady: capabilities.textReady,
+    imageReady: capabilities.imageReady,
+    videoReady: capabilities.videoReady,
+    hasOpenRouter: capabilities.hasOpenRouter,
+    hasAnthropic: capabilities.hasAnthropic,
+    hasOpenAI: capabilities.hasOpenAI,
+    hasFal: capabilities.hasFal,
+    imagesEnabled: capabilities.imagesEnabled,
+    standardVideoEnabled: capabilities.standardVideoEnabled,
+    premiumMediaEnabled: capabilities.premiumMediaEnabled,
+    defaultTextModel: capabilities.defaultTextModel,
+    defaultImageModel: capabilities.defaultImageModel,
+    defaultVideoModel: capabilities.defaultVideoModel,
+    defaultImageVideoModel: capabilities.defaultImageVideoModel,
+    monthlyBudgetUsd: capabilities.monthlyBudgetUsd,
+  }, pricingCatalog).map(item => ({
+    icon: item.role === 'Text' ? KeyRound : item.role === 'Image' ? ImagePlus : Clapperboard,
+    label: item.role,
+    status: item.status,
+    cost: item.provider,
+    estimate: item.estimate,
+    body: `${item.reason} ${item.escalation}`,
+    tone: item.tone,
+  }))
 }
 
 function routeToneStyle(tone: ModelRouteRecommendation['tone']) {

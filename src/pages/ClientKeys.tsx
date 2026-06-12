@@ -12,12 +12,16 @@ import {
   IMAGE_MODEL_OPTIONS,
   IMAGE_VIDEO_MODEL_OPTIONS,
   VIDEO_MODEL_OPTIONS,
+  buildModelRecommendations,
   imageSpendEstimate,
+  imageModelProvider,
+  imageModelProviderLabel,
   isPremiumImageModel,
   latestPricingReviewDate,
   modelLabel,
   textSpendEstimate,
   videoSpendEstimate,
+  type ModelRecommendation,
   type ModelPricingGuide,
   type SpendEstimate,
 } from '../lib/modelEconomics'
@@ -262,46 +266,65 @@ export default function ClientKeys() {
   if (!activeProject) return null
   const active = keys.filter(k => k.status === 'active')
   const activeProviders = new Set(active.map(k => k.provider))
+  const hasOpenRouter = activeProviders.has('openrouter')
+  const hasAnthropic = activeProviders.has('anthropic')
+  const hasOpenAI = activeProviders.has('openai')
+  const hasFal = activeProviders.has('fal') || activeProviders.has('fal_ai')
+  const defaultImageRoute = imageModelProvider(aiPolicy.default_image_model, { hasOpenRouter, hasOpenAI, hasFal })
+  const defaultImageReady = aiPolicy.images_enabled && !!defaultImageRoute
+  const modelRecommendations = buildModelRecommendations({
+    textReady: hasOpenRouter || hasAnthropic,
+    imageReady: defaultImageReady,
+    videoReady: aiPolicy.standard_video_enabled && hasFal,
+    hasOpenRouter,
+    hasAnthropic,
+    hasOpenAI,
+    hasFal,
+    imagesEnabled: aiPolicy.images_enabled,
+    standardVideoEnabled: aiPolicy.standard_video_enabled,
+    premiumMediaEnabled: aiPolicy.premium_media_enabled,
+    defaultTextModel: aiPolicy.default_text_model,
+    defaultImageModel: aiPolicy.default_image_model,
+    defaultVideoModel: aiPolicy.default_video_model,
+    defaultImageVideoModel: aiPolicy.default_image_video_model,
+    monthlyBudgetUsd: aiPolicy.monthly_budget_usd,
+  }, pricingCatalog)
   const clientCapabilities = [
     {
       icon: Bot,
       title: 'Text engine',
-      ready: activeProviders.has('openrouter') || activeProviders.has('anthropic'),
-      body: activeProviders.has('openrouter')
+      ready: hasOpenRouter || hasAnthropic,
+      body: hasOpenRouter
         ? 'OpenRouter is active for chat, content generation, and model testing.'
-        : activeProviders.has('anthropic')
+        : hasAnthropic
           ? 'Anthropic is active for chat and content generation.'
           : 'Add OpenRouter or Anthropic before relying on client-owned text generation.',
     },
     {
       icon: ImagePlus,
       title: 'Image generation',
-      ready: aiPolicy.images_enabled && (activeProviders.has('openrouter') || activeProviders.has('openai') || activeProviders.has('fal')),
+      ready: defaultImageReady,
       body: !aiPolicy.images_enabled
         ? 'Locked by policy. Vera will not generate images for this client space.'
-        : activeProviders.has('openrouter')
-        ? 'Nano Banana and supported image models can run through this client OpenRouter key.'
-        : activeProviders.has('openai')
-          ? 'Premium OpenAI image generation is available for this client.'
-          : activeProviders.has('fal')
-            ? 'FAL image models are available for this client.'
-            : 'Add OpenRouter for the normal image path, or FAL/OpenAI for provider-specific image models.',
+        : defaultImageRoute
+          ? `${modelLabel(aiPolicy.default_image_model)} can run through ${imageModelProviderLabel(defaultImageRoute).replace('Client ', 'the client ')} key.`
+          : `${modelLabel(aiPolicy.default_image_model)} does not match the active image keys. Add OpenRouter for Nano Banana, FAL for Seedream/Qwen/FAL routes, or OpenAI for OpenAI Image Gen 2.`,
     },
     {
       icon: BookOpen,
       title: 'Searchable knowledge',
-      ready: activeProviders.has('openai'),
-      body: activeProviders.has('openai')
+      ready: hasOpenAI,
+      body: hasOpenAI
         ? 'OpenAI embeddings are active. Uploaded and pasted knowledge can become searchable for this client.'
         : 'Add a client OpenAI key before ingesting searchable knowledge sources.',
     },
     {
       icon: Clapperboard,
       title: 'Video rendering',
-      ready: aiPolicy.standard_video_enabled && (activeProviders.has('fal') || activeProviders.has('fal_ai')),
+      ready: aiPolicy.standard_video_enabled && hasFal,
       body: !aiPolicy.standard_video_enabled
         ? 'Locked by policy. Vera will use storyboards and briefs instead of real video renders.'
-        : activeProviders.has('fal') || activeProviders.has('fal_ai')
+        : hasFal
           ? 'Client-owned FAL is active. Video rendering can run from this client budget.'
         : 'Locked. Real video rendering requires a client-owned FAL key. Vera will use storyboards and briefs instead.',
     },
@@ -355,6 +378,14 @@ export default function ClientKeys() {
             {routingRows.map(row => (
               <RouteRow key={row.label} {...row} />
             ))}
+          </div>
+          <div style={{ marginTop: space[5], borderTop: `1px solid ${color.line}`, paddingTop: space[4] }}>
+            <SectionLabel style={{ marginBottom: space[3] }}>Recommended model route</SectionLabel>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: space[3] }}>
+              {modelRecommendations.map(item => (
+                <RecommendationCard key={item.role} item={item} />
+              ))}
+            </div>
           </div>
           <p style={{ fontSize: t.size.micro, color: color.faint, margin: `${space[4]} 0 0`, lineHeight: 1.5 }}>
             Vera should default to cheap and fast prototype paths. Premium media stays locked unless this client has a cap and an explicit policy toggle.{' '}
@@ -598,6 +629,40 @@ type RoutingRow = {
   tone: 'success' | 'warn' | 'danger' | 'info'
 }
 
+function RecommendationCard({ item }: { item: ModelRecommendation }) {
+  const Icon = item.role === 'Text' ? Bot : item.role === 'Image' ? ImagePlus : Clapperboard
+  const toneColor = item.tone === 'success' ? color.success : item.tone === 'warn' ? color.warn : item.tone === 'danger' ? color.danger : color.info
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: space[3], padding: space[4], borderRadius: radius.md, border: `1px solid ${toneColor}`, background: color.paper2, minHeight: 190 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: space[3] }}>
+        <span style={{ width: 32, height: 32, borderRadius: radius.pill, background: color.surface, color: toneColor, border: `1px solid ${color.line}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Icon size={15} />
+        </span>
+        <span style={{ minWidth: 0 }}>
+          <span style={{ display: 'block', color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>{item.role}</span>
+          <span style={{ display: 'block', color: color.ghost, fontSize: t.size.micro, lineHeight: 1.4 }}>{item.task}</span>
+        </span>
+        <span style={{ marginLeft: 'auto', color: toneColor, fontSize: t.size.micro, fontWeight: t.weight.semibold, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
+          {item.status}
+        </span>
+      </div>
+      <div>
+        <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>{item.model}</div>
+        <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: 2 }}>{item.provider}</div>
+      </div>
+      <div style={{ color: color.faint, fontSize: t.size.micro, lineHeight: 1.4 }}>
+        {item.estimate.label}. {item.estimate.detail}
+      </div>
+      <div style={{ color: color.ink2, fontSize: t.size.micro, lineHeight: 1.45 }}>
+        {item.reason}
+      </div>
+      <div style={{ marginTop: 'auto', color: color.ghost, fontSize: t.size.micro, lineHeight: 1.45 }}>
+        {item.escalation}
+      </div>
+    </div>
+  )
+}
+
 function GuardMetric({ icon: Icon, label, value, detail, tone }: SpendGuardMetric) {
   const toneColor = tone === 'success' ? color.success : tone === 'warn' ? color.warn : tone === 'danger' ? color.danger : color.info
   return (
@@ -644,9 +709,13 @@ function buildSpendGuard(aiPolicy: AiPolicy, activeProviders: Set<string>, usage
   const remaining = budget ? Math.max(0, budget - used) : null
   const budgetPct = budget ? Math.min(100, Math.round((used / budget) * 100)) : null
   const premiumDefault = isPremiumImageModel(aiPolicy.default_image_model)
-  const hasClientText = activeProviders.has('openrouter') || activeProviders.has('anthropic')
-  const hasClientMedia = activeProviders.has('openrouter') || activeProviders.has('openai') || activeProviders.has('fal') || activeProviders.has('fal_ai')
-  const hasClientVideo = activeProviders.has('fal') || activeProviders.has('fal_ai')
+  const hasOpenRouter = activeProviders.has('openrouter')
+  const hasAnthropic = activeProviders.has('anthropic')
+  const hasOpenAI = activeProviders.has('openai')
+  const hasFal = activeProviders.has('fal') || activeProviders.has('fal_ai')
+  const hasClientText = hasOpenRouter || hasAnthropic
+  const hasClientMedia = !!imageModelProvider(aiPolicy.default_image_model, { hasOpenRouter, hasOpenAI, hasFal })
+  const hasClientVideo = hasFal
   const alerts = [
     !hasClientText ? 'text key missing' : '',
     aiPolicy.images_enabled && !hasClientMedia ? 'image route locked' : '',
@@ -706,7 +775,8 @@ function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>, pric
   const hasFal = activeProviders.has('fal') || activeProviders.has('fal_ai')
   const imageIsPremium = isPremiumImageModel(aiPolicy.default_image_model)
   const hasClientText = hasOpenRouter || hasAnthropic
-  const hasClientMedia = hasOpenRouter || hasOpenAI || hasFal
+  const imageRoute = imageModelProvider(aiPolicy.default_image_model, { hasOpenRouter, hasOpenAI, hasFal })
+  const hasClientMedia = !!imageRoute
   const hasClientVideo = hasFal
   return [
     {
@@ -728,13 +798,9 @@ function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>, pric
       estimate: imageSpendEstimate(aiPolicy.default_image_model, aiPolicy.images_enabled, hasClientMedia, imageIsPremium, pricingCatalog),
       detail: !aiPolicy.images_enabled
         ? 'Disabled by policy. Vera should provide prompts or briefs only.'
-        : hasOpenRouter
-          ? `${modelLabel(aiPolicy.default_image_model)} can use the client OpenRouter route when supported.`
-          : hasOpenAI
-            ? `${modelLabel(aiPolicy.default_image_model)} can use the client OpenAI route for premium image work.`
-            : hasFal
-              ? `${modelLabel(aiPolicy.default_image_model)} can use the client FAL route.`
-              : 'Add OpenRouter for the normal path, or OpenAI/FAL for provider-specific media.',
+        : imageRoute
+          ? `${modelLabel(aiPolicy.default_image_model)} can use ${imageModelProviderLabel(imageRoute).replace('Client ', 'the client ')} route.`
+          : `${modelLabel(aiPolicy.default_image_model)} does not match the active image keys. Add OpenRouter, FAL, or OpenAI for the selected model.`,
       tone: !aiPolicy.images_enabled ? 'info' : hasClientMedia ? (imageIsPremium ? 'warn' : 'success') : 'danger',
     },
     {

@@ -210,7 +210,11 @@ Current state:
 - The provider pricing catalog is applied on the live Vera content stack at `supabase-content-eu.innovareai.com` and currently exposes 13 active read-only pricing rows through the anon REST API.
 - Edge Function usage logging and client budget checks now try the provider pricing catalog first, then fall back to static estimates if the catalog is unavailable or no model row matches.
 - AI Usage settings now includes an operator-only pricing catalog editor for platform admins, backed by a service-role Edge Function gated through `is_platform_admin`.
+- A shared recommendation layer now chooses task-aware text, image, and video routes from provider readiness, selected defaults, premium policy, monthly cap state, and pricing catalog estimates.
+- Client API-key settings now show the recommended text, image, and video route with model, provider, estimate, reason, and escalation rule.
+- Command model routing now reuses the same recommendation rules, so chat guidance and API-key settings do not drift.
+- Image readiness now checks whether the selected default image model can actually run through the active client key type. For example, an OpenAI key does not make Nano Banana ready.
 
 Next step:
 
-- Add recommended model selection rules on top of the catalog so Vera can choose the cheapest model that is good enough for each task, format, and approval risk.
+- Move the recommendation decision into paid generation requests so Vera can resolve the cheapest good-enough model server-side before images or videos are submitted.
