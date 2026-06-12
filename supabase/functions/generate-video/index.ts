@@ -14,6 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember, requireSignedInOrService } from "../_shared/auth.ts"
+import { hasAiUserEntitlement, userCanAccessProject } from "../_shared/ai-entitlements.ts"
 import { checkProjectAiBudget, loadProjectAiPolicy } from "../_shared/ai-policy.ts"
 import { loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
@@ -26,6 +27,7 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const FAL_API_KEY = Deno.env.get('FAL_API_KEY') ?? Deno.env.get('FAL_KEY') ?? ''
 
 type VideoTier = 'standard' | 'premium'
 type VideoKind = 'text' | 'image'
@@ -82,6 +84,7 @@ Deno.serve(async (req) => {
     request_id,             // for action: 'status'
     slug: slugIn,           // legacy status hint; DB slug wins
     premium_approved,
+    operator_user_id,
   } = await req.json().catch(() => ({}))
 
   const json = (obj: unknown, status = 200) =>
@@ -95,21 +98,44 @@ Deno.serve(async (req) => {
     if (!auth.ok) return auth.response
     const { data: job, error: jobError } = await supabase
       .from('video_jobs')
-      .select('project_id, slug')
+      .select('project_id, slug, key_source, operator_user_id')
       .eq('request_id', String(request_id))
       .maybeSingle()
     if (jobError) return jsonError(jobError.message, 500)
-    const jobProjectId = (job as { project_id?: string | null } | null)?.project_id
+    const jobRow = job as { project_id?: string | null; slug?: string | null; key_source?: string | null; operator_user_id?: string | null } | null
+    const jobProjectId = jobRow?.project_id
     if (!jobProjectId) return jsonError('Video job not found for this client space.', 404)
 
     const access = await requireProjectMember(req, supabase, SERVICE_KEY, jobProjectId, corsHeaders)
     if (!access.ok) return access.response
-    const fal = await resolveFalKey(supabase, jobProjectId)
+    const statusOperatorUserId = access.service ? cleanString(operator_user_id) || jobRow?.operator_user_id || null : access.userId
+    const jobUsedPlatformKey = jobRow?.key_source === 'platform'
+    let platformAllowed = false
+    if (jobUsedPlatformKey) {
+      if (!statusOperatorUserId) return jsonError('Platform video status requires the entitled operator.', 403)
+      if (!access.service && jobRow?.operator_user_id && statusOperatorUserId !== jobRow.operator_user_id) {
+        return jsonError('Only the operator who started this platform video job can poll it.', 403)
+      }
+      try {
+        const canAccess = await userCanAccessProject(supabase, statusOperatorUserId, access.orgId, jobProjectId)
+        if (!canAccess) return jsonError('Forbidden', 403)
+        platformAllowed = await hasAiUserEntitlement(supabase, {
+          userId: statusOperatorUserId,
+          orgId: access.orgId,
+          projectId: jobProjectId,
+          capability: 'platform_fal_video',
+        })
+      } catch (error) {
+        return jsonError(error instanceof Error ? error.message : 'Could not verify platform video entitlement.', 500)
+      }
+      if (!platformAllowed) return jsonError('Platform video entitlement is no longer active for this operator.', 403)
+    }
+    const fal = await resolveFalKey(supabase, jobProjectId, { allowPlatform: platformAllowed, preferPlatform: jobUsedPlatformKey })
     if (!fal.ok) return fal.response
 
     const modelHint = modelSlugHint(model)
     const defaultSlug = modelSlugHint(DEFAULT_TEXT_VIDEO_MODEL) ?? MODELS.hailuo.slug
-    const slug = canonicalQueueSlug((job as { slug?: string | null } | null)?.slug || slugIn || modelHint || defaultSlug)
+    const slug = canonicalQueueSlug(jobRow?.slug || slugIn || modelHint || defaultSlug)
     const sres = await fetch(`https://queue.fal.run/${slug}/requests/${request_id}/status`, { headers: { Authorization: `Key ${fal.key}` } })
     if (!sres.ok) return json({ status: 'ERROR', message: `status ${sres.status}` })
     const sdata = await sres.json() as { status: string; queue_position?: number }
@@ -130,15 +156,51 @@ Deno.serve(async (req) => {
 
   const access = await requireProjectMember(req, supabase, SERVICE_KEY, projectId, corsHeaders)
   if (!access.ok) return access.response
+  const operatorUserId = access.service ? cleanString(operator_user_id) : access.userId
 
   const resolved = resolveVideoModel(model, !!image_url)
   if (!resolved.ok) return resolved.response
   const { alias, model: selectedModel, slug } = resolved
   const aiPolicy = await loadProjectAiPolicy(supabase, projectId)
-  if (selectedModel.tier === 'standard' && !aiPolicy.standardVideoEnabled) {
+
+  let platformStandardVideoAllowed = false
+  let platformPremiumVideoAllowed = false
+  if (operatorUserId) {
+    try {
+      const canAccess = await userCanAccessProject(supabase, operatorUserId, access.orgId, projectId)
+      if (!canAccess) return jsonError('Forbidden', 403)
+      const [standardEntitlement, premiumEntitlement] = await Promise.all([
+        hasAiUserEntitlement(supabase, {
+          userId: operatorUserId,
+          orgId: access.orgId,
+          projectId,
+          capability: 'platform_fal_video',
+        }),
+        hasAiUserEntitlement(supabase, {
+          userId: operatorUserId,
+          orgId: access.orgId,
+          projectId,
+          capability: 'platform_premium_video',
+        }),
+      ])
+      platformStandardVideoAllowed = standardEntitlement
+      platformPremiumVideoAllowed = premiumEntitlement
+    } catch (error) {
+      return jsonError(error instanceof Error ? error.message : 'Could not verify platform video entitlement.', 500)
+    }
+  }
+
+  const tierPolicyAllowed = selectedModel.tier === 'standard'
+    ? aiPolicy.standardVideoEnabled
+    : aiPolicy.premiumMediaEnabled
+  const tierPlatformAllowed = selectedModel.tier === 'standard'
+    ? platformStandardVideoAllowed
+    : platformPremiumVideoAllowed
+
+  if (selectedModel.tier === 'standard' && !tierPolicyAllowed && !tierPlatformAllowed) {
     return jsonError('Video generation is disabled for this client space. Enable standard video in the client AI usage policy first.', 403)
   }
-  if (selectedModel.tier === 'premium' && !aiPolicy.premiumMediaEnabled) {
+  if (selectedModel.tier === 'premium' && !tierPolicyAllowed && !tierPlatformAllowed) {
     return jsonError(`Premium video model "${alias}" is disabled for this client space. Enable premium media only when this client budget explicitly covers it.`, 402)
   }
   if (selectedModel.kind === 'image' && !image_url) {
@@ -154,7 +216,10 @@ Deno.serve(async (req) => {
     )
   }
 
-  const fal = await resolveFalKey(supabase, projectId)
+  const fal = await resolveFalKey(supabase, projectId, {
+    allowPlatform: tierPlatformAllowed,
+    preferPlatform: tierPlatformAllowed && !tierPolicyAllowed,
+  })
   if (!fal.ok) return fal.response
 
   // Build per-model payload. Different FAL video endpoints accept slightly
@@ -178,6 +243,7 @@ Deno.serve(async (req) => {
     aspect_ratio,
     has_source_image: !!image_url,
     key_source: fal.source,
+    operator_user_id: operatorUserId,
   }
   const budget = await checkProjectAiBudget(supabase, projectId, {
     orgId: access.orgId,
@@ -200,7 +266,7 @@ Deno.serve(async (req) => {
     if (!submitRes.ok) return jsonError(`FAL submit failed (${submitRes.status}): ${(await submitRes.text()).slice(0, 200)}`, 502)
     const submission = await submitRes.json() as { request_id: string; response_url?: string; status_url?: string }
     const queueSlug = queueSlugFromUrl(submission.response_url ?? submission.status_url) ?? canonicalQueueSlug(slug)
-    const recordError = await recordVideoJob(supabase, projectId, submission.request_id, queueSlug, prompt)
+    const recordError = await recordVideoJob(supabase, projectId, submission.request_id, queueSlug, prompt, fal.source, operatorUserId)
     if (recordError) return jsonError(recordError, 500)
     await logGenerationUsage(supabase, {
       orgId: access.orgId,
@@ -242,7 +308,7 @@ Deno.serve(async (req) => {
         const queueSlug = queueSlugFromUrl(submission.response_url ?? submission.status_url) ?? canonicalQueueSlug(slug)
         const statusUrl = submission.status_url ?? `https://queue.fal.run/${queueSlug}/requests/${requestId}/status`
         const resultUrl = submission.response_url ?? `https://queue.fal.run/${queueSlug}/requests/${requestId}`
-        const recordError = await recordVideoJob(supabase, projectId, requestId, queueSlug, prompt)
+        const recordError = await recordVideoJob(supabase, projectId, requestId, queueSlug, prompt, fal.source, operatorUserId)
         if (recordError) {
           send('error', { message: recordError })
           controller.close()
@@ -362,6 +428,10 @@ function normalizeDuration(value: unknown): string | null {
   return null
 }
 
+function cleanString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
 function queueSlugFromUrl(value: unknown): string | null {
   if (typeof value !== 'string') return null
   try {
@@ -387,6 +457,8 @@ async function recordVideoJob(
   requestId: string,
   slug: string,
   prompt: unknown,
+  keySource: 'client' | 'platform',
+  operatorUserId: string | null,
 ): Promise<string | null> {
   const { error } = await supabase
     .from('video_jobs')
@@ -396,6 +468,8 @@ async function recordVideoJob(
       project_id: projectId,
       status: 'rendering',
       prompt: typeof prompt === 'string' ? prompt.slice(0, 8000) : null,
+      key_source: keySource,
+      operator_user_id: operatorUserId,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'request_id' })
   return error?.message ?? null
@@ -404,10 +478,37 @@ async function recordVideoJob(
 async function resolveFalKey(
   supabase: AdminClient,
   projectId: string,
-): Promise<{ ok: true; key: string; source: 'client' } | { ok: false; response: Response }> {
+  opts: { allowPlatform?: boolean; preferPlatform?: boolean } = {},
+): Promise<{ ok: true; key: string; source: 'client' | 'platform' } | { ok: false; response: Response }> {
   try {
+    if (opts.preferPlatform) {
+      if (!opts.allowPlatform) {
+        return {
+          ok: false,
+          response: jsonError('Platform video rendering is not enabled for this operator.', 403),
+        }
+      }
+      if (!FAL_API_KEY) {
+        return {
+          ok: false,
+          response: jsonError('Platform FAL key is not configured.', 500),
+        }
+      }
+      return { ok: true, key: FAL_API_KEY, source: 'platform' }
+    }
+
     const clientKey = await loadClientApiKey(supabase, projectId, ['fal', 'fal_ai'])
     if (clientKey) return { ok: true, key: clientKey.key, source: 'client' }
+
+    if (opts.allowPlatform) {
+      if (!FAL_API_KEY) {
+        return {
+          ok: false,
+          response: jsonError('Platform FAL key is not configured.', 500),
+        }
+      }
+      return { ok: true, key: FAL_API_KEY, source: 'platform' }
+    }
 
     return {
       ok: false,

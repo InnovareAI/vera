@@ -31,6 +31,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
+import { hasAiUserEntitlement } from '../_shared/ai-entitlements.ts'
 import { DEFAULT_AI_POLICY, checkProjectAiBudget, loadProjectAiPolicy } from '../_shared/ai-policy.ts'
 import { isPlatformMediaProject } from '../_shared/client-media-keys.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
@@ -2024,7 +2025,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           return { result: 'Image generation is disabled for this client space because no approved client media key or image policy is available. I can refine the copy or write an image production brief instead.' }
         }
         if (vidPrompt && !ctx.allowVideoGeneration) {
-          return { result: 'Video generation is disabled for this client space because no client-owned FAL key is configured. I can refine the copy or write a video production brief instead.' }
+          return { result: 'Video generation is disabled for this client space because no client-owned FAL key or operator platform video entitlement is available. I can refine the copy or write a video production brief instead.' }
         }
         let changed = newCopy ? 'copy' : ''
         if (imgPrompt || vidPrompt) {
@@ -2038,6 +2039,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
                   model: 'hailuo',
                   aspect_ratio: '16:9',
                   project_id: ctx.projectId,
+                  operator_user_id: ctx.userId,
                 }
             const res = await fetch(`${ctx.supabaseUrl}/functions/v1/${fn}`, {
               method: 'POST',
@@ -2329,7 +2331,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
 
       case 'generate_video': {
         if (!ctx.allowVideoGeneration) {
-          return { result: 'Video generation is disabled for this client space because no client-owned FAL key is configured. Use generate_video_brief for a written production brief instead.' }
+          return { result: 'Video generation is disabled for this client space because no client-owned FAL key or operator platform video entitlement is available. Use generate_video_brief for a written production brief instead.' }
         }
         // Video gen takes 60-120s — far longer than the gateway will hold an
         // SSE connection open (it cuts ~47s in, surfacing as a "network error").
@@ -2344,6 +2346,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           image_url: (input.image_url as string) ?? undefined,
           aspect_ratio: (input.aspect_ratio as string) ?? '16:9',
           project_id: ctx.projectId,
+          operator_user_id: ctx.userId,
         }
         const res = await fetch(`${ctx.supabaseUrl}/functions/v1/generate-video`, {
           method: 'POST',
@@ -4207,6 +4210,19 @@ Deno.serve(async (req) => {
       clientHasOpenAIKey = false
     }
   }
+  let operatorHasPlatformVideo = false
+  if (projectId && effectiveUserId) {
+    try {
+      operatorHasPlatformVideo = await hasAiUserEntitlement(supabase, {
+        userId: effectiveUserId,
+        orgId,
+        projectId,
+        capability: 'platform_fal_video',
+      })
+    } catch {
+      operatorHasPlatformVideo = false
+    }
+  }
   let aiPolicy = DEFAULT_AI_POLICY
   if (projectId) {
     try {
@@ -4222,7 +4238,7 @@ Deno.serve(async (req) => {
     clientHasOpenAIKey ||
     clientHasFalKey
   )
-  const allowVideoGeneration = clientHasFalKey && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled)
+  const allowVideoGeneration = (clientHasFalKey && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled)) || operatorHasPlatformVideo
   const platformOnlyTools = new Set(['run_pipeline', 'run_audit'])
   const enabledTools = TOOLS.filter(tool => {
     if (!platformTextAllowed && platformOnlyTools.has(tool.name)) return false
@@ -4250,8 +4266,18 @@ Deno.serve(async (req) => {
         '<media_capabilities>',
         clientHasFalKey
           ? 'Real video generation is unavailable in this client space because the client AI usage policy disables video generation.'
-          : 'Real video generation is unavailable in this client space because no client-owned FAL key is configured.',
+          : 'Real video generation is unavailable in this client space because no client-owned FAL key or operator platform video entitlement is configured.',
         'Do not offer, promise, or call generate_video. If the operator asks for video, create a written production brief with generate_video_brief instead.',
+        '</media_capabilities>',
+      ].join('\n'),
+    })
+  } else if (operatorHasPlatformVideo && !clientHasFalKey) {
+    systemBlocks.push({
+      type: 'text' as const,
+      text: [
+        '<media_capabilities>',
+        'Standard video generation is available through this operator\'s platform video entitlement. Use prototype video models only unless premium video is explicitly approved and enabled.',
+        'Default to generate_video_storyboard before any paid render, then call generate_video only after the operator approves rendering.',
         '</media_capabilities>',
       ].join('\n'),
     })

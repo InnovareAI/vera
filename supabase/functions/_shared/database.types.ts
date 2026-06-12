@@ -436,6 +436,77 @@ export type Database = {
           },
         ]
       }
+      ai_user_entitlements: {
+        Row: {
+          capability: string
+          created_at: string
+          enabled: boolean
+          expires_at: string | null
+          granted_by: string | null
+          id: string
+          note: string | null
+          org_id: string | null
+          project_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          capability: string
+          created_at?: string
+          enabled?: boolean
+          expires_at?: string | null
+          granted_by?: string | null
+          id?: string
+          note?: string | null
+          org_id?: string | null
+          project_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          capability?: string
+          created_at?: string
+          enabled?: boolean
+          expires_at?: string | null
+          granted_by?: string | null
+          id?: string
+          note?: string | null
+          org_id?: string | null
+          project_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_user_entitlements_granted_by_fkey"
+            columns: ["granted_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_user_entitlements_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_user_entitlements_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_user_entitlements_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_api_keys: {
         Row: {
           capabilities: Json
@@ -2765,7 +2836,9 @@ export type Database = {
           created_at: string
           error: string | null
           id: string
+          key_source: string
           message_id: string | null
+          operator_user_id: string | null
           post_id: string | null
           project_id: string | null
           prompt: string | null
@@ -2780,7 +2853,9 @@ export type Database = {
           created_at?: string
           error?: string | null
           id?: string
+          key_source?: string
           message_id?: string | null
+          operator_user_id?: string | null
           post_id?: string | null
           project_id?: string | null
           prompt?: string | null
@@ -2795,7 +2870,9 @@ export type Database = {
           created_at?: string
           error?: string | null
           id?: string
+          key_source?: string
           message_id?: string | null
+          operator_user_id?: string | null
           post_id?: string | null
           project_id?: string | null
           prompt?: string | null
@@ -2807,6 +2884,13 @@ export type Database = {
           video_url?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "video_jobs_operator_user_id_fkey"
+            columns: ["operator_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "video_jobs_post_id_fkey"
             columns: ["post_id"]

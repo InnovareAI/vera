@@ -79,6 +79,7 @@ type ProviderCapabilities = {
   imagesEnabled: boolean
   standardVideoEnabled: boolean
   premiumMediaEnabled: boolean
+  hasPlatformVideoEntitlement: boolean
   textReady: boolean
   imageReady: boolean
   videoReady: boolean
@@ -572,6 +573,7 @@ export default function VeraThread() {
     imagesEnabled: true,
     standardVideoEnabled: false,
     premiumMediaEnabled: false,
+    hasPlatformVideoEntitlement: false,
     textReady: false,
     imageReady: false,
     videoReady: false,
@@ -594,6 +596,7 @@ export default function VeraThread() {
         imagesEnabled: true,
         standardVideoEnabled: false,
         premiumMediaEnabled: false,
+        hasPlatformVideoEntitlement: false,
         textReady: false,
         imageReady: false,
         videoReady: false,
@@ -603,10 +606,17 @@ export default function VeraThread() {
     }
     let cancelled = false
     void (async () => {
-      const [{ data: org }, { data: rows }, { data: project }] = await Promise.all([
+      const [{ data: org }, { data: rows }, { data: project }, { data: entitlements }] = await Promise.all([
         supabase.from('organizations').select('is_master').eq('id', activeOrg.id).maybeSingle(),
         supabase.from('client_api_keys').select('provider').eq('project_id', activeProject.id).eq('status', 'active').in('provider', ['anthropic', 'openrouter', 'openai', 'fal', 'fal_ai']),
         supabase.from('projects').select('ai_policy').eq('id', activeProject.id).maybeSingle(),
+        user?.id
+          ? supabase.from('ai_user_entitlements')
+            .select('org_id, project_id, capability, expires_at')
+            .eq('user_id', user.id)
+            .eq('capability', 'platform_fal_video')
+            .eq('enabled', true)
+          : Promise.resolve({ data: [] }),
       ])
       if (cancelled) return
       const isMaster = !!(org as { is_master?: boolean } | null)?.is_master
@@ -617,6 +627,13 @@ export default function VeraThread() {
       const hasOpenRouter = providers.has('openrouter')
       const hasOpenAI = providers.has('openai')
       const hasFal = providers.has('fal') || providers.has('fal_ai')
+      const hasPlatformVideoEntitlement = ((entitlements ?? []) as Array<{ org_id?: string | null; project_id?: string | null; expires_at?: string | null }>)
+        .some(row => {
+          if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) return false
+          if (row.project_id) return row.project_id === activeProject.id
+          if (row.org_id) return row.org_id === activeOrg.id
+          return true
+        })
       setProviderCapabilities({
         loaded: true,
         isMaster,
@@ -627,14 +644,15 @@ export default function VeraThread() {
         imagesEnabled: aiPolicy.imagesEnabled,
         standardVideoEnabled: aiPolicy.standardVideoEnabled,
         premiumMediaEnabled: aiPolicy.premiumMediaEnabled,
+        hasPlatformVideoEntitlement,
         textReady: isMaster || hasAnthropic || hasOpenRouter,
         imageReady: aiPolicy.imagesEnabled && (platformImageReady || hasOpenRouter || hasOpenAI || hasFal),
-        videoReady: hasFal && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled),
+        videoReady: (hasFal && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled)) || hasPlatformVideoEntitlement,
         needsTextKey: !isMaster && !hasAnthropic && !hasOpenRouter,
       })
     })()
     return () => { cancelled = true }
-  }, [activeOrg?.id, activeProject?.id, activeProject?.slug])
+  }, [activeOrg?.id, activeProject?.id, activeProject?.slug, user?.id])
 
   // Resume any in-flight video renders on load. A render that was still going
   // when the page was refreshed / closed used to be lost forever (its fal
@@ -1058,7 +1076,7 @@ export default function VeraThread() {
         const res = await fetch(`${SUPA}/functions/v1/generate-video`, {
           method: 'POST',
           headers: await functionHeaders(),
-          body: JSON.stringify({ action: 'status', request_id: requestId, slug }),
+          body: JSON.stringify({ action: 'status', request_id: requestId, slug, project_id: activeProject?.id ?? null }),
         })
         if (!res.ok) continue
         data = await res.json()
