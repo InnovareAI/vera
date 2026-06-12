@@ -396,10 +396,19 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   table_name regclass := to_regclass(format('public.%I', p_table));
+  has_org_id boolean;
 BEGIN
   IF table_name IS NULL THEN
     RETURN;
   END IF;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.columns c
+    WHERE c.table_schema = 'public'
+      AND c.table_name = p_table
+      AND c.column_name = 'org_id'
+  ) INTO has_org_id;
 
   EXECUTE format('DROP POLICY IF EXISTS %I ON %s', p_table || '_member_all', table_name);
   EXECUTE format('DROP POLICY IF EXISTS %I ON %s', p_table || '_select', table_name);
@@ -407,10 +416,20 @@ BEGIN
   EXECUTE format('DROP POLICY IF EXISTS %I ON %s', p_table || '_update', table_name);
   EXECUTE format('DROP POLICY IF EXISTS %I ON %s', p_table || '_delete', table_name);
 
-  EXECUTE format('CREATE POLICY %I ON %s FOR SELECT TO authenticated USING (%s)', p_table || '_select', table_name, p_read_expr);
-  EXECUTE format('CREATE POLICY %I ON %s FOR INSERT TO authenticated WITH CHECK (%s)', p_table || '_insert', table_name, p_write_expr);
-  EXECUTE format('CREATE POLICY %I ON %s FOR UPDATE TO authenticated USING (%s) WITH CHECK (%s)', p_table || '_update', table_name, p_write_expr, p_write_expr);
-  EXECUTE format('CREATE POLICY %I ON %s FOR DELETE TO authenticated USING (%s)', p_table || '_delete', table_name, p_write_expr);
+  BEGIN
+    EXECUTE format('CREATE POLICY %I ON %s FOR SELECT TO authenticated USING (%s)', p_table || '_select', table_name, p_read_expr);
+    EXECUTE format('CREATE POLICY %I ON %s FOR INSERT TO authenticated WITH CHECK (%s)', p_table || '_insert', table_name, p_write_expr);
+    EXECUTE format('CREATE POLICY %I ON %s FOR UPDATE TO authenticated USING (%s) WITH CHECK (%s)', p_table || '_update', table_name, p_write_expr, p_write_expr);
+    EXECUTE format('CREATE POLICY %I ON %s FOR DELETE TO authenticated USING (%s)', p_table || '_delete', table_name, p_write_expr);
+  EXCEPTION
+    WHEN undefined_column THEN
+      IF has_org_id THEN
+        EXECUTE format('CREATE POLICY %I ON %s FOR SELECT TO authenticated USING (private.is_org_member(org_id))', p_table || '_select', table_name);
+        EXECUTE format('CREATE POLICY %I ON %s FOR INSERT TO authenticated WITH CHECK (private.is_org_member(org_id))', p_table || '_insert', table_name);
+        EXECUTE format('CREATE POLICY %I ON %s FOR UPDATE TO authenticated USING (private.is_org_member(org_id)) WITH CHECK (private.is_org_member(org_id))', p_table || '_update', table_name);
+        EXECUTE format('CREATE POLICY %I ON %s FOR DELETE TO authenticated USING (private.is_org_member(org_id))', p_table || '_delete', table_name);
+      END IF;
+  END;
 END;
 $$;
 

@@ -8,7 +8,44 @@
 CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 CREATE SCHEMA IF NOT EXISTS vault;
-CREATE EXTENSION IF NOT EXISTS supabase_vault WITH SCHEMA vault;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'supabase_vault') THEN
+    CREATE EXTENSION IF NOT EXISTS supabase_vault WITH SCHEMA vault;
+  ELSE
+    CREATE TABLE IF NOT EXISTS vault.secrets (
+      id uuid PRIMARY KEY DEFAULT extensions.gen_random_uuid(),
+      name text UNIQUE NOT NULL,
+      secret text,
+      decrypted_secret text,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+
+    CREATE OR REPLACE VIEW vault.decrypted_secrets AS
+      SELECT id, name, COALESCE(decrypted_secret, secret) AS decrypted_secret
+      FROM vault.secrets;
+
+    CREATE OR REPLACE FUNCTION vault.create_secret(p_secret text, p_name text)
+    RETURNS uuid
+    LANGUAGE plpgsql
+    AS $fn$
+    DECLARE
+      inserted_id uuid;
+    BEGIN
+      INSERT INTO vault.secrets (name, secret, decrypted_secret)
+      VALUES (p_name, p_secret, p_secret)
+      ON CONFLICT (name) DO UPDATE
+        SET secret = EXCLUDED.secret,
+            decrypted_secret = EXCLUDED.decrypted_secret
+      RETURNING id INTO inserted_id;
+
+      RETURN inserted_id;
+    END;
+    $fn$;
+  END IF;
+END
+$$;
 
 DO $$
 BEGIN

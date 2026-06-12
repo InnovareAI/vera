@@ -32,6 +32,23 @@ CREATE TABLE content_briefs (
   updated_at       timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS content_posts (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id      uuid REFERENCES organisations(id) ON DELETE SET NULL,
+  title       text,
+  copy        text NOT NULL DEFAULT '',
+  channel     text NOT NULL DEFAULT 'LinkedIn',
+  format      text NOT NULL DEFAULT 'Text-only',
+  status      text NOT NULL DEFAULT 'pending' CHECK (
+    status IN ('draft','pending','approved','changes_requested','rejected','scheduled','posted','published')
+  ),
+  feedback    text,
+  media_url   text,
+  media_type  text,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE generation_log (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id       uuid REFERENCES organisations(id) ON DELETE SET NULL,
@@ -47,6 +64,7 @@ CREATE TABLE generation_log (
 
 CREATE INDEX campaigns_org_id_idx      ON campaigns(org_id);
 CREATE INDEX content_briefs_org_id_idx ON content_briefs(org_id);
+CREATE INDEX content_posts_status_base_idx ON content_posts(status);
 CREATE INDEX generation_log_org_id_idx ON generation_log(org_id);
 CREATE INDEX generation_log_post_id_idx ON generation_log(post_id);
 
@@ -54,16 +72,21 @@ CREATE TRIGGER campaigns_updated_at
   BEFORE UPDATE ON campaigns FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER content_briefs_updated_at
   BEFORE UPDATE ON content_briefs FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER content_posts_updated_at
+  BEFORE UPDATE ON content_posts FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 ALTER TABLE campaigns      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE content_briefs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE content_posts  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE generation_log ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "campaigns_all"      ON campaigns      FOR ALL USING (org_id = kai_org_id());
 CREATE POLICY "content_briefs_all" ON content_briefs FOR ALL USING (org_id = kai_org_id());
+CREATE POLICY "content_posts_all"  ON content_posts  FOR ALL USING (org_id = kai_org_id());
 CREATE POLICY "generation_log_all" ON generation_log FOR ALL USING (org_id = kai_org_id());
 
 -- Dev bypass
 CREATE POLICY "campaigns_anon_all"      ON campaigns      FOR ALL TO anon USING (true) WITH CHECK (true);
 CREATE POLICY "content_briefs_anon_all" ON content_briefs FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "content_posts_base_anon_all" ON content_posts FOR ALL TO anon USING (true) WITH CHECK (true);
 CREATE POLICY "generation_log_anon_all" ON generation_log FOR ALL TO anon USING (true) WITH CHECK (true);

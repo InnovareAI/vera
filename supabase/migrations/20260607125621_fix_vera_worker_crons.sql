@@ -2,6 +2,12 @@
 -- internal Kong URLs and read the service key from Supabase Vault at runtime.
 -- Prerequisite: vault.decrypted_secrets contains name = 'service_role_key'.
 
+DO $$
+BEGIN
+IF to_regclass('cron.job') IS NULL THEN
+  RETURN;
+END IF;
+
 UPDATE cron.job
 SET command = $cmd$
 select net.http_post(
@@ -81,3 +87,6 @@ select net.http_post(
 $cmd$,
 active = true
 WHERE jobname = 'vera-notice-every-30min';
+
+END
+$$;

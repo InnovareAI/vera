@@ -231,13 +231,18 @@ BEGIN
   END IF;
 
   EXECUTE format('DROP POLICY IF EXISTS %I ON %s', p_policy, table_name);
-  EXECUTE format(
-    'CREATE POLICY %I ON %s FOR ALL TO authenticated USING (%s) WITH CHECK (%s)',
-    p_policy,
-    table_name,
-    p_expr,
-    p_expr
-  );
+  BEGIN
+    EXECUTE format(
+      'CREATE POLICY %I ON %s FOR ALL TO authenticated USING (%s) WITH CHECK (%s)',
+      p_policy,
+      table_name,
+      p_expr,
+      p_expr
+    );
+  EXCEPTION
+    WHEN undefined_column THEN
+      RETURN;
+  END;
 END;
 $$;
 

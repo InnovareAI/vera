@@ -35,18 +35,55 @@ CREATE TABLE skills (
   updated_at      timestamptz   NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS skill_invocations (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  skill_id    uuid NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  org_id      uuid REFERENCES organisations(id) ON DELETE SET NULL,
+  post_id     uuid REFERENCES content_posts(id) ON DELETE SET NULL,
+  applied_in  text NOT NULL,
+  applied_by  uuid REFERENCES users(id) ON DELETE SET NULL,
+  applied_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS post_outcomes (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  post_id      uuid NOT NULL REFERENCES content_posts(id) ON DELETE CASCADE,
+  outcome      text NOT NULL CHECK (outcome IN ('approved','posted','rejected','changes_requested','edited')),
+  feedback     text,
+  edit_summary jsonb,
+  recorded_by  uuid REFERENCES users(id) ON DELETE SET NULL,
+  recorded_at  timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE INDEX skills_org_id_idx        ON skills(org_id);
 CREATE INDEX skills_type_idx          ON skills(type);
 CREATE INDEX skills_injected_into_idx ON skills(injected_into);
 CREATE INDEX skills_is_system_idx     ON skills(is_system);
 CREATE INDEX skills_tags_idx          ON skills USING gin(tags);
 CREATE INDEX skills_trigger_when_idx  ON skills USING gin(trigger_when);
+CREATE INDEX skill_invocations_skill_idx ON skill_invocations(skill_id);
+CREATE INDEX skill_invocations_org_idx ON skill_invocations(org_id);
+CREATE INDEX skill_invocations_post_idx ON skill_invocations(post_id);
+CREATE INDEX post_outcomes_post_idx ON post_outcomes(post_id, recorded_at DESC);
 
 CREATE TRIGGER skills_updated_at
   BEFORE UPDATE ON skills
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 ALTER TABLE skills ENABLE ROW LEVEL SECURITY;
+ALTER TABLE skill_invocations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE post_outcomes ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE VIEW post_final_outcome
+WITH (security_invoker = true) AS
+SELECT DISTINCT ON (post_id)
+  post_id,
+  outcome,
+  feedback,
+  edit_summary,
+  recorded_at
+FROM post_outcomes
+ORDER BY post_id, recorded_at DESC;
 
 -- Orgs can see system/library skills + their own
 CREATE POLICY "skills_select" ON skills
