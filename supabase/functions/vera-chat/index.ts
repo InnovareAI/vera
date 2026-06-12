@@ -32,6 +32,7 @@ import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
 import { DEFAULT_AI_POLICY, checkProjectAiBudget, loadProjectAiPolicy } from '../_shared/ai-policy.ts'
+import { isPlatformMediaProject } from '../_shared/client-media-keys.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 
 const corsHeaders = {
@@ -1702,6 +1703,7 @@ async function executeTool(
     serviceKey: string
     emit: (event: Record<string, unknown>) => void
     userPrompt?: string | null
+    allowImageGeneration?: boolean
     allowVideoGeneration?: boolean
   },
 ): Promise<{ result: string; image_url?: string; video_url?: string }> {
@@ -1750,7 +1752,9 @@ async function executeTool(
         // visual — a post stays text-only unless a visual was requested.
         const imagePrompt = (input.image_prompt as string)?.trim() || ''
         let imageNote = ''
-        if (imagePrompt) {
+        if (imagePrompt && !ctx.allowImageGeneration) {
+          imageNote = ' (visual generation is disabled for this client space because no approved client media key or image policy is available)'
+        } else if (imagePrompt) {
           ctx.emit({ type: 'tool_progress', tool: 'save_draft', status: 'adding a visual…' })
           try {
             // 'nano-banana' = FAL gemini-flash (~8s). NOT 'nano-banana-pro'
@@ -1969,6 +1973,9 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         if (newCopy) updates.copy = newCopy
         const imgPrompt = (input.image_prompt as string)?.trim()
         const vidPrompt = (input.video_prompt as string)?.trim()
+        if (imgPrompt && !ctx.allowImageGeneration) {
+          return { result: 'Image generation is disabled for this client space because no approved client media key or image policy is available. I can refine the copy or write an image production brief instead.' }
+        }
         if (vidPrompt && !ctx.allowVideoGeneration) {
           return { result: 'Video generation is disabled for this client space because no client-owned FAL key is configured. I can refine the copy or write a video production brief instead.' }
         }
@@ -2145,6 +2152,9 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
       }
       case 'generate_infographic':
       case 'generate_image': {
+        if (!ctx.allowImageGeneration) {
+          return { result: 'Image generation is disabled for this client space because no approved client media key or image policy is available. Add a client OpenRouter, OpenAI, or FAL key, or enable image generation in the client AI policy.' }
+        }
         // Both pipe to the same image stack via the relevant edge function.
         // Bridge progress events so the operator sees the work happening.
         const target = name === 'generate_infographic' ? 'generate-infographic' : 'generate-image'
@@ -2226,6 +2236,9 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
       }
 
       case 'generate_carousel': {
+        if (!ctx.allowImageGeneration) {
+          return { result: 'Carousel generation is disabled for this client space because it renders images. Add a client OpenRouter, OpenAI, or FAL key, or enable image generation in the client AI policy.' }
+        }
         const frames = Array.isArray(input.frames) ? (input.frames as Array<{ image_prompt?: string; text?: string }>) : []
         if (!frames.length) return { result: 'No carousel frames provided — pass one entry per frame.' }
         const aspect = (input.aspect_ratio as string) ?? 'square_hd'
@@ -4103,6 +4116,17 @@ Deno.serve(async (req) => {
       clientHasFalKey = false
     }
   }
+  let clientHasOpenAIKey = false
+  if (projectId) {
+    try {
+      const { data: openAIRow } = await supabase.from('client_api_keys')
+        .select('id').eq('project_id', projectId).eq('provider', 'openai').eq('status', 'active')
+        .order('updated_at', { ascending: false }).limit(1).maybeSingle()
+      clientHasOpenAIKey = !!openAIRow
+    } catch {
+      clientHasOpenAIKey = false
+    }
+  }
   let aiPolicy = DEFAULT_AI_POLICY
   if (projectId) {
     try {
@@ -4111,10 +4135,39 @@ Deno.serve(async (req) => {
       aiPolicy = DEFAULT_AI_POLICY
     }
   }
+  let platformMediaProject = false
+  if (projectId) {
+    try {
+      platformMediaProject = await isPlatformMediaProject(supabase, projectId, orgId)
+    } catch {
+      platformMediaProject = false
+    }
+  }
+  const allowImageGeneration = !!projectId && aiPolicy.imagesEnabled && (
+    platformMediaProject ||
+    !!clientOpenRouterKey ||
+    clientHasOpenAIKey ||
+    clientHasFalKey
+  )
   const allowVideoGeneration = clientHasFalKey && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled)
-  const enabledTools = allowVideoGeneration
-    ? TOOLS
-    : TOOLS.filter(tool => tool.name !== 'generate_video')
+  const enabledTools = TOOLS.filter(tool => {
+    if (!allowVideoGeneration && tool.name === 'generate_video') return false
+    if (!allowImageGeneration && (tool.name === 'generate_image' || tool.name === 'generate_infographic' || tool.name === 'generate_carousel')) return false
+    return true
+  })
+  if (!allowImageGeneration) {
+    systemBlocks.push({
+      type: 'text' as const,
+      text: [
+        '<image_capabilities>',
+        aiPolicy.imagesEnabled
+          ? 'Image and carousel generation is unavailable in this client space because no approved client OpenRouter, OpenAI, or FAL key is configured for media, and this is not an approved platform media project.'
+          : 'Image and carousel generation is unavailable in this client space because the client AI usage policy disables image generation.',
+        'Do not offer, promise, or call generate_image, generate_infographic, or generate_carousel. If the operator asks for images, write a production brief or image prompt for manual use instead.',
+        '</image_capabilities>',
+      ].join('\n'),
+    })
+  }
   if (!allowVideoGeneration) {
     systemBlocks.push({
       type: 'text' as const,
@@ -4213,6 +4266,7 @@ Deno.serve(async (req) => {
               serviceKey,
               emit: send,
               userPrompt: lastUserText ?? null,
+              allowImageGeneration,
               allowVideoGeneration,
             },
           })
@@ -4320,6 +4374,7 @@ Deno.serve(async (req) => {
                 serviceKey,
                 emit: send,
                 userPrompt: lastUserText ?? null,
+                allowImageGeneration,
                 allowVideoGeneration,
               })
               if (exec.image_url) {
@@ -4379,6 +4434,7 @@ Deno.serve(async (req) => {
             cache_read_input_tokens: totalCacheRead,
             cache_creation_input_tokens: totalCacheCreate,
             images_generated: generatedImages.length,
+            image_generation_available: allowImageGeneration,
             video_generation_available: allowVideoGeneration,
             thinking_enabled: useThinking,
           },

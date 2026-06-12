@@ -76,6 +76,9 @@ type ProviderCapabilities = {
   hasOpenRouter: boolean
   hasOpenAI: boolean
   hasFal: boolean
+  imagesEnabled: boolean
+  standardVideoEnabled: boolean
+  premiumMediaEnabled: boolean
   textReady: boolean
   imageReady: boolean
   videoReady: boolean
@@ -90,6 +93,18 @@ type WireContentBlock =
   | { type: 'text'; text: string }
   | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
   | DocumentBlock
+
+function parseClientAiPolicy(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { imagesEnabled: true, standardVideoEnabled: false, premiumMediaEnabled: false }
+  }
+  const policy = value as Record<string, unknown>
+  return {
+    imagesEnabled: typeof policy.images_enabled === 'boolean' ? policy.images_enabled : true,
+    standardVideoEnabled: typeof policy.standard_video_enabled === 'boolean' ? policy.standard_video_enabled : false,
+    premiumMediaEnabled: typeof policy.premium_media_enabled === 'boolean' ? policy.premium_media_enabled : false,
+  }
+}
 
 function extension(name: string) {
   const dot = name.lastIndexOf('.')
@@ -554,6 +569,9 @@ export default function VeraThread() {
     hasOpenRouter: false,
     hasOpenAI: false,
     hasFal: false,
+    imagesEnabled: true,
+    standardVideoEnabled: false,
+    premiumMediaEnabled: false,
     textReady: false,
     imageReady: false,
     videoReady: false,
@@ -573,6 +591,9 @@ export default function VeraThread() {
         hasOpenRouter: false,
         hasOpenAI: false,
         hasFal: false,
+        imagesEnabled: true,
+        standardVideoEnabled: false,
+        premiumMediaEnabled: false,
         textReady: false,
         imageReady: false,
         videoReady: false,
@@ -582,12 +603,14 @@ export default function VeraThread() {
     }
     let cancelled = false
     void (async () => {
-      const [{ data: org }, { data: rows }] = await Promise.all([
+      const [{ data: org }, { data: rows }, { data: project }] = await Promise.all([
         supabase.from('organizations').select('is_master').eq('id', activeOrg.id).maybeSingle(),
         supabase.from('client_api_keys').select('provider').eq('project_id', activeProject.id).eq('status', 'active').in('provider', ['anthropic', 'openrouter', 'openai', 'fal', 'fal_ai']),
+        supabase.from('projects').select('ai_policy').eq('id', activeProject.id).maybeSingle(),
       ])
       if (cancelled) return
       const isMaster = !!(org as { is_master?: boolean } | null)?.is_master
+      const aiPolicy = parseClientAiPolicy((project as { ai_policy?: unknown } | null)?.ai_policy)
       const providers = new Set(((rows ?? []) as Array<{ provider: string | null }>).map(row => row.provider).filter(Boolean) as string[])
       const platformImageReady = isMaster && activeProject.slug === 'innovareai-brand'
       const hasAnthropic = providers.has('anthropic')
@@ -601,9 +624,12 @@ export default function VeraThread() {
         hasOpenRouter,
         hasOpenAI,
         hasFal,
+        imagesEnabled: aiPolicy.imagesEnabled,
+        standardVideoEnabled: aiPolicy.standardVideoEnabled,
+        premiumMediaEnabled: aiPolicy.premiumMediaEnabled,
         textReady: isMaster || hasAnthropic || hasOpenRouter,
-        imageReady: platformImageReady || hasOpenRouter || hasOpenAI || hasFal,
-        videoReady: hasFal,
+        imageReady: aiPolicy.imagesEnabled && (platformImageReady || hasOpenRouter || hasOpenAI || hasFal),
+        videoReady: hasFal && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled),
         needsTextKey: !isMaster && !hasAnthropic && !hasOpenRouter,
       })
     })()
@@ -1814,10 +1840,22 @@ function buildLaunchActions(stats: { pending: number; campaigns: number }): Laun
 
 function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: ProviderCapabilities; onAddKey?: () => void }) {
   const needsText = capabilities.needsTextKey
-  const textBody = needsText
-    ? 'Add OpenRouter or Anthropic before relying on full-quality client-owned text generation. OpenRouter also covers supported image models.'
-    : 'Text and supported image work can use the connected client provider. Real video stays locked until this client adds FAL.'
-  const title = needsText ? 'Provider key needed' : 'Video rendering locked'
+  const imageLocked = !capabilities.imageReady
+  const videoLocked = !capabilities.videoReady
+  const title = needsText ? 'Provider key needed' : imageLocked ? 'Media rendering locked' : 'Video rendering locked'
+  const notes: string[] = []
+  if (needsText) notes.push('Add OpenRouter or Anthropic before relying on full-quality client-owned text generation.')
+  if (imageLocked) {
+    notes.push(capabilities.imagesEnabled
+      ? 'Image and carousel rendering needs a client OpenRouter, OpenAI, or FAL key, unless this is an approved platform media project.'
+      : 'Image and carousel rendering is disabled in this client AI policy.')
+  }
+  if (videoLocked) {
+    notes.push(capabilities.hasFal
+      ? 'Video rendering is disabled in this client AI policy.'
+      : 'Video rendering requires a client-owned FAL key.')
+  }
+  const textBody = notes.join(' ')
   const rows = [
     { icon: KeyRound, label: 'Text', ready: capabilities.textReady },
     { icon: ImagePlus, label: 'Images', ready: capabilities.imageReady },
@@ -1833,7 +1871,7 @@ function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: Pr
             {title}
           </div>
           <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.6, margin: 0 }}>
-            {textBody} If the operator asks for video now, Vera will create a storyboard or production brief instead of rendering a paid clip.
+            {textBody} If the operator asks for locked media now, Vera will create a storyboard, production brief, or reusable prompt instead of rendering a paid asset.
           </p>
         </div>
         {onAddKey && (
@@ -1886,7 +1924,7 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
         Turn client knowledge into campaigns, posts, visuals, storyboards, and demand signals that SAM can use.
       </p>
 
-      {providerCapabilities.loaded && (providerCapabilities.needsTextKey || !providerCapabilities.videoReady) && (
+      {providerCapabilities.loaded && (providerCapabilities.needsTextKey || !providerCapabilities.imageReady || !providerCapabilities.videoReady) && (
         <ProviderCapabilityNotice capabilities={providerCapabilities} onAddKey={onAddKey} />
       )}
 
