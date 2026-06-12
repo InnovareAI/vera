@@ -224,6 +224,7 @@ export type ClientIntegrationProvider =
   | 'reddit'
   | 'bluesky'
   | 'medium'
+  | 'quora'
   | 'wordpress'
   | 'webflow'
   | 'contentful'

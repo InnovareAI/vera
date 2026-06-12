@@ -57,7 +57,7 @@ interface IntegrationTemplate {
   setupNote: string
   launch?: {
     priority: 'wave_1' | 'wave_2' | 'later'
-    workstream: 'Search & analytics' | 'LinkedIn' | 'WordPress' | 'Meta' | 'YouTube' | 'Other'
+    workstream: 'Search & analytics' | 'LinkedIn' | 'WordPress' | 'Meta' | 'YouTube' | 'Content platforms' | 'Other'
     adapterState: string
     nextBuild: string
     requirements: string[]
@@ -293,6 +293,13 @@ const PROVIDERS: IntegrationTemplate[] = [
     scopes: ['identity', 'read', 'submit', 'edit', 'history'],
     capabilities: { read: true, ingest: true, analyze: true, publish: true, schedule: true },
     setupNote: 'Needs Reddit OAuth and a community-rules review step before any publishing action.',
+    launch: {
+      priority: 'wave_1',
+      workstream: 'Content platforms',
+      adapterState: 'Manual-first research and answer drafting. OAuth publishing later.',
+      nextBuild: 'Register target subreddits, ingest public discussions, summarize objections, and draft posts or comments for human approval.',
+      requirements: ['Target subreddit or profile', 'Community rules', 'Manual approval gate', 'Engagement signal tracking'],
+    },
     icon: MessageSquareText,
     accent: '#ea580c',
   },
@@ -327,8 +334,39 @@ const PROVIDERS: IntegrationTemplate[] = [
     scopes: ['rss.read', 'manual.publish'],
     capabilities: { read: true, ingest: true, analyze: true },
     setupNote: 'Use Medium RSS for source ingestion. Final publishing stays manual because Medium does not support new official API integrations.',
+    launch: {
+      priority: 'wave_1',
+      workstream: 'Content platforms',
+      adapterState: 'Manual-first source ingestion and publishing handoff.',
+      nextBuild: 'Register profile or publication RSS, ingest articles, map long-form themes, and prepare approved drafts for manual publishing.',
+      requirements: ['Medium profile or publication URL', 'RSS availability', 'Manual publish owner', 'Canonical link strategy'],
+    },
     icon: FileCode2,
     accent: '#111827',
+  },
+  {
+    provider: 'quora',
+    category: 'content_source',
+    group: 'Content platforms',
+    label: 'Quora',
+    eyebrow: 'Answer platform',
+    description: 'Track target topics, ingest public profile or Space context, draft answers, and capture questions that should become demand content.',
+    connectionKind: 'manual',
+    credentialRoute: 'No direct publishing API. Use URL ingestion and approved manual answer handoff',
+    primaryLabel: 'Quora profile, Space, or topic URL',
+    primaryPlaceholder: 'https://www.quora.com/profile/brand-or-person',
+    scopes: ['public.read', 'manual.publish', 'answer.research'],
+    capabilities: { read: true, ingest: true, analyze: true },
+    setupNote: 'Use Quora as a research and answer-prep source. Final posting stays manual unless a client-specific approved adapter is added later.',
+    launch: {
+      priority: 'wave_1',
+      workstream: 'Content platforms',
+      adapterState: 'Manual-first question research and answer drafting.',
+      nextBuild: 'Register profile, Space, or topic URLs, collect buyer questions, draft answers, and label traffic-driving themes for SAM handoff.',
+      requirements: ['Quora profile, Space, or topic URL', 'Manual answer owner', 'Source-quality review', 'Engagement signal tracking'],
+    },
+    icon: MessageSquareText,
+    accent: '#b92b27',
   },
   {
     provider: 'wordpress',
