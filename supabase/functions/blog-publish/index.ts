@@ -25,6 +25,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js"
 import { requirePostMember } from "../_shared/auth.ts"
+import {
+  claimPublish,
+  completePublishClaim,
+  markPublishClaimError,
+  releasePublishClaim,
+} from "../_shared/publish-claims.ts"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -65,7 +71,7 @@ Deno.serve(async (req) => {
   // 1. Fetch the post
   const { data: post, error: postErr } = await supabase
     .from("content_posts")
-    .select("id, channel, title, copy, hashtags, media_url, profile_name, posted_at, agent_outputs")
+    .select("id, org_id, project_id, channel, title, copy, hashtags, media_url, profile_name, posted_at, agent_outputs")
     .eq("id", post_id)
     .maybeSingle()
   if (postErr) return jsonError(`Post lookup failed: ${postErr.message}`, 500)
@@ -76,6 +82,9 @@ Deno.serve(async (req) => {
   }
   if (!post.title) return jsonError("Post has no title — required for a blog slug.", 400)
   if (!post.copy) return jsonError("Post has no copy.", 400)
+
+  const claim = await claimPublish(supabase, post, "blog", "blog-publish")
+  if (!claim.ok) return jsonError(claim.message, claim.status)
 
   // 2. Pick a unique slug
   const baseSlug = slugify(post.title as string)
@@ -98,6 +107,7 @@ Deno.serve(async (req) => {
         message: `Add hero image for ${slug}`,
       })
       if (!imgRes.ok) {
+        await releasePublishClaim(supabase, post_id, `GitHub image commit failed: ${imgRes.error}`)
         return jsonError(`GitHub image commit failed: ${imgRes.error}`, 502)
       }
     }
@@ -123,8 +133,11 @@ Deno.serve(async (req) => {
     message: `Publish blog post: ${(post.title as string).slice(0, 70)}`,
   })
   if (!mdxRes.ok) {
+    await markPublishClaimError(supabase, post_id, `GitHub MDX commit failed: ${mdxRes.error}`)
     return jsonError(`GitHub MDX commit failed: ${mdxRes.error}`, 502)
   }
+
+  await completePublishClaim(supabase, post, undefined, liveUrl)
 
   // 5. Chain back to approval-webhook so the row is marked posted + Slack notify fires
   if (autoMarkPosted) {

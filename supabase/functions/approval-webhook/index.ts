@@ -79,25 +79,39 @@ Deno.serve(async (req) => {
 
   const now = new Date().toISOString()
   const updates: Record<string, unknown> = {}
+  let updated: unknown
   if (action === "posted") {
     updates.posted_at = now
     if (posted_url !== undefined) updates.posted_url = posted_url
     if (provider_post_id !== undefined) updates.provider_post_id = provider_post_id
+
+    const result = await supabase
+      .from("content_posts")
+      .update(updates)
+      .eq("id", post.id)
+      .is("posted_at", null)
+      .select()
+      .maybeSingle()
+
+    if (result.error) return jsonError(result.error.message, 500)
+    if (!result.data) return jsonError("Post is already marked posted.", 409)
+    updated = result.data
   } else {
     updates.status = action
     updates.reviewed_at = now
     if (reviewed_by !== undefined) updates.reviewed_by = reviewed_by
     if (feedback !== undefined) updates.feedback = feedback
+
+    const result = await supabase
+      .from("content_posts")
+      .update(updates)
+      .eq("id", post.id)
+      .select()
+      .single()
+
+    if (result.error) return jsonError(result.error.message, 500)
+    updated = result.data
   }
-
-  const { data: updated, error } = await supabase
-    .from("content_posts")
-    .update(updates)
-    .eq("id", post.id)
-    .select()
-    .single()
-
-  if (error) return jsonError(error.message, 500)
 
   if (N8N_WEBHOOK_URL && action !== "posted") {
     fetch(N8N_WEBHOOK_URL, {

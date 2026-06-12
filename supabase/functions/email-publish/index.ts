@@ -22,6 +22,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js"
 import { requirePostMember } from "../_shared/auth.ts"
+import {
+  claimPublish,
+  completePublishClaim,
+  markPublishClaimError,
+  releasePublishClaim,
+} from "../_shared/publish-claims.ts"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -71,7 +77,7 @@ Deno.serve(async (req) => {
   // 1. Fetch the post
   const { data: post, error: postErr } = await supabase
     .from("content_posts")
-    .select("id, channel, title, copy, posted_at")
+    .select("id, org_id, project_id, channel, title, copy, posted_at")
     .eq("id", post_id)
     .maybeSingle()
   if (postErr) return jsonError(`Post lookup failed: ${postErr.message}`, 500)
@@ -86,20 +92,30 @@ Deno.serve(async (req) => {
   if (!parsed.subject) return jsonError("Could not extract a subject — first line should be 'Subject: ...' or post must have a title.", 400)
   if (!parsed.body) return jsonError("Post has no body content.", 400)
 
+  const claim = await claimPublish(supabase, post, "email", "email-publish")
+  if (!claim.ok) return jsonError(claim.message, claim.status)
+
   // 3. Send via Postmark. For single recipient → /email; multi → /email/batch.
   const sendResults: Array<{ recipient: string; message_id?: string; error?: string }> = []
-  if (recipients.length === 1) {
-    const res = await postmarkSend(recipients[0], fromEmail, fromName, replyTo, parsed.subject, parsed.body)
-    sendResults.push(res)
-  } else {
-    const batchResults = await postmarkSendBatch(recipients, fromEmail, fromName, replyTo, parsed.subject, parsed.body)
-    sendResults.push(...batchResults)
+  try {
+    if (recipients.length === 1) {
+      const res = await postmarkSend(recipients[0], fromEmail, fromName, replyTo, parsed.subject, parsed.body)
+      sendResults.push(res)
+    } else {
+      const batchResults = await postmarkSendBatch(recipients, fromEmail, fromName, replyTo, parsed.subject, parsed.body)
+      sendResults.push(...batchResults)
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await markPublishClaimError(supabase, post_id, message)
+    return jsonError(`Postmark send failed: ${message}`, 502)
   }
 
   const successes = sendResults.filter(r => r.message_id)
   const failures = sendResults.filter(r => !r.message_id)
 
   if (!successes.length) {
+    await releasePublishClaim(supabase, post_id, `Postmark rejected all ${recipients.length} sends.`)
     return jsonError(
       `Postmark rejected all ${recipients.length} sends. First error: ${failures[0]?.error ?? "unknown"}`,
       502,
@@ -112,6 +128,12 @@ Deno.serve(async (req) => {
   const mailtoRecipients = recipients.slice(0, 5).join(",") +
     (recipients.length > 5 ? `,+${recipients.length - 5}-more` : "")
   const postedUrl = `mailto:${mailtoRecipients}?subject=${encodeURIComponent(parsed.subject)}`
+  await completePublishClaim(
+    supabase,
+    post,
+    successes.map(item => item.message_id).filter(Boolean).join(",") || undefined,
+    postedUrl,
+  )
 
   // 5. Chain back to approval-webhook for posted_at + Slack notify
   if (autoMarkPosted) {

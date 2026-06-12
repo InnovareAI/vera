@@ -24,6 +24,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js"
 import { requirePostMember } from "../_shared/auth.ts"
+import {
+  claimPublish,
+  completePublishClaim,
+  markPublishClaimError,
+  releasePublishClaim,
+} from "../_shared/publish-claims.ts"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -35,13 +41,11 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const UNIPILE_DSN = Deno.env.get("UNIPILE_DSN")
 const UNIPILE_API_KEY = Deno.env.get("UNIPILE_API_KEY")
-const PUBLISH_CLAIM_STALE_MS = 15 * 60 * 1000
 
 function createAdminClient() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 }
 
-type SupabaseAdminClient = ReturnType<typeof createAdminClient>
 type JsonRecord = Record<string, unknown>
 
 type PostRow = {
@@ -64,10 +68,6 @@ type ClientIntegrationRow = {
   external_ref: JsonRecord | null
   health_status: string | null
 }
-
-type PublishClaim =
-  | { ok: true }
-  | { ok: false; message: string; status: number }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders })
@@ -188,7 +188,7 @@ Deno.serve(async (req) => {
   const text = textParts.join("\n\n").trim()
   if (!text) return jsonError("Post has no copy to publish.", 400)
 
-  const claim = await claimPublish(supabase, post, channel)
+  const claim = await claimPublish(supabase, post, channel, "unipile-post")
   if (!claim.ok) return jsonError(claim.message, claim.status)
 
   // 4. Build the request. JSON when no media; multipart/form-data when media_url
@@ -314,117 +314,6 @@ function getUnipileAccountId(integration: ClientIntegrationRow | null): string |
     integration?.config?.unipile_account_id,
     integration?.external_ref?.account_id,
   )
-}
-
-async function claimPublish(
-  supabase: SupabaseAdminClient,
-  post: PostRow,
-  channel: string,
-): Promise<PublishClaim> {
-  const row = {
-    post_id: post.id,
-    org_id: post.org_id,
-    project_id: post.project_id,
-    channel,
-    claim_status: "in_progress",
-    claimed_by: "unipile-post",
-    locked_at: new Date().toISOString(),
-  }
-
-  const firstAttempt = await supabase.from("content_post_publish_claims").insert(row)
-  if (!firstAttempt.error) return { ok: true }
-  if (firstAttempt.error.code !== "23505") {
-    console.error("publish claim insert failed", firstAttempt.error)
-    return { ok: false, status: 500, message: `Publish claim failed: ${firstAttempt.error.message}` }
-  }
-
-  const { data: existingData, error: lookupError } = await supabase
-    .from("content_post_publish_claims")
-    .select("post_id, claim_status, locked_at, completed_at")
-    .eq("post_id", post.id)
-    .maybeSingle()
-
-  if (lookupError) {
-    console.error("publish claim lookup failed", lookupError)
-    return { ok: false, status: 500, message: `Publish claim lookup failed: ${lookupError.message}` }
-  }
-
-  const existing = existingData as { claim_status?: string; locked_at?: string; completed_at?: string | null } | null
-  if (!existing) {
-    const retry = await supabase.from("content_post_publish_claims").insert(row)
-    if (!retry.error) return { ok: true }
-    return { ok: false, status: 409, message: "Publish is already in progress for this post." }
-  }
-
-  if (existing.claim_status === "completed" || existing.completed_at) {
-    return { ok: false, status: 409, message: "Post has already been published or claimed as published." }
-  }
-
-  const lockedAt = existing.locked_at ? Date.parse(existing.locked_at) : Number.NaN
-  const isStale = Number.isFinite(lockedAt) && Date.now() - lockedAt > PUBLISH_CLAIM_STALE_MS
-  if (!isStale) {
-    return { ok: false, status: 409, message: "Publish is already in progress for this post." }
-  }
-
-  const staleCutoff = new Date(Date.now() - PUBLISH_CLAIM_STALE_MS).toISOString()
-  const staleDelete = await supabase
-    .from("content_post_publish_claims")
-    .delete()
-    .eq("post_id", post.id)
-    .eq("claim_status", "in_progress")
-    .lte("locked_at", staleCutoff)
-
-  if (staleDelete.error) {
-    console.error("stale publish claim cleanup failed", staleDelete.error)
-    return { ok: false, status: 500, message: `Stale publish claim cleanup failed: ${staleDelete.error.message}` }
-  }
-
-  const retry = await supabase.from("content_post_publish_claims").insert(row)
-  if (!retry.error) return { ok: true }
-  if (retry.error.code === "23505") {
-    return { ok: false, status: 409, message: "Publish is already in progress for this post." }
-  }
-  console.error("stale publish claim retry failed", retry.error)
-  return { ok: false, status: 500, message: `Publish claim retry failed: ${retry.error.message}` }
-}
-
-async function releasePublishClaim(supabase: SupabaseAdminClient, postId: string, reason: string) {
-  const { error } = await supabase
-    .from("content_post_publish_claims")
-    .delete()
-    .eq("post_id", postId)
-    .eq("claim_status", "in_progress")
-  if (error) console.error("publish claim release failed", { postId, reason, error })
-}
-
-async function markPublishClaimError(supabase: SupabaseAdminClient, postId: string, reason: string) {
-  const { error } = await supabase
-    .from("content_post_publish_claims")
-    .update({ last_error: reason.slice(0, 1000) })
-    .eq("post_id", postId)
-    .eq("claim_status", "in_progress")
-  if (error) console.error("publish claim error update failed", { postId, reason, error })
-}
-
-async function completePublishClaim(
-  supabase: SupabaseAdminClient,
-  post: PostRow,
-  urn?: string,
-  postedUrl?: string,
-) {
-  const { error } = await supabase
-    .from("content_post_publish_claims")
-    .update({
-      claim_status: "completed",
-      completed_at: new Date().toISOString(),
-      org_id: post.org_id,
-      project_id: post.project_id,
-      remote_id: urn ?? null,
-      remote_url: postedUrl ?? null,
-      last_error: null,
-    })
-    .eq("post_id", post.id)
-  if (error) console.error("publish claim completion update failed", { post_id: post.id, error })
 }
 
 function firstString(...values: unknown[]): string | null {
