@@ -228,7 +228,9 @@ Current state:
 - Learning now turns synced and manual metrics into demand insights, next experiment prompts, SAM handoff candidates, and buyer-intent weighted demand scores.
 - Learning now proposes inactive, client-scoped skills from measured evidence, such as repeatable demand patterns, buyer-intent response loops, and qualified-traffic CTA tests.
 - AI Settings now supports deep links into the Skills view so Learning can send operators straight to review and enable proposed client skills.
+- The `vera-notice` worker now creates a weekly learning observation per client when there are fresh demand signals, pending learning skill proposals, approved unscheduled posts, or SAM handoff candidates.
+- Weekly learning observations include current-week metrics, previous-week comparison, top assets, pending skill proposals, SAM handoff candidates, and a route back to the client Learning page.
 
 Next step:
 
-- Add the weekly learning cadence: generate a client notice that summarizes what changed, which skill proposals need review, and which SAM handoff actions should be queued.
+- Surface weekly learning notices more directly in the client desk UI so operators can review, enable skills, brief VERA, or queue SAM handoffs without opening chat first.
