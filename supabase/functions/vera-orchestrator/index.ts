@@ -4,6 +4,7 @@ import type { AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
 import { requireOrgMember, requireProjectMember } from '../_shared/auth.ts'
 import { isPlatformMediaProject, loadClientApiKey } from '../_shared/client-media-keys.ts'
+import { DEFAULT_AI_POLICY, loadProjectAiPolicy } from '../_shared/ai-policy.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -197,6 +198,12 @@ Deno.serve(async (req) => {
 
   const runtime = await resolvePipelineRuntime(supabase, org_id, project_id)
   if (!runtime.ok) return runtime.response
+  let aiPolicy = DEFAULT_AI_POLICY
+  try {
+    aiPolicy = await loadProjectAiPolicy(supabase, project_id)
+  } catch {
+    aiPolicy = DEFAULT_AI_POLICY
+  }
   const anthropic = new Anthropic({ apiKey: runtime.anthropicKey })
   const researchOpenRouterKey = runtime.openRouterKey
 
@@ -497,11 +504,12 @@ Output the rewritten content only — no labels, no explanation.`,
 
         // ── STEP 7b: IMAGE DESIGNER (parallel with Brand Guard + Compliance) ─
         // Fire-and-store: kick off image gen here, await right before Publisher.
-        // FAL Seedream takes ~10-12s; Brand Guard + Compliance together take ~20s,
-        // so image arrives "for free" without adding to the critical path.
+        // The image router enforces approved aliases, client keys, premium
+        // policy, and budget. Brand Guard + Compliance usually take long enough
+        // that the image often arrives without adding to the critical path.
         let imagePromise: Promise<{ url: string | null; error?: string }> | null = null
         if (strategy.run_image_designer && strategy.image_prompt) {
-          send('Image Designer', `Generating image via FAL Seedream V4…`, false)
+          send('Image Designer', `Generating image via the configured client image model…`, false)
           imagePromise = (async () => {
             try {
               const r = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-image`, {
@@ -511,7 +519,7 @@ Output the rewritten content only — no labels, no explanation.`,
                   'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
                   'apikey': Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
                 },
-                body: JSON.stringify({ prompt: strategy.image_prompt as string, model: 'nano-banana', project_id }),
+                body: JSON.stringify({ prompt: strategy.image_prompt as string, model: aiPolicy.defaultImageModel, project_id }),
                 signal: AbortSignal.timeout(180_000),
               })
               if (!r.body) return { url: null, error: 'no response body' }
@@ -677,7 +685,7 @@ followed by a summary of what must be fixed.`,
             model_used: 'claude-sonnet-4-6',
             media_url: generatedImageUrl,
             media_type: generatedImageUrl ? 'image' : null,
-            media_metadata: (generatedImageUrl ? { image_prompt: String(strategy.image_prompt ?? ''), model: 'fal-ai/gemini-25-flash-image' } : {}) as Json,
+            media_metadata: (generatedImageUrl ? { image_prompt: String(strategy.image_prompt ?? ''), model: aiPolicy.defaultImageModel } : {}) as Json,
             compliance_checks: complianceChecks,
             agent_outputs: {
               strategy,
