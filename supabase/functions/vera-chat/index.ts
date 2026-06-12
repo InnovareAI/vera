@@ -72,6 +72,94 @@ const UNIPILE_BASE_URL = normalizeUnipileBaseUrl(
   Deno.env.get('UNIPILE_BASE_URL') ?? Deno.env.get('UNIPILE_API_URL') ?? Deno.env.get('UNIPILE_DSN') ?? '',
 )
 const APIFY_API_TOKEN = Deno.env.get('APIFY_API_TOKEN') ?? Deno.env.get('APIFY_TOKEN') ?? ''
+const CAMPAIGN_CHANNELS = [
+  'LinkedIn',
+  'YouTube',
+  'Medium',
+  'Quora',
+  'Reddit',
+  'X',
+  'Instagram',
+  'Facebook',
+  'Blog',
+  'Email',
+] as const
+const DEFAULT_MULTI_CHANNEL_CAMPAIGN = ['LinkedIn', 'YouTube', 'Medium', 'Quora', 'Reddit', 'X']
+const CAMPAIGN_CHANNEL_ALIASES: Record<string, string> = {
+  linkedin: 'LinkedIn',
+  'linked in': 'LinkedIn',
+  'linked-in': 'LinkedIn',
+  youtube: 'YouTube',
+  'you tube': 'YouTube',
+  yt: 'YouTube',
+  shorts: 'YouTube',
+  'youtube shorts': 'YouTube',
+  medium: 'Medium',
+  quora: 'Quora',
+  reddit: 'Reddit',
+  x: 'X',
+  twitter: 'X',
+  instagram: 'Instagram',
+  ig: 'Instagram',
+  reels: 'Instagram',
+  'instagram reels': 'Instagram',
+  facebook: 'Facebook',
+  fb: 'Facebook',
+  blog: 'Blog',
+  blogs: 'Blog',
+  article: 'Blog',
+  articles: 'Blog',
+  substack: 'Blog',
+  website: 'Blog',
+  'website blog': 'Blog',
+  email: 'Email',
+  newsletter: 'Email',
+  newsletters: 'Email',
+}
+const ALL_CAMPAIGN_CHANNEL_ALIASES = new Set([
+  'all',
+  'all relevant',
+  'all channels',
+  'all platforms',
+  'multi',
+  'multichannel',
+  'multi-channel',
+  'cross channel',
+  'cross-channel',
+  'across channels',
+  'across platforms',
+])
+
+function normalizeCampaignChannel(value: unknown): string | null {
+  const raw = String(value ?? '').trim()
+  if (!raw) return null
+  const key = raw.toLowerCase().replace(/^#/, '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ')
+  return CAMPAIGN_CHANNEL_ALIASES[key] ?? CAMPAIGN_CHANNELS.find(channel => channel.toLowerCase() === key) ?? null
+}
+
+function campaignChannelCandidates(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(campaignChannelCandidates)
+  const raw = String(value ?? '').trim()
+  if (!raw) return []
+  const key = raw.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ')
+  if (ALL_CAMPAIGN_CHANNEL_ALIASES.has(key)) return [...DEFAULT_MULTI_CHANNEL_CAMPAIGN]
+  return raw
+    .split(/\s*(?:,|\||\/|;|\+|\band\b)\s*/i)
+    .map(normalizeCampaignChannel)
+    .filter((channel): channel is string => Boolean(channel))
+}
+
+function normalizeCampaignChannels(input: Record<string, unknown>): string[] {
+  const requested = new Set<string>()
+  const sources: unknown[] = []
+  if (Array.isArray(input.channels)) sources.push(input.channels)
+  else if (typeof input.channels === 'string') sources.push(input.channels)
+  if (!sources.length && input.channel !== undefined) sources.push(input.channel)
+  for (const source of sources) {
+    for (const channel of campaignChannelCandidates(source)) requested.add(channel)
+  }
+  return requested.size ? [...requested].slice(0, CAMPAIGN_CHANNELS.length) : ['LinkedIn']
+}
 
 const VERA_MARKETING_EXPERTISE = `
 Marketing and content strategy expertise:
@@ -1591,6 +1679,7 @@ const TOOLS = [
         brief: { type: 'string', description: 'What the campaign is about — theme, goal, any must-haves. Faithful to the operator\'s intent; you expand it into the arc.' },
         count: { type: 'number', description: 'How many posts to produce. Default 8. Max 12. For "a month" of weekly content use ~4-8; for a denser month use 8-12.' },
         channel: { type: 'string', description: 'LinkedIn | YouTube | Medium | Quora | Reddit | X | Instagram | Facebook | Blog | Email. Default LinkedIn.' },
+        channels: { type: 'array', items: { type: 'string' }, description: 'Optional multi-channel distribution set. Use this for cross-channel campaigns. Supported: LinkedIn, YouTube, Medium, Quora, Reddit, X, Instagram, Facebook, Blog, Email.' },
         cadence: { type: 'string', description: 'How far apart to schedule: "weekly" (default), "biweekly", or "daily". One post per slot.' },
         start_date: { type: 'string', description: 'Optional ISO date (YYYY-MM-DD) for the first post. Default: the upcoming Monday.' },
         campaign_name: { type: 'string', description: 'Optional short campaign name. If omitted, VERA names it from the brief.' },
@@ -1723,7 +1812,9 @@ async function executeTool(
         const brief = String(input.brief ?? '').trim()
         if (!brief) return { result: 'No brief was provided — tell me what the campaign is about.' }
         const count = Math.max(1, Math.min(Number(input.count) || 8, 12))
-        const channel = (input.channel as string)?.trim() || 'LinkedIn'
+        const channels = normalizeCampaignChannels(input)
+        const primaryChannel = channels[0] ?? 'LinkedIn'
+        const channelLabel = channels.length === 1 ? primaryChannel : channels.join(', ')
         const cadence = ((input.cadence as string)?.trim() || 'weekly').toLowerCase()
         const stepDays = cadence === 'daily' ? 1 : cadence === 'biweekly' ? 14 : 7
 
@@ -1736,7 +1827,7 @@ async function executeTool(
         }
         start.setUTCHours(9, 0, 0, 0)
 
-        ctx.emit({ type: 'tool_progress', tool: 'plan_campaign', status: `planning ${count} ${channel} posts…` })
+        ctx.emit({ type: 'tool_progress', tool: 'plan_campaign', status: `planning ${count} ${channels.length === 1 ? primaryChannel : 'multi-channel'} posts...` })
 
         // Ground the arc in the brand voice (one query, best-effort).
         const { data: bv } = await loadBrandVoice(ctx.supabase, ctx.orgId, ctx.projectId)
@@ -1768,17 +1859,30 @@ async function executeTool(
           body: JSON.stringify({
             model: MODEL,
             max_tokens: 6000,
-            system: `You are VERA, InnovareAI's creative content partner. You write sharp, native ${channel} posts in the brand voice. American spelling. Never invent statistics or fake quotes.${brandBrief ? `\n\nBRAND VOICE:\n${brandBrief}` : ''}`,
+            system: `You are VERA, InnovareAI's creative content partner. You write sharp, platform-native demand content for ${channelLabel} in the brand voice. American spelling. Never invent statistics or fake quotes.${brandBrief ? `\n\nBRAND VOICE:\n${brandBrief}` : ''}`,
             messages: [{
               role: 'user',
-              content: `Plan a ${channel} content campaign and write every post.
+              content: `Plan a ${channelLabel} B2B demand campaign and write every post.
 
 Brief: ${brief}
 
-Produce a coherent arc of EXACTLY ${count} posts that build on each other (no repeated angles). Each post: a scroll-stopping first line, 80-160 words, native to ${channel}, ending with a light CTA or question. Vary the formats across the arc (story, insight, how-to, contrarian take, list, question).${categoryClause}
+Use these target channels exactly: ${channels.join(', ')}.
+Distribute the ${count} posts across those channels. If count is smaller than the channel count, choose the most relevant channels for the brief.
+Each post must include a "channel" field using one of the target channels.
+Make every post native to its channel:
+- LinkedIn: insight, founder/operator post, carousel caption, or lead-gen post.
+- YouTube: title plus description or short script outline.
+- Medium or Blog: article opener, thesis, and summary-style post.
+- Quora: useful answer to a high-intent question.
+- Reddit: discussion post that does not read like an ad.
+- X: concise post or thread starter.
+- Instagram or Facebook: social caption with a clear creative angle.
+- Email: newsletter or nurture email copy.
+
+Produce a coherent arc of EXACTLY ${count} posts that build on each other (no repeated angles). Each post should have a strong first line, a clear demand-generation job, and a light CTA or question. Vary the formats across the arc (story, insight, how-to, contrarian take, list, question).${categoryClause}
 
 Output ONLY valid JSON — no prose, no markdown fences — in exactly this shape:
-{"campaign_name":"<short punchy name>","theme":"<one-line narrative anchor>","posts":[{"title":"<4-8 word internal title>","copy":"<the full post>","hashtags":["tag","tag"],"category":"<one category name from the set above, or empty if none>"}]}`,
+{"campaign_name":"<short punchy name>","theme":"<one-line narrative anchor>","posts":[{"title":"<4-8 word internal title>","channel":"<one target channel>","copy":"<the full post>","hashtags":["tag","tag"],"category":"<one category name from the set above, or empty if none>"}]}`,
             }],
           }),
         })
@@ -1786,12 +1890,18 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         const planData = await planRes.json() as { content?: Array<{ type: string; text?: string }> }
         const rawText = (planData.content ?? []).filter(b => b.type === 'text').map(b => b.text).join('').trim()
         const jsonStr = rawText.slice(rawText.indexOf('{'), rawText.lastIndexOf('}') + 1)
-        let plan: { campaign_name?: string; theme?: string; posts?: Array<{ title?: string; copy?: string; hashtags?: string[]; image_prompt?: string; category?: string }> }
+        let plan: { campaign_name?: string; theme?: string; posts?: Array<{ title?: string; channel?: string; copy?: string; hashtags?: string[]; image_prompt?: string; category?: string }> }
         try { plan = JSON.parse(jsonStr) } catch { return { result: 'Campaign planning returned malformed output — try again.' } }
         const planned = (plan.posts ?? []).filter(p => p && (p.copy ?? '').trim())
         if (!planned.length) return { result: 'Campaign planning produced no posts — try again with a clearer brief.' }
 
         const campaignName = (input.campaign_name as string)?.trim() || plan.campaign_name?.trim() || brief.slice(0, 60)
+        const campaignChannels = [...new Set(
+          planned
+            .map(p => normalizeCampaignChannel(p.channel))
+            .filter((channel): channel is string => Boolean(channel)),
+        )]
+        if (!campaignChannels.length) campaignChannels.push(...channels)
         const startISO = start.toISOString()
         const endISO = new Date(start.getTime() + (planned.length - 1) * stepDays * 86400000).toISOString()
 
@@ -1805,25 +1915,28 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           status: 'active',
           start_date: startISO.slice(0, 10),
           end_date: endISO.slice(0, 10),
-          platforms: [channel],
+          platforms: campaignChannels,
           post_count: planned.length,
         }).select('id').single()
         if (campErr) return { result: `Couldn't create the campaign: ${campErr.message}` }
         const campaignId = (campaign as Record<string, unknown>).id as string
 
-        const rows = planned.map((p, i) => ({
-          org_id: ctx.orgId,
-          project_id: ctx.projectId ?? null,
-          campaign_id: campaignId,
-          title: (p.title ?? '').trim() || `${campaignName} — ${i + 1}`,
-          copy: (p.copy ?? '').trim(),
-          channel,
-          format: 'Text-only',
-          status: 'pending',
-          hashtags: Array.isArray(p.hashtags) ? p.hashtags.map(h => String(h).replace(/^#/, '')) : null,
-          category: (p.category ?? '').trim() || null,
-          scheduled_at: new Date(start.getTime() + i * stepDays * 86400000).toISOString(),
-        }))
+        const rows = planned.map((p, i) => {
+          const postChannel = normalizeCampaignChannel(p.channel) ?? channels[i % channels.length] ?? primaryChannel
+          return {
+            org_id: ctx.orgId,
+            project_id: ctx.projectId ?? null,
+            campaign_id: campaignId,
+            title: (p.title ?? '').trim() || `${campaignName} - ${i + 1}`,
+            copy: (p.copy ?? '').trim(),
+            channel: postChannel,
+            format: 'Text-only',
+            status: 'pending',
+            hashtags: Array.isArray(p.hashtags) ? p.hashtags.map(h => String(h).replace(/^#/, '')) : null,
+            category: (p.category ?? '').trim() || null,
+            scheduled_at: new Date(start.getTime() + i * stepDays * 86400000).toISOString(),
+          }
+        })
         const { data: inserted, error: postErr } = await ctx.supabase
           .from('content_posts').insert(rows)
           .select('id, title, copy, channel, status, scheduled_at, hashtags, category, campaign_id')
@@ -1831,12 +1944,12 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
 
         ctx.emit({
           type: 'campaign',
-          campaign: { id: campaignId, name: campaignName, theme: plan.theme ?? null, channel, cadence, count: (inserted ?? []).length },
+          campaign: { id: campaignId, name: campaignName, theme: plan.theme ?? null, channel: channelLabel, channels: campaignChannels, cadence, count: (inserted ?? []).length },
           posts: inserted ?? [],
         })
 
         return {
-          result: `Planned and drafted ${(inserted ?? []).length} ${channel} posts for "${campaignName}" (${cadence}, ${startISO.slice(0, 10)} → ${endISO.slice(0, 10)}). All saved as Pending and laid out on the campaign calendar in the panel. Reply in ONE short line: it's ready to review, and you can refine any post or generate the images on approval.`,
+          result: `Planned and drafted ${(inserted ?? []).length} ${channelLabel} posts for "${campaignName}" (${cadence}, ${startISO.slice(0, 10)} to ${endISO.slice(0, 10)}). All saved as Pending and laid out on the campaign calendar in the panel. Reply in ONE short line: it's ready to review, and you can refine any post or generate the images on approval.`,
         }
       }
 

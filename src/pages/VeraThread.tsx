@@ -314,6 +314,7 @@ interface CampaignData {
   name: string
   theme: string | null
   channel: string
+  channels?: string[]
   cadence: string
   count: number
   posts: CampaignPost[]
@@ -975,6 +976,7 @@ export default function VeraThread() {
               name: (meta.name as string) ?? 'Campaign',
               theme: (meta.theme as string) ?? null,
               channel: (meta.channel as string) ?? 'LinkedIn',
+              channels: Array.isArray(meta.channels) ? meta.channels.map(String).filter(Boolean) : undefined,
               cadence: (meta.cadence as string) ?? 'weekly',
               count: posts.length,
               posts,
@@ -1741,11 +1743,12 @@ function CampaignArtifact({ campaign, onOpenPost }: {
     }
   }
   const posts = [...campaign.posts].sort((a, b) => (a.scheduled_at ?? '').localeCompare(b.scheduled_at ?? ''))
+  const channelLabel = campaign.channels?.length ? campaign.channels.join(', ') : campaign.channel
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ padding: `${space[5]} ${space[5]} ${space[3]}`, flexShrink: 0 }}>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.accent }}>
-          <CalendarDays size={13} /> Campaign · {campaign.channel}
+          <CalendarDays size={13} /> Campaign · {channelLabel}
         </div>
         <h2 style={{ fontSize: t.size.lg, fontWeight: t.weight.semibold, color: color.ink, margin: `${space[2]} 0 2px`, lineHeight: 1.25 }}>{campaign.name}</h2>
         {campaign.theme && <p style={{ fontSize: t.size.cap, color: color.ink2, margin: 0, lineHeight: 1.45 }}>{campaign.theme}</p>}
@@ -1762,7 +1765,10 @@ function CampaignArtifact({ campaign, onOpenPost }: {
                 <div style={{ fontSize: t.size.cap, color: color.ink, fontWeight: t.weight.medium }}>{d.md}</div>
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: t.size.cap, fontWeight: t.weight.semibold, color: color.ink, marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title || `Post ${i + 1}`}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, marginBottom: 2 }}>
+                  <div style={{ fontSize: t.size.cap, fontWeight: t.weight.semibold, color: color.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title || `Post ${i + 1}`}</div>
+                  <span style={{ flexShrink: 0, fontSize: '10px', lineHeight: 1, fontWeight: t.weight.semibold, color: color.accent, background: color.accentSoft, border: `1px solid ${color.accentLine}`, borderRadius: radius.pill, padding: '3px 6px' }}>{p.channel}</span>
+                </div>
                 <div style={{ fontSize: t.size.micro, color: color.ink2, lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{p.copy}</div>
               </div>
             </button>
