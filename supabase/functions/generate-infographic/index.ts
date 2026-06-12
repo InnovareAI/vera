@@ -1,8 +1,8 @@
 // Infographic generation — thin wrapper over generate-image that scaffolds
-// a Nano Banana (Gemini 2.5 Flash Image) prompt with layout discipline.
+// a structured visual prompt with layout discipline.
 //
-// NotebookLM-style infographics are Gemini under the hood. The quality gap
-// vs free-form generate-image isn't the model — it's the structured prompt
+// NotebookLM-style infographics need layout-aware prompt structure. The quality
+// gap vs free-form generate-image isn't just the model — it's the prompt
 // template that tells the model exactly what frame to draw, what each panel
 // holds, and which visual elements to repeat.
 //
@@ -147,10 +147,10 @@ Deno.serve(async (req) => {
     return jsonError('Invalid JSON body', 400)
   }
 
-  // Default to Nano Banana so OpenRouter-only clients can generate without
-  // falling through to the platform FAL key. Operators can explicitly override
-  // to a FAL-only model when that client has its own FAL credential.
-  const { title, subtitle, sections, stats, audience, style = 'editorial', model = 'nano-banana' } = body
+  // Omit model to let generate-image load the client space policy. Operators
+  // can explicitly override to an approved model when the client has access.
+  const { title, subtitle, sections, stats, audience, style = 'editorial' } = body
+  const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null
   const projectId = typeof body.project_id === 'string' ? body.project_id.trim() : ''
 
   if (!title) return jsonError('title is required', 400)
@@ -182,7 +182,7 @@ Deno.serve(async (req) => {
     },
     body: JSON.stringify({
       prompt,
-      model,
+      ...(model ? { model } : {}),
       image_size: 'landscape_16_9',
       num_images: 1,
       quality: 'high',

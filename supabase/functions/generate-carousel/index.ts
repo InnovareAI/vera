@@ -1,7 +1,7 @@
 // Background carousel generation — runs server-side so it isn't bound by the
 // chat SSE turn (which gets force-killed when it batches image renders).
 //
-// POST { post_id, frames:[{image_prompt, text?}], aspect?, session_id?, project_id? }
+// POST { post_id, frames:[{image_prompt, text?}], aspect?, session_id?, project_id?, model? }
 //   → 200 { job_id } IMMEDIATELY, then renders every frame in the background via
 //     EdgeRuntime.waitUntil(): each frame is its own short call to generate-image
 //     (sequential, to keep the resource spike low), uploaded to storage, then the
@@ -26,7 +26,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? 'http://kong:8000'
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 const PUBLIC_BASE = Deno.env.get('PUBLIC_SUPABASE_URL') || Deno.env.get('SUPABASE_PUBLIC_URL') || 'https://supabase-content-eu.innovareai.com'
 const STORAGE_BUCKET = 'vera-images'
-const STORYBOARD_IMAGE_MODEL = Deno.env.get('STORYBOARD_IMAGE_MODEL') ?? 'nano-banana'
+const STORYBOARD_IMAGE_MODEL = Deno.env.get('STORYBOARD_IMAGE_MODEL')?.trim() || ''
 
 type Frame = { image_prompt?: string; text?: string | null }
 
@@ -73,13 +73,14 @@ async function renderFrame(
   prompt: string,
   aspect: string,
   projectId: string,
+  model: string | null,
 ): Promise<string> {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-image`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_KEY}`, 'apikey': SERVICE_KEY },
     body: JSON.stringify({
       prompt,
-      model: STORYBOARD_IMAGE_MODEL,
+      ...(model ? { model } : {}),
       image_size: aspect,
       quality: 'high',
       project_id: projectId,
@@ -117,6 +118,7 @@ async function processJob(
   scope: CarouselScope,
   frames: Frame[],
   aspect: string,
+  model: string | null,
 ) {
   // Render ALL frames in parallel. This is a background task (the HTTP response
   // already returned), so there's no foreground SSE to hold open — and finishing
@@ -143,7 +145,7 @@ async function processJob(
   await Promise.all(frames.map(async (f, i) => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const url = await renderFrame(supabase, scope.orgId, f.image_prompt ?? '', aspect, scope.projectId)
+        const url = await renderFrame(supabase, scope.orgId, f.image_prompt ?? '', aspect, scope.projectId, model)
         slots[i] = { url, text: f.text ?? null }
         break
       } catch (e) {
@@ -210,11 +212,12 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   try {
     const body = await req.json().catch(() => ({})) as {
-      post_id?: string; frames?: Frame[]; aspect_ratio?: string; aspect?: string; session_id?: string; project_id?: string
+      post_id?: string; frames?: Frame[]; aspect_ratio?: string; aspect?: string; session_id?: string; project_id?: string; model?: string
     }
     const frames = Array.isArray(body.frames) ? body.frames : []
     if (!frames.length) return new Response(JSON.stringify({ error: 'no frames' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     const aspect = body.aspect ?? body.aspect_ratio ?? 'square_hd'
+    const requestedModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : (STORYBOARD_IMAGE_MODEL || null)
     const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
 
     const resolvedScope = await resolveCarouselScope(req, supabase, body)
@@ -228,7 +231,7 @@ Deno.serve(async (req) => {
       post_id: scope.postId,
       project_id: scope.projectId,
       session_id: body.session_id ?? null,
-      spec: { frames, aspect, model: STORYBOARD_IMAGE_MODEL },
+      spec: { frames, aspect, ...(requestedModel ? { model: requestedModel } : {}) },
       status: 'processing',
       attempts: 1,
     }).select('id').single()
@@ -242,6 +245,7 @@ Deno.serve(async (req) => {
       scope,
       frames,
       aspect,
+      requestedModel,
     ))
 
     return new Response(JSON.stringify({ job_id: jobId, status: 'processing', total: frames.length }), {

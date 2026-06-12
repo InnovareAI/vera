@@ -32,7 +32,7 @@ import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
 import { hasAiUserEntitlement } from '../_shared/ai-entitlements.ts'
-import { DEFAULT_AI_POLICY, checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError } from '../_shared/ai-policy.ts'
+import { DEFAULT_AI_POLICY, checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError, type ProjectAiPolicy } from '../_shared/ai-policy.ts'
 import { isPlatformMediaProject } from '../_shared/client-media-keys.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { completeText, type TextRuntime } from '../_shared/text-runtime.ts'
@@ -617,8 +617,8 @@ Generation tools:
   makes finishing media attach to the WRONG post, risks timeouts, and overwhelms
   the operator; strictly one-at-a-time keeps every visual pinned to the right
   draft and the work calm.
-  VIDEO COST CONTROL: default video generation to the prototype tier only
-  (hailuo for text-to-video, hailuo-i2v for image-to-video). Do not select
+  VIDEO COST CONTROL: default video generation to the client space's configured
+  prototype tier. Do not select
   Kling, Sora, Veo, Seedance, "hero", or any raw fal model slug for ordinary
   video asks. Those are premium video choices and the backend blocks them unless
   a separate paid premium flow is explicitly enabled. When the operator is still
@@ -657,8 +657,8 @@ Generation tools:
   carousel ask gets EVERY frame generated — NEVER answer it with a single
   generate_image. If they describe five frames, you produce five.
 - generate_video — generates a real video clip (MP4) via Vera's cost-controlled
-  video router. Default models are hailuo for text-to-video and hailuo-i2v for
-  image-to-video. Premium video models like Kling, Sora, Veo, Seedance, and
+  video router. Use the workspace default unless the operator explicitly asks
+  for a different approved model. Premium video models like Kling, Sora, Veo, Seedance, and
   "hero" aliases are not defaults. If the ask is a video POST and no draft
   exists yet, save_draft the caption FIRST, then call this.
 - generate_video_storyboard — produces a structured storyboard, caption, model
@@ -1624,14 +1624,14 @@ const TOOLS = [
   },
   {
     name: 'generate_video',
-    description: 'Generate an actual video clip (MP4) via Vera\'s cost-controlled video router and stream it into the thread. Use only after the operator explicitly asks to render a real clip. Text-to-video defaults to "hailuo"; image-to-video defaults to "hailuo-i2v". Do not choose Kling, Sora, Veo, Seedance, "hero", or raw fal slugs for ordinary requests because those are premium choices and are blocked by default. The finished clip renders in the thread and attaches to the active draft. IMPORTANT: this attaches to an EXISTING draft. If the operator wants a video POST and you have not saved a draft yet, call save_draft for the caption FIRST so the clip has a post card to attach to. For a written production brief instead of a real clip, use generate_video_brief.',
+    description: 'Generate an actual video clip (MP4) via Vera\'s cost-controlled video router and stream it into the thread. Use only after the operator explicitly asks to render a real clip. The backend uses the client space default model unless an approved override is provided. Do not choose Kling, Sora, Veo, Seedance, "hero", or raw fal slugs for ordinary requests because those are premium choices and are blocked by default. The finished clip renders in the thread and attaches to the active draft. IMPORTANT: this attaches to an EXISTING draft. If the operator wants a video POST and you have not saved a draft yet, call save_draft for the caption FIRST so the clip has a post card to attach to. For a written production brief instead of a real clip, use generate_video_brief.',
     input_schema: {
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'What the video should show — subject, motion, camera, mood. Be vivid and concrete; this drives the generation.' },
         image_url: { type: 'string', description: 'Optional. A still image URL to animate (image-to-video). When set, an image-to-video model is used.' },
         aspect_ratio: { type: 'string', enum: ['16:9', '9:16', '1:1'], description: 'Optional. Default 16:9. Use 9:16 for Reels / Shorts / TikTok.' },
-        model: { type: 'string', description: 'Optional engine override. Use "hailuo" for text-to-video prototypes or "hailuo-i2v" when image_url is provided. Premium engines such as Kling, Sora, Veo, and Seedance are blocked unless a separate paid flow is enabled.' },
+        model: { type: 'string', description: 'Optional approved engine override. Omit this to use the client space default. Premium engines such as Kling, Sora, Veo, and Seedance are blocked unless a separate paid flow is enabled.' },
       },
       required: ['prompt'],
     },
@@ -1747,24 +1747,40 @@ const TOOLS = [
   },
 ] as const
 
+type ToolExecutionContext = {
+  orgId: string
+  userId: string | null
+  projectId: string | null
+  supabase: AdminClient
+  supabaseUrl: string
+  serviceKey: string
+  emit: (event: Record<string, unknown>) => void
+  userPrompt?: string | null
+  allowImageGeneration?: boolean
+  allowVideoGeneration?: boolean
+  embeddingRuntime?: EmbeddingRuntime | null
+  textRuntime: TextRuntime
+  aiPolicy: ProjectAiPolicy
+}
+
+function requestedModelOrDefault(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback
+}
+
+function imageModelForTool(ctx: ToolExecutionContext, input: Record<string, unknown>): string {
+  return requestedModelOrDefault(input.model, ctx.aiPolicy.defaultImageModel)
+}
+
+function videoModelForTool(ctx: ToolExecutionContext, input: Record<string, unknown>): string {
+  const fallback = input.image_url ? ctx.aiPolicy.defaultImageVideoModel : ctx.aiPolicy.defaultVideoModel
+  return requestedModelOrDefault(input.model, fallback)
+}
+
 // Tool execution. Each tool returns { result: string for the model, image_url?: string for the UI }.
 async function executeTool(
   name: string,
   input: Record<string, unknown>,
-  ctx: {
-    orgId: string
-    userId: string | null
-    projectId: string | null
-    supabase: AdminClient
-    supabaseUrl: string
-    serviceKey: string
-    emit: (event: Record<string, unknown>) => void
-    userPrompt?: string | null
-    allowImageGeneration?: boolean
-    allowVideoGeneration?: boolean
-    embeddingRuntime?: EmbeddingRuntime | null
-    textRuntime: TextRuntime
-  },
+  ctx: ToolExecutionContext,
 ): Promise<{ result: string; image_url?: string; video_url?: string }> {
   try {
     switch (name) {
@@ -1816,14 +1832,14 @@ async function executeTool(
         } else if (imagePrompt) {
           ctx.emit({ type: 'tool_progress', tool: 'save_draft', status: 'adding a visual…' })
           try {
-            // 'nano-banana' = FAL gemini-flash (~8s). NOT 'nano-banana-pro'
-            // (gemini-3-pro via OpenRouter, 45s+) which hung the whole turn.
+            // Use the client space image default. The image router enforces
+            // approved aliases, client keys, premium policy, and budget.
             // Hard 28s cap so a slow/stuck image never blocks the draft —
             // the copy is already saved + on the card regardless.
             const imgRes = await fetch(`${ctx.supabaseUrl}/functions/v1/generate-image`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
-              body: JSON.stringify({ prompt: imagePrompt, model: 'nano-banana', image_size: 'square_hd', project_id: ctx.projectId, post_id: post.id }),
+              body: JSON.stringify({ prompt: imagePrompt, model: ctx.aiPolicy.defaultImageModel, image_size: 'square_hd', project_id: ctx.projectId, post_id: post.id }),
               signal: AbortSignal.timeout(28000),
             })
             if (imgRes.ok && imgRes.body) {
@@ -2052,10 +2068,10 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           try {
             const fn = imgPrompt ? 'generate-image' : 'generate-video'
             const body = imgPrompt
-              ? { prompt: imgPrompt, model: 'nano-banana', image_size: 'square_hd', project_id: ctx.projectId }
+              ? { prompt: imgPrompt, model: ctx.aiPolicy.defaultImageModel, image_size: 'square_hd', project_id: ctx.projectId }
               : {
                   prompt: vidPrompt,
-                  model: 'hailuo',
+                  model: ctx.aiPolicy.defaultVideoModel,
                   aspect_ratio: '16:9',
                   project_id: ctx.projectId,
                   operator_user_id: ctx.userId,
@@ -2227,10 +2243,10 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         // Bridge progress events so the operator sees the work happening.
         const target = name === 'generate_infographic' ? 'generate-infographic' : 'generate-image'
         const body = name === 'generate_infographic'
-          ? { ...input, project_id: ctx.projectId }
+          ? { ...input, model: imageModelForTool(ctx, input), project_id: ctx.projectId }
           : {
               prompt: input.prompt,
-              model: 'nano-banana',
+              model: imageModelForTool(ctx, input),
               image_size: (input.aspect_ratio as string) ?? 'square_hd',
               quality: 'high',
               project_id: ctx.projectId,
@@ -2334,6 +2350,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
               project_id: ctx.projectId ?? null,
               frames,
               aspect,
+              model: imageModelForTool(ctx, input),
             }),
             signal: AbortSignal.timeout(15000),
           })
@@ -2361,7 +2378,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         const body = {
           action: 'submit',
           prompt: input.prompt as string,
-          model: (input.model as string) ?? (input.image_url ? 'hailuo-i2v' : 'hailuo'),
+          model: videoModelForTool(ctx, input),
           image_url: (input.image_url as string) ?? undefined,
           aspect_ratio: (input.aspect_ratio as string) ?? '16:9',
           project_id: ctx.projectId,
@@ -4403,6 +4420,7 @@ Deno.serve(async (req) => {
               allowVideoGeneration,
               embeddingRuntime,
               textRuntime,
+              aiPolicy,
             },
           })
           fullText = r.fullText
@@ -4513,6 +4531,7 @@ Deno.serve(async (req) => {
                 allowVideoGeneration,
                 embeddingRuntime,
                 textRuntime,
+                aiPolicy,
               })
               if (exec.image_url) {
                 generatedImages.push(exec.image_url)
