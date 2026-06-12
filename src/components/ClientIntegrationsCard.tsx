@@ -576,6 +576,18 @@ type Draft = {
   capabilities: IntegrationCapabilities
 }
 
+type SharedResearchProfile = {
+  unipile_account_id: string | null
+  unipile_health_status: string | null
+  unipile_connected_at: string | null
+  unipile_last_health_check: string | null
+}
+
+function maskAccountId(accountId: string): string {
+  if (accountId.length <= 12) return accountId
+  return `${accountId.slice(0, 6)}...${accountId.slice(-4)}`
+}
+
 function configString(row: ClientIntegration | undefined, key: string): string {
   const value = row?.config?.[key]
   return typeof value === 'string' ? value : ''
@@ -627,12 +639,17 @@ function buildIntegrationConfig(
 export function ClientIntegrationsCard() {
   const { activeProject } = useProject()
   const activeProjectId = activeProject?.id ?? null
+  const activeOrgId = activeProject?.org_id ?? null
   const [rows, setRows] = useState<ClientIntegration[]>([])
   const [loading, setLoading] = useState(false)
+  const [researchProfile, setResearchProfile] = useState<SharedResearchProfile | null>(null)
+  const [loadingResearchProfile, setLoadingResearchProfile] = useState(false)
   const [saving, setSaving] = useState(false)
   const [connectingGoogle, setConnectingGoogle] = useState(false)
   const [connectingMeta, setConnectingMeta] = useState(false)
   const [connectingUnipile, setConnectingUnipile] = useState(false)
+  const [connectingResearchProfile, setConnectingResearchProfile] = useState(false)
+  const [removingResearchProfile, setRemovingResearchProfile] = useState(false)
   const [selectedProvider, setSelectedProvider] = useState<ClientIntegrationProvider>(() => initialProviderFromUrl())
   const selectedTemplate = PROVIDERS.find(p => p.provider === selectedProvider) ?? PROVIDERS[0]
   const rowByProvider = useMemo(() => new Map(rows.map(row => [row.provider, row])), [rows])
@@ -683,6 +700,31 @@ export function ClientIntegrationsCard() {
   }, [activeProjectId])
 
   useEffect(() => {
+    let cancelled = false
+    async function loadResearchProfile() {
+      if (!activeOrgId) {
+        setResearchProfile(null)
+        return
+      }
+      setLoadingResearchProfile(true)
+      const { data, error } = await supabase
+        .from('organizations')
+        .select('unipile_account_id, unipile_health_status, unipile_connected_at, unipile_last_health_check')
+        .eq('id', activeOrgId)
+        .maybeSingle()
+      if (cancelled) return
+      if (error) {
+        setResearchProfile(null)
+      } else {
+        setResearchProfile((data ?? null) as SharedResearchProfile | null)
+      }
+      setLoadingResearchProfile(false)
+    }
+    loadResearchProfile()
+    return () => { cancelled = true }
+  }, [activeOrgId])
+
+  useEffect(() => {
     const url = new URL(window.location.href)
     const googleStatus = url.searchParams.get('google_status')
     const googleDetail = url.searchParams.get('google_detail')
@@ -721,12 +763,16 @@ export function ClientIntegrationsCard() {
     const unipileStatus = url.searchParams.get('unipile_status')
     if (unipileStatus !== 'success' && unipileStatus !== 'error') return
     const requestedProjectId = url.searchParams.get('project_id')
+    const callbackScope = url.searchParams.get('scope')
+    const isResearchConnection = callbackScope === 'research' || !requestedProjectId
     if (requestedProjectId && project.id !== requestedProjectId) return
 
     const cleanUrl = () => {
       url.searchParams.delete('unipile_status')
       url.searchParams.delete('account_id')
       url.searchParams.delete('org_id')
+      url.searchParams.delete('project_id')
+      url.searchParams.delete('scope')
       window.history.replaceState({}, '', url.toString())
     }
 
@@ -754,11 +800,35 @@ export function ClientIntegrationsCard() {
       const { data: authData } = await supabase.auth.getUser()
       const userId = authData.user?.id ?? null
 
-      await supabase.from('organizations').update({
-        unipile_account_id: accountId,
-        unipile_connected_at: connectedAt,
-        unipile_health_status: 'healthy',
-      }).eq('id', project.org_id)
+      if (isResearchConnection) {
+        const { error } = await supabase.from('organizations').update({
+          unipile_account_id: accountId,
+          unipile_connected_at: connectedAt,
+          unipile_last_health_check: connectedAt,
+          unipile_health_status: 'healthy',
+        }).eq('id', project.org_id)
+
+        if (cancelled) return
+        setSaving(false)
+        setConnectingResearchProfile(false)
+
+        if (error) {
+          setMessage({ type: 'err', text: error.message })
+          cleanUrl()
+          return
+        }
+
+        setResearchProfile({
+          unipile_account_id: accountId,
+          unipile_connected_at: connectedAt,
+          unipile_last_health_check: connectedAt,
+          unipile_health_status: 'healthy',
+        })
+        setSelectedProvider('linkedin')
+        setMessage({ type: 'ok', text: 'LinkedIn research profile connected across client spaces.' })
+        cleanUrl()
+        return
+      }
 
       const { data: existingRows, error: lookupError } = await supabase
         .from('client_integrations')
@@ -799,7 +869,7 @@ export function ClientIntegrationsCard() {
         external_ref: {
           ...(existing?.external_ref ?? {}),
           unipile_account_id: accountId,
-          source: 'organizations.unipile_account_id',
+          source: 'client_integrations.external_ref.unipile_account_id',
         },
         health_status: 'healthy' as const,
         health_detail: 'LinkedIn connected through Unipile OAuth Wizard',
@@ -837,7 +907,7 @@ export function ClientIntegrationsCard() {
         return exists ? prev.map(row => row.id === saved.id ? saved : row) : [...prev, saved]
       })
       setDraftState({ key: `linkedin:${saved.id}:${saved.updated_at ?? ''}`, draft: makeDraft(template, saved) })
-      setMessage({ type: 'ok', text: 'LinkedIn connected through Unipile.' })
+      setMessage({ type: 'ok', text: 'LinkedIn publishing connected for this client space.' })
       cleanUrl()
     }
 
@@ -1008,6 +1078,78 @@ export function ClientIntegrationsCard() {
     }
   }
 
+  async function connectResearchProfile() {
+    if (!activeProject) return
+    setConnectingResearchProfile(true)
+    setMessage(null)
+
+    try {
+      const { data, error } = await supabase.auth.getSession()
+      if (error) throw error
+      const token = data.session?.access_token
+      if (!token) throw new Error('Sign in again before connecting LinkedIn.')
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+      if (!supabaseUrl || !anonKey) throw new Error('Supabase connection settings are not configured.')
+
+      const returnUrl = new URL('/settings', window.location.origin)
+      returnUrl.searchParams.set('tab', 'integrations')
+      returnUrl.searchParams.set('provider', 'linkedin')
+      returnUrl.searchParams.set('scope', 'research')
+
+      const response = await fetch(`${supabaseUrl.replace(/\/+$/, '')}/functions/v1/unipile-connect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: anonKey,
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          org_id: activeProject.org_id,
+          return_url: returnUrl.toString(),
+        }),
+      })
+      const body = await response.json().catch(() => ({})) as { auth_url?: string; error?: string }
+      if (!response.ok || !body.auth_url) {
+        throw new Error(body.error ?? `Unipile OAuth returned HTTP ${response.status}`)
+      }
+
+      window.location.assign(body.auth_url)
+    } catch (error) {
+      setConnectingResearchProfile(false)
+      setMessage({ type: 'err', text: error instanceof Error ? error.message : 'LinkedIn research profile connection failed.' })
+    }
+  }
+
+  async function removeResearchProfile() {
+    if (!activeProject || !researchProfile?.unipile_account_id) return
+    if (!confirm('Remove the shared LinkedIn research profile for this workspace? Client publishing integrations are not affected.')) return
+    setRemovingResearchProfile(true)
+    setMessage(null)
+
+    const { error } = await supabase.from('organizations').update({
+      unipile_account_id: null,
+      unipile_connected_at: null,
+      unipile_last_health_check: new Date().toISOString(),
+      unipile_health_status: 'stale',
+    }).eq('id', activeProject.org_id)
+
+    setRemovingResearchProfile(false)
+    if (error) {
+      setMessage({ type: 'err', text: error.message })
+      return
+    }
+
+    setResearchProfile({
+      unipile_account_id: null,
+      unipile_connected_at: null,
+      unipile_last_health_check: new Date().toISOString(),
+      unipile_health_status: 'stale',
+    })
+    setMessage({ type: 'ok', text: 'Shared LinkedIn research profile removed.' })
+  }
+
   async function connectUnipile() {
     if (!activeProject) return
     setConnectingUnipile(true)
@@ -1027,6 +1169,7 @@ export function ClientIntegrationsCard() {
       returnUrl.searchParams.set('tab', 'integrations')
       returnUrl.searchParams.set('provider', 'linkedin')
       returnUrl.searchParams.set('project_id', activeProject.id)
+      returnUrl.searchParams.set('scope', 'client')
 
       const response = await fetch(`${supabaseUrl.replace(/\/+$/, '')}/functions/v1/unipile-connect`, {
         method: 'POST',
@@ -1119,6 +1262,9 @@ export function ClientIntegrationsCard() {
   const StatusIcon = STATUS_META[draft.status].icon
   const SelectedIcon = selectedTemplate.icon
   const selectedLaunch = launchMeta(selectedTemplate)
+  const researchAccountId = researchProfile?.unipile_account_id ?? null
+  const researchConnected = !!researchAccountId
+  const researchHealth = researchProfile?.unipile_health_status ?? 'not connected'
 
   return (
     <section style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', padding: 18 }}>
@@ -1135,6 +1281,75 @@ export function ClientIntegrationsCard() {
           <Metric label="Connected" value={connectedCount} />
           <Metric label="Planned" value={pendingCount} />
           <Metric label="Publish" value={publishCount} />
+        </div>
+      </div>
+
+      <div className="mt-4" style={{ border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', background: 'var(--paper)', padding: 14 }}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-3">
+            <span
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 'var(--radius-md)',
+                background: '#0a66c218',
+                color: '#0a66c2',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Search size={17} />
+            </span>
+            <div className="min-w-0">
+              <p style={{ color: 'var(--ink)', fontSize: 'var(--t-sm)', fontWeight: 750, margin: 0 }}>
+                Shared LinkedIn research profile
+              </p>
+              <p style={{ color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.45, margin: '4px 0 0', maxWidth: 760 }}>
+                This profile is available to Vera for audits, LinkedIn research, business context extraction, and content intelligence across all client spaces in this workspace. It does not grant client publishing access.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <span style={{
+                  ...chipStyle,
+                  color: researchConnected ? '#059669' : '#78716c',
+                  background: researchConnected ? '#05966914' : 'var(--paper)',
+                }}>
+                  {loadingResearchProfile ? 'Checking profile' : researchConnected ? `Connected: ${maskAccountId(researchAccountId)}` : 'Not connected'}
+                </span>
+                <span style={chipStyle}>Health: {researchHealth}</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={connectResearchProfile}
+              disabled={saving || connectingResearchProfile}
+              className="inline-flex items-center gap-2"
+              style={{
+                ...secondaryButtonStyle,
+                color: '#0a66c2',
+                borderColor: '#0a66c2',
+                opacity: saving || connectingResearchProfile ? 0.65 : 1,
+              }}
+            >
+              {connectingResearchProfile ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
+              {researchConnected ? 'Reconnect research profile' : 'Connect research profile'}
+            </button>
+            {researchConnected && (
+              <button
+                type="button"
+                onClick={removeResearchProfile}
+                disabled={removingResearchProfile}
+                className="inline-flex items-center gap-2"
+                style={{ ...secondaryButtonStyle, color: '#dc2626' }}
+              >
+                {removingResearchProfile ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                Remove research profile
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1179,9 +1394,6 @@ export function ClientIntegrationsCard() {
                 onClick={() => {
                   setSelectedProvider(template.provider)
                   setMessage(null)
-                  if (template.provider === 'linkedin') {
-                    void connectUnipile()
-                  }
                 }}
                 className="text-left"
                 style={{

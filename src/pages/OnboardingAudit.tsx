@@ -57,8 +57,14 @@ export default function OnboardingAudit() {
       const unipileStatus = searchParams.get('unipile_status')
       const accountId = searchParams.get('account_id')
       if (unipileStatus === 'success' && accountId) {
+        const connectedAt = new Date().toISOString()
         await supabase.from('organizations')
-          .update({ unipile_account_id: accountId, unipile_connected_at: new Date().toISOString() })
+          .update({
+            unipile_account_id: accountId,
+            unipile_connected_at: connectedAt,
+            unipile_last_health_check: connectedAt,
+            unipile_health_status: 'healthy',
+          })
           .eq('id', orgId)
         navigate(`/linkedin-score/${orgId}`, { replace: true })
         return

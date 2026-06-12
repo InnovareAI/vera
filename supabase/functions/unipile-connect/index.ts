@@ -1,7 +1,7 @@
-// Generate a Unipile hosted-auth URL for LinkedIn. The user clicks the
-// returned URL, completes Unipile's hosted flow, and is redirected back to
-// `return_url?account_id=XXX&status=success&org_id=YYY` — the frontend then
-// PATCHes organizations.unipile_account_id directly.
+// Generate a Unipile hosted-auth URL for LinkedIn, Instagram, or X.
+// If project_id is omitted, the callback attaches the account to the org-level
+// research profile. If project_id is present, the callback attaches it to that
+// client space's publishing integration.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js"
