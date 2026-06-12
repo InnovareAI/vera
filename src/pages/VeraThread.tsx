@@ -143,6 +143,38 @@ const DEFAULT_PROVIDER_CAPABILITIES: ProviderCapabilities = {
 }
 
 const PREMIUM_IMAGE_MODELS = new Set(['ideogram', 'recraft', 'imagen-4', 'gpt-image-2'])
+const TEXT_ESTIMATE_INPUT_TOKENS = 4_500
+const TEXT_ESTIMATE_OUTPUT_TOKENS = 1_200
+const TEXT_PRICE_GUIDES = [
+  { match: ['gemini', 'flash'], label: 'Gemini Flash class', inputPerMillion: 0.10, outputPerMillion: 0.40 },
+  { match: ['haiku'], label: 'Claude Haiku class', inputPerMillion: 1, outputPerMillion: 5 },
+  { match: ['sonnet'], label: 'Claude Sonnet class', inputPerMillion: 3, outputPerMillion: 15 },
+  { match: ['opus'], label: 'Claude Opus class', inputPerMillion: 5, outputPerMillion: 25 },
+]
+const IMAGE_PRICE_GUIDES: Record<string, { label: string; detail: string; priceUsd?: number }> = {
+  'nano-banana': { label: '~$0.039 / image', detail: 'fal Nano Banana text-to-image guide.', priceUsd: 0.039 },
+  'nano-banana-2': { label: '~$0.08 / image', detail: 'fal Nano Banana 2 guide. Higher resolution can cost more.', priceUsd: 0.08 },
+  seedream: { label: '~$0.03 / image', detail: 'fal Seedream normalized image guide.', priceUsd: 0.03 },
+  'seedream-v4.5': { label: '~$0.03 / image', detail: 'Use Seedream as the cheap prototype benchmark until live pricing is normalized.', priceUsd: 0.03 },
+  'qwen-image': { label: '~$0.02 / MP', detail: 'fal Qwen guide, billed by output megapixel.', priceUsd: 0.02 },
+  'z-image-turbo': { label: 'cheap prototype tier', detail: 'Use only after provider pricing is confirmed for the selected endpoint.' },
+  ideogram: { label: 'premium quote required', detail: 'Premium image route. Confirm provider price before generation.' },
+  recraft: { label: 'premium quote required', detail: 'Premium image route. Confirm provider price before generation.' },
+  'imagen-4': { label: 'premium quote required', detail: 'Premium Google image route. Confirm token and resolution cost before generation.' },
+  'gpt-image-2': { label: 'premium token-metered', detail: 'OpenAI Image Gen 2 is premium and token-metered. Do not use as default.' },
+}
+const VIDEO_PRICE_GUIDES: Record<string, { label: string; detail: string; premium?: boolean }> = {
+  hailuo: { label: '~$0.28 / 6s', detail: 'fal Hailuo 2.3 Standard text-to-video guide.' },
+  'hailuo-i2v': { label: '~$0.27 / 6s', detail: 'fal Hailuo 02 Standard image-to-video guide at 768p.' },
+  kling: { label: '~$0.25 to $0.90 / 5 to 10s', detail: 'Kling can climb quickly by tier and duration.', premium: true },
+  seedance: { label: '~$0.26+ / 5s', detail: 'Seedance pricing varies by version, resolution, audio, and endpoint.', premium: true },
+  veo: { label: 'premium quote required', detail: 'Veo-class video should require explicit approval.', premium: true },
+}
+
+type SpendEstimate = {
+  label: string
+  detail: string
+}
 
 function parseClientAiPolicy(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -177,6 +209,62 @@ function modelLabel(value: string | null | undefined) {
     'hailuo-i2v': 'Hailuo image-to-video',
   }
   return labels[value] ?? value
+}
+
+function money(value: number) {
+  if (value <= 0) return '$0'
+  if (value < 0.01) return '<$0.01'
+  if (value < 1) return `$${value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`
+  return `$${value.toFixed(2)}`
+}
+
+function textSpendEstimate(model: string | null | undefined, provider: 'openrouter' | 'anthropic' | 'platform' | 'missing'): SpendEstimate {
+  if (provider === 'missing') {
+    return { label: 'No spend', detail: 'No paid text generation until a client key is added.' }
+  }
+  if (provider === 'platform') {
+    return { label: 'Platform metered', detail: 'Allowed only for approved InnovareAI workspaces.' }
+  }
+  const raw = (model ?? '').toLowerCase()
+  const guide = TEXT_PRICE_GUIDES.find(item => item.match.some(part => raw.includes(part)))
+  if (!guide) {
+    return {
+      label: provider === 'openrouter' ? 'OpenRouter quote' : 'Anthropic quote',
+      detail: 'Set a default model to show a per-draft estimate before generation.',
+    }
+  }
+  const estimate = (TEXT_ESTIMATE_INPUT_TOKENS / 1_000_000) * guide.inputPerMillion
+    + (TEXT_ESTIMATE_OUTPUT_TOKENS / 1_000_000) * guide.outputPerMillion
+  return {
+    label: `${money(estimate)} / draft guide`,
+    detail: `${guide.label}, based on ${TEXT_ESTIMATE_INPUT_TOKENS.toLocaleString()} input and ${TEXT_ESTIMATE_OUTPUT_TOKENS.toLocaleString()} output tokens. Actual provider markup and context size vary.`,
+  }
+}
+
+function imageSpendEstimate(model: string, enabled: boolean, ready: boolean, premium: boolean): SpendEstimate {
+  if (!enabled) return { label: 'No spend', detail: 'Image generation is disabled for this client space.' }
+  if (!ready) return { label: 'No spend', detail: 'VERA will keep this as a prompt or production brief.' }
+  const guide = IMAGE_PRICE_GUIDES[model]
+  if (guide) return { label: guide.label, detail: guide.detail }
+  return {
+    label: premium ? 'premium quote required' : 'provider quote required',
+    detail: 'This model needs normalized provider pricing before VERA can show a numeric estimate.',
+  }
+}
+
+function videoSpendEstimate(model: string, ready: boolean, premium: boolean): SpendEstimate {
+  if (!ready) return { label: 'No spend', detail: 'Storyboard and prompt only until video is explicitly enabled.' }
+  const guide = VIDEO_PRICE_GUIDES[model]
+  if (guide) {
+    return {
+      label: guide.label,
+      detail: guide.premium || premium ? `${guide.detail} Require approval before render.` : guide.detail,
+    }
+  }
+  return {
+    label: premium ? 'premium quote required' : 'provider quote required',
+    detail: 'Video price depends on model, duration, resolution, audio, and endpoint.',
+  }
 }
 
 function extension(name: string) {
@@ -1929,6 +2017,7 @@ type ModelRouteRecommendation = {
   label: string
   status: string
   cost: string
+  estimate: SpendEstimate
   body: string
   tone: 'success' | 'warn' | 'danger' | 'info'
 }
@@ -1941,6 +2030,13 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
   const videoModel = modelLabel(capabilities.defaultVideoModel)
   const imageVideoModel = modelLabel(capabilities.defaultImageVideoModel)
   const imagePremium = PREMIUM_IMAGE_MODELS.has(capabilities.defaultImageModel)
+  const textProvider = !capabilities.textReady
+    ? 'missing'
+    : capabilities.hasOpenRouter
+      ? 'openrouter'
+      : capabilities.hasAnthropic
+        ? 'anthropic'
+        : 'platform'
 
   const text = !capabilities.textReady
     ? {
@@ -1948,6 +2044,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
         label: 'Text',
         status: 'Missing client key',
         cost: 'No spend until key is added',
+        estimate: textSpendEstimate(capabilities.defaultTextModel, 'missing'),
         body: 'Add client OpenRouter or Anthropic. Do not fall back to platform text spend for client work.',
         tone: 'danger' as const,
       }
@@ -1957,6 +2054,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
           label: 'Text',
           status: 'Client OpenRouter',
           cost: 'Low variable token cost',
+          estimate: textSpendEstimate(capabilities.defaultTextModel, textProvider),
           body: `Use the client OpenRouter key. Default: ${textModel}.`,
           tone: 'success' as const,
         }
@@ -1966,6 +2064,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
             label: 'Text',
             status: 'Client Anthropic',
             cost: 'Medium token cost',
+            estimate: textSpendEstimate(capabilities.defaultTextModel, textProvider),
             body: `Use the client Anthropic key. Default: ${textModel || 'provider default'}. Add OpenRouter for higher-volume cost control.`,
             tone: 'success' as const,
           }
@@ -1974,6 +2073,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
             label: 'Text',
             status: 'Platform approved',
             cost: 'Platform spend',
+            estimate: textSpendEstimate(capabilities.defaultTextModel, 'platform'),
             body: 'Platform text is only acceptable inside approved InnovareAI workspaces.',
             tone: 'warn' as const,
           }
@@ -1984,6 +2084,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
         label: 'Image',
         status: 'Disabled by policy',
         cost: 'No image spend',
+        estimate: imageSpendEstimate(capabilities.defaultImageModel, false, false, imagePremium),
         body: 'Image and carousel rendering are disabled for this client space.',
         tone: 'info' as const,
       }
@@ -1993,6 +2094,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
           label: 'Image',
           status: 'Prompt only',
           cost: 'No image spend',
+          estimate: imageSpendEstimate(capabilities.defaultImageModel, true, false, imagePremium),
           body: 'Keep image work as a prompt, storyboard, or production brief until a client key or entitlement is available.',
           tone: 'danger' as const,
         }
@@ -2002,6 +2104,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
             label: 'Image',
             status: capabilities.premiumMediaEnabled ? 'Premium selected' : 'Premium default needs review',
             cost: 'Premium image spend',
+            estimate: imageSpendEstimate(capabilities.defaultImageModel, true, true, true),
             body: `${imageModel} is a premium default. Use only when the client budget and production need justify it.`,
             tone: 'warn' as const,
           }
@@ -2010,6 +2113,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
             label: 'Image',
             status: 'Standard prototype tier',
             cost: 'Standard image spend',
+            estimate: imageSpendEstimate(capabilities.defaultImageModel, true, true, false),
             body: `Default: ${imageModel}. Use Nano Banana or Seedream-style routes before premium image models.`,
             tone: 'success' as const,
           }
@@ -2020,6 +2124,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
         label: 'Video',
         status: 'Storyboard only',
         cost: 'No video spend',
+        estimate: videoSpendEstimate(capabilities.defaultVideoModel, false, false),
         body: 'Real renders require a client-owned FAL key or an approved platform video entitlement.',
         tone: 'danger' as const,
       }
@@ -2028,6 +2133,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
         label: 'Video',
         status: capabilities.premiumMediaEnabled ? 'Render approved' : 'Standard render',
         cost: capabilities.premiumMediaEnabled ? 'Premium video risk' : 'Standard video spend',
+        estimate: videoSpendEstimate(capabilities.defaultVideoModel, true, capabilities.premiumMediaEnabled),
         body: `Storyboard first. Text-to-video: ${videoModel}. Image-to-video: ${imageVideoModel}.`,
         tone: capabilities.premiumMediaEnabled ? 'warn' as const : 'success' as const,
       }
@@ -2142,6 +2248,10 @@ function ModelRoutingPanel({ capabilities, onAddKey }: { capabilities: ProviderC
               </div>
               <div style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 7px', borderRadius: radius.pill, background: color.paper2, border: `1px solid ${color.line}`, color: color.ghost, fontSize: t.size.micro, fontWeight: t.weight.medium, marginBottom: 6 }}>
                 {route.cost}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 6 }}>
+                <span style={{ color: color.ink, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>{route.estimate.label}</span>
+                <span style={{ color: color.ghost, fontSize: t.size.micro, lineHeight: 1.35 }}>{route.estimate.detail}</span>
               </div>
               <div style={{ color: color.ink2, fontSize: t.size.micro, lineHeight: 1.45 }}>
                 {route.body}
