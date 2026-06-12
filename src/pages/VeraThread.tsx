@@ -32,14 +32,16 @@ import {
   demandChannelsFromContext,
 } from '../lib/demandModel'
 import {
-  MODEL_PRICE_GUIDE_LAST_REVIEWED,
   imageSpendEstimate,
   isPremiumImageModel,
+  latestPricingReviewDate,
   modelLabel,
   textSpendEstimate,
   videoSpendEstimate,
+  type ModelPricingGuide,
   type SpendEstimate,
 } from '../lib/modelEconomics'
+import { useModelPricingCatalog } from '../lib/useModelPricingCatalog'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -642,6 +644,7 @@ export default function VeraThread() {
   }, [activeProject?.id, sessionId])
 
   const [providerCapabilities, setProviderCapabilities] = useState<ProviderCapabilities>(DEFAULT_PROVIDER_CAPABILITIES)
+  const { catalog: pricingCatalog } = useModelPricingCatalog()
   const demandPlan = useMemo(() => {
     const parsed = parseProjectInstructions(activeProject?.instructions ?? '')
     return buildDemandPlanSnapshot(parsed.businessContext)
@@ -1622,6 +1625,7 @@ export default function VeraThread() {
             onOpenBrain={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/brain`) }}
             providerCapabilities={providerCapabilities}
             onAddKey={() => activeProject?.slug ? navigate(`/p/${activeProject.slug}/keys`) : navigate('/clients')}
+            pricingCatalog={pricingCatalog}
             demandPlan={demandPlan}
             composer={renderComposer('idle')} />
         ) : (
@@ -1923,7 +1927,7 @@ type ModelRouteRecommendation = {
   tone: 'success' | 'warn' | 'danger' | 'info'
 }
 
-function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRouteRecommendation[] {
+function modelRouteRecommendations(capabilities: ProviderCapabilities, pricingCatalog?: ModelPricingGuide[]): ModelRouteRecommendation[] {
   const textModel = capabilities.defaultTextModel
     ? modelLabel(capabilities.defaultTextModel)
     : 'provider default, prefer Gemini-class low-cost routing when quality is sufficient'
@@ -1945,7 +1949,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
         label: 'Text',
         status: 'Missing client key',
         cost: 'No spend until key is added',
-        estimate: textSpendEstimate(capabilities.defaultTextModel, 'missing'),
+        estimate: textSpendEstimate(capabilities.defaultTextModel, 'missing', pricingCatalog),
         body: 'Add client OpenRouter or Anthropic. Do not fall back to platform text spend for client work.',
         tone: 'danger' as const,
       }
@@ -1955,7 +1959,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
           label: 'Text',
           status: 'Client OpenRouter',
           cost: 'Low variable token cost',
-          estimate: textSpendEstimate(capabilities.defaultTextModel, textProvider),
+          estimate: textSpendEstimate(capabilities.defaultTextModel, textProvider, pricingCatalog),
           body: `Use the client OpenRouter key. Default: ${textModel}.`,
           tone: 'success' as const,
         }
@@ -1965,7 +1969,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
             label: 'Text',
             status: 'Client Anthropic',
             cost: 'Medium token cost',
-            estimate: textSpendEstimate(capabilities.defaultTextModel, textProvider),
+            estimate: textSpendEstimate(capabilities.defaultTextModel, textProvider, pricingCatalog),
             body: `Use the client Anthropic key. Default: ${textModel || 'provider default'}. Add OpenRouter for higher-volume cost control.`,
             tone: 'success' as const,
           }
@@ -1974,7 +1978,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
             label: 'Text',
             status: 'Platform approved',
             cost: 'Platform spend',
-            estimate: textSpendEstimate(capabilities.defaultTextModel, 'platform'),
+            estimate: textSpendEstimate(capabilities.defaultTextModel, 'platform', pricingCatalog),
             body: 'Platform text is only acceptable inside approved InnovareAI workspaces.',
             tone: 'warn' as const,
           }
@@ -1985,7 +1989,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
         label: 'Image',
         status: 'Disabled by policy',
         cost: 'No image spend',
-        estimate: imageSpendEstimate(capabilities.defaultImageModel, false, false, imagePremium),
+        estimate: imageSpendEstimate(capabilities.defaultImageModel, false, false, imagePremium, pricingCatalog),
         body: 'Image and carousel rendering are disabled for this client space.',
         tone: 'info' as const,
       }
@@ -1995,7 +1999,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
           label: 'Image',
           status: 'Prompt only',
           cost: 'No image spend',
-          estimate: imageSpendEstimate(capabilities.defaultImageModel, true, false, imagePremium),
+          estimate: imageSpendEstimate(capabilities.defaultImageModel, true, false, imagePremium, pricingCatalog),
           body: 'Keep image work as a prompt, storyboard, or production brief until a client key or entitlement is available.',
           tone: 'danger' as const,
         }
@@ -2005,7 +2009,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
             label: 'Image',
             status: capabilities.premiumMediaEnabled ? 'Premium selected' : 'Premium default needs review',
             cost: 'Premium image spend',
-            estimate: imageSpendEstimate(capabilities.defaultImageModel, true, true, true),
+            estimate: imageSpendEstimate(capabilities.defaultImageModel, true, true, true, pricingCatalog),
             body: `${imageModel} is a premium default. Use only when the client budget and production need justify it.`,
             tone: 'warn' as const,
           }
@@ -2014,7 +2018,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
             label: 'Image',
             status: 'Standard prototype tier',
             cost: 'Standard image spend',
-            estimate: imageSpendEstimate(capabilities.defaultImageModel, true, true, false),
+            estimate: imageSpendEstimate(capabilities.defaultImageModel, true, true, false, pricingCatalog),
             body: `Default: ${imageModel}. Use Nano Banana or Seedream-style routes before premium image models.`,
             tone: 'success' as const,
           }
@@ -2025,7 +2029,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
         label: 'Video',
         status: 'Storyboard only',
         cost: 'No video spend',
-        estimate: videoSpendEstimate(capabilities.defaultVideoModel, false, false),
+        estimate: videoSpendEstimate(capabilities.defaultVideoModel, false, false, pricingCatalog),
         body: 'Real renders require a client-owned FAL key or an approved platform video entitlement.',
         tone: 'danger' as const,
       }
@@ -2034,7 +2038,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
         label: 'Video',
         status: capabilities.premiumMediaEnabled ? 'Render approved' : 'Standard render',
         cost: capabilities.premiumMediaEnabled ? 'Premium video risk' : 'Standard video spend',
-        estimate: videoSpendEstimate(capabilities.defaultVideoModel, true, capabilities.premiumMediaEnabled),
+        estimate: videoSpendEstimate(capabilities.defaultVideoModel, true, capabilities.premiumMediaEnabled, pricingCatalog),
         body: `Storyboard first. Text-to-video: ${videoModel}. Image-to-video: ${imageVideoModel}.`,
         tone: capabilities.premiumMediaEnabled ? 'warn' as const : 'success' as const,
       }
@@ -2107,8 +2111,9 @@ function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: Pr
   )
 }
 
-function ModelRoutingPanel({ capabilities, onAddKey }: { capabilities: ProviderCapabilities; onAddKey?: () => void }) {
-  const routes = modelRouteRecommendations(capabilities)
+function ModelRoutingPanel({ capabilities, onAddKey, pricingCatalog }: { capabilities: ProviderCapabilities; onAddKey?: () => void; pricingCatalog?: ModelPricingGuide[] }) {
+  const routes = modelRouteRecommendations(capabilities, pricingCatalog)
+  const reviewedOn = latestPricingReviewDate(pricingCatalog)
   const budget = capabilities.monthlyBudgetUsd
     ? `Monthly cap: $${capabilities.monthlyBudgetUsd.toFixed(0)}`
     : 'No monthly cap set'
@@ -2124,7 +2129,7 @@ function ModelRoutingPanel({ capabilities, onAddKey }: { capabilities: ProviderC
           <div style={{ color: color.ghost, fontSize: t.size.cap, lineHeight: 1.45, marginTop: 3 }}>
             Client keys first. Standard models by default. Premium and platform spend need explicit approval.
             <br />
-            Pricing guide reviewed {MODEL_PRICE_GUIDE_LAST_REVIEWED}. Estimates are planning guides.
+            Pricing guide reviewed {reviewedOn}. Estimates are planning guides.
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
@@ -2167,7 +2172,7 @@ function ModelRoutingPanel({ capabilities, onAddKey }: { capabilities: ProviderC
   )
 }
 
-function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain, providerCapabilities, onAddKey, demandPlan, composer }: {
+function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain, providerCapabilities, onAddKey, pricingCatalog, demandPlan, composer }: {
   onRun: (prompt: string) => void
   observations: { id: string; title: string; proposed_action: string | null }[]
   actions: LaunchAction[]
@@ -2177,6 +2182,7 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
   onOpenBrain: () => void
   providerCapabilities: ProviderCapabilities
   onAddKey?: () => void
+  pricingCatalog?: ModelPricingGuide[]
   demandPlan: DemandPlanSnapshot
   composer: ReactNode
 }) {
@@ -2202,7 +2208,7 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
       {composer}
 
       {providerCapabilities.loaded && (
-        <ModelRoutingPanel capabilities={providerCapabilities} onAddKey={onAddKey} />
+        <ModelRoutingPanel capabilities={providerCapabilities} onAddKey={onAddKey} pricingCatalog={pricingCatalog} />
       )}
 
       <DemandPlanPanel plan={demandPlan} projectName={projectName} onRun={onRun} onOpenBrain={onOpenBrain} />

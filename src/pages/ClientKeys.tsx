@@ -11,15 +11,17 @@ import { useProject } from '../lib/projectContext'
 import {
   IMAGE_MODEL_OPTIONS,
   IMAGE_VIDEO_MODEL_OPTIONS,
-  MODEL_PRICE_GUIDE_LAST_REVIEWED,
   VIDEO_MODEL_OPTIONS,
   imageSpendEstimate,
   isPremiumImageModel,
+  latestPricingReviewDate,
   modelLabel,
   textSpendEstimate,
   videoSpendEstimate,
+  type ModelPricingGuide,
   type SpendEstimate,
 } from '../lib/modelEconomics'
+import { useModelPricingCatalog } from '../lib/useModelPricingCatalog'
 import { PageHeader, SectionLabel, Button, Field, Input, Select, Textarea, color, space, type as t, radius, useToast } from '../design'
 
 type ClientApiKey = {
@@ -100,6 +102,7 @@ export default function ClientKeys() {
     default_image_video_model: DEFAULT_AI_POLICY.default_image_video_model,
   })
   const [policySaving, setPolicySaving] = useState(false)
+  const { catalog: pricingCatalog } = useModelPricingCatalog()
 
   const load = useCallback(async () => {
     if (!activeProject?.id) { setKeys([]); setLoading(false); return }
@@ -304,7 +307,8 @@ export default function ClientKeys() {
     },
   ]
   const spendGuard = buildSpendGuard(aiPolicy, activeProviders, usageSummary)
-  const routingRows = buildRoutingRows(aiPolicy, activeProviders)
+  const routingRows = buildRoutingRows(aiPolicy, activeProviders, pricingCatalog)
+  const pricingReviewDate = latestPricingReviewDate(pricingCatalog)
 
   const card: React.CSSProperties = { background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5] }
   const statusColor = (s: string) => s === 'active' ? color.success : s === 'invalid' ? color.danger : color.ghost
@@ -341,7 +345,7 @@ export default function ClientKeys() {
           </div>
           <p style={{ fontSize: t.size.micro, color: color.faint, margin: `${space[4]} 0 0`, lineHeight: 1.5 }}>
             Vera should default to cheap and fast prototype paths. Premium media stays locked unless this client has a cap and an explicit policy toggle.{' '}
-            Pricing guide reviewed {MODEL_PRICE_GUIDE_LAST_REVIEWED}. Estimates are planning guides and final billing comes from provider usage logs.
+            Pricing guide reviewed {pricingReviewDate}. Estimates are planning guides and final billing comes from provider usage logs.
           </p>
         </div>
       </section>
@@ -676,7 +680,7 @@ function buildSpendGuard(aiPolicy: AiPolicy, activeProviders: Set<string>, usage
   }
 }
 
-function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>): RoutingRow[] {
+function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>, pricingCatalog?: ModelPricingGuide[]): RoutingRow[] {
   const hasOpenRouter = activeProviders.has('openrouter')
   const hasAnthropic = activeProviders.has('anthropic')
   const hasOpenAI = activeProviders.has('openai')
@@ -690,7 +694,7 @@ function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>): Rou
       icon: Bot,
       label: 'Text generation',
       status: hasClientText ? 'Client' : 'Missing',
-      estimate: textSpendEstimate(aiPolicy.default_text_model, !hasClientText ? 'missing' : hasOpenRouter ? 'openrouter' : 'anthropic'),
+      estimate: textSpendEstimate(aiPolicy.default_text_model, !hasClientText ? 'missing' : hasOpenRouter ? 'openrouter' : 'anthropic', pricingCatalog),
       detail: hasOpenRouter
         ? `Runs through the client OpenRouter key${aiPolicy.default_text_model ? ` using ${aiPolicy.default_text_model}` : ' with provider default routing'}.`
         : hasAnthropic
@@ -702,7 +706,7 @@ function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>): Rou
       icon: ImagePlus,
       label: 'Image generation',
       status: !aiPolicy.images_enabled ? 'Locked' : hasClientMedia ? 'Client' : 'Missing',
-      estimate: imageSpendEstimate(aiPolicy.default_image_model, aiPolicy.images_enabled, hasClientMedia, imageIsPremium),
+      estimate: imageSpendEstimate(aiPolicy.default_image_model, aiPolicy.images_enabled, hasClientMedia, imageIsPremium, pricingCatalog),
       detail: !aiPolicy.images_enabled
         ? 'Disabled by policy. Vera should provide prompts or briefs only.'
         : hasOpenRouter
@@ -727,7 +731,7 @@ function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>): Rou
       icon: Clapperboard,
       label: 'Video rendering',
       status: aiPolicy.standard_video_enabled && hasClientVideo ? 'Client' : 'Storyboard',
-      estimate: videoSpendEstimate(aiPolicy.default_video_model, aiPolicy.standard_video_enabled && hasClientVideo, aiPolicy.premium_media_enabled),
+      estimate: videoSpendEstimate(aiPolicy.default_video_model, aiPolicy.standard_video_enabled && hasClientVideo, aiPolicy.premium_media_enabled, pricingCatalog),
       detail: aiPolicy.standard_video_enabled
         ? hasClientVideo ? `${modelLabel(aiPolicy.default_video_model)} and ${modelLabel(aiPolicy.default_image_video_model)} run only through the client FAL key.` : 'Policy allows standard video, but Vera still needs a client FAL key.'
         : 'Real clips are locked. Vera should create storyboards, prompts, and production briefs.',
