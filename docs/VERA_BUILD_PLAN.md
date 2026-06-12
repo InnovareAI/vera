@@ -192,10 +192,18 @@ Current app labels are allowed to be pragmatic:
 
 ## Next Product Slice
 
-The next high-leverage slice is the model recommendation and entitlement layer:
+The active high-leverage slice is the model recommendation and entitlement layer:
 
 - Text: recommend Gemini or other low-cost capable models through the client's configured provider where available.
 - Image: cheap prototype default, premium only when selected.
 - Video: storyboard first, gated by explicit video entitlement.
 - UI: show why VERA picked a model and what it will cost before generation.
 
+Current state:
+
+- Command shows text, image, and video routing before generation.
+- Command shows budget classes: no spend, low token cost, standard image, premium image, storyboard-only, standard video, or premium video risk.
+
+Next step:
+
+- Replace budget classes with exact provider-aware estimates once provider pricing metadata and usage units are normalized.

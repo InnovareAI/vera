@@ -1928,6 +1928,7 @@ type ModelRouteRecommendation = {
   icon: React.ElementType
   label: string
   status: string
+  cost: string
   body: string
   tone: 'success' | 'warn' | 'danger' | 'info'
 }
@@ -1946,6 +1947,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
         icon: KeyRound,
         label: 'Text',
         status: 'Missing client key',
+        cost: 'No spend until key is added',
         body: 'Add client OpenRouter or Anthropic. Do not fall back to platform text spend for client work.',
         tone: 'danger' as const,
       }
@@ -1954,6 +1956,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
           icon: KeyRound,
           label: 'Text',
           status: 'Client OpenRouter',
+          cost: 'Low variable token cost',
           body: `Use the client OpenRouter key. Default: ${textModel}.`,
           tone: 'success' as const,
         }
@@ -1962,6 +1965,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
             icon: KeyRound,
             label: 'Text',
             status: 'Client Anthropic',
+            cost: 'Medium token cost',
             body: `Use the client Anthropic key. Default: ${textModel || 'provider default'}. Add OpenRouter for higher-volume cost control.`,
             tone: 'success' as const,
           }
@@ -1969,6 +1973,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
             icon: KeyRound,
             label: 'Text',
             status: 'Platform approved',
+            cost: 'Platform spend',
             body: 'Platform text is only acceptable inside approved InnovareAI workspaces.',
             tone: 'warn' as const,
           }
@@ -1978,6 +1983,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
         icon: ImagePlus,
         label: 'Image',
         status: 'Disabled by policy',
+        cost: 'No image spend',
         body: 'Image and carousel rendering are disabled for this client space.',
         tone: 'info' as const,
       }
@@ -1986,6 +1992,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
           icon: ImagePlus,
           label: 'Image',
           status: 'Prompt only',
+          cost: 'No image spend',
           body: 'Keep image work as a prompt, storyboard, or production brief until a client key or entitlement is available.',
           tone: 'danger' as const,
         }
@@ -1994,6 +2001,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
             icon: ImagePlus,
             label: 'Image',
             status: capabilities.premiumMediaEnabled ? 'Premium selected' : 'Premium default needs review',
+            cost: 'Premium image spend',
             body: `${imageModel} is a premium default. Use only when the client budget and production need justify it.`,
             tone: 'warn' as const,
           }
@@ -2001,6 +2009,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
             icon: ImagePlus,
             label: 'Image',
             status: 'Standard prototype tier',
+            cost: 'Standard image spend',
             body: `Default: ${imageModel}. Use Nano Banana or Seedream-style routes before premium image models.`,
             tone: 'success' as const,
           }
@@ -2010,6 +2019,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
         icon: Clapperboard,
         label: 'Video',
         status: 'Storyboard only',
+        cost: 'No video spend',
         body: 'Real renders require a client-owned FAL key or an approved platform video entitlement.',
         tone: 'danger' as const,
       }
@@ -2017,6 +2027,7 @@ function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRou
         icon: Clapperboard,
         label: 'Video',
         status: capabilities.premiumMediaEnabled ? 'Render approved' : 'Standard render',
+        cost: capabilities.premiumMediaEnabled ? 'Premium video risk' : 'Standard video spend',
         body: `Storyboard first. Text-to-video: ${videoModel}. Image-to-video: ${imageVideoModel}.`,
         tone: capabilities.premiumMediaEnabled ? 'warn' as const : 'success' as const,
       }
@@ -2128,6 +2139,9 @@ function ModelRoutingPanel({ capabilities, onAddKey }: { capabilities: ProviderC
                 <Icon size={13} style={{ color: tone.fg, flexShrink: 0 }} />
                 <span style={{ color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold }}>{route.label}</span>
                 <span style={{ marginLeft: 'auto', color: tone.fg, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>{route.status}</span>
+              </div>
+              <div style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 7px', borderRadius: radius.pill, background: color.paper2, border: `1px solid ${color.line}`, color: color.ghost, fontSize: t.size.micro, fontWeight: t.weight.medium, marginBottom: 6 }}>
+                {route.cost}
               </div>
               <div style={{ color: color.ink2, fontSize: t.size.micro, lineHeight: 1.45 }}>
                 {route.body}
