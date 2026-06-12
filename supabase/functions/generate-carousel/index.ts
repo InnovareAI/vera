@@ -1,7 +1,7 @@
 // Background carousel generation — runs server-side so it isn't bound by the
 // chat SSE turn (which gets force-killed when it batches image renders).
 //
-// POST { post_id, frames:[{image_prompt, text?}], aspect?, session_id?, project_id? }
+// POST { post_id, frames:[{image_prompt, text?}], aspect?, session_id?, project_id?, platform_operator_email? }
 //   → 200 { job_id } IMMEDIATELY, then renders every frame in the background via
 //     EdgeRuntime.waitUntil(): each frame is its own short call to generate-image
 //     (sequential, to keep the resource spike low), uploaded to storage, then the
@@ -53,11 +53,25 @@ async function uploadToStorage(supabase: AdminClient, orgId: string, source: str
 
 // Render one frame through the existing generate-image function (SSE), returning
 // a stored public URL.
-async function renderFrame(supabase: AdminClient, orgId: string, prompt: string, aspect: string, projectId: string | null): Promise<string> {
+async function renderFrame(
+  supabase: AdminClient,
+  orgId: string,
+  prompt: string,
+  aspect: string,
+  projectId: string | null,
+  platformOperatorEmail: string | null,
+): Promise<string> {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-image`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_KEY}`, 'apikey': SERVICE_KEY },
-    body: JSON.stringify({ prompt, model: 'seedream-4.5', image_size: aspect, quality: 'high', project_id: projectId }),
+    body: JSON.stringify({
+      prompt,
+      model: 'seedream-4.5',
+      image_size: aspect,
+      quality: 'high',
+      project_id: projectId,
+      platform_operator_email: platformOperatorEmail ?? undefined,
+    }),
   })
   if (!res.ok || !res.body) throw new Error(`generate-image HTTP ${res.status}`)
   const reader = res.body.getReader()
@@ -85,7 +99,15 @@ async function renderFrame(supabase: AdminClient, orgId: string, prompt: string,
   try { return await uploadToStorage(supabase, orgId, url) } catch { return url }
 }
 
-async function processJob(supabase: AdminClient, jobId: string, postId: string | null, frames: Frame[], aspect: string, projectId: string | null) {
+async function processJob(
+  supabase: AdminClient,
+  jobId: string,
+  postId: string | null,
+  frames: Frame[],
+  aspect: string,
+  projectId: string | null,
+  platformOperatorEmail: string | null,
+) {
   // Find the post's org for storage pathing.
   let orgId = ''
   if (postId) {
@@ -117,7 +139,7 @@ async function processJob(supabase: AdminClient, jobId: string, postId: string |
   await Promise.all(frames.map(async (f, i) => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const url = await renderFrame(supabase, orgId, f.image_prompt ?? '', aspect, projectId)
+        const url = await renderFrame(supabase, orgId, f.image_prompt ?? '', aspect, projectId, platformOperatorEmail)
         slots[i] = { url, text: f.text ?? null }
         break
       } catch (e) {
@@ -141,7 +163,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   try {
     const body = await req.json().catch(() => ({})) as {
-      post_id?: string; frames?: Frame[]; aspect_ratio?: string; aspect?: string; session_id?: string; project_id?: string
+      post_id?: string; frames?: Frame[]; aspect_ratio?: string; aspect?: string; session_id?: string; project_id?: string; platform_operator_email?: string
     }
     const frames = Array.isArray(body.frames) ? body.frames : []
     if (!frames.length) return new Response(JSON.stringify({ error: 'no frames' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
@@ -169,7 +191,15 @@ Deno.serve(async (req) => {
     const jobId = (job as { id: string }).id
 
     // @ts-expect-error EdgeRuntime is provided by the supabase edge runtime
-    EdgeRuntime.waitUntil(processJob(supabase, jobId, body.post_id ?? null, frames, aspect, body.project_id ?? null))
+    EdgeRuntime.waitUntil(processJob(
+      supabase,
+      jobId,
+      body.post_id ?? null,
+      frames,
+      aspect,
+      body.project_id ?? null,
+      normalizeEmail(body.platform_operator_email),
+    ))
 
     return new Response(JSON.stringify({ job_id: jobId, status: 'processing', total: frames.length }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -178,3 +208,9 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
   }
 })
+
+function normalizeEmail(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const email = value.trim().toLowerCase()
+  return email.includes('@') ? email : null
+}

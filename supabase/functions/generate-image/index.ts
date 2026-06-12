@@ -14,7 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember } from "../_shared/auth.ts"
-import { isPlatformFalEnabled, isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { isPlatformFalEnabled, isPlatformMediaProject, isPlatformVideoOperatorEmail, loadClientApiKey } from "../_shared/client-media-keys.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -80,15 +80,12 @@ const OPENAI_MODELS: Record<string, string> = {
 }
 
 // OpenRouter-routed non-OpenAI models. Useful for newer Google models not
-// yet on FAL (Nano Banana 2/Pro). FAL stays preferred for Gemini 2.5
-// because it's already plumbed and the OR account currently has provider-
-// routing restrictions on some image models.
+// yet on FAL (Nano Banana 2/Pro). Keep Seedream off this list: OpenRouter
+// currently rejects the requested image modality for that alias, so Seedream
+// must route through FAL only.
 const OR_MODELS: Record<string, string> = {
   'nano-banana-2':     'google/gemini-3.1-flash-image-preview',
   'nano-banana-pro':   'google/gemini-3-pro-image-preview',
-  'seedream':          'bytedance-seed/seedream-4.5',
-  'seedream-4.5':      'bytedance-seed/seedream-4.5',
-  'seedream-v4.5':     'bytedance-seed/seedream-4.5',
 }
 // Nano Banana (Gemini 2.5 Flash Image) on OpenRouter. Kept out of OR_MODELS so
 // the plain "nano-banana" alias still routes to FAL when a FAL key is present.
@@ -99,7 +96,7 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return jsonError('Method not allowed', 405)
   const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
 
-  const { prompt, model = DEFAULT_IMAGE_MODEL, image_size = 'square_hd', num_images = 1, quality = 'high', project_id } = await req.json().catch(() => ({}))
+  const { prompt, model = DEFAULT_IMAGE_MODEL, image_size = 'square_hd', num_images = 1, quality = 'high', project_id, platform_operator_email } = await req.json().catch(() => ({}))
   if (!prompt) return jsonError('prompt is required', 400)
   const projectId = typeof project_id === 'string' ? project_id.trim() : ''
   if (!projectId) return jsonError('project_id is required for image generation', 400)
@@ -108,6 +105,9 @@ Deno.serve(async (req) => {
   if (!access.ok) return access.response
   const mediaKeys = await resolveMediaKeys(supabase, projectId, access.orgId)
   if (!mediaKeys.ok) return mediaKeys.response
+  const operatorEmail = access.service ? normalizeEmail(platform_operator_email) : access.email
+  const platformOperatorFalAvailable = isPlatformVideoOperatorEmail(operatorEmail) && !!FAL_API_KEY
+  const platformFalAvailable = platformOperatorFalAvailable || (mediaKeys.isPlatformMediaProject && isPlatformFalEnabled() && !!FAL_API_KEY)
 
   // Route by alias: explicit OpenAI premium > supported OpenRouter image
   // models > FAL. A client OpenRouter key is used only for aliases we know
@@ -119,14 +119,14 @@ Deno.serve(async (req) => {
   const useOpenAI = model in OPENAI_MODELS
   const useOR = !useOpenAI && (
     (!!mediaKeys.openRouterKey && supportsOpenRouter) ||
-    (!mediaKeys.falKey && platformOpenRouterAvailable && supportsOpenRouter)
+    (!mediaKeys.falKey && !platformFalAvailable && platformOpenRouterAvailable && supportsOpenRouter)
   )
 
   if (!mediaKeys.isPlatformMediaProject) {
     const hasClientKeyForRoute =
       (useOR && !!mediaKeys.openRouterKey) ||
       (useOpenAI && !!mediaKeys.openAIKey) ||
-      (!useOpenAI && !useOR && !!mediaKeys.falKey)
+      (!useOpenAI && !useOR && (!!mediaKeys.falKey || platformOperatorFalAvailable))
     if (!hasClientKeyForRoute) {
       return jsonError('Image generation requires this client space to use its own OpenRouter, OpenAI, or FAL key for the selected model.', 403)
     }
@@ -139,7 +139,7 @@ Deno.serve(async (req) => {
       : (FAL_MODELS[model] ?? model)
   const openRouterKey = mediaKeys.openRouterKey ?? (mediaKeys.isPlatformMediaProject ? OPENROUTER_API_KEY : null)
   const openAIKey = mediaKeys.openAIKey ?? (mediaKeys.isPlatformMediaProject ? OPENAI_API_KEY : null)
-  const falKey = mediaKeys.falKey ?? (mediaKeys.isPlatformMediaProject && isPlatformFalEnabled() ? FAL_API_KEY : null)
+  const falKey = mediaKeys.falKey ?? (platformFalAvailable ? FAL_API_KEY : null)
 
   if (useOpenAI && !openAIKey) return jsonError('No OpenAI key available for this image request.', 500)
   if (useOR && !openRouterKey) return jsonError('No OpenRouter key available for this image request.', 500)
@@ -375,6 +375,12 @@ async function runOpenRouter(
 }
 
 function delay(ms: number) { return new Promise(r => setTimeout(r, ms)) }
+
+function normalizeEmail(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const email = value.trim().toLowerCase()
+  return email.includes('@') ? email : null
+}
 
 type MediaKeys = {
   isPlatformMediaProject: boolean

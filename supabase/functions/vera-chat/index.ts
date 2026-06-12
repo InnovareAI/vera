@@ -2136,7 +2136,13 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           const jobRes = await fetch(`${ctx.supabaseUrl}/functions/v1/generate-carousel`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
-            body: JSON.stringify({ post_id: postId, project_id: ctx.projectId ?? null, frames, aspect }),
+            body: JSON.stringify({
+              post_id: postId,
+              project_id: ctx.projectId ?? null,
+              frames,
+              aspect,
+              platform_operator_email: ctx.platformVideoOperatorEmail ?? undefined,
+            }),
             signal: AbortSignal.timeout(15000),
           })
           if (!jobRes.ok) {
