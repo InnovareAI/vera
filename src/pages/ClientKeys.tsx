@@ -39,12 +39,14 @@ type AiPolicy = {
   images_enabled: boolean
   standard_video_enabled: boolean
   premium_media_enabled: boolean
+  monthly_budget_usd: number | null
 }
 
 const DEFAULT_AI_POLICY: AiPolicy = {
   images_enabled: true,
   standard_video_enabled: false,
   premium_media_enabled: false,
+  monthly_budget_usd: null,
 }
 
 const PROVIDERS = [
@@ -70,6 +72,7 @@ export default function ClientKeys() {
   const [usageLoading, setUsageLoading] = useState(true)
   const [usageError, setUsageError] = useState<string | null>(null)
   const [aiPolicy, setAiPolicy] = useState<AiPolicy>(DEFAULT_AI_POLICY)
+  const [budgetDraft, setBudgetDraft] = useState('')
   const [policySaving, setPolicySaving] = useState(false)
 
   const load = useCallback(async () => {
@@ -95,7 +98,7 @@ export default function ClientKeys() {
     }
     setUsageLoading(true)
     setUsageError(null)
-    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    const since = usageQueryStartIso()
     const { data, error } = await supabase
       .from('generation_log')
       .select('id, provider, operation, model_used, input_tokens, output_tokens, duration_ms, cost_usd, usage_metadata, created_at')
@@ -115,7 +118,9 @@ export default function ClientKeys() {
   useEffect(() => { void loadUsage() }, [loadUsage])
 
   useEffect(() => {
-    setAiPolicy(parseAiPolicy(activeProject?.ai_policy))
+    const next = parseAiPolicy(activeProject?.ai_policy)
+    setAiPolicy(next)
+    setBudgetDraft(next.monthly_budget_usd === null ? '' : String(next.monthly_budget_usd))
   }, [activeProject?.id, activeProject?.ai_policy])
 
   async function saveKey() {
@@ -180,8 +185,22 @@ export default function ClientKeys() {
     push({ kind: 'success', title: 'AI usage policy updated' })
   }
 
-  function togglePolicy(key: keyof AiPolicy, value: boolean) {
+  function togglePolicy(key: 'images_enabled' | 'standard_video_enabled' | 'premium_media_enabled', value: boolean) {
     void saveAiPolicy({ ...aiPolicy, [key]: value })
+  }
+
+  function saveBudgetCap() {
+    const raw = budgetDraft.trim()
+    const nextBudget = raw === '' ? null : Number(raw)
+    if (nextBudget !== null && (!Number.isFinite(nextBudget) || nextBudget < 0)) {
+      push({ kind: 'warn', title: 'Enter a valid monthly cap' })
+      return
+    }
+    const normalized = nextBudget !== null && nextBudget > 0
+      ? Math.round(nextBudget * 100) / 100
+      : null
+    setBudgetDraft(normalized === null ? '' : String(normalized))
+    void saveAiPolicy({ ...aiPolicy, monthly_budget_usd: normalized })
   }
 
   const usageSummary = useMemo(() => summarizeUsage(usageRows), [usageRows])
@@ -279,6 +298,26 @@ export default function ClientKeys() {
           <p style={{ fontSize: t.size.micro, color: color.faint, margin: `${space[3]} 0 0`, lineHeight: 1.5 }}>
             Text generation stays available through the selected text provider. Video still requires a client-owned FAL key even when enabled here.
           </p>
+          <div style={{ marginTop: space[5], borderTop: `1px solid ${color.line}`, paddingTop: space[4], display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) auto', gap: space[3], alignItems: 'end' }}>
+            <Field
+              label="Monthly cap (USD)"
+              helper="Blank means no cap. The cap uses estimated logged spend for this client space."
+            >
+              <Input
+                value={budgetDraft}
+                onChange={event => setBudgetDraft(event.target.value)}
+                inputMode="decimal"
+                placeholder="No cap"
+              />
+            </Field>
+            <Button variant="secondary" leading={<Clock3 size={14} />} onClick={saveBudgetCap} disabled={policySaving}>
+              Save cap
+            </Button>
+            <p style={{ gridColumn: '1 / -1', fontSize: t.size.micro, color: color.faint, margin: 0, lineHeight: 1.5 }}>
+              Current month: {formatMoney(usageSummary.currentMonthCost)}
+              {aiPolicy.monthly_budget_usd ? ` of ${formatMoney(aiPolicy.monthly_budget_usd)}` : ''}
+            </p>
+          </div>
         </div>
       </section>
 
@@ -539,6 +578,7 @@ function summarizeUsage(rows: GenerationUsageRow[]) {
       if (typeof row.cost_usd === 'number') {
         summary.knownCost += row.cost_usd
         summary.hasKnownCost = true
+        if (isInCurrentMonth(row.created_at)) summary.currentMonthCost += row.cost_usd
         if (metadata.cost_estimate_source) summary.estimatedCostEvents += 1
       }
       return summary
@@ -554,6 +594,7 @@ function summarizeUsage(rows: GenerationUsageRow[]) {
       clientKeyEvents: 0,
       platformKeyEvents: 0,
       knownCost: 0,
+      currentMonthCost: 0,
       hasKnownCost: false,
       estimatedCostEvents: 0,
     },
@@ -571,7 +612,21 @@ function parseAiPolicy(value: unknown): AiPolicy {
     images_enabled: typeof raw.images_enabled === 'boolean' ? raw.images_enabled : DEFAULT_AI_POLICY.images_enabled,
     standard_video_enabled: typeof raw.standard_video_enabled === 'boolean' ? raw.standard_video_enabled : DEFAULT_AI_POLICY.standard_video_enabled,
     premium_media_enabled: typeof raw.premium_media_enabled === 'boolean' ? raw.premium_media_enabled : DEFAULT_AI_POLICY.premium_media_enabled,
+    monthly_budget_usd: typeof raw.monthly_budget_usd === 'number' && Number.isFinite(raw.monthly_budget_usd) && raw.monthly_budget_usd > 0 ? raw.monthly_budget_usd : null,
   }
+}
+
+function isInCurrentMonth(value: string) {
+  const date = new Date(value)
+  const now = new Date()
+  return date.getUTCFullYear() === now.getUTCFullYear() && date.getUTCMonth() === now.getUTCMonth()
+}
+
+function usageQueryStartIso() {
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
+  const now = new Date()
+  const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0)
+  return new Date(Math.min(thirtyDaysAgo, monthStart)).toISOString()
 }
 
 function numberFromMetadata(value: unknown, fallback: number) {

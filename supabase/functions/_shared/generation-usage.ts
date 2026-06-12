@@ -25,7 +25,7 @@ export async function logGenerationUsage(
   if (!provider || !operation || !model) return
 
   const estimate = usage.costUsd === undefined || usage.costUsd === null
-    ? estimateGenerationCost({ ...usage, provider, operation, model })
+    ? estimateGenerationUsageCost({ ...usage, provider, operation, model })
     : null
   const metadata = sanitizeMetadata({
     ...(usage.metadata ?? {}),
@@ -63,26 +63,26 @@ export async function logGenerationUsage(
   }
 }
 
-type EstimateInput = Omit<GenerationUsageInput, "provider" | "operation" | "model"> & {
+export type GenerationUsageEstimateInput = Omit<GenerationUsageInput, "provider" | "operation" | "model"> & {
   provider: string
   operation: string
   model: string
 }
 
-type CostEstimate = {
+export type GenerationCostEstimate = {
   costUsd: number
   source: string
   confidence: "high" | "medium"
 }
 
-function estimateGenerationCost(usage: EstimateInput): CostEstimate | null {
+export function estimateGenerationUsageCost(usage: GenerationUsageEstimateInput): GenerationCostEstimate | null {
   if (usage.operation === "chat.message") return estimateTextCost(usage)
   if (usage.operation === "image.generate") return estimateImageCost(usage)
   if (usage.operation === "video.submit") return estimateVideoSubmitCost(usage)
   return null
 }
 
-function estimateTextCost(usage: EstimateInput): CostEstimate | null {
+function estimateTextCost(usage: GenerationUsageEstimateInput): GenerationCostEstimate | null {
   const inputTokens = usage.inputTokens ?? 0
   const outputTokens = usage.outputTokens ?? 0
   if (inputTokens <= 0 && outputTokens <= 0) return null
@@ -100,7 +100,7 @@ function estimateTextCost(usage: EstimateInput): CostEstimate | null {
   return roundedEstimate(costUsd, pricing.source, "high")
 }
 
-function estimateImageCost(usage: EstimateInput): CostEstimate | null {
+function estimateImageCost(usage: GenerationUsageEstimateInput): GenerationCostEstimate | null {
   const metadata = usage.metadata ?? {}
   const count = positiveNumber(metadata.num_images) ?? 1
   const model = usage.model.toLowerCase()
@@ -121,7 +121,7 @@ function estimateImageCost(usage: EstimateInput): CostEstimate | null {
   return null
 }
 
-function estimateVideoSubmitCost(usage: EstimateInput): CostEstimate | null {
+function estimateVideoSubmitCost(usage: GenerationUsageEstimateInput): GenerationCostEstimate | null {
   if (usage.provider !== "fal") return null
   const model = usage.model.toLowerCase()
   const metadata = usage.metadata ?? {}
@@ -131,7 +131,7 @@ function estimateVideoSubmitCost(usage: EstimateInput): CostEstimate | null {
   return roundedEstimate(duration === "10" ? 0.56 : 0.28, "fal_hailuo_2_3_standard_pricing_2026_06_12", "high")
 }
 
-function roundedEstimate(value: number, source: string, confidence: CostEstimate["confidence"]): CostEstimate {
+function roundedEstimate(value: number, source: string, confidence: GenerationCostEstimate["confidence"]): GenerationCostEstimate {
   return { costUsd: Math.round(value * 1_000_000) / 1_000_000, source, confidence }
 }
 

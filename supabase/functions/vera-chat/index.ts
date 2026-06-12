@@ -31,7 +31,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
-import { DEFAULT_AI_POLICY, loadProjectAiPolicy } from '../_shared/ai-policy.ts'
+import { DEFAULT_AI_POLICY, checkProjectAiBudget, loadProjectAiPolicy } from '../_shared/ai-policy.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 
 const corsHeaders = {
@@ -4020,6 +4020,23 @@ Deno.serve(async (req) => {
   const chatProvider = clientOpenRouterKey ? 'openrouter' : 'anthropic'
   const chatModel = clientOpenRouterKey ? OPENROUTER_TEXT_MODEL : effectiveModel
   const chatKeySource = clientOpenRouterKey ? 'client' : (effectiveApiKey === anthropicKey ? 'platform' : 'client')
+  if (projectId) {
+    try {
+      const budget = await checkProjectAiBudget(supabase, projectId, {
+        orgId,
+        projectId,
+        provider: chatProvider,
+        model: chatModel,
+        operation: 'chat.message',
+        inputTokens: 0,
+        outputTokens: 0,
+        metadata: { route, key_source: chatKeySource },
+      })
+      if (!budget.ok) return jsonError(budget.message, 402)
+    } catch (error) {
+      return jsonError(error instanceof Error ? error.message : 'Could not check AI budget', 500)
+    }
+  }
   // Build the Anthropic client with the resolved key (client BYOK or platform).
   const anthropic = new Anthropic({ apiKey: effectiveApiKey })
 

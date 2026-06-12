@@ -14,7 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember } from "../_shared/auth.ts"
-import { loadProjectAiPolicy } from "../_shared/ai-policy.ts"
+import { checkProjectAiBudget, loadProjectAiPolicy } from "../_shared/ai-policy.ts"
 import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
 
@@ -152,6 +152,29 @@ Deno.serve(async (req) => {
   if (useOR && !openRouterKey) return jsonError('No OpenRouter key available for this image request.', 500)
   if (!useOpenAI && !useOR && !falKey) return jsonError('No FAL key available for this image request.', 500)
 
+  const selectedProvider = useOpenAI ? 'openai' : useOR ? 'openrouter' : 'fal'
+  const usageMetadata = {
+    alias: model,
+    image_size,
+    num_images,
+    quality,
+    key_source: selectedProvider === 'openrouter'
+      ? (mediaKeys.openRouterKey ? 'client' : 'platform')
+      : selectedProvider === 'openai'
+        ? (mediaKeys.openAIKey ? 'client' : 'platform')
+        : 'client',
+  }
+  const budget = await checkProjectAiBudget(supabase, projectId, {
+    orgId: access.orgId,
+    projectId,
+    postId,
+    provider: selectedProvider,
+    model: slug,
+    operation: 'image.generate',
+    metadata: usageMetadata,
+  })
+  if (!budget.ok) return jsonError(budget.message, 402)
+
   const encoder = new TextEncoder()
   const startTime = Date.now()
 
@@ -162,13 +185,10 @@ Deno.serve(async (req) => {
       const elapsed = () => Math.round((Date.now() - startTime) / 100) / 10
 
       try {
-        let provider = 'fal'
         let success = false
         if (useOpenAI) {
-          provider = 'openai'
           success = await runOpenAI(slug, prompt, quality, image_size, num_images, send, elapsed, openAIKey!)
         } else if (useOR) {
-          provider = 'openrouter'
           success = await runOpenRouter(slug, prompt, quality, send, elapsed, openRouterKey!)
         } else {
           success = await runFal(slug, prompt, image_size, num_images, send, elapsed, falKey!)
@@ -178,21 +198,11 @@ Deno.serve(async (req) => {
             orgId: access.orgId,
             projectId,
             postId,
-            provider,
+            provider: selectedProvider,
             model: slug,
             operation: 'image.generate',
             durationMs: Date.now() - startTime,
-            metadata: {
-              alias: model,
-              image_size,
-              num_images,
-              quality,
-              key_source: provider === 'openrouter'
-                ? (mediaKeys.openRouterKey ? 'client' : 'platform')
-                : provider === 'openai'
-                  ? (mediaKeys.openAIKey ? 'client' : 'platform')
-                  : 'client',
-            },
+            metadata: usageMetadata,
           })
         }
         controller.close()

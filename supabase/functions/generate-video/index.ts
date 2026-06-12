@@ -14,7 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember, requireSignedInOrService } from "../_shared/auth.ts"
-import { loadProjectAiPolicy } from "../_shared/ai-policy.ts"
+import { checkProjectAiBudget, loadProjectAiPolicy } from "../_shared/ai-policy.ts"
 import { loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
 
@@ -169,6 +169,26 @@ Deno.serve(async (req) => {
   if (safeDuration) payload.duration = safeDuration
   if (aspect_ratio && selectedModel.tier === 'premium') payload.aspect_ratio = aspect_ratio
 
+  const baseUsageMetadata = {
+    alias,
+    tier: selectedModel.tier,
+    kind: selectedModel.kind,
+    estimate: selectedModel.estimate,
+    duration: safeDuration,
+    aspect_ratio,
+    has_source_image: !!image_url,
+    key_source: fal.source,
+  }
+  const budget = await checkProjectAiBudget(supabase, projectId, {
+    orgId: access.orgId,
+    projectId,
+    provider: 'fal',
+    model: canonicalQueueSlug(slug),
+    operation: 'video.submit',
+    metadata: baseUsageMetadata,
+  })
+  if (!budget.ok) return jsonError(budget.message, 402)
+
   // ── ASYNC submit ── fire the fal job and return the request_id immediately;
   // the frontend then polls action:'status'. No long-held connection.
   if (action === 'submit') {
@@ -189,15 +209,8 @@ Deno.serve(async (req) => {
       model: queueSlug,
       operation: 'video.submit',
       metadata: {
-        alias,
-        tier: selectedModel.tier,
-        kind: selectedModel.kind,
-        estimate: selectedModel.estimate,
-        duration: safeDuration,
-        aspect_ratio,
-        has_source_image: !!image_url,
+        ...baseUsageMetadata,
         action: 'submit',
-        key_source: fal.source,
       },
     })
     return json({ request_id: submission.request_id, slug: queueSlug, model: alias, tier: selectedModel.tier, estimated_cost: selectedModel.estimate })
@@ -242,15 +255,8 @@ Deno.serve(async (req) => {
           model: queueSlug,
           operation: 'video.submit',
           metadata: {
-            alias,
-            tier: selectedModel.tier,
-            kind: selectedModel.kind,
-            estimate: selectedModel.estimate,
-            duration: safeDuration,
-            aspect_ratio,
-            has_source_image: !!image_url,
+            ...baseUsageMetadata,
             action: 'stream',
-            key_source: fal.source,
           },
         })
         send('started', { model_used: queueSlug, request_id: requestId })
