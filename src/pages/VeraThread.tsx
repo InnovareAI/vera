@@ -614,13 +614,14 @@ export default function VeraThread() {
       const isMaster = !!(org as { is_master?: boolean } | null)?.is_master
       const aiPolicy = parseClientAiPolicy((project as { ai_policy?: unknown } | null)?.ai_policy)
       const providers = new Set(((rows ?? []) as Array<{ provider: string | null }>).map(row => row.provider).filter(Boolean) as string[])
-      const platformImageReady = isMaster && activeProject.slug === 'innovareai-brand'
+      const platformMediaProject = isMaster && activeProject.slug === 'innovareai-brand'
       const hasAnthropic = providers.has('anthropic')
       const hasOpenRouter = providers.has('openrouter')
       const hasOpenAI = providers.has('openai')
       const hasFal = providers.has('fal') || providers.has('fal_ai')
       const hasPlatformVideoEntitlement = ((entitlements ?? []) as Array<{ org_id?: string | null; project_id?: string | null; expires_at?: string | null }>)
         .some(row => {
+          if (!platformMediaProject) return false
           if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) return false
           if (row.project_id) return row.project_id === activeProject.id
           if (row.org_id) return row.org_id === activeOrg.id
@@ -637,10 +638,10 @@ export default function VeraThread() {
         standardVideoEnabled: aiPolicy.standardVideoEnabled,
         premiumMediaEnabled: aiPolicy.premiumMediaEnabled,
         hasPlatformVideoEntitlement,
-        textReady: isMaster || hasAnthropic || hasOpenRouter,
-        imageReady: aiPolicy.imagesEnabled && (platformImageReady || hasOpenRouter || hasOpenAI || hasFal),
+        textReady: platformMediaProject || hasAnthropic || hasOpenRouter,
+        imageReady: aiPolicy.imagesEnabled && (platformMediaProject || hasOpenRouter || hasOpenAI || hasFal),
         videoReady: (hasFal && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled)) || hasPlatformVideoEntitlement,
-        needsTextKey: !isMaster && !hasAnthropic && !hasOpenRouter,
+        needsTextKey: !platformMediaProject && !hasAnthropic && !hasOpenRouter,
       })
     })()
     return () => { cancelled = true }
@@ -1863,7 +1864,7 @@ function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: Pr
   if (videoLocked) {
     notes.push(capabilities.hasFal
       ? 'Video rendering is disabled in this client AI policy.'
-      : 'Video rendering requires a client-owned FAL key.')
+      : 'Video rendering requires a client-owned FAL key. Platform video entitlements only apply to approved platform media projects.')
   }
   const textBody = notes.join(' ')
   const rows = [

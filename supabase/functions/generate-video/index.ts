@@ -16,7 +16,7 @@ import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember, requireSignedInOrService } from "../_shared/auth.ts"
 import { hasAiUserEntitlement, userCanAccessProject } from "../_shared/ai-entitlements.ts"
 import { checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError } from "../_shared/ai-policy.ts"
-import { loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
 
 const corsHeaders = {
@@ -112,6 +112,10 @@ Deno.serve(async (req) => {
     const jobUsedPlatformKey = jobRow?.key_source === 'platform'
     let platformAllowed = false
     if (jobUsedPlatformKey) {
+      const platformVideoProject = await isPlatformMediaProject(supabase, jobProjectId, access.orgId)
+      if (!platformVideoProject) {
+        return jsonError('Platform video jobs are only available inside approved platform media projects.', 403)
+      }
       if (!statusOperatorUserId) return jsonError('Platform video status requires the entitled operator.', 403)
       if (!access.service && jobRow?.operator_user_id && statusOperatorUserId !== jobRow.operator_user_id) {
         return jsonError('Only the operator who started this platform video job can poll it.', 403)
@@ -157,6 +161,7 @@ Deno.serve(async (req) => {
   const access = await requireProjectMember(req, supabase, SERVICE_KEY, projectId, corsHeaders)
   if (!access.ok) return access.response
   const operatorUserId = access.service ? cleanString(operator_user_id) : access.userId
+  const platformVideoProject = await isPlatformMediaProject(supabase, projectId, access.orgId)
   const aiPolicy = await loadProjectAiPolicy(supabase, projectId)
   const requestedModel = cleanString(model) ?? (image_url ? aiPolicy.defaultImageVideoModel : aiPolicy.defaultVideoModel)
 
@@ -166,7 +171,7 @@ Deno.serve(async (req) => {
 
   let platformStandardVideoAllowed = false
   let platformPremiumVideoAllowed = false
-  if (operatorUserId) {
+  if (platformVideoProject && operatorUserId) {
     try {
       const canAccess = await userCanAccessProject(supabase, operatorUserId, access.orgId, projectId)
       if (!canAccess) return jsonError('Forbidden', 403)

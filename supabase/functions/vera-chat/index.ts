@@ -4235,7 +4235,7 @@ Deno.serve(async (req) => {
     }
   }
   let operatorHasPlatformVideo = false
-  if (projectId && effectiveUserId) {
+  if (projectId && platformKeyProject && effectiveUserId) {
     try {
       operatorHasPlatformVideo = await hasAiUserEntitlement(supabase, {
         userId: effectiveUserId,
@@ -4260,7 +4260,7 @@ Deno.serve(async (req) => {
       ? paidMediaBudgetCapError(aiPolicy, 'premium_media')
       : null
   const clientVideoPolicyReady = clientHasFalKey && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled) && !videoPolicyBudgetError
-  const allowVideoGeneration = clientVideoPolicyReady || operatorHasPlatformVideo
+  const allowVideoGeneration = clientVideoPolicyReady || (platformMediaProject && operatorHasPlatformVideo)
   const platformOnlyTools = new Set(['run_pipeline', 'run_audit'])
   const enabledTools = TOOLS.filter(tool => {
     if (!platformTextAllowed && platformOnlyTools.has(tool.name)) return false
@@ -4290,7 +4290,7 @@ Deno.serve(async (req) => {
           ? videoPolicyBudgetError
           : clientHasFalKey
           ? 'Real video generation is unavailable in this client space because the client AI usage policy disables video generation.'
-          : 'Real video generation is unavailable in this client space because no client-owned FAL key or operator platform video entitlement is configured.',
+          : 'Real video generation is unavailable in this client space because no client-owned FAL key is configured. Platform video entitlements are limited to approved platform media projects.',
         'Do not offer, promise, or call generate_video. If the operator asks for video, create a written production brief with generate_video_brief instead.',
         '</media_capabilities>',
       ].join('\n'),
