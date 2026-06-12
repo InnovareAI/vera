@@ -5,7 +5,7 @@ import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
 import {
   Settings2, Users, Mic2, Plug, Building2, Save,
-  Eye, EyeOff, CheckCircle2, AlertCircle, Sun, Moon, Monitor
+  CheckCircle2, AlertCircle, Sun, Moon, Monitor
 } from 'lucide-react'
 import { PublishersCard } from '../components/PublishersCard'
 import { ClientIntegrationsCard } from '../components/ClientIntegrationsCard'
@@ -35,10 +35,35 @@ function initialSettingsTab(): Tab {
   return TABS.some(tab => tab.id === value) ? value as Tab : 'workspace'
 }
 
-const PLATFORMS = ['linkedin', 'twitter', 'instagram', 'facebook', 'youtube', 'quora', 'medium']
-const PLATFORM_LABELS: Record<string, string> = {
-  linkedin: 'LinkedIn', twitter: 'X (Twitter)', instagram: 'Instagram',
-  facebook: 'Facebook', youtube: 'YouTube', quora: 'Quora', medium: 'Medium',
+type PlatformRuleSetting = {
+  id: string
+  label: string
+  initials: string
+  swatch: string
+  aliases?: string[]
+  charPlaceholder: string
+  noteTitle: string
+  note: string
+}
+
+const PLATFORM_RULES: PlatformRuleSetting[] = [
+  { id: 'linkedin', label: 'LinkedIn', initials: 'Li', swatch: 'bg-blue-100 text-blue-700', charPlaceholder: '3000', noteTitle: 'Connected through Unipile', note: 'Use this section for channel-specific voice, limits, and model overrides. OAuth and publishing permissions live in Agentic integrations above.' },
+  { id: 'x', label: 'X', initials: 'X', swatch: 'bg-sky-100 text-sky-700', aliases: ['twitter'], charPlaceholder: '280', noteTitle: 'Manual-first channel', note: 'X stays lower priority because API access can be expensive. Use these rules for drafts and manual handoff until an approved connector is enabled.' },
+  { id: 'instagram', label: 'Instagram', initials: 'IG', swatch: 'bg-pink-100 text-pink-700', charPlaceholder: '2200', noteTitle: 'Meta connector', note: 'Use this section for caption rules and creative tone. Account permissions are managed through the Meta integration above.' },
+  { id: 'facebook', label: 'Facebook', initials: 'FB', swatch: 'bg-indigo-100 text-indigo-700', charPlaceholder: '63206', noteTitle: 'Meta connector', note: 'Use this section for Page copy rules. Account permissions are managed through the Meta integration above.' },
+  { id: 'youtube', label: 'YouTube', initials: 'YT', swatch: 'bg-red-100 text-red-700', charPlaceholder: '5000', noteTitle: 'Google connector', note: 'Use this section for video titles, descriptions, Shorts, and long-form tone. Channel access is managed through the YouTube integration above.' },
+  { id: 'medium', label: 'Medium', initials: 'Me', swatch: 'bg-stone-100 text-stone-700', charPlaceholder: '10000', noteTitle: 'Manual publishing', note: 'No API token needed. Add the Medium profile or publication URL in Agentic integrations for RSS ingestion and manual handoff.' },
+  { id: 'quora', label: 'Quora', initials: 'Qu', swatch: 'bg-red-100 text-red-700', charPlaceholder: '5000', noteTitle: 'Answer handoff', note: 'Use this section for answer style, proof rules, and CTA restraint. Final posting remains manual unless a client-specific adapter is approved.' },
+  { id: 'reddit', label: 'Reddit', initials: 'Rd', swatch: 'bg-orange-100 text-orange-700', charPlaceholder: '40000', noteTitle: 'Community-first channel', note: 'Use this section for subreddit tone, rule sensitivity, and non-promotional framing. Vera should research and draft before any human-approved posting.' },
+  { id: 'blog', label: 'Blog', initials: 'Bl', swatch: 'bg-amber-100 text-amber-700', charPlaceholder: '10000', noteTitle: 'CMS handoff', note: 'Use this section for article structure and editorial tone. Publishing credentials belong in WordPress or CMS integrations above.' },
+  { id: 'email', label: 'Email', initials: 'Em', swatch: 'bg-emerald-100 text-emerald-700', charPlaceholder: '5000', noteTitle: 'Nurture channel', note: 'Use this section for newsletter or nurture tone. ESP credentials and sending approvals should stay in dedicated integrations, not in channel rules.' },
+]
+function findPlatformRuleConfig(existing: Partial<PlatformConfig>[], setting: PlatformRuleSetting) {
+  const aliases = new Set([setting.id, ...(setting.aliases ?? [])])
+  const exact = existing.find(config => config.platform === setting.id)
+  const legacy = existing.find(config => config.platform && aliases.has(config.platform))
+  const found = exact ?? legacy
+  return found ? { ...found, platform: setting.id } : null
 }
 
 // ─── Workspace Tab ────────────────────────────────────────────────────────────
@@ -391,17 +416,15 @@ function IntegrationsTab() {
   const activeOrgId = activeOrg?.id
   const [configs, setConfigs] = useState<Partial<PlatformConfig>[]>([])
   const [saving, setSaving] = useState<string | null>(null)
-  const [reveal, setReveal] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     if (!activeOrgId) return
     supabase.from('platform_configs').select('*').eq('org_id', activeOrgId)
       .then(({ data }) => {
         const existing = data || []
-        // Ensure all platforms have an entry
-        const merged = PLATFORMS.map(p => {
-          const found = existing.find(e => e.platform === p)
-          return found ?? { platform: p, is_active: false, hashtag_limit: 5, org_id: activeOrgId }
+        const merged = PLATFORM_RULES.map(setting => {
+          const found = findPlatformRuleConfig(existing, setting)
+          return found ?? { platform: setting.id, is_active: false, hashtag_limit: 5, org_id: activeOrgId }
         })
         setConfigs(merged)
       })
@@ -415,7 +438,7 @@ function IntegrationsTab() {
     if (!activeOrg) return
     setSaving(platform)
     const config = configs.find(c => c.platform === platform)
-    if (!config) return
+    if (!config) { setSaving(null); return }
     if (config.id) {
       await supabase.from('platform_configs').update(config).eq('id', config.id)
     } else {
@@ -429,8 +452,8 @@ function IntegrationsTab() {
   return (
     <div className="max-w-5xl space-y-5">
       <div>
-        <h2 className="text-base font-semibold text-gray-900">Platform Integrations</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Configure settings and API keys for each publishing platform.</p>
+        <h2 className="text-base font-semibold text-gray-900">Agentic integrations</h2>
+        <p className="text-sm text-gray-500 mt-0.5">Connect client-owned accounts and define the channels Vera can read, analyze, draft for, or publish to.</p>
       </div>
 
       <ClientIntegrationsCard />
@@ -439,26 +462,22 @@ function IntegrationsTab() {
       <PublishersCard />
 
       <div className="space-y-3">
-        {PLATFORMS.map(platform => {
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900">Channel writing rules</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Set per-channel limits, tone, and model overrides. Credentials stay in the integration cards above, not in this rules section.</p>
+        </div>
+        {PLATFORM_RULES.map(setting => {
+          const platform = setting.id
           const config = configs.find(c => c.platform === platform) ?? {}
-          const isRevealed = reveal[platform]
 
           return (
             <div key={platform} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
               {/* Platform header */}
               <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
-                  platform === 'linkedin' ? 'bg-blue-100 text-blue-700' :
-                  platform === 'twitter'  ? 'bg-sky-100 text-sky-700' :
-                  platform === 'instagram' ? 'bg-pink-100 text-pink-700' :
-                  platform === 'facebook' ? 'bg-indigo-100 text-indigo-700' :
-                  platform === 'youtube' ? 'bg-red-100 text-red-700' :
-                  platform === 'medium' ? 'bg-stone-100 text-stone-700' :
-                  'bg-red-100 text-red-700'
-                }`}>
-                  {PLATFORM_LABELS[platform].slice(0, 2).toUpperCase()}
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${setting.swatch}`}>
+                  {setting.initials}
                 </div>
-                <span className="flex-1 text-sm font-medium text-gray-800">{PLATFORM_LABELS[platform]}</span>
+                <span className="flex-1 text-sm font-medium text-gray-800">{setting.label}</span>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <span className="text-xs text-gray-500">{config.is_active ? 'Active' : 'Inactive'}</span>
                   <div
@@ -479,7 +498,7 @@ function IntegrationsTab() {
                       value={config.char_limit ?? ''}
                       onChange={e => update(platform, { char_limit: Number(e.target.value) || undefined })}
                       className="input w-full"
-                      placeholder={platform === 'twitter' ? '280' : platform === 'medium' || platform === 'youtube' ? '10000' : '3000'}
+                      placeholder={setting.charPlaceholder}
                     />
                   </div>
                   <div>
@@ -514,37 +533,10 @@ function IntegrationsTab() {
                   />
                 </div>
 
-                {platform === 'medium' ? (
-                  <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
-                    <p className="text-xs font-medium text-gray-700">Manual publishing</p>
-                    <p className="text-[11px] text-gray-500 mt-0.5">
-                      No API token needed. Add the Medium profile or publication URL in Agentic integrations for RSS ingestion and manual handoff.
-                    </p>
-                  </div>
-                ) : (
-                  <div>
-                    <label className="text-xs text-gray-500 mb-1 flex items-center justify-between">
-                      <span>API / Access Token</span>
-                      <button onClick={() => setReveal(r => ({...r, [platform]: !r[platform]}))}
-                        className="text-gray-400 hover:text-gray-600">
-                        {isRevealed ? <EyeOff size={12} /> : <Eye size={12} />}
-                      </button>
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={isRevealed ? 'text' : 'password'}
-                        value={(config as Record<string, unknown>)['access_token'] as string ?? ''}
-                        onChange={e => update(platform, { access_token: e.target.value } as Partial<PlatformConfig>)}
-                        className="input w-full pr-8"
-                        placeholder="Stored encrypted · not used directly by VERA yet"
-                      />
-                    </div>
-                    <p className="text-[10px] text-gray-400 mt-1">
-                      <AlertCircle size={10} className="inline mr-0.5" />
-                      API keys are stored in your Supabase project; auto-posting coming soon.
-                    </p>
-                  </div>
-                )}
+                <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                  <p className="text-xs font-medium text-gray-700">{setting.noteTitle}</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">{setting.note}</p>
+                </div>
 
                 <button onClick={() => handleSave(platform)} disabled={saving === platform}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 disabled:opacity-50 transition-colors">
