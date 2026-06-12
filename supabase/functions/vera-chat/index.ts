@@ -35,7 +35,8 @@ import { hasAiUserEntitlement } from '../_shared/ai-entitlements.ts'
 import { DEFAULT_AI_POLICY, checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError, type ProjectAiPolicy } from '../_shared/ai-policy.ts'
 import { isPlatformMediaProject } from '../_shared/client-media-keys.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
-import { completeText, type TextRuntime } from '../_shared/text-runtime.ts'
+import { completeText, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
+import { selectTextModel } from '../_shared/model-recommendations.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1977,7 +1978,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
             operation: 'campaign.plan',
             inputTokens: planResult.inputTokens,
             outputTokens: planResult.outputTokens,
-            metadata: { key_source: ctx.textRuntime.keySource, channel_count: channels.length, post_count: count },
+            metadata: textRuntimeUsageMetadata(ctx.textRuntime, { channel_count: channels.length, post_count: count }),
           })
         } catch (error) {
           return { result: `Campaign planning failed: ${error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180)}` }
@@ -2910,7 +2911,7 @@ Do NOT fabricate claims. If sources contradict, surface the contradiction.`,
             operation: 'knowledge.synthesize',
             inputTokens: synthResult.inputTokens,
             outputTokens: synthResult.outputTokens,
-            metadata: { key_source: ctx.textRuntime.keySource, source_count: sources.length, theme_count: themes.length },
+            metadata: textRuntimeUsageMetadata(ctx.textRuntime, { source_count: sources.length, theme_count: themes.length }),
           })
         } catch (error) {
           return { result: `Synthesis failed: ${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}` }
@@ -3913,23 +3914,12 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
-function resolveOpenRouterTextModel(value: string | null): string | null {
-  return value && value.trim() ? value.trim() : null
-}
-
-function resolveAnthropicTextModel(value: string | null): string | null {
-  if (!value || !value.trim()) return null
-  const raw = value.trim()
-  if (raw.startsWith('anthropic/')) return raw.slice('anthropic/'.length)
-  return raw.startsWith('claude-') ? raw : null
-}
-
 const MAX_TOOL_ROUNDS = 5  // safety cap so a tool loop can't run forever
 
 // Text model used when a project runs its chat on its own OpenRouter key.
-// OpenRouter serves Claude, so quality matches; override per deployment if the
-// slug changes.
-const OPENROUTER_TEXT_MODEL = Deno.env.get('OPENROUTER_TEXT_MODEL') ?? 'anthropic/claude-sonnet-4.6'
+// Default to a Gemini-class route for cost control. Override per deployment or
+// per client policy when a stronger model is justified.
+const OPENROUTER_TEXT_MODEL = Deno.env.get('OPENROUTER_TEXT_MODEL') ?? 'google/gemini-2.5-flash'
 type EmbeddingRuntime = { key: string; model: string; keySource: 'platform' | 'client' }
 
 // Isolated OpenRouter (OpenAI-format) agent loop for a project running its text
@@ -4210,8 +4200,20 @@ Deno.serve(async (req) => {
     }
   }
   if (platformTextAllowed && !anthropicKey) return jsonError('ANTHROPIC_API_KEY not configured', 500)
-  const effectiveModel = resolveAnthropicTextModel(aiPolicy.defaultTextModel) ?? MODEL
-  const openRouterChatModel = resolveOpenRouterTextModel(aiPolicy.defaultTextModel) ?? OPENROUTER_TEXT_MODEL
+  const anthropicSelection = selectTextModel({
+    provider: 'anthropic',
+    requestedModel: null,
+    policyDefaultModel: aiPolicy.defaultTextModel,
+    fallbackModel: MODEL,
+  })
+  const openRouterSelection = selectTextModel({
+    provider: 'openrouter',
+    requestedModel: null,
+    policyDefaultModel: aiPolicy.defaultTextModel,
+    fallbackModel: OPENROUTER_TEXT_MODEL,
+  })
+  const effectiveModel = anthropicSelection.alias
+  const openRouterChatModel = openRouterSelection.alias
   let effectiveApiKey = platformTextAllowed ? anthropicKey : ''
   let clientAnthropicKey: string | null = null
 
@@ -4363,9 +4365,16 @@ Deno.serve(async (req) => {
   const chatProvider = clientOpenRouterKey ? 'openrouter' : 'anthropic'
   const chatModel = clientOpenRouterKey ? openRouterChatModel : effectiveModel
   const chatKeySource: TextRuntime['keySource'] = clientOpenRouterKey ? 'client' : (platformTextAllowed ? 'platform' : 'client')
+  const chatSelection = clientOpenRouterKey ? openRouterSelection : anthropicSelection
+  const chatAudit = {
+    selectionSource: chatSelection.source,
+    selectionReason: chatSelection.reason,
+    requestedModel: null,
+    policyDefaultModel: aiPolicy.defaultTextModel,
+  }
   const textRuntime: TextRuntime = chatProvider === 'openrouter'
-    ? { provider: 'openrouter', key: effectiveApiKey, model: chatModel, keySource: 'client' }
-    : { provider: 'anthropic', key: effectiveApiKey, model: chatModel, keySource: chatKeySource }
+    ? { provider: 'openrouter', key: effectiveApiKey, model: chatModel, keySource: 'client', ...chatAudit }
+    : { provider: 'anthropic', key: effectiveApiKey, model: chatModel, keySource: chatKeySource, ...chatAudit }
   if (projectId) {
     try {
       const budget = await checkProjectAiBudget(supabase, projectId, {
@@ -4376,7 +4385,7 @@ Deno.serve(async (req) => {
         operation: 'chat.message',
         inputTokens: 0,
         outputTokens: 0,
-        metadata: { route, key_source: chatKeySource },
+        metadata: textRuntimeUsageMetadata(textRuntime, { route }),
       })
       if (!budget.ok) return jsonError(budget.message, 402)
     } catch (error) {
@@ -4614,9 +4623,8 @@ Deno.serve(async (req) => {
           inputTokens: totalTokensIn,
           outputTokens: totalTokensOut,
           metadata: {
-            route,
+            ...textRuntimeUsageMetadata(textRuntime, { route }),
             session_id: sessionId,
-            key_source: chatKeySource,
             cache_read_input_tokens: totalCacheRead,
             cache_creation_input_tokens: totalCacheCreate,
             images_generated: generatedImages.length,

@@ -15,7 +15,7 @@ import { createClient } from 'npm:@supabase/supabase-js'
 import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
-import { resolveProjectTextRuntime, streamText } from '../_shared/text-runtime.ts'
+import { resolveProjectTextRuntime, streamText, textRuntimeUsageMetadata } from '../_shared/text-runtime.ts'
 import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
 
 const corsHeaders = {
@@ -351,7 +351,7 @@ Analyze this profile and content against the 360Brew algorithm. Return the JSON 
           operation: 'audit.brew360',
           inputTokens: completion.inputTokens,
           outputTokens: completion.outputTokens,
-          metadata: { key_source: runtime.runtime.keySource, posts_analyzed: postsContext.length },
+          metadata: textRuntimeUsageMetadata(runtime.runtime, { posts_analyzed: postsContext.length }),
         })
         send('done', payload)
         controller.close()

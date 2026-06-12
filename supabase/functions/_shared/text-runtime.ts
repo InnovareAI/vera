@@ -2,14 +2,22 @@ import Anthropic from "npm:@anthropic-ai/sdk"
 import type { AdminClient } from "./auth.ts"
 import { loadProjectAiPolicy } from "./ai-policy.ts"
 import { isPlatformMediaProject, loadClientApiKey } from "./client-media-keys.ts"
+import { selectTextModel, type ModelSelectionSource } from "./model-recommendations.ts"
 
 const PLATFORM_ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? ""
 const DEFAULT_ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_AUDIT_MODEL") ?? "claude-sonnet-4-6"
-const DEFAULT_OPENROUTER_MODEL = Deno.env.get("OPENROUTER_TEXT_MODEL") ?? "anthropic/claude-sonnet-4.6"
+const DEFAULT_OPENROUTER_MODEL = Deno.env.get("OPENROUTER_TEXT_MODEL") ?? "google/gemini-2.5-flash"
+
+type TextRuntimeAudit = {
+  selectionSource: ModelSelectionSource
+  selectionReason: string
+  requestedModel: string | null
+  policyDefaultModel: string | null
+}
 
 export type TextRuntime =
-  | { provider: "anthropic"; key: string; model: string; keySource: "platform" | "client" }
-  | { provider: "openrouter"; key: string; model: string; keySource: "client" }
+  | ({ provider: "anthropic"; key: string; model: string; keySource: "platform" | "client" } & TextRuntimeAudit)
+  | ({ provider: "openrouter"; key: string; model: string; keySource: "client" } & TextRuntimeAudit)
 
 export type TextRuntimeResult =
   | { ok: true; runtime: TextRuntime }
@@ -33,8 +41,18 @@ export async function resolveProjectTextRuntime(
   } catch {
     defaultTextModel = null
   }
-  const anthropicModel = opts.anthropicModel ?? resolveAnthropicTextModel(defaultTextModel) ?? DEFAULT_ANTHROPIC_MODEL
-  const openRouterModel = opts.openRouterModel ?? resolveOpenRouterTextModel(defaultTextModel) ?? DEFAULT_OPENROUTER_MODEL
+  const anthropicSelection = selectTextModel({
+    provider: "anthropic",
+    requestedModel: opts.anthropicModel,
+    policyDefaultModel: defaultTextModel,
+    fallbackModel: DEFAULT_ANTHROPIC_MODEL,
+  })
+  const openRouterSelection = selectTextModel({
+    provider: "openrouter",
+    requestedModel: opts.openRouterModel,
+    policyDefaultModel: defaultTextModel,
+    fallbackModel: DEFAULT_OPENROUTER_MODEL,
+  })
 
   let platformProject: boolean
   try {
@@ -52,8 +70,9 @@ export async function resolveProjectTextRuntime(
       runtime: {
         provider: "anthropic",
         key: PLATFORM_ANTHROPIC_KEY,
-        model: anthropicModel,
+        model: anthropicSelection.alias,
         keySource: "platform",
+        ...runtimeAudit(anthropicSelection, opts.anthropicModel, defaultTextModel),
       },
     }
   }
@@ -72,12 +91,24 @@ export async function resolveProjectTextRuntime(
     if (clientKey.provider === "openrouter") {
       return {
         ok: true,
-        runtime: { provider: "openrouter", key: clientKey.key, model: openRouterModel, keySource: "client" },
+        runtime: {
+          provider: "openrouter",
+          key: clientKey.key,
+          model: openRouterSelection.alias,
+          keySource: "client",
+          ...runtimeAudit(openRouterSelection, opts.openRouterModel, defaultTextModel),
+        },
       }
     }
     return {
       ok: true,
-      runtime: { provider: "anthropic", key: clientKey.key, model: anthropicModel, keySource: "client" },
+      runtime: {
+        provider: "anthropic",
+        key: clientKey.key,
+        model: anthropicSelection.alias,
+        keySource: "client",
+        ...runtimeAudit(anthropicSelection, opts.anthropicModel, defaultTextModel),
+      },
     }
   }
 
@@ -85,6 +116,20 @@ export async function resolveProjectTextRuntime(
     ok: false,
     status: 403,
     message: `${purpose} requires this client space to use its own OpenRouter or Anthropic key.`,
+  }
+}
+
+export function textRuntimeUsageMetadata(
+  runtime: TextRuntime,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    ...extra,
+    key_source: runtime.keySource,
+    requested_model: runtime.requestedModel,
+    policy_default_model: runtime.policyDefaultModel,
+    model_selection_source: runtime.selectionSource,
+    model_selection_reason: runtime.selectionReason,
   }
 }
 
@@ -215,13 +260,19 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function resolveOpenRouterTextModel(value: string | null): string | null {
-  return value && value.trim() ? value.trim() : null
+function runtimeAudit(
+  selection: { source: ModelSelectionSource; reason: string },
+  requestedModel: unknown,
+  policyDefaultModel: string | null,
+): TextRuntimeAudit {
+  return {
+    selectionSource: selection.source,
+    selectionReason: selection.reason,
+    requestedModel: cleanString(requestedModel),
+    policyDefaultModel,
+  }
 }
 
-function resolveAnthropicTextModel(value: string | null): string | null {
-  if (!value || !value.trim()) return null
-  const raw = value.trim()
-  if (raw.startsWith("anthropic/")) return raw.slice("anthropic/".length)
-  return raw.startsWith("claude-") ? raw : null
+function cleanString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null
 }

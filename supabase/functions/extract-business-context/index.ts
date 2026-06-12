@@ -3,8 +3,10 @@ import { createClient } from "npm:@supabase/supabase-js"
 import Anthropic from "npm:@anthropic-ai/sdk"
 import mammoth from "npm:mammoth@1.10.0"
 import type { AdminClient } from "../_shared/auth.ts"
+import { loadProjectAiPolicy } from "../_shared/ai-policy.ts"
 import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
+import { selectTextModel, type ModelSelectionSource } from "../_shared/model-recommendations.ts"
 import { resolveUnipileResearchConnection } from "../_shared/unipile-research.ts"
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
@@ -91,8 +93,15 @@ type SourceDocument = {
 }
 
 type ExtractionRuntime =
-  | { provider: "anthropic"; key: string; model: string; keySource: "platform" | "client" }
-  | { provider: "openrouter"; key: string; model: string; keySource: "client" }
+  | ({ provider: "anthropic"; key: string; model: string; keySource: "platform" | "client" } & ExtractionRuntimeAudit)
+  | ({ provider: "openrouter"; key: string; model: string; keySource: "client" } & ExtractionRuntimeAudit)
+
+type ExtractionRuntimeAudit = {
+  selectionSource: ModelSelectionSource
+  selectionReason: string
+  requestedModel: string | null
+  policyDefaultModel: string | null
+}
 
 const FIELD_KEYS = [
   "website",
@@ -213,13 +222,12 @@ Deno.serve(async (req) => {
     inputTokens: extraction.inputTokens,
     outputTokens: extraction.outputTokens,
     durationMs: Date.now() - startedAt,
-    metadata: {
+    metadata: extractionRuntimeUsageMetadata(runtime.runtime, {
       task: "extract-business-context",
       source: fileName,
-      key_source: runtime.runtime.keySource,
       pulled_sources: !!body.pull_sources,
       source_count: sources?.length ?? 0,
-    },
+    }),
   })
 
   const context = parseContextJson(extraction.output)
@@ -232,6 +240,22 @@ async function resolveExtractionRuntime(
   orgId: string,
   requiresAnthropicDocuments: boolean,
 ): Promise<{ ok: true; runtime: ExtractionRuntime } | { ok: false; response: Response }> {
+  const policyDefaultModel = await loadProjectAiPolicy(supabase, projectId)
+    .then(policy => policy.defaultTextModel)
+    .catch(() => null)
+  const anthropicSelection = selectTextModel({
+    provider: "anthropic",
+    requestedModel: null,
+    policyDefaultModel,
+    fallbackModel: ANTHROPIC_EXTRACT_MODEL,
+  })
+  const openRouterSelection = selectTextModel({
+    provider: "openrouter",
+    requestedModel: null,
+    policyDefaultModel,
+    fallbackModel: OPENROUTER_EXTRACT_MODEL,
+  })
+
   let platformProject: boolean
   try {
     platformProject = await isPlatformMediaProject(supabase, projectId, orgId)
@@ -242,7 +266,13 @@ async function resolveExtractionRuntime(
     if (!ANTHROPIC_API_KEY) return { ok: false, response: jsonError("ANTHROPIC_API_KEY is not configured", 500) }
     return {
       ok: true,
-      runtime: { provider: "anthropic", key: ANTHROPIC_API_KEY, model: ANTHROPIC_EXTRACT_MODEL, keySource: "platform" },
+      runtime: {
+        provider: "anthropic",
+        key: ANTHROPIC_API_KEY,
+        model: anthropicSelection.alias,
+        keySource: "platform",
+        ...extractionRuntimeAudit(anthropicSelection, null, policyDefaultModel),
+      },
     }
   }
 
@@ -262,13 +292,25 @@ async function resolveExtractionRuntime(
   if (openRouter?.key) {
     return {
       ok: true,
-      runtime: { provider: "openrouter", key: openRouter.key, model: OPENROUTER_EXTRACT_MODEL, keySource: "client" },
+      runtime: {
+        provider: "openrouter",
+        key: openRouter.key,
+        model: openRouterSelection.alias,
+        keySource: "client",
+        ...extractionRuntimeAudit(openRouterSelection, null, policyDefaultModel),
+      },
     }
   }
   if (anthropic?.key) {
     return {
       ok: true,
-      runtime: { provider: "anthropic", key: anthropic.key, model: ANTHROPIC_EXTRACT_MODEL, keySource: "client" },
+      runtime: {
+        provider: "anthropic",
+        key: anthropic.key,
+        model: anthropicSelection.alias,
+        keySource: "client",
+        ...extractionRuntimeAudit(anthropicSelection, null, policyDefaultModel),
+      },
     }
   }
 
@@ -803,6 +845,37 @@ function base64ToBytes(input: string) {
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
   return bytes
+}
+
+function extractionRuntimeAudit(
+  selection: { source: ModelSelectionSource; reason: string },
+  requestedModel: unknown,
+  policyDefaultModel: string | null,
+): ExtractionRuntimeAudit {
+  return {
+    selectionSource: selection.source,
+    selectionReason: selection.reason,
+    requestedModel: cleanString(requestedModel),
+    policyDefaultModel,
+  }
+}
+
+function extractionRuntimeUsageMetadata(
+  runtime: ExtractionRuntime,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    ...extra,
+    key_source: runtime.keySource,
+    requested_model: runtime.requestedModel,
+    policy_default_model: runtime.policyDefaultModel,
+    model_selection_source: runtime.selectionSource,
+    model_selection_reason: runtime.selectionReason,
+  }
+}
+
+function cleanString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null
 }
 
 async function canManageProject(

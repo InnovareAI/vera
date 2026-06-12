@@ -26,7 +26,7 @@ import { createClient } from 'npm:@supabase/supabase-js'
 import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
-import { completeText, resolveProjectTextRuntime } from '../_shared/text-runtime.ts'
+import { completeText, resolveProjectTextRuntime, textRuntimeUsageMetadata } from '../_shared/text-runtime.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -207,7 +207,7 @@ Required output JSON (no other keys):
     inputTokens: resp.inputTokens,
     outputTokens: resp.outputTokens,
     durationMs: Date.now() - startedAt,
-    metadata: { key_source: runtime.runtime.keySource, source_count: fetched.length + blogPosts.length },
+    metadata: textRuntimeUsageMetadata(runtime.runtime, { source_count: fetched.length + blogPosts.length }),
   })
 
   const text = resp.text

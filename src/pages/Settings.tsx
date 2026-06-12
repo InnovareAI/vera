@@ -642,6 +642,15 @@ type ModelUsageSummary = {
   platformEvents: number
 }
 
+type UsageSelectionSource = 'recommended_standard' | 'policy_default' | 'explicit' | 'fallback' | 'unknown'
+type UsageSelectionFilter = UsageSelectionSource | 'all'
+
+type SelectionSourceSummary = {
+  source: UsageSelectionSource
+  events: number
+  cost: number
+}
+
 type AiEntitlementRow = {
   id: string
   user_id: string
@@ -702,6 +711,7 @@ function AiUsageTab() {
   const [pricingLoading, setPricingLoading] = useState(false)
   const [pricingSaving, setPricingSaving] = useState<string | null>(null)
   const [pricingError, setPricingError] = useState<string | null>(null)
+  const [selectionSourceFilter, setSelectionSourceFilter] = useState<UsageSelectionFilter>('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -710,10 +720,16 @@ function AiUsageTab() {
     return (projectId: string | null) => projectId ? map.get(projectId) ?? 'Unknown client' : 'Workspace'
   }, [projects])
   const projectIds = useMemo(() => new Set(projects.map(project => project.id)), [projects])
-  const summary = useMemo(() => summarizeWorkspaceUsage(usageRows), [usageRows])
-  const clientRows = useMemo(() => summarizeByClient(usageRows, projects as UsageProject[]), [usageRows, projects])
-  const providerRows = useMemo(() => summarizeByProvider(usageRows), [usageRows])
-  const modelRows = useMemo(() => summarizeByModel(usageRows), [usageRows])
+  const selectionSourceRows = useMemo(() => summarizeSelectionSources(usageRows), [usageRows])
+  const filteredUsageRows = useMemo(() => (
+    selectionSourceFilter === 'all'
+      ? usageRows
+      : usageRows.filter(row => usageSelectionSource(row) === selectionSourceFilter)
+  ), [selectionSourceFilter, usageRows])
+  const summary = useMemo(() => summarizeWorkspaceUsage(filteredUsageRows), [filteredUsageRows])
+  const clientRows = useMemo(() => summarizeByClient(filteredUsageRows, projects as UsageProject[]), [filteredUsageRows, projects])
+  const providerRows = useMemo(() => summarizeByProvider(filteredUsageRows), [filteredUsageRows])
+  const modelRows = useMemo(() => summarizeByModel(filteredUsageRows), [filteredUsageRows])
   const riskSummary = useMemo(() => summarizeUsageRisk(clientRows), [clientRows])
 
   const load = useCallback(async () => {
@@ -862,6 +878,43 @@ function AiUsageTab() {
           tone={riskSummary.budgetAlerts > 0 || riskSummary.videoPolicyAlerts > 0 ? 'danger' : 'neutral'}
         />
       </div>
+
+      <section className="bg-white border border-gray-200 rounded-xl p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+          <div>
+            <p className="text-sm font-medium text-gray-800">Model selection source</p>
+            <p className="text-xs text-gray-500 mt-0.5">Filter usage by how Vera chose the model before generation.</p>
+          </div>
+          {selectionSourceFilter !== 'all' && (
+            <button
+              type="button"
+              onClick={() => setSelectionSourceFilter('all')}
+              className="text-xs font-medium text-gray-500 hover:text-gray-800"
+            >
+              Clear filter
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <SelectionFilterButton
+            active={selectionSourceFilter === 'all'}
+            label="All"
+            count={usageRows.length}
+            cost={usageRows.reduce((sum, row) => sum + (typeof row.cost_usd === 'number' ? row.cost_usd : 0), 0)}
+            onClick={() => setSelectionSourceFilter('all')}
+          />
+          {selectionSourceRows.map(row => (
+            <SelectionFilterButton
+              key={row.source}
+              active={selectionSourceFilter === row.source}
+              label={formatSelectionSourceLabel(row.source)}
+              count={row.events}
+              cost={row.cost}
+              onClick={() => setSelectionSourceFilter(row.source)}
+            />
+          ))}
+        </div>
+      </section>
 
       <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-4">
@@ -1028,18 +1081,19 @@ function AiUsageTab() {
           <table className="w-full min-w-[760px] border-collapse">
             <thead>
               <tr className="border-b border-gray-100">
-                {['When', 'Client', 'Operation', 'Provider', 'Model', 'Key', 'Cost'].map(label => (
+                {['When', 'Client', 'Operation', 'Provider', 'Model', 'Key', 'Selection', 'Cost'].map(label => (
                   <th key={label} className="px-4 py-2 text-left text-[10px] uppercase tracking-[0.05em] font-semibold text-gray-400">{label}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {usageRows.length === 0 && (
-                <tr><td colSpan={7}><EmptyLine text={loading ? 'Loading usage...' : 'No generation events found.'} /></td></tr>
+              {filteredUsageRows.length === 0 && (
+                <tr><td colSpan={8}><EmptyLine text={loading ? 'Loading usage...' : 'No generation events found for this filter.'} /></td></tr>
               )}
-              {usageRows.slice(0, 40).map(row => {
+              {filteredUsageRows.slice(0, 40).map(row => {
                 const metadata = usageMetadata(row)
                 const keySource = typeof metadata.key_source === 'string' ? metadata.key_source : 'unknown'
+                const selectionSource = usageSelectionSource(row)
                 return (
                   <tr key={row.id} className="border-b border-gray-100">
                     <td className="px-4 py-3 text-xs text-gray-500">{formatSettingsDate(row.created_at)}</td>
@@ -1050,6 +1104,7 @@ function AiUsageTab() {
                     <td className="px-4 py-3 text-xs font-semibold">
                       <span className={keySource === 'platform' ? 'text-amber-700' : keySource === 'client' ? 'text-emerald-700' : 'text-gray-400'}>{formatKeySourceLabel(keySource)}</span>
                     </td>
+                    <td className="px-4 py-3 text-xs text-gray-600">{formatSelectionSourceLabel(selectionSource)}</td>
                     <td className="px-4 py-3 text-xs text-gray-700">{typeof row.cost_usd === 'number' ? formatUsageUsd(row.cost_usd) : 'n/a'}</td>
                   </tr>
                 )
@@ -1349,6 +1404,33 @@ function UsageMetric({ label, value, detail, tone = 'neutral' }: { label: string
   )
 }
 
+function SelectionFilterButton({
+  active,
+  label,
+  count,
+  cost,
+  onClick,
+}: {
+  active: boolean
+  label: string
+  count: number
+  cost: number
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-xl border px-3 py-2 text-left transition-colors ${active ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100'}`}
+    >
+      <span className="block text-xs font-semibold">{label}</span>
+      <span className={`block text-[11px] mt-0.5 ${active ? 'text-gray-200' : 'text-gray-400'}`}>
+        {count} events · {formatUsageUsd(cost)}
+      </span>
+    </button>
+  )
+}
+
 function EmptyLine({ text }: { text: string }) {
   return <div className="px-4 py-6 text-sm text-gray-400">{text}</div>
 }
@@ -1406,6 +1488,21 @@ function summarizeWorkspaceUsage(rows: GenerationUsageRow[]) {
     platformEvents: 0,
     clientEvents: 0,
   })
+}
+
+function summarizeSelectionSources(rows: GenerationUsageRow[]): SelectionSourceSummary[] {
+  const map = new Map<UsageSelectionSource, SelectionSourceSummary>()
+  rows.forEach(row => {
+    const source = usageSelectionSource(row)
+    const current = map.get(source) ?? { source, events: 0, cost: 0 }
+    current.events += 1
+    current.cost += typeof row.cost_usd === 'number' ? row.cost_usd : 0
+    map.set(source, current)
+  })
+  const order: UsageSelectionSource[] = ['recommended_standard', 'policy_default', 'explicit', 'fallback', 'unknown']
+  return order
+    .map(source => map.get(source) ?? { source, events: 0, cost: 0 })
+    .filter(row => row.events > 0)
 }
 
 function summarizeByClient(rows: GenerationUsageRow[], projects: UsageProject[]): ClientUsageSummary[] {
@@ -1596,6 +1693,25 @@ function isPlatformMediaProject(slug: string | null) {
 function usageMetadata(row: GenerationUsageRow): Record<string, unknown> {
   const value = row.usage_metadata
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function usageSelectionSource(row: GenerationUsageRow): UsageSelectionSource {
+  const value = usageMetadata(row).model_selection_source
+  if (
+    value === 'recommended_standard' ||
+    value === 'policy_default' ||
+    value === 'explicit' ||
+    value === 'fallback'
+  ) return value
+  return 'unknown'
+}
+
+function formatSelectionSourceLabel(value: UsageSelectionSource) {
+  if (value === 'recommended_standard') return 'Recommended'
+  if (value === 'policy_default') return 'Policy default'
+  if (value === 'explicit') return 'Explicit override'
+  if (value === 'fallback') return 'Fallback'
+  return 'Unknown'
 }
 
 function usageWindowStartIso() {

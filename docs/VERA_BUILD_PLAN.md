@@ -218,7 +218,10 @@ Current state:
 - Server-side image defaults avoid premium policy defaults and choose a standard model that can run on the client's active key route.
 - Server-side video defaults stay on Hailuo or Hailuo I2V unless the operator explicitly requests and approves a premium model.
 - Media usage logs now include the requested model, policy default, model selection source, and selection reason for spend audits.
+- Shared text runtimes now use the same model-selection audit metadata, including requested model, policy default, selection source, and selection reason.
+- Client OpenRouter text defaults now fall back to Gemini Flash class when no client policy default is set.
+- AI Usage settings now filters current-month usage by model selection source: recommended, policy default, explicit override, fallback, or unknown historical events.
 
 Next step:
 
-- Extend the same recommendation and audit path to text generation, then expose selection-source filters in the AI Usage dashboard.
+- Add operator-facing budget rules that turn these usage signals into warnings before a generation request is submitted.

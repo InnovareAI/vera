@@ -12,7 +12,7 @@ import { createClient } from 'npm:@supabase/supabase-js'
 import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
-import { resolveProjectTextRuntime, streamText, type TextRuntime } from '../_shared/text-runtime.ts'
+import { resolveProjectTextRuntime, streamText, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
 import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
 
 const corsHeaders = {
@@ -132,7 +132,7 @@ Deno.serve(async (req) => {
           operation: 'audit.content',
           inputTokens: synthesis.inputTokens,
           outputTokens: synthesis.outputTokens,
-          metadata: { key_source: runtime.runtime.keySource },
+          metadata: textRuntimeUsageMetadata(runtime.runtime),
         })
 
         // 5. Save proposal

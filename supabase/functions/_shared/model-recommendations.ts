@@ -17,6 +17,8 @@ export type ImageModelAvailability = {
   platformOpenRouterAvailable?: boolean
 }
 
+export type TextModelProvider = "openrouter" | "anthropic"
+
 const OPENROUTER_IMAGE_ALIASES = new Set([
   "nano-banana",
   "nano-banana-2",
@@ -165,6 +167,40 @@ export function selectVideoModel(input: {
   }
 }
 
+export function selectTextModel(input: {
+  provider: TextModelProvider
+  requestedModel: unknown
+  policyDefaultModel: string | null | undefined
+  fallbackModel: string
+  purpose?: string
+}): ModelSelection {
+  const explicit = normalizeTextModelForProvider(input.provider, input.requestedModel)
+  if (explicit) {
+    return {
+      alias: explicit,
+      source: "explicit",
+      reason: "The calling workflow explicitly requested this text model.",
+    }
+  }
+
+  const policyDefault = normalizeTextModelForProvider(input.provider, input.policyDefaultModel)
+  if (policyDefault) {
+    return {
+      alias: policyDefault,
+      source: "policy_default",
+      reason: "Using the client policy default because it matches the selected text provider.",
+    }
+  }
+
+  return {
+    alias: input.fallbackModel,
+    source: "recommended_standard",
+    reason: input.provider === "openrouter"
+      ? "No matching policy default was set, so Vera selected the standard low-cost Gemini-class text route."
+      : "No matching policy default was set, so Vera selected the configured Anthropic text route.",
+  }
+}
+
 function imageAliasCanRoute(alias: string, availability: ImageModelAvailability): boolean {
   if (OPENAI_IMAGE_ALIASES.has(alias)) return availability.hasOpenAI
   if (FAL_IMAGE_ALIASES.has(alias) && availability.hasFal) return true
@@ -180,4 +216,12 @@ function isPremiumImageAlias(alias: string): boolean {
 
 function cleanAlias(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null
+}
+
+function normalizeTextModelForProvider(provider: TextModelProvider, value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null
+  const raw = value.trim()
+  if (provider === "openrouter") return raw
+  if (raw.startsWith("anthropic/")) return raw.slice("anthropic/".length)
+  return raw.startsWith("claude-") ? raw : null
 }

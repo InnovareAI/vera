@@ -46,9 +46,15 @@ const json = (status: number, body: unknown) =>
 
 type ProjectScope = { id: string; org_id: string; name?: string | null }
 type EmbedRuntime = { provider: 'openai'; key: string; model: string; keySource: 'platform' | 'client' }
+type RuntimeAudit = {
+  selectionSource: 'recommended_standard'
+  selectionReason: string
+  requestedModel: string | null
+  policyDefaultModel: string | null
+}
 type ClassifyRuntime =
-  | { provider: 'anthropic'; key: string; model: string; keySource: 'platform' | 'client' }
-  | { provider: 'openrouter'; key: string; model: string; keySource: 'client' }
+  | ({ provider: 'anthropic'; key: string; model: string; keySource: 'platform' | 'client' } & RuntimeAudit)
+  | ({ provider: 'openrouter'; key: string; model: string; keySource: 'client' } & RuntimeAudit)
 type IngestRuntimes = { embedding: EmbedRuntime; classifier: ClassifyRuntime | null }
 
 // ─── helpers ─────────────────────────────────────────────────────────
@@ -314,7 +320,7 @@ async function resolveIngestRuntimes(
       value: {
         embedding: { provider: 'openai', key: OPENAI_API_KEY, model: OPENAI_EMBED_MODEL, keySource: 'platform' },
         classifier: ANTHROPIC_API_KEY
-          ? { provider: 'anthropic', key: ANTHROPIC_API_KEY, model: ANTHROPIC_CLASSIFY_MODEL, keySource: 'platform' }
+          ? classifierRuntime('anthropic', ANTHROPIC_API_KEY, ANTHROPIC_CLASSIFY_MODEL, 'platform')
           : null,
       },
     }
@@ -345,9 +351,9 @@ async function resolveIngestRuntimes(
       loadClientApiKey(supabase, project.id, ['anthropic']),
     ])
     if (openRouter?.key) {
-      classifier = { provider: 'openrouter', key: openRouter.key, model: OPENROUTER_CLASSIFY_MODEL, keySource: 'client' }
+      classifier = classifierRuntime('openrouter', openRouter.key, OPENROUTER_CLASSIFY_MODEL, 'client')
     } else if (anthropic?.key) {
-      classifier = { provider: 'anthropic', key: anthropic.key, model: ANTHROPIC_CLASSIFY_MODEL, keySource: 'client' }
+      classifier = classifierRuntime('anthropic', anthropic.key, ANTHROPIC_CLASSIFY_MODEL, 'client')
     }
   } catch (error) {
     console.warn(`knowledge classifier key unavailable: ${errorMessage(error)}`)
@@ -359,6 +365,36 @@ async function resolveIngestRuntimes(
       embedding: { provider: 'openai', key: openai.key, model: OPENAI_EMBED_MODEL, keySource: 'client' },
       classifier,
     },
+  }
+}
+
+function classifierRuntime(
+  provider: ClassifyRuntime['provider'],
+  key: string,
+  model: string,
+  keySource: ClassifyRuntime['keySource'],
+): ClassifyRuntime {
+  return {
+    provider,
+    key,
+    model,
+    keySource,
+    selectionSource: 'recommended_standard',
+    selectionReason: provider === 'openrouter'
+      ? 'Knowledge classification uses the configured low-cost OpenRouter route.'
+      : 'Knowledge classification uses the configured Anthropic classifier route.',
+    requestedModel: null,
+    policyDefaultModel: null,
+  } as ClassifyRuntime
+}
+
+function classifierUsageMetadata(runtime: ClassifyRuntime): Record<string, unknown> {
+  return {
+    key_source: runtime.keySource,
+    requested_model: runtime.requestedModel,
+    policy_default_model: runtime.policyDefaultModel,
+    model_selection_source: runtime.selectionSource,
+    model_selection_reason: runtime.selectionReason,
   }
 }
 
@@ -450,7 +486,7 @@ Suggestion examples:
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
       durationMs: Date.now() - startedAt,
-      metadata: { key_source: runtime.keySource },
+      metadata: classifierUsageMetadata(runtime),
     })
   } catch (e) {
     console.warn(`classify: ${e instanceof Error ? e.message : String(e)}`)

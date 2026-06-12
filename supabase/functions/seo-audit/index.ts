@@ -14,7 +14,7 @@ import { createClient } from 'npm:@supabase/supabase-js'
 import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
-import { resolveProjectTextRuntime, streamText, type TextRuntime } from '../_shared/text-runtime.ts'
+import { resolveProjectTextRuntime, streamText, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
           inputTokens: synthesis.inputTokens,
           outputTokens: synthesis.outputTokens,
           durationMs: Date.now() - startedAt,
-          metadata: { key_source: runtime.runtime.keySource, pages_audited: 1 + innerPages.length },
+          metadata: textRuntimeUsageMetadata(runtime.runtime, { pages_audited: 1 + innerPages.length }),
         })
 
         // ── Phase 7: persist final result ───────────────────────────────────
