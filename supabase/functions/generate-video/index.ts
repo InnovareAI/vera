@@ -15,6 +15,7 @@ import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember, requireSignedInOrService } from "../_shared/auth.ts"
 import { loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { logGenerationUsage } from "../_shared/generation-usage.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -173,6 +174,24 @@ Deno.serve(async (req) => {
     const queueSlug = queueSlugFromUrl(submission.response_url ?? submission.status_url) ?? canonicalQueueSlug(slug)
     const recordError = await recordVideoJob(supabase, projectId, submission.request_id, queueSlug, prompt)
     if (recordError) return jsonError(recordError, 500)
+    await logGenerationUsage(supabase, {
+      orgId: access.orgId,
+      projectId,
+      provider: 'fal',
+      model: queueSlug,
+      operation: 'video.submit',
+      metadata: {
+        alias,
+        tier: selectedModel.tier,
+        kind: selectedModel.kind,
+        estimate: selectedModel.estimate,
+        duration: safeDuration,
+        aspect_ratio,
+        has_source_image: !!image_url,
+        action: 'submit',
+        key_source: fal.source,
+      },
+    })
     return json({ request_id: submission.request_id, slug: queueSlug, model: alias, tier: selectedModel.tier, estimated_cost: selectedModel.estimate })
   }
 
@@ -208,6 +227,24 @@ Deno.serve(async (req) => {
           controller.close()
           return
         }
+        await logGenerationUsage(supabase, {
+          orgId: access.orgId,
+          projectId,
+          provider: 'fal',
+          model: queueSlug,
+          operation: 'video.submit',
+          metadata: {
+            alias,
+            tier: selectedModel.tier,
+            kind: selectedModel.kind,
+            estimate: selectedModel.estimate,
+            duration: safeDuration,
+            aspect_ratio,
+            has_source_image: !!image_url,
+            action: 'stream',
+            key_source: fal.source,
+          },
+        })
         send('started', { model_used: queueSlug, request_id: requestId })
 
         // Video gen is slower than image — poll every 3s, cap at 600 attempts

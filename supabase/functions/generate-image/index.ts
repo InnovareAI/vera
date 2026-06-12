@@ -15,6 +15,7 @@ import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember } from "../_shared/auth.ts"
 import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { logGenerationUsage } from "../_shared/generation-usage.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -97,9 +98,10 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return jsonError('Method not allowed', 405)
   const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
 
-  const { prompt, model = DEFAULT_IMAGE_MODEL, image_size = 'square_hd', num_images = 1, quality = 'high', project_id } = await req.json().catch(() => ({}))
+  const { prompt, model = DEFAULT_IMAGE_MODEL, image_size = 'square_hd', num_images = 1, quality = 'high', project_id, post_id } = await req.json().catch(() => ({}))
   if (!prompt) return jsonError('prompt is required', 400)
   const projectId = typeof project_id === 'string' ? project_id.trim() : ''
+  const postId = typeof post_id === 'string' && post_id.trim() ? post_id.trim() : null
   if (!projectId) return jsonError('project_id is required for image generation', 400)
 
   const access = await requireProjectMember(req, supabase, SERVICE_KEY, projectId, corsHeaders)
@@ -154,12 +156,38 @@ Deno.serve(async (req) => {
       const elapsed = () => Math.round((Date.now() - startTime) / 100) / 10
 
       try {
+        let provider = 'fal'
+        let success = false
         if (useOpenAI) {
-          await runOpenAI(slug, prompt, quality, image_size, num_images, send, elapsed, openAIKey!)
+          provider = 'openai'
+          success = await runOpenAI(slug, prompt, quality, image_size, num_images, send, elapsed, openAIKey!)
         } else if (useOR) {
-          await runOpenRouter(slug, prompt, quality, send, elapsed, openRouterKey!)
+          provider = 'openrouter'
+          success = await runOpenRouter(slug, prompt, quality, send, elapsed, openRouterKey!)
         } else {
-          await runFal(slug, prompt, image_size, num_images, send, elapsed, falKey!)
+          success = await runFal(slug, prompt, image_size, num_images, send, elapsed, falKey!)
+        }
+        if (success) {
+          await logGenerationUsage(supabase, {
+            orgId: access.orgId,
+            projectId,
+            postId,
+            provider,
+            model: slug,
+            operation: 'image.generate',
+            durationMs: Date.now() - startTime,
+            metadata: {
+              alias: model,
+              image_size,
+              num_images,
+              quality,
+              key_source: provider === 'openrouter'
+                ? (mediaKeys.openRouterKey ? 'client' : 'platform')
+                : provider === 'openai'
+                  ? (mediaKeys.openAIKey ? 'client' : 'platform')
+                  : 'client',
+            },
+          })
         }
         controller.close()
       } catch (e) {
@@ -191,7 +219,7 @@ async function runFal(
   send: (event: string, data: unknown) => void,
   elapsed: () => number,
   apiKey: string,
-): Promise<void> {
+): Promise<boolean> {
   const payload: Record<string, unknown> = { prompt, num_images }
   if (image_size) payload.image_size = image_size
 
@@ -203,7 +231,7 @@ async function runFal(
   if (!submitRes.ok) {
     const errText = await submitRes.text()
     send('error', { message: `FAL submit failed (${submitRes.status}): ${errText.slice(0, 200)}` })
-    return
+    return false
   }
   const submission = await submitRes.json() as { request_id: string; status_url?: string; response_url?: string }
   const requestId = submission.request_id
@@ -215,22 +243,23 @@ async function runFal(
   for (let i = 0; i < 300; i++) {
     await delay(2000)
     const statusRes = await fetch(statusUrl, { headers: { 'Authorization': `Key ${apiKey}` } })
-    if (!statusRes.ok) { send('error', { message: `FAL status fetch failed (${statusRes.status})` }); return }
+    if (!statusRes.ok) { send('error', { message: `FAL status fetch failed (${statusRes.status})` }); return false }
     const sdata = await statusRes.json() as { status: string; queue_position?: number }
     send('status', { status: sdata.status, queue_position: sdata.queue_position, elapsed_s: elapsed() })
     if (sdata.status === 'COMPLETED') { completed = true; break }
     if (sdata.status === 'FAILED' || sdata.status === 'CANCELLED') {
-      send('error', { message: `FAL job ${sdata.status.toLowerCase()}` }); return
+      send('error', { message: `FAL job ${sdata.status.toLowerCase()}` }); return false
     }
   }
-  if (!completed) { send('error', { message: 'Timed out after 10 minutes of polling' }); return }
+  if (!completed) { send('error', { message: 'Timed out after 10 minutes of polling' }); return false }
 
   const resultRes = await fetch(resultUrl, { headers: { 'Authorization': `Key ${apiKey}` } })
-  if (!resultRes.ok) { send('error', { message: `FAL result fetch failed (${resultRes.status})` }); return }
+  if (!resultRes.ok) { send('error', { message: `FAL result fetch failed (${resultRes.status})` }); return false }
   const result = await resultRes.json() as { images?: Array<{ url: string }>; image?: { url: string } }
   const images = result.images ?? (result.image ? [result.image] : [])
-  if (!images.length) { send('error', { message: 'FAL returned no images' }); return }
+  if (!images.length) { send('error', { message: 'FAL returned no images' }); return false }
   send('done', { images, provider: 'fal', model_used: slug, elapsed_s: elapsed() })
+  return true
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -246,7 +275,7 @@ async function runOpenAI(
   send: (event: string, data: unknown) => void,
   elapsed: () => number,
   apiKey: string,
-): Promise<void> {
+): Promise<boolean> {
   send('started', { provider: 'openai', model_used: slug })
   // OpenAI's images endpoint takes ~30–150s for gpt-image-2 at high quality.
   // Heartbeat keeps the SSE alive.
@@ -289,20 +318,21 @@ async function runOpenAI(
     if (!res.ok) {
       const errText = await res.text()
       send('error', { message: `OpenAI call failed (${res.status}): ${errText.slice(0, 300)}` })
-      return
+      return false
     }
     const data = await res.json() as {
       data?: Array<{ url?: string; b64_json?: string }>
       error?: { message?: string }
     }
-    if (data.error) { send('error', { message: data.error.message ?? 'OpenAI error' }); return }
+    if (data.error) { send('error', { message: data.error.message ?? 'OpenAI error' }); return false }
     const images = (data.data ?? []).map(d => {
       if (d.url) return { url: d.url }
       if (d.b64_json) return { url: `data:image/png;base64,${d.b64_json}` }
       return null
     }).filter((x): x is { url: string } => !!x)
-    if (!images.length) { send('error', { message: 'OpenAI returned no images' }); return }
+    if (!images.length) { send('error', { message: 'OpenAI returned no images' }); return false }
     send('done', { images, provider: 'openai', model_used: slug, elapsed_s: elapsed() })
+    return true
   } finally {
     alive = false
   }
@@ -319,7 +349,7 @@ async function runOpenRouter(
   send: (event: string, data: unknown) => void,
   elapsed: () => number,
   apiKey: string,
-): Promise<void> {
+): Promise<boolean> {
   send('started', { provider: 'openrouter', model_used: slug })
   // Heartbeat ticker so the SSE stays alive during the long OR call.
   let alive = true
@@ -352,22 +382,23 @@ async function runOpenRouter(
       alive = false
       const errText = await res.text()
       send('error', { message: `OpenRouter call failed (${res.status}): ${errText.slice(0, 200)}` })
-      return
+      return false
     }
     const data = await res.json() as {
       choices?: Array<{ message?: { images?: Array<{ image_url?: { url: string } | string }> } }>
       error?: { message?: string }
     }
     alive = false
-    if (data.error) { send('error', { message: data.error.message ?? 'OpenRouter error' }); return }
+    if (data.error) { send('error', { message: data.error.message ?? 'OpenRouter error' }); return false }
     const imgArr = data.choices?.[0]?.message?.images ?? []
     const images = imgArr.map(i => {
       const u = i.image_url
       const url = typeof u === 'string' ? u : u?.url
       return url ? { url } : null
     }).filter((x): x is { url: string } => !!x)
-    if (!images.length) { send('error', { message: 'OpenRouter returned no images' }); return }
+    if (!images.length) { send('error', { message: 'OpenRouter returned no images' }); return false }
     send('done', { images, provider: 'openrouter', model_used: slug, elapsed_s: elapsed() })
+    return true
   } finally {
     alive = false
   }

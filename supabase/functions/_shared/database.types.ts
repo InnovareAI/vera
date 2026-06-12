@@ -1211,9 +1211,13 @@ export type Database = {
           id: string
           input_tokens: number | null
           model_used: string | null
+          operation: string | null
           org_id: string | null
           output_tokens: number | null
           post_id: string | null
+          project_id: string | null
+          provider: string | null
+          usage_metadata: Json
         }
         Insert: {
           agent?: string | null
@@ -1223,9 +1227,13 @@ export type Database = {
           id?: string
           input_tokens?: number | null
           model_used?: string | null
+          operation?: string | null
           org_id?: string | null
           output_tokens?: number | null
           post_id?: string | null
+          project_id?: string | null
+          provider?: string | null
+          usage_metadata?: Json
         }
         Update: {
           agent?: string | null
@@ -1235,9 +1243,13 @@ export type Database = {
           id?: string
           input_tokens?: number | null
           model_used?: string | null
+          operation?: string | null
           org_id?: string | null
           output_tokens?: number | null
           post_id?: string | null
+          project_id?: string | null
+          provider?: string | null
+          usage_metadata?: Json
         }
         Relationships: [
           {
@@ -1252,6 +1264,13 @@ export type Database = {
             columns: ["post_id"]
             isOneToOne: false
             referencedRelation: "content_posts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "generation_log_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
             referencedColumns: ["id"]
           },
         ]

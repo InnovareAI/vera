@@ -31,6 +31,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
+import { logGenerationUsage } from '../_shared/generation-usage.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1669,7 +1670,7 @@ async function executeTool(
             const imgRes = await fetch(`${ctx.supabaseUrl}/functions/v1/generate-image`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
-              body: JSON.stringify({ prompt: imagePrompt, model: 'nano-banana', image_size: 'square_hd', project_id: ctx.projectId }),
+              body: JSON.stringify({ prompt: imagePrompt, model: 'nano-banana', image_size: 'square_hd', project_id: ctx.projectId, post_id: post.id }),
               signal: AbortSignal.timeout(28000),
             })
             if (imgRes.ok && imgRes.body) {
@@ -4005,6 +4006,9 @@ Deno.serve(async (req) => {
   }
   // Haiku doesn't accept Sonnet's extended-thinking param — only enable on Sonnet.
   const useThinking = enableThinking && effectiveModel === MODEL
+  const chatProvider = clientOpenRouterKey ? 'openrouter' : 'anthropic'
+  const chatModel = clientOpenRouterKey ? OPENROUTER_TEXT_MODEL : effectiveModel
+  const chatKeySource = clientOpenRouterKey ? 'client' : (effectiveApiKey === anthropicKey ? 'platform' : 'client')
   // Build the Anthropic client with the resolved key (client BYOK or platform).
   const anthropic = new Anthropic({ apiKey: effectiveApiKey })
 
@@ -4218,6 +4222,26 @@ Deno.serve(async (req) => {
           tokens_in: totalTokensIn, tokens_out: totalTokensOut,
           attachments,
         }, { onConflict: 'id' })
+
+        await logGenerationUsage(supabase, {
+          orgId,
+          projectId,
+          provider: chatProvider,
+          model: chatModel,
+          operation: 'chat.message',
+          inputTokens: totalTokensIn,
+          outputTokens: totalTokensOut,
+          metadata: {
+            route,
+            session_id: sessionId,
+            key_source: chatKeySource,
+            cache_read_input_tokens: totalCacheRead,
+            cache_creation_input_tokens: totalCacheCreate,
+            images_generated: generatedImages.length,
+            video_generation_available: allowVideoGeneration,
+            thinking_enabled: useThinking,
+          },
+        })
 
         send({
           type: 'done',
