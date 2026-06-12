@@ -21,7 +21,7 @@ import {
   type ModelPricingGuide,
   type SpendEstimate,
 } from '../lib/modelEconomics'
-import { useModelPricingCatalog } from '../lib/useModelPricingCatalog'
+import { useModelPricingCatalog, type ModelPricingCatalogSource } from '../lib/useModelPricingCatalog'
 import { PageHeader, SectionLabel, Button, Field, Input, Select, Textarea, color, space, type as t, radius, useToast } from '../design'
 
 type ClientApiKey = {
@@ -102,7 +102,7 @@ export default function ClientKeys() {
     default_image_video_model: DEFAULT_AI_POLICY.default_image_video_model,
   })
   const [policySaving, setPolicySaving] = useState(false)
-  const { catalog: pricingCatalog } = useModelPricingCatalog()
+  const { catalog: pricingCatalog, source: pricingSource, rowCount: pricingRowCount } = useModelPricingCatalog()
 
   const load = useCallback(async () => {
     if (!activeProject?.id) { setKeys([]); setLoading(false); return }
@@ -309,6 +309,7 @@ export default function ClientKeys() {
   const spendGuard = buildSpendGuard(aiPolicy, activeProviders, usageSummary)
   const routingRows = buildRoutingRows(aiPolicy, activeProviders, pricingCatalog)
   const pricingReviewDate = latestPricingReviewDate(pricingCatalog)
+  const pricingStatus = pricingCatalogStatus(pricingSource, pricingRowCount)
 
   const card: React.CSSProperties = { background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5] }
   const statusColor = (s: string) => s === 'active' ? color.success : s === 'invalid' ? color.danger : color.ghost
@@ -331,7 +332,19 @@ export default function ClientKeys() {
       </section>
 
       <section style={{ marginBottom: space[8] }}>
-        <SectionLabel style={{ marginBottom: space[3] }} action={spendGuard.action}>Spend guard</SectionLabel>
+        <SectionLabel
+          style={{ marginBottom: space[3] }}
+          action={
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <span>{spendGuard.action}</span>
+              <span style={{ padding: '3px 7px', borderRadius: radius.pill, border: `1px solid ${pricingStatus.border}`, color: pricingStatus.color, background: color.paper2, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>
+                {pricingStatus.label}
+              </span>
+            </span>
+          }
+        >
+          Spend guard
+        </SectionLabel>
         <div style={card}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: space[3], marginBottom: space[5] }}>
             {spendGuard.metrics.map(item => (
@@ -345,7 +358,7 @@ export default function ClientKeys() {
           </div>
           <p style={{ fontSize: t.size.micro, color: color.faint, margin: `${space[4]} 0 0`, lineHeight: 1.5 }}>
             Vera should default to cheap and fast prototype paths. Premium media stays locked unless this client has a cap and an explicit policy toggle.{' '}
-            Pricing guide reviewed {pricingReviewDate}. Estimates are planning guides and final billing comes from provider usage logs.
+            Pricing guide reviewed {pricingReviewDate}. {pricingStatus.label}. Estimates are planning guides and final billing comes from provider usage logs.
           </p>
         </div>
       </section>
@@ -678,6 +691,12 @@ function buildSpendGuard(aiPolicy: AiPolicy, activeProviders: Set<string>, usage
       },
     ],
   }
+}
+
+function pricingCatalogStatus(source: ModelPricingCatalogSource, rowCount: number) {
+  if (source === 'catalog') return { label: `Live catalog, ${rowCount} rows`, color: color.success, border: color.success }
+  if (source === 'fallback') return { label: 'Fallback guide', color: color.warn, border: color.warn }
+  return { label: 'Loading guide', color: color.ghost, border: color.line }
 }
 
 function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>, pricingCatalog?: ModelPricingGuide[]): RoutingRow[] {

@@ -205,6 +205,7 @@ Current state:
 - Command shows budget classes: no spend, low token cost, standard image, premium image, storyboard-only, standard video, or premium video risk.
 - Command now adds provider-aware estimate guides for common text, image, and video routes. These are operator-facing planning estimates, not billing records.
 - Command and client API-key settings share one frontend model economics module for labels, premium classification, model options, and planning estimates.
+- Command and client API-key settings show whether estimates are using the live provider pricing catalog or the static fallback guide.
 - A provider pricing catalog migration now defines normalized model pricing rows with RLS, explicit grants, reviewed dates, source URLs, and seeded text, image, and video guide rows.
 - Edge Function usage logging and client budget checks now try the provider pricing catalog first, then fall back to static estimates if the catalog is unavailable or no model row matches.
 

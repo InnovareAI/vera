@@ -41,7 +41,7 @@ import {
   type ModelPricingGuide,
   type SpendEstimate,
 } from '../lib/modelEconomics'
-import { useModelPricingCatalog } from '../lib/useModelPricingCatalog'
+import { useModelPricingCatalog, type ModelPricingCatalogSource } from '../lib/useModelPricingCatalog'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -644,7 +644,7 @@ export default function VeraThread() {
   }, [activeProject?.id, sessionId])
 
   const [providerCapabilities, setProviderCapabilities] = useState<ProviderCapabilities>(DEFAULT_PROVIDER_CAPABILITIES)
-  const { catalog: pricingCatalog } = useModelPricingCatalog()
+  const { catalog: pricingCatalog, source: pricingSource, rowCount: pricingRowCount } = useModelPricingCatalog()
   const demandPlan = useMemo(() => {
     const parsed = parseProjectInstructions(activeProject?.instructions ?? '')
     return buildDemandPlanSnapshot(parsed.businessContext)
@@ -1626,6 +1626,8 @@ export default function VeraThread() {
             providerCapabilities={providerCapabilities}
             onAddKey={() => activeProject?.slug ? navigate(`/p/${activeProject.slug}/keys`) : navigate('/clients')}
             pricingCatalog={pricingCatalog}
+            pricingSource={pricingSource}
+            pricingRowCount={pricingRowCount}
             demandPlan={demandPlan}
             composer={renderComposer('idle')} />
         ) : (
@@ -2111,9 +2113,22 @@ function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: Pr
   )
 }
 
-function ModelRoutingPanel({ capabilities, onAddKey, pricingCatalog }: { capabilities: ProviderCapabilities; onAddKey?: () => void; pricingCatalog?: ModelPricingGuide[] }) {
+function pricingCatalogBadge(source: ModelPricingCatalogSource = 'loading', rowCount = 0) {
+  if (source === 'catalog') return { label: `Live catalog, ${rowCount} rows`, color: color.success, border: color.success }
+  if (source === 'fallback') return { label: 'Fallback guide', color: color.warn, border: color.warn }
+  return { label: 'Loading guide', color: color.ghost, border: color.line }
+}
+
+function ModelRoutingPanel({ capabilities, onAddKey, pricingCatalog, pricingSource, pricingRowCount }: {
+  capabilities: ProviderCapabilities
+  onAddKey?: () => void
+  pricingCatalog?: ModelPricingGuide[]
+  pricingSource?: ModelPricingCatalogSource
+  pricingRowCount?: number
+}) {
   const routes = modelRouteRecommendations(capabilities, pricingCatalog)
   const reviewedOn = latestPricingReviewDate(pricingCatalog)
+  const pricingStatus = pricingCatalogBadge(pricingSource, pricingRowCount)
   const budget = capabilities.monthlyBudgetUsd
     ? `Monthly cap: $${capabilities.monthlyBudgetUsd.toFixed(0)}`
     : 'No monthly cap set'
@@ -2129,10 +2144,13 @@ function ModelRoutingPanel({ capabilities, onAddKey, pricingCatalog }: { capabil
           <div style={{ color: color.ghost, fontSize: t.size.cap, lineHeight: 1.45, marginTop: 3 }}>
             Client keys first. Standard models by default. Premium and platform spend need explicit approval.
             <br />
-            Pricing guide reviewed {reviewedOn}. Estimates are planning guides.
+            Pricing guide reviewed {reviewedOn}. {pricingStatus.label}. Estimates are planning guides.
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <span style={{ padding: '4px 8px', borderRadius: radius.pill, background: color.paper2, border: `1px solid ${pricingStatus.border}`, color: pricingStatus.color, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>
+            {pricingStatus.label}
+          </span>
           <span style={{ padding: '4px 8px', borderRadius: radius.pill, background: color.paper2, border: `1px solid ${color.line}`, color: color.ghost, fontSize: t.size.micro, fontWeight: t.weight.medium }}>
             {budget}
           </span>
@@ -2172,7 +2190,7 @@ function ModelRoutingPanel({ capabilities, onAddKey, pricingCatalog }: { capabil
   )
 }
 
-function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain, providerCapabilities, onAddKey, pricingCatalog, demandPlan, composer }: {
+function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain, providerCapabilities, onAddKey, pricingCatalog, pricingSource, pricingRowCount, demandPlan, composer }: {
   onRun: (prompt: string) => void
   observations: { id: string; title: string; proposed_action: string | null }[]
   actions: LaunchAction[]
@@ -2183,6 +2201,8 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
   providerCapabilities: ProviderCapabilities
   onAddKey?: () => void
   pricingCatalog?: ModelPricingGuide[]
+  pricingSource?: ModelPricingCatalogSource
+  pricingRowCount?: number
   demandPlan: DemandPlanSnapshot
   composer: ReactNode
 }) {
@@ -2208,7 +2228,7 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
       {composer}
 
       {providerCapabilities.loaded && (
-        <ModelRoutingPanel capabilities={providerCapabilities} onAddKey={onAddKey} pricingCatalog={pricingCatalog} />
+        <ModelRoutingPanel capabilities={providerCapabilities} onAddKey={onAddKey} pricingCatalog={pricingCatalog} pricingSource={pricingSource} pricingRowCount={pricingRowCount} />
       )}
 
       <DemandPlanPanel plan={demandPlan} projectName={projectName} onRun={onRun} onOpenBrain={onOpenBrain} />

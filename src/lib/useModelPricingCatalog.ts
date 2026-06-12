@@ -2,9 +2,24 @@ import { useEffect, useState } from 'react'
 import { supabase } from './supabase'
 import { normalizePricingCatalogRows, type ModelPricingGuide, type ProviderModelPricingRow } from './modelEconomics'
 
+export type ModelPricingCatalogSource = 'loading' | 'catalog' | 'fallback'
+
+type ModelPricingCatalogState = {
+  catalog: ModelPricingGuide[]
+  loaded: boolean
+  source: ModelPricingCatalogSource
+  rowCount: number
+  error: string | null
+}
+
 export function useModelPricingCatalog() {
-  const [catalog, setCatalog] = useState<ModelPricingGuide[]>([])
-  const [loaded, setLoaded] = useState(false)
+  const [state, setState] = useState<ModelPricingCatalogState>({
+    catalog: [],
+    loaded: false,
+    source: 'loading',
+    rowCount: 0,
+    error: null,
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -15,14 +30,26 @@ export function useModelPricingCatalog() {
       .then(({ data, error }) => {
         if (cancelled) return
         if (error) {
-          setCatalog([])
+          setState({
+            catalog: [],
+            loaded: true,
+            source: 'fallback',
+            rowCount: 0,
+            error: 'Pricing catalog unavailable. Vera is using fallback estimates.',
+          })
         } else {
-          setCatalog(normalizePricingCatalogRows((data ?? []) as ProviderModelPricingRow[]))
+          const catalog = normalizePricingCatalogRows((data ?? []) as ProviderModelPricingRow[])
+          setState({
+            catalog,
+            loaded: true,
+            source: catalog.length ? 'catalog' : 'fallback',
+            rowCount: catalog.length,
+            error: catalog.length ? null : 'Pricing catalog has no active rows. Vera is using fallback estimates.',
+          })
         }
-        setLoaded(true)
       })
     return () => { cancelled = true }
   }, [])
 
-  return { catalog, loaded }
+  return state
 }
