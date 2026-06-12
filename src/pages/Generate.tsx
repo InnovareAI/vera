@@ -5,6 +5,7 @@ import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
 import { useRightRail } from '../lib/rightRailContext'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../lib/auth'
 import type { Audience } from '../lib/supabase'
 
 interface Campaign {
@@ -311,13 +312,16 @@ async function runAgentPipeline(
   projectId: string | null,
   campaignId: string | null,
   audienceId: string | null,
+  accessToken: string | null | undefined,
   onChunk: (agent: AgentName, chunk: string, done: boolean) => void
 ) {
+  if (!accessToken) throw new Error('Sign in again before running the full team pipeline.')
   const response = await fetch(ORCHESTRATOR_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${accessToken}`,
     },
     body: JSON.stringify({ prompt, org_id: orgId, project_id: projectId, campaign_id: campaignId, audience_id: audienceId }),
   })
@@ -361,6 +365,7 @@ async function runAgentPipeline(
 }
 
 export default function Generate() {
+  const { session } = useAuth()
   const { activeOrg } = useOrg()
   const { activeProject, projects, switchProject } = useProject()
   const [messages, setMessages] = useState<Message[]>([WELCOME])
@@ -470,7 +475,7 @@ export default function Generate() {
     let currentId: string | null = null
 
     try {
-      await runAgentPipeline(input, activeOrg?.id, activeProject?.id ?? null, selectedCampaignId, selectedAudienceId, (agent, chunk, done) => {
+      await runAgentPipeline(input, activeOrg?.id, activeProject?.id ?? null, selectedCampaignId, selectedAudienceId, session?.access_token, (agent, chunk, done) => {
         // Reveal optional agents as they appear
         if (!CORE_AGENTS.includes(agent)) {
           setActiveAgents(prev => prev.includes(agent) ? prev : [...prev, agent])

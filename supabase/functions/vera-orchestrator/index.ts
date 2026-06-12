@@ -1,5 +1,9 @@
 import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
+import type { AdminClient } from '../_shared/auth.ts'
+import type { Json } from '../_shared/database.types.ts'
+import { requireOrgMember, requireProjectMember } from '../_shared/auth.ts'
+import { isPlatformMediaProject, loadClientApiKey } from '../_shared/client-media-keys.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -82,9 +86,9 @@ type SkillRow = {
 
 // Web research via Perplexity Sonar through OpenRouter: single call returns
 // search + synthesis + citations. Replaces the previous Brave+Claude two-step.
-async function perplexityResearch(query: string): Promise<{ findings: string; citations: string[] }> {
-  const key = Deno.env.get('OPENROUTER_API_KEY')
-  if (!key) return { findings: '(OPENROUTER_API_KEY not configured — skipping research)', citations: [] }
+async function perplexityResearch(query: string, apiKey: string | null): Promise<{ findings: string; citations: string[] }> {
+  const key = apiKey
+  if (!key) return { findings: '(OpenRouter research key is not configured for this pipeline, skipping research)', citations: [] }
 
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -115,12 +119,52 @@ async function perplexityResearch(query: string): Promise<{ findings: string; ci
   return { findings: content, citations: data.citations ?? [] }
 }
 
+async function resolvePipelineRuntime(
+  supabase: AdminClient,
+  orgId: string,
+  projectId: string,
+): Promise<{ ok: true; anthropicKey: string; openRouterKey: string | null } | { ok: false; response: Response }> {
+  try {
+    const platformProject = await isPlatformMediaProject(supabase, projectId, orgId)
+    if (platformProject) {
+      const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
+      if (!anthropicKey) return { ok: false, response: jsonError('ANTHROPIC_API_KEY is not configured', 500) }
+      return {
+        ok: true,
+        anthropicKey,
+        openRouterKey: Deno.env.get('OPENROUTER_API_KEY') ?? null,
+      }
+    }
+
+    const [anthropic, openRouter] = await Promise.all([
+      loadClientApiKey(supabase, projectId, ['anthropic']),
+      loadClientApiKey(supabase, projectId, ['openrouter']),
+    ])
+    if (!anthropic?.key) {
+      return {
+        ok: false,
+        response: jsonError('Full team generation requires this client space to use its own Anthropic key. Use Vera chat for OpenRouter-only drafting, or add a client Anthropic key before running the legacy team pipeline.', 403),
+      }
+    }
+    return { ok: true, anthropicKey: anthropic.key, openRouterKey: openRouter?.key ?? null }
+  } catch (error) {
+    return { ok: false, response: jsonError(error instanceof Error ? error.message : 'Could not resolve pipeline provider keys.', 500) }
+  }
+}
+
+function jsonError(message: string, status: number): Response {
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
-  const { prompt, org_id, project_id, campaign_id, audience_id } = await req.json()
+  const { prompt, org_id, project_id, campaign_id, audience_id } = await req.json().catch(() => ({}))
 
   if (!prompt) {
     return new Response(JSON.stringify({ error: 'prompt is required' }), {
@@ -128,12 +172,33 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
+  if (!org_id) {
+    return new Response(JSON.stringify({ error: 'org_id is required' }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  if (!project_id) {
+    return new Response(JSON.stringify({ error: 'project_id is required for the full team pipeline' }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
 
-  const anthropic = new Anthropic({ apiKey: Deno.env.get('ANTHROPIC_API_KEY')! })
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  )
+  ) as unknown as AdminClient
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  const access = project_id
+    ? await requireProjectMember(req, supabase, serviceKey, project_id, corsHeaders, org_id)
+    : await requireOrgMember(req, supabase, serviceKey, org_id, corsHeaders)
+  if (!access.ok) return access.response
+
+  const runtime = await resolvePipelineRuntime(supabase, org_id, project_id)
+  if (!runtime.ok) return runtime.response
+  const anthropic = new Anthropic({ apiKey: runtime.anthropicKey })
+  const researchOpenRouterKey = runtime.openRouterKey
 
   const encoder = new TextEncoder()
 
@@ -301,7 +366,7 @@ When run_image_designer is true, populate image_prompt with a concrete 1-2 sente
 
         if (strategy.run_researcher && strategy.research_query) {
           send('Researcher', 'Searching the web via Perplexity Sonar…', false)
-          const { findings, citations } = await perplexityResearch(strategy.research_query as string)
+          const { findings, citations } = await perplexityResearch(strategy.research_query as string, researchOpenRouterKey)
           const withCitations = citations.length
             ? `${findings}\n\nSources:\n${citations.slice(0, 5).map((c, i) => `[${i + 1}] ${c}`).join('\n')}`
             : findings
@@ -612,7 +677,7 @@ followed by a summary of what must be fixed.`,
             model_used: 'claude-sonnet-4-6',
             media_url: generatedImageUrl,
             media_type: generatedImageUrl ? 'image' : null,
-            media_metadata: generatedImageUrl ? { image_prompt: strategy.image_prompt ?? null, model: 'fal-ai/gemini-25-flash-image' } : {},
+            media_metadata: (generatedImageUrl ? { image_prompt: String(strategy.image_prompt ?? ''), model: 'fal-ai/gemini-25-flash-image' } : {}) as Json,
             compliance_checks: complianceChecks,
             agent_outputs: {
               strategy,
@@ -623,7 +688,7 @@ followed by a summary of what must be fixed.`,
               seo_notes: seoNotes,
               persona_adapter_notes: personaAdapterNotes,
               agents_run: agentsRun,
-            },
+            } as Json,
           })
           .select('id')
           .single()
