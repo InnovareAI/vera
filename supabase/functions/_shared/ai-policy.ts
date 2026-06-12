@@ -1,6 +1,6 @@
 import type { AdminClient } from "./auth.ts"
 import type { Json } from "./database.types.ts"
-import { estimateGenerationUsageCost, type GenerationUsageEstimateInput } from "./generation-usage.ts"
+import { estimateGenerationUsageCostWithCatalog, type GenerationUsageEstimateInput } from "./generation-usage.ts"
 
 export type ProjectAiPolicy = {
   imagesEnabled: boolean
@@ -70,7 +70,7 @@ export async function checkProjectAiBudget(
 ): Promise<ProjectAiBudgetCheck> {
   const policy = await loadProjectAiPolicy(supabase, projectId)
   const budgetUsd = policy.monthlyBudgetUsd
-  const requestedUsd = usage ? estimateGenerationUsageCost(usage)?.costUsd ?? null : null
+  const requestedUsd = usage ? (await estimateGenerationUsageCostWithCatalog(supabase, usage))?.costUsd ?? null : null
   if (!budgetUsd || budgetUsd <= 0) return { ok: true, budgetUsd: null, usedUsd: 0, requestedUsd, remainingUsd: null }
 
   const usedUsd = await currentMonthSpendUsd(supabase, projectId)

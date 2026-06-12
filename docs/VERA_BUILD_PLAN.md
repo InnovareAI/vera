@@ -206,7 +206,8 @@ Current state:
 - Command now adds provider-aware estimate guides for common text, image, and video routes. These are operator-facing planning estimates, not billing records.
 - Command and client API-key settings share one frontend model economics module for labels, premium classification, model options, and planning estimates.
 - A provider pricing catalog migration now defines normalized model pricing rows with RLS, explicit grants, reviewed dates, source URLs, and seeded text, image, and video guide rows.
+- Edge Function usage logging and client budget checks now try the provider pricing catalog first, then fall back to static estimates if the catalog is unavailable or no model row matches.
 
 Next step:
 
-- Make Edge Function usage logging and budget checks read from the provider pricing catalog, then reconcile planning estimates with actual generation log usage and client budget limits.
+- Apply the pricing catalog migration to the correct Vera Supabase project and move remaining static fallback rows into maintained provider pricing metadata.
