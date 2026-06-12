@@ -63,6 +63,9 @@ type PostRowData = {
   shares: number
   saves: number
   clicks: number
+  qualifiedTraffic: number
+  buyerQuestions: number
+  meetingRequests: number
   pulledAt: string | null
   url: string | null
 }
@@ -110,6 +113,58 @@ type SyncReport = {
   error?: string
 }
 
+type ManualMetricKey =
+  | 'views'
+  | 'reach'
+  | 'reactions'
+  | 'comments'
+  | 'shares'
+  | 'saves'
+  | 'clicks'
+  | 'qualified_traffic'
+  | 'buyer_questions'
+  | 'meeting_requests'
+
+type ManualMetricDraft = {
+  postId: string
+  provider: string
+  liveUrl: string
+  metricDate: string
+  values: Record<ManualMetricKey, string>
+}
+
+type ManualMetricMessage = { tone: 'danger' | 'success'; text: string } | null
+
+const MANUAL_METRIC_FIELDS: Array<{ key: ManualMetricKey; label: string; helper: string }> = [
+  { key: 'views', label: 'Views', helper: 'Impressions, views, or reads' },
+  { key: 'reach', label: 'Reach', helper: 'Unique audience where known' },
+  { key: 'reactions', label: 'Reactions', helper: 'Likes or reactions' },
+  { key: 'comments', label: 'Comments', helper: 'Replies and discussion' },
+  { key: 'shares', label: 'Shares', helper: 'Reposts and shares' },
+  { key: 'saves', label: 'Saves', helper: 'Bookmarks or saves' },
+  { key: 'clicks', label: 'Clicks', helper: 'Traffic-driving clicks' },
+  { key: 'qualified_traffic', label: 'Qualified traffic', helper: 'Useful visits or sessions' },
+  { key: 'buyer_questions', label: 'Buyer questions', helper: 'Commercial questions' },
+  { key: 'meeting_requests', label: 'Meeting requests', helper: 'Demo or call requests' },
+]
+
+const MANUAL_PROVIDER_OPTIONS = [
+  'linkedin',
+  'meta_instagram',
+  'meta_facebook_pages',
+  'youtube',
+  'medium',
+  'quora',
+  'reddit',
+  'x',
+  'wordpress',
+  'custom_cms',
+]
+
+const EMPTY_MANUAL_VALUES: Record<ManualMetricKey, string> = Object.fromEntries(
+  MANUAL_METRIC_FIELDS.map(field => [field.key, '']),
+) as Record<ManualMetricKey, string>
+
 export default function Measure() {
   const { activeOrg } = useOrg()
   const { activeProject } = useProject()
@@ -134,6 +189,9 @@ export default function Measure() {
   const [listenTopic, setListenTopic] = useState('')
   const [listening, setListening] = useState(false)
   const [listenError, setListenError] = useState<string | null>(null)
+  const [manualDraft, setManualDraft] = useState<ManualMetricDraft>(() => emptyManualMetricDraft())
+  const [manualSaving, setManualSaving] = useState(false)
+  const [manualMessage, setManualMessage] = useState<ManualMetricMessage>(null)
 
   const loadData = useCallback(async (projectId?: string | null) => {
     if (!projectId) {
@@ -271,9 +329,23 @@ export default function Measure() {
 
   const campaignById = useMemo(() => new Map(campaigns.map(campaign => [campaign.id, campaign])), [campaigns])
   const rows = useMemo(() => buildPostRows(posts, snapshots, campaignById), [posts, snapshots, campaignById])
+  const manualMetricRows = useMemo(() => rows.slice(0, 150), [rows])
+  const selectedManualRow = useMemo(
+    () => manualMetricRows.find(row => row.post.id === manualDraft.postId) ?? manualMetricRows[0] ?? null,
+    [manualMetricRows, manualDraft.postId],
+  )
   const providerReadiness = useMemo(() => buildProviderReadiness(integrations), [integrations])
   const currentWindow = useMemo(() => rangeWindow(dateRange, 0), [dateRange])
   const previousWindow = useMemo(() => rangeWindow(dateRange, 1), [dateRange])
+
+  useEffect(() => {
+    if (!manualMetricRows.length) {
+      setManualDraft(emptyManualMetricDraft())
+      return
+    }
+    if (manualMetricRows.some(row => row.post.id === manualDraft.postId)) return
+    setManualDraft(prev => manualDraftForRow(manualMetricRows[0], prev))
+  }, [manualMetricRows, manualDraft.postId])
 
   const filteredRows = useMemo(() => {
     return sortRows(
@@ -305,6 +377,54 @@ export default function Measure() {
   }), [filteredRows, stats, statusCounts, providerReadiness, activeProject?.slug])
   const options = useMemo(() => buildFilterOptions(rows, campaigns), [rows, campaigns])
   const integrationSummary = useMemo(() => buildIntegrationSummary(providerReadiness), [providerReadiness])
+
+  function selectManualMetricPost(postId: string) {
+    const row = manualMetricRows.find(item => item.post.id === postId)
+    if (!row) return
+    setManualDraft(prev => manualMetricForSelectedRow(row, prev))
+    setManualMessage(null)
+  }
+
+  async function saveManualMetrics() {
+    if (!activeProject?.id || !selectedManualRow || manualSaving) return
+    const metrics = Object.fromEntries(
+      MANUAL_METRIC_FIELDS
+        .map(field => [field.key, metricInputNumber(manualDraft.values[field.key])] as const)
+        .filter((entry): entry is [ManualMetricKey, number] => entry[1] !== null),
+    )
+    if (Object.keys(metrics).length === 0) {
+      setManualMessage({ tone: 'danger', text: 'Enter at least one metric value.' })
+      return
+    }
+
+    setManualSaving(true)
+    setManualMessage(null)
+    try {
+      const { data } = await supabase.auth.getSession()
+      const token = data.session?.access_token
+      if (!token) throw new Error('Sign in before saving manual metrics.')
+      const response = await fetch(FN_URL('manual-content-metrics'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          project_id: activeProject.id,
+          post_id: selectedManualRow.post.id,
+          provider: manualDraft.provider,
+          live_url: manualDraft.liveUrl || undefined,
+          metric_time: manualDraft.metricDate || undefined,
+          metrics,
+        }),
+      })
+      const json = await response.json().catch(() => ({})) as { error?: string; metric_count?: number }
+      if (!response.ok || json.error) throw new Error(json.error ?? `Manual metrics failed with HTTP ${response.status}`)
+      setManualMessage({ tone: 'success', text: `Saved ${json.metric_count ?? Object.keys(metrics).length} metrics for "${selectedManualRow.title}".` })
+      setManualDraft(prev => ({ ...prev, values: { ...EMPTY_MANUAL_VALUES } }))
+      await loadData(activeProject.id)
+    } catch (manualError) {
+      setManualMessage({ tone: 'danger', text: manualError instanceof Error ? manualError.message : 'Manual metrics failed.' })
+    }
+    setManualSaving(false)
+  }
 
   const kpis = [
     {
@@ -342,6 +462,15 @@ export default function Measure() {
       tone: color.accent,
       helper: 'Weighted by views or reach',
       rate: true,
+    },
+    {
+      label: 'Traffic',
+      value: formatNumber(stats.clicks + stats.qualifiedTraffic),
+      previous: previousStats.clicks + previousStats.qualifiedTraffic,
+      rawValue: stats.clicks + stats.qualifiedTraffic,
+      icon: Zap,
+      tone: color.info,
+      helper: `${formatNumber(stats.buyerQuestions)} buyer questions, ${formatNumber(stats.meetingRequests)} meeting requests`,
     },
     {
       label: 'Metric coverage',
@@ -414,6 +543,29 @@ export default function Measure() {
           {showIntegrations && (
             <IntegrationHealthPanel providers={providerReadiness} />
           )}
+
+          <section style={{ marginTop: space[8] }}>
+            <SectionLabel style={{ marginBottom: space[3] }} action="Manual channels and API fallback">
+              Manual metrics
+            </SectionLabel>
+            <ManualMetricsPanel
+              rows={manualMetricRows}
+              draft={manualDraft}
+              saving={manualSaving}
+              message={manualMessage}
+              disabled={!activeProject?.id}
+              onPostChange={selectManualMetricPost}
+              onDraftChange={patch => {
+                setManualDraft(prev => ({ ...prev, ...patch }))
+                setManualMessage(null)
+              }}
+              onMetricChange={(key, value) => {
+                setManualDraft(prev => ({ ...prev, values: { ...prev.values, [key]: value } }))
+                setManualMessage(null)
+              }}
+              onSave={saveManualMetrics}
+            />
+          </section>
 
           <section style={{ marginTop: space[8] }}>
             <SectionLabel style={{ marginBottom: space[3] }} action="Read-only · we never post to Reddit">
@@ -995,6 +1147,148 @@ function RedditListeningPanel({ topic, onTopic, listening, error, onRun, listens
   )
 }
 
+function ManualMetricsPanel({
+  rows,
+  draft,
+  saving,
+  message,
+  disabled,
+  onPostChange,
+  onDraftChange,
+  onMetricChange,
+  onSave,
+}: {
+  rows: PostRowData[]
+  draft: ManualMetricDraft
+  saving: boolean
+  message: ManualMetricMessage
+  disabled: boolean
+  onPostChange: (postId: string) => void
+  onDraftChange: (patch: Partial<ManualMetricDraft>) => void
+  onMetricChange: (key: ManualMetricKey, value: string) => void
+  onSave: () => void
+}) {
+  const selected = rows.find(row => row.post.id === draft.postId) ?? null
+  if (!rows.length) {
+    return <EmptyPanel icon={Activity} text="No posts are available for manual metric entry yet." />
+  }
+
+  return (
+    <div style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5] }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 1.2fr) minmax(160px, 0.5fr) minmax(220px, 0.9fr) minmax(150px, 0.45fr)', gap: space[3], alignItems: 'end' }}>
+        <FieldStack label="Post">
+          <select
+            value={draft.postId}
+            onChange={event => onPostChange(event.target.value)}
+            disabled={disabled || saving}
+            style={manualInputStyle}
+          >
+            {rows.map(row => (
+              <option key={row.post.id} value={row.post.id}>
+                {providerLabel(row.provider)}: {row.title}
+              </option>
+            ))}
+          </select>
+        </FieldStack>
+        <FieldStack label="Platform">
+          <select
+            value={draft.provider}
+            onChange={event => onDraftChange({ provider: event.target.value })}
+            disabled={disabled || saving}
+            style={manualInputStyle}
+          >
+            {MANUAL_PROVIDER_OPTIONS.map(provider => (
+              <option key={provider} value={provider}>{providerLabel(provider)}</option>
+            ))}
+          </select>
+        </FieldStack>
+        <FieldStack label="Live URL">
+          <input
+            value={draft.liveUrl}
+            onChange={event => onDraftChange({ liveUrl: event.target.value })}
+            disabled={disabled || saving}
+            placeholder="https://..."
+            style={manualInputStyle}
+          />
+        </FieldStack>
+        <FieldStack label="Metric date">
+          <input
+            type="date"
+            value={draft.metricDate}
+            onChange={event => onDraftChange({ metricDate: event.target.value })}
+            disabled={disabled || saving}
+            style={manualInputStyle}
+          />
+        </FieldStack>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: space[3], marginTop: space[5] }}>
+        {MANUAL_METRIC_FIELDS.map(field => (
+          <FieldStack key={field.key} label={field.label} helper={field.helper}>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={draft.values[field.key]}
+              onChange={event => onMetricChange(field.key, event.target.value)}
+              disabled={disabled || saving}
+              placeholder="0"
+              style={manualInputStyle}
+            />
+          </FieldStack>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[4], marginTop: space[5], flexWrap: 'wrap' }}>
+        <p style={{ margin: 0, color: color.ghost, fontSize: t.size.cap, lineHeight: 1.45 }}>
+          {selected
+            ? `Latest source: ${selected.pulledAt ? relativeDate(selected.pulledAt) : 'not measured yet'}. Manual entries create a new lifetime snapshot.`
+            : 'Manual entries create lifetime snapshots for the active client space.'}
+        </p>
+        <Button
+          variant="primary"
+          leading={saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+          onClick={onSave}
+          disabled={disabled || saving || !draft.postId}
+        >
+          {saving ? 'Saving' : 'Save metrics'}
+        </Button>
+      </div>
+
+      {message && (
+        <div style={{ marginTop: space[4] }}>
+          <Notice tone={message.tone} text={message.text} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FieldStack({ label, helper, children }: { label: string; helper?: string; children: ReactNode }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+      <span style={{ color: color.ink2, fontSize: t.size.micro, fontWeight: t.weight.semibold, textTransform: 'uppercase', letterSpacing: t.letterSpacing.wide }}>
+        {label}
+      </span>
+      {children}
+      {helper && <span style={{ color: color.ghost, fontSize: t.size.micro, lineHeight: 1.35 }}>{helper}</span>}
+    </label>
+  )
+}
+
+const manualInputStyle: CSSProperties = {
+  width: '100%',
+  height: 38,
+  padding: '0 11px',
+  border: `1px solid ${color.line}`,
+  borderRadius: radius.sm,
+  background: color.paper,
+  color: color.ink,
+  fontSize: t.size.sm,
+  outline: 'none',
+  minWidth: 0,
+}
+
 function PostTable({ rows, sortKey, sortDirection, onSort }: {
   rows: PostRowData[]
   sortKey: SortKey
@@ -1133,6 +1427,47 @@ function Dot({ colorValue }: { colorValue: string }) {
   return <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: radius.pill, background: colorValue, verticalAlign: 'middle', marginRight: 4 }} />
 }
 
+function emptyManualMetricDraft(): ManualMetricDraft {
+  return {
+    postId: '',
+    provider: 'linkedin',
+    liveUrl: '',
+    metricDate: todayInputValue(),
+    values: { ...EMPTY_MANUAL_VALUES },
+  }
+}
+
+function manualMetricForSelectedRow(row: PostRowData, current: ManualMetricDraft): ManualMetricDraft {
+  return {
+    ...current,
+    postId: row.post.id,
+    provider: row.provider || current.provider || 'linkedin',
+    liveUrl: row.url ?? current.liveUrl,
+    metricDate: current.metricDate || todayInputValue(),
+  }
+}
+
+function manualDraftForRow(row: PostRowData, current: ManualMetricDraft): ManualMetricDraft {
+  return {
+    ...emptyManualMetricDraft(),
+    values: current.values,
+    postId: row.post.id,
+    provider: row.provider || 'linkedin',
+    liveUrl: row.url ?? '',
+    metricDate: current.metricDate || todayInputValue(),
+  }
+}
+
+function metricInputNumber(value: string): number | null {
+  if (!value.trim()) return null
+  const parsed = Number(value.replace(/,/g, ''))
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
+}
+
+function todayInputValue(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
 function buildPostRows(posts: MeasurePost[], snapshots: ContentMetricSnapshot[], campaigns: Map<string, Campaign>): PostRowData[] {
   const latest = latestMetricMap(snapshots)
   return posts.map(post => {
@@ -1146,6 +1481,9 @@ function buildPostRows(posts: MeasurePost[], snapshots: ContentMetricSnapshot[],
     const shares = metric('shares')
     const saves = metric('saves')
     const clicks = metric('clicks')
+    const qualifiedTraffic = metric('qualified_traffic')
+    const buyerQuestions = metric('buyer_questions')
+    const meetingRequests = metric('meeting_requests')
     const explicitEngagements = metric('engagements')
     const engagements = explicitEngagements || reactions + comments + shares + saves + clicks
     const explicitRate = latest.get(`${post.id}:engagement_rate`)?.metric_value
@@ -1171,6 +1509,9 @@ function buildPostRows(posts: MeasurePost[], snapshots: ContentMetricSnapshot[],
       shares,
       saves,
       clicks,
+      qualifiedTraffic,
+      buyerQuestions,
+      meetingRequests,
       pulledAt: latestPulledAt,
       url: post.provider_permalink ?? post.posted_url ?? null,
     }
@@ -1184,6 +1525,10 @@ function buildStats(rows: PostRowData[]) {
   const reach = measuredRows.reduce((sum, row) => sum + row.reach, 0)
   const engagements = measuredRows.reduce((sum, row) => sum + row.engagements, 0)
   const comments = measuredRows.reduce((sum, row) => sum + row.comments, 0)
+  const clicks = measuredRows.reduce((sum, row) => sum + row.clicks, 0)
+  const qualifiedTraffic = measuredRows.reduce((sum, row) => sum + row.qualifiedTraffic, 0)
+  const buyerQuestions = measuredRows.reduce((sum, row) => sum + row.buyerQuestions, 0)
+  const meetingRequests = measuredRows.reduce((sum, row) => sum + row.meetingRequests, 0)
   const denominator = measuredRows.reduce((sum, row) => sum + (row.views || row.reach), 0)
   return {
     total: rows.length,
@@ -1195,6 +1540,10 @@ function buildStats(rows: PostRowData[]) {
     views: views || reach,
     engagements,
     comments,
+    clicks,
+    qualifiedTraffic,
+    buyerQuestions,
+    meetingRequests,
     engagementRate: denominator > 0 ? engagements / denominator : null,
   }
 }

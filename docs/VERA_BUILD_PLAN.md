@@ -221,7 +221,11 @@ Current state:
 - Shared text runtimes now use the same model-selection audit metadata, including requested model, policy default, selection source, and selection reason.
 - Client OpenRouter text defaults now fall back to Gemini Flash class when no client policy default is set.
 - AI Usage settings now filters current-month usage by model selection source: recommended, policy default, explicit override, fallback, or unknown historical events.
+- Image and video generation now emit structured AI budget warnings before a paid provider call when a cap is missing, the request cost is unknown, or the request moves a client space near its monthly cap.
+- Command surfaces those budget warnings as operator toasts, while usage logs keep the warning metadata for audits.
+- Performance now supports manual lifetime metric entry for API-light channels and fallback cases, including Medium, Quora, Reddit, X, and any provider where sync is incomplete.
+- Manual metrics capture views, reach, comments, shares, saves, clicks, qualified traffic, buyer questions, and meeting requests as normalized `content_metric_snapshots`.
 
 Next step:
 
-- Add operator-facing budget rules that turn these usage signals into warnings before a generation request is submitted.
+- Turn synced and manual performance signals into learning recommendations that propose the next brief, platform mix, and SAM handoff actions.
