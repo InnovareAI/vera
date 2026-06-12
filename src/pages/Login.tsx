@@ -134,7 +134,7 @@ export default function Login() {
         </div>
 
         <p style={{ textAlign: 'center', fontSize: 11.5, color: 'var(--faint)', marginTop: 18 }}>
-          One sign-in across InnovareAI — SAM &amp; VERA.
+          One sign-in across InnovareAI, SAM &amp; VERA.
         </p>
       </div>
     </div>

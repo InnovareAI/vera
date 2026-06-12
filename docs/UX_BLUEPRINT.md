@@ -1,6 +1,6 @@
 # VERA — Workflow-Driven UX Blueprint
 
-**Status:** Canonical. This ends the architecture thrash. A single engineer can execute it top-to-bottom without re-deciding anything below.
+**Status:** Historical UX blueprint. The current execution plan lives in [VERA_BUILD_PLAN.md](./VERA_BUILD_PLAN.md).
 
 **Provenance:** Produced by an 8-agent workflow (map current state → 3 competing organizing spines → judge → synthesize). Every structural claim verified against the real codebase — route line numbers, schema columns, the missing engagement fields, the unwritten `projects.instructions`.
 

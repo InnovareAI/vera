@@ -219,6 +219,13 @@ const PROVIDERS: IntegrationTemplate[] = [
     scopes: ['manual.publish', 'public.read', 'traffic.review'],
     capabilities: { read: true, ingest: true, analyze: true },
     setupNote: 'Keep manual handoff first. Add API publishing only when the client plan covers X API usage.',
+    launch: {
+      priority: 'wave_2',
+      workstream: 'Other',
+      adapterState: 'Manual-first and cost-gated. Official API usage depends on client plan and paid API economics.',
+      nextBuild: 'Register X handles, draft POV tests for manual handoff, track traffic manually, and add OAuth only when the client plan covers API cost.',
+      requirements: ['X profile URL or handle', 'Manual publish owner', 'Paid API decision', 'Traffic tracking plan'],
+    },
     icon: Hash,
     accent: '#0f172a',
   },

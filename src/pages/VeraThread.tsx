@@ -914,7 +914,7 @@ export default function VeraThread() {
     if (wire.length) {
       let outText = text
       if (draft?.copy) {
-        outText += `\n\n---\n[The draft currently open in the preview${draft.id ? ` (id: ${draft.id})` : ''}. If I ask you to tweak, edit, refine, shorten, or change "the draft/copy/post", revise THIS exact text in place and return the full updated post — do not ask me to paste it again:]\n${draft.copy}`
+        outText += `\n\n---\n[The draft currently open in the preview${draft.id ? ` (id: ${draft.id})` : ''}. If I ask you to tweak, edit, refine, shorten, or change "the draft/copy/post", revise THIS exact text in place and return the full updated post. Do not ask me to paste it again:]\n${draft.copy}`
       }
       const contentBlocks: WireContentBlock[] = [
         ...docAtts.map(a => a.document),
@@ -1162,7 +1162,7 @@ export default function VeraThread() {
       // IN_QUEUE / IN_PROGRESS → keep polling
     }
     setMessages(prev => prev.map(m => m.id === assistantId
-      ? { ...m, videoPending: false, content: (m.content ? m.content + '\n\n' : '') + '⚠ Video is taking longer than usual — it may still be rendering. Try again shortly.' } : m))
+      ? { ...m, videoPending: false, content: (m.content ? m.content + '\n\n' : '') + '⚠ Video is taking longer than usual. It may still be rendering. Try again shortly.' } : m))
   }
 
   // Watch a server-side carousel job fill in. generate-carousel renders frames
@@ -1475,7 +1475,7 @@ export default function VeraThread() {
     setTimeout(() => taRef.current?.focus(), 0)
   }
   function regenerateDraft() {
-    setInput('Regenerate that draft — same brief, fresh take.')
+    setInput('Regenerate that draft. Same brief, fresh take.')
     setTimeout(() => taRef.current?.focus(), 0)
   }
 
@@ -1698,7 +1698,7 @@ function Bubble({ m, onPin }: { m: Message; onPin?: (content: string) => void })
         {/* result actions — Claude-style, under a completed answer */}
         {m.content && !m.pending && (
           <div style={{ display: 'flex', gap: 2, marginTop: -2 }}>
-            <button title="Copy as plain text — keeps bold, drops Markdown symbols" style={actBtn}
+            <button title="Copy as plain text, keeps bold, drops Markdown symbols" style={actBtn}
               onClick={() => { try { void navigator.clipboard?.writeText(markdownToText(m.content)) } catch { /* ignore */ } setCopied(true); setTimeout(() => setCopied(false), 1500) }}>
               {copied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
             </button>
@@ -1712,7 +1712,7 @@ function Bubble({ m, onPin }: { m: Message; onPin?: (content: string) => void })
               onClick={() => downloadMarkdown(m.content, m.videos ?? [])}>
               <FileText size={13} /> .md
             </button>
-            <button title="Download as PDF — selectable text, images embedded, videos as clickable links" style={actBtn} disabled={pdfBusy}
+            <button title="Download as PDF: selectable text, images embedded, videos as clickable links" style={actBtn} disabled={pdfBusy}
               onClick={async () => { setPdfBusy(true); try { const { downloadPdf } = await import('../lib/exportPdf'); await downloadPdf(m.content, m.images ?? [], m.videos ?? []) } catch { /* ignore */ } finally { setPdfBusy(false) } }}>
               <FileText size={13} /> {pdfBusy ? 'PDF…' : '.pdf'}
             </button>
@@ -1759,7 +1759,7 @@ function DraftArtifact({ draft, approving, sending, onApprove, onSendForApproval
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: space[2] }}>
             <button onClick={onPrevVersion} disabled={!onPrevVersion} title="Previous version"
               style={{ width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${color.line}`, borderRadius: radius.sm, background: color.surface, color: onPrevVersion ? color.ink2 : color.faint, cursor: onPrevVersion ? 'pointer' : 'default', fontSize: 14, lineHeight: 1 }}>‹</button>
-            <span style={{ fontSize: t.size.micro, color: color.ghost, fontWeight: t.weight.medium, minWidth: 32, textAlign: 'center' }} title="Draft version — flip back through edits">v{versionIdx + 1}/{versionTotal}</span>
+            <span style={{ fontSize: t.size.micro, color: color.ghost, fontWeight: t.weight.medium, minWidth: 32, textAlign: 'center' }} title="Draft version, flip back through edits">v{versionIdx + 1}/{versionTotal}</span>
             <button onClick={onNextVersion} disabled={!onNextVersion} title="Next version"
               style={{ width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${color.line}`, borderRadius: radius.sm, background: color.surface, color: onNextVersion ? color.ink2 : color.faint, cursor: onNextVersion ? 'pointer' : 'default', fontSize: 14, lineHeight: 1 }}>›</button>
           </span>
@@ -1859,7 +1859,7 @@ function ArtifactEmpty() {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: space[7], gap: space[3] }}>
       <Sparkles size={20} strokeWidth={1.5} style={{ color: color.faint }} />
       <p style={{ fontSize: t.size.cap, color: color.ghost, lineHeight: 1.5, maxWidth: '26ch' }}>
-        Brief a post in the thread. The draft — copy, image, or video — opens here, ready to approve.
+        Brief a post in the thread. A draft with copy, image, or video opens here, ready to approve.
       </p>
     </div>
   )
@@ -1910,6 +1910,30 @@ function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: Pr
     { icon: ImagePlus, label: 'Images', ready: capabilities.imageReady },
     { icon: Clapperboard, label: 'Video', ready: capabilities.videoReady },
   ]
+  const recommendations = [
+    {
+      label: 'Text',
+      body: capabilities.textReady
+        ? capabilities.hasOpenRouter
+          ? 'Use the client OpenRouter key. Prefer a low-cost content model such as Gemini when quality is sufficient.'
+          : capabilities.hasAnthropic
+            ? 'Use the client Anthropic key for high-trust writing and strategy work.'
+            : 'Use platform text only inside approved InnovareAI workspaces.'
+        : 'Add a client OpenRouter key first. Do not fall back to platform text spend for client work.',
+    },
+    {
+      label: 'Image',
+      body: capabilities.imageReady
+        ? 'Default to the standard prototype tier, Nano Banana or Seedream style routes. Premium image models need explicit selection.'
+        : 'Keep image work as a prompt, storyboard, or production brief until a client key or entitlement is available.',
+    },
+    {
+      label: 'Video',
+      body: capabilities.videoReady
+        ? 'Storyboard first, then render only after explicit approval. Use standard video unless premium media is enabled.'
+        : 'Keep video as storyboard-first. Real renders require a client-owned FAL key or approved platform video entitlement.',
+    },
+  ]
 
   return (
     <div style={{ width: '100%', maxWidth: 680, marginBottom: space[5], padding: space[5], background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.lg, textAlign: 'left' }}>
@@ -1940,6 +1964,18 @@ function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: Pr
             </span>
           )
         })}
+      </div>
+      <div style={{ marginTop: space[4], display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: space[2] }}>
+        {recommendations.map(item => (
+          <div key={item.label} style={{ padding: space[3], borderRadius: radius.md, background: color.surface, border: `1px solid ${color.line}` }}>
+            <div style={{ fontSize: t.size.micro, fontWeight: t.weight.semibold, color: color.accent, textTransform: 'uppercase', letterSpacing: 0, marginBottom: 4 }}>
+              Recommended {item.label}
+            </div>
+            <div style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5 }}>
+              {item.body}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )
