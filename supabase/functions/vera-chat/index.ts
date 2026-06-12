@@ -1501,6 +1501,7 @@ async function executeTool(
     serviceKey: string
     emit: (event: Record<string, unknown>) => void
     userPrompt?: string | null
+    allowVideoGeneration?: boolean
   },
 ): Promise<{ result: string; image_url?: string; video_url?: string }> {
   try {
@@ -1743,6 +1744,9 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         if (newCopy) updates.copy = newCopy
         const imgPrompt = (input.image_prompt as string)?.trim()
         const vidPrompt = (input.video_prompt as string)?.trim()
+        if (vidPrompt && !ctx.allowVideoGeneration) {
+          return { result: 'Video generation is disabled for this client space because no client-owned FAL key is configured. I can refine the copy or write a video production brief instead.' }
+        }
         let changed = newCopy ? 'copy' : ''
         if (imgPrompt || vidPrompt) {
           ctx.emit({ type: 'tool_progress', tool: 'refine_post', status: imgPrompt ? 'regenerating the image…' : 'regenerating the video…' })
@@ -2029,6 +2033,9 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
       }
 
       case 'generate_video': {
+        if (!ctx.allowVideoGeneration) {
+          return { result: 'Video generation is disabled for this client space because no client-owned FAL key is configured. Use generate_video_brief for a written production brief instead.' }
+        }
         // Video gen takes 60-120s — far longer than the gateway will hold an
         // SSE connection open (it cuts ~47s in, surfacing as a "network error").
         // So we DON'T wait here. We submit the fal job, hand the request_id to
@@ -2987,10 +2994,11 @@ Deno.serve(async (req) => {
   //     bring their own Anthropic key — the only provider key we offer/use)
   let effectiveModel = MODEL
   let effectiveApiKey = anthropicKey   // InnovareAI / platform key (default)
+  let isMasterOrg = false
   try {
     const { data: orgRow } = await supabase.from('organizations').select('is_master').eq('id', org_id).maybeSingle()
-    const isMaster = !!(orgRow as { is_master?: boolean } | null)?.is_master
-    if (!isMaster && project_id) {
+    isMasterOrg = !!(orgRow as { is_master?: boolean } | null)?.is_master
+    if (!isMasterOrg && project_id) {
       const { data: ownAnthropic } = await supabase.from('client_api_keys')
         .select('secret_ciphertext').eq('project_id', project_id).eq('provider', 'anthropic').eq('status', 'active')
         .order('updated_at', { ascending: false }).limit(1).maybeSingle()
@@ -3013,6 +3021,31 @@ Deno.serve(async (req) => {
       const cipher = (orRow as { secret_ciphertext?: string } | null)?.secret_ciphertext
       if (cipher) clientOpenRouterKey = await decryptClientSecret(cipher)
     } catch { /* fall back to the Anthropic path on any lookup/decrypt error */ }
+  }
+  let clientHasFalKey = false
+  if (project_id && !isMasterOrg) {
+    try {
+      const { data: falRow } = await supabase.from('client_api_keys')
+        .select('id').eq('project_id', project_id).in('provider', ['fal', 'fal_ai']).eq('status', 'active')
+        .order('updated_at', { ascending: false }).limit(1).maybeSingle()
+      clientHasFalKey = !!falRow
+    } catch {
+      clientHasFalKey = false
+    }
+  }
+  const enabledTools = (isMasterOrg || clientHasFalKey)
+    ? TOOLS
+    : TOOLS.filter(tool => tool.name !== 'generate_video')
+  if (!isMasterOrg && !clientHasFalKey) {
+    systemBlocks.push({
+      type: 'text' as const,
+      text: [
+        '<media_capabilities>',
+        'Real video generation is unavailable in this client space because no client-owned FAL key is configured.',
+        'Do not offer, promise, or call generate_video. If the operator asks for video, create a written production brief with generate_video_brief instead.',
+        '</media_capabilities>',
+      ].join('\n'),
+    })
   }
   // Haiku doesn't accept Sonnet's extended-thinking param — only enable on Sonnet.
   const useThinking = enableThinking && effectiveModel === MODEL
@@ -3068,7 +3101,7 @@ Deno.serve(async (req) => {
             model: OPENROUTER_TEXT_MODEL,
             systemText: (systemBlocks as Array<{ text?: string }>).map(b => b.text ?? '').join('\n\n'),
             convo,
-            tools: TOOLS as unknown as Array<{ name: string; description?: string; input_schema?: unknown }>,
+            tools: enabledTools as unknown as Array<{ name: string; description?: string; input_schema?: unknown }>,
             send,
             toolCtx: {
               orgId: org_id,
@@ -3079,6 +3112,7 @@ Deno.serve(async (req) => {
               serviceKey,
               emit: send,
               userPrompt: lastUserText ?? null,
+              allowVideoGeneration: isMasterOrg || clientHasFalKey,
             },
           })
           fullText = r.fullText
@@ -3095,7 +3129,7 @@ Deno.serve(async (req) => {
             system: systemBlocks,
             tools: [
               ...SERVER_TOOLS,
-              ...TOOLS,
+              ...enabledTools,
             ] as unknown as Parameters<typeof anthropic.messages.create>[0]['tools'],
             messages: convo as Parameters<typeof anthropic.messages.create>[0]['messages'],
             stream: true,
@@ -3185,6 +3219,7 @@ Deno.serve(async (req) => {
                 serviceKey,
                 emit: send,
                 userPrompt: lastUserText ?? null,
+                allowVideoGeneration: isMasterOrg || clientHasFalKey,
               })
               if (exec.image_url) {
                 generatedImages.push(exec.image_url)
