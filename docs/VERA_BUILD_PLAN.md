@@ -209,7 +209,8 @@ Current state:
 - A provider pricing catalog migration now defines normalized model pricing rows with RLS, explicit grants, reviewed dates, source URLs, and seeded text, image, and video guide rows.
 - The provider pricing catalog is applied on the live Vera content stack at `supabase-content-eu.innovareai.com` and currently exposes 13 active read-only pricing rows through the anon REST API.
 - Edge Function usage logging and client budget checks now try the provider pricing catalog first, then fall back to static estimates if the catalog is unavailable or no model row matches.
+- AI Usage settings now includes an operator-only pricing catalog editor for platform admins, backed by a service-role Edge Function gated through `is_platform_admin`.
 
 Next step:
 
-- Keep provider pricing metadata maintained as models change, then add an operator-only pricing admin surface for updating sources, reviewed dates, and premium flags without a code deploy.
+- Add recommended model selection rules on top of the catalog so Vera can choose the cheapest model that is good enough for each task, format, and approval risk.

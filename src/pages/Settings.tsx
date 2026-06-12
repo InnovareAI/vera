@@ -6,7 +6,7 @@ import { useProject } from '../lib/projectContext'
 import { useAuth } from '../lib/auth'
 import {
   Settings2, Users, Mic2, Plug, Building2, Save,
-  CheckCircle2, AlertCircle, Sun, Moon, Monitor, BarChart3, ShieldCheck, RefreshCw, KeyRound
+  CheckCircle2, AlertCircle, Sun, Moon, Monitor, BarChart3, ShieldCheck, RefreshCw, KeyRound, Database, ExternalLink
 } from 'lucide-react'
 import { PublishersCard } from '../components/PublishersCard'
 import { ClientIntegrationsCard } from '../components/ClientIntegrationsCard'
@@ -654,12 +654,54 @@ type AiEntitlementRow = {
   created_at: string
 }
 
+type PricingAdminRow = {
+  id: string
+  provider: string
+  model_key: string
+  model_match_patterns: string[]
+  operation: 'chat.message' | 'image.generate' | 'video.submit'
+  billing_unit: 'token' | 'image' | 'megapixel' | 'video' | 'quote'
+  input_per_million_usd: number | null
+  output_per_million_usd: number | null
+  unit_price_usd: number | null
+  estimate_label: string
+  estimate_detail: string
+  source: string
+  source_url: string | null
+  confidence: 'high' | 'medium' | 'low'
+  premium: boolean
+  active: boolean
+  reviewed_on: string
+  metadata: Record<string, unknown>
+  updated_at: string
+}
+
+type PricingAdminDraft = {
+  estimate_label: string
+  estimate_detail: string
+  input_per_million_usd: string
+  output_per_million_usd: string
+  unit_price_usd: string
+  source: string
+  source_url: string
+  confidence: PricingAdminRow['confidence']
+  premium: boolean
+  active: boolean
+  reviewed_on: string
+}
+
 function AiUsageTab() {
   const { activeOrg } = useOrg()
   const { projects } = useProject()
   const { user } = useAuth()
   const [usageRows, setUsageRows] = useState<GenerationUsageRow[]>([])
   const [entitlements, setEntitlements] = useState<AiEntitlementRow[]>([])
+  const [pricingRows, setPricingRows] = useState<PricingAdminRow[]>([])
+  const [pricingDrafts, setPricingDrafts] = useState<Record<string, PricingAdminDraft>>({})
+  const [pricingAllowed, setPricingAllowed] = useState<boolean | null>(null)
+  const [pricingLoading, setPricingLoading] = useState(false)
+  const [pricingSaving, setPricingSaving] = useState<string | null>(null)
+  const [pricingError, setPricingError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -706,7 +748,80 @@ function AiUsageTab() {
     setLoading(false)
   }, [activeOrg?.id, projectIds])
 
+  const loadPricingCatalog = useCallback(async () => {
+    if (!user) {
+      setPricingAllowed(false)
+      setPricingRows([])
+      setPricingDrafts({})
+      return
+    }
+    setPricingLoading(true)
+    setPricingError(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/model-pricing-admin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${session?.access_token ?? ''}`,
+        },
+        body: JSON.stringify({ action: 'list' }),
+      })
+      const data = await res.json().catch(() => ({})) as { rows?: PricingAdminRow[]; error?: string }
+      if (res.status === 403 || res.status === 401) {
+        setPricingAllowed(false)
+        setPricingRows([])
+        setPricingDrafts({})
+        return
+      }
+      if (!res.ok) throw new Error(data.error ?? `Pricing catalog failed (HTTP ${res.status})`)
+      const rows = data.rows ?? []
+      setPricingAllowed(true)
+      setPricingRows(rows)
+      setPricingDrafts(Object.fromEntries(rows.map(row => [row.id, pricingDraftFromRow(row)])))
+    } catch (e) {
+      setPricingError(e instanceof Error ? e.message : 'Could not load pricing catalog.')
+    } finally {
+      setPricingLoading(false)
+    }
+  }, [user])
+
+  async function savePricingRow(row: PricingAdminRow) {
+    const draft = pricingDrafts[row.id]
+    if (!draft) return
+    setPricingSaving(row.id)
+    setPricingError(null)
+    try {
+      const patch = pricingPatchFromDraft(draft)
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/model-pricing-admin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${session?.access_token ?? ''}`,
+        },
+        body: JSON.stringify({ action: 'update', id: row.id, patch }),
+      })
+      const data = await res.json().catch(() => ({})) as { rows?: PricingAdminRow[]; error?: string }
+      if (!res.ok) throw new Error(data.error ?? `Save failed (HTTP ${res.status})`)
+      const rows = data.rows ?? []
+      setPricingRows(rows)
+      setPricingDrafts(Object.fromEntries(rows.map(item => [item.id, pricingDraftFromRow(item)])))
+    } catch (e) {
+      setPricingError(e instanceof Error ? e.message : 'Could not save pricing row.')
+    } finally {
+      setPricingSaving(null)
+    }
+  }
+
+  function updatePricingDraft(id: string, patch: Partial<PricingAdminDraft>) {
+    setPricingDrafts(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))
+  }
+
   useEffect(() => { void load() }, [load])
+  useEffect(() => { void loadPricingCatalog() }, [loadPricingCatalog])
 
   return (
     <div className="max-w-5xl space-y-5">
@@ -851,6 +966,20 @@ function AiUsageTab() {
         </section>
       </div>
 
+      {pricingAllowed !== false && (
+        <PricingCatalogAdmin
+          rows={pricingRows}
+          drafts={pricingDrafts}
+          loading={pricingLoading}
+          error={pricingError}
+          savingId={pricingSaving}
+          allowed={pricingAllowed}
+          onRefresh={() => void loadPricingCatalog()}
+          onDraftChange={updatePricingDraft}
+          onSave={savePricingRow}
+        />
+      )}
+
       <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100">
           <p className="text-sm font-medium text-gray-800">Model spend concentration</p>
@@ -930,6 +1059,223 @@ function AiUsageTab() {
         </div>
       </section>
     </div>
+  )
+}
+
+function PricingCatalogAdmin({
+  rows,
+  drafts,
+  loading,
+  error,
+  savingId,
+  allowed,
+  onRefresh,
+  onDraftChange,
+  onSave,
+}: {
+  rows: PricingAdminRow[]
+  drafts: Record<string, PricingAdminDraft>
+  loading: boolean
+  error: string | null
+  savingId: string | null
+  allowed: boolean | null
+  onRefresh: () => void
+  onDraftChange: (id: string, patch: Partial<PricingAdminDraft>) => void
+  onSave: (row: PricingAdminRow) => void
+}) {
+  const activeRows = rows.filter(row => row.active).length
+  return (
+    <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-4">
+        <div className="flex items-start gap-2">
+          <Database size={16} className="text-gray-500 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-gray-800">Operator pricing catalog</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Update model prices, review dates, sources, and premium flags without a code deploy.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500">
+            {allowed === null ? 'Checking access' : `${activeRows}/${rows.length} active`}
+          </span>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {error && <div className="border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+      {allowed === null && rows.length === 0 && <EmptyLine text="Checking operator pricing access..." />}
+      {allowed === true && rows.length === 0 && <EmptyLine text={loading ? 'Loading pricing catalog...' : 'No pricing rows found.'} />}
+
+      <div className="grid gap-3 p-4">
+        {rows.map(row => {
+          const draft = drafts[row.id] ?? pricingDraftFromRow(row)
+          const disabled = savingId === row.id
+          return (
+            <div key={row.id} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-white border border-gray-200 px-2 py-0.5 text-[11px] font-semibold text-gray-600">{formatProviderName(row.provider)}</span>
+                    <span className="text-sm font-semibold text-gray-900">{row.model_key}</span>
+                    <span className="rounded-full bg-white border border-gray-200 px-2 py-0.5 text-[11px] font-medium text-gray-500">{pricingOperationLabel(row.operation)}</span>
+                    <span className={pricingStatusClass(draft.active)}>{draft.active ? 'Active' : 'Inactive'}</span>
+                    {draft.premium && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Premium</span>}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {pricingUnitLabel(row.billing_unit)} billing. Updated {formatSettingsDate(row.updated_at)}.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onSave(row)}
+                  disabled={disabled}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 disabled:opacity-50"
+                >
+                  <Save size={12} />
+                  {disabled ? 'Saving...' : 'Save row'}
+                </button>
+              </div>
+
+              <div className="grid lg:grid-cols-3 gap-3">
+                <label className="space-y-1">
+                  <span className="text-[11px] font-medium text-gray-500">Estimate label</span>
+                  <input
+                    value={draft.estimate_label}
+                    onChange={e => onDraftChange(row.id, { estimate_label: e.target.value })}
+                    className="input w-full bg-white"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[11px] font-medium text-gray-500">Unit price USD</span>
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={draft.unit_price_usd}
+                    onChange={e => onDraftChange(row.id, { unit_price_usd: e.target.value })}
+                    className="input w-full bg-white"
+                    placeholder="n/a"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[11px] font-medium text-gray-500">Reviewed on</span>
+                  <input
+                    type="date"
+                    value={draft.reviewed_on}
+                    onChange={e => onDraftChange(row.id, { reviewed_on: e.target.value })}
+                    className="input w-full bg-white"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[11px] font-medium text-gray-500">Input per 1M tokens</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={draft.input_per_million_usd}
+                    onChange={e => onDraftChange(row.id, { input_per_million_usd: e.target.value })}
+                    className="input w-full bg-white"
+                    placeholder="n/a"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[11px] font-medium text-gray-500">Output per 1M tokens</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={draft.output_per_million_usd}
+                    onChange={e => onDraftChange(row.id, { output_per_million_usd: e.target.value })}
+                    className="input w-full bg-white"
+                    placeholder="n/a"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[11px] font-medium text-gray-500">Confidence</span>
+                  <select
+                    value={draft.confidence}
+                    onChange={e => onDraftChange(row.id, { confidence: e.target.value as PricingAdminRow['confidence'] })}
+                    className="input w-full bg-white"
+                  >
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="grid lg:grid-cols-[0.8fr_1.2fr_auto] gap-3 mt-3">
+                <label className="space-y-1">
+                  <span className="text-[11px] font-medium text-gray-500">Source key</span>
+                  <input
+                    value={draft.source}
+                    onChange={e => onDraftChange(row.id, { source: e.target.value })}
+                    className="input w-full bg-white"
+                    placeholder="provider_pricing_YYYY_MM_DD"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[11px] font-medium text-gray-500">Source URL</span>
+                  <div className="flex gap-2">
+                    <input
+                      value={draft.source_url}
+                      onChange={e => onDraftChange(row.id, { source_url: e.target.value })}
+                      className="input flex-1 bg-white"
+                      placeholder="https://provider.example/pricing"
+                    />
+                    {draft.source_url && (
+                      <a
+                        href={draft.source_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center justify-center w-9 rounded-lg border border-gray-200 bg-white text-gray-500 hover:text-gray-800"
+                        title="Open source"
+                      >
+                        <ExternalLink size={14} />
+                      </a>
+                    )}
+                  </div>
+                </label>
+                <div className="flex items-end gap-3 pb-2">
+                  <label className="inline-flex items-center gap-2 text-xs font-medium text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={draft.premium}
+                      onChange={e => onDraftChange(row.id, { premium: e.target.checked })}
+                    />
+                    Premium
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-xs font-medium text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={draft.active}
+                      onChange={e => onDraftChange(row.id, { active: e.target.checked })}
+                    />
+                    Active
+                  </label>
+                </div>
+              </div>
+
+              <label className="space-y-1 block mt-3">
+                <span className="text-[11px] font-medium text-gray-500">Estimate detail</span>
+                <textarea
+                  value={draft.estimate_detail}
+                  onChange={e => onDraftChange(row.id, { estimate_detail: e.target.value })}
+                  className="input w-full min-h-[72px] bg-white resize-y"
+                />
+              </label>
+            </div>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
@@ -1263,6 +1609,71 @@ function numberFromUnknown(value: unknown, fallback: number) {
 
 function formatUsageUsd(value: number) {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value)
+}
+
+function pricingDraftFromRow(row: PricingAdminRow): PricingAdminDraft {
+  return {
+    estimate_label: row.estimate_label,
+    estimate_detail: row.estimate_detail,
+    input_per_million_usd: numberInputValue(row.input_per_million_usd),
+    output_per_million_usd: numberInputValue(row.output_per_million_usd),
+    unit_price_usd: numberInputValue(row.unit_price_usd),
+    source: row.source,
+    source_url: row.source_url ?? '',
+    confidence: row.confidence,
+    premium: row.premium,
+    active: row.active,
+    reviewed_on: row.reviewed_on,
+  }
+}
+
+function pricingPatchFromDraft(draft: PricingAdminDraft) {
+  return {
+    estimate_label: draft.estimate_label.trim(),
+    estimate_detail: draft.estimate_detail.trim(),
+    input_per_million_usd: nullableNumberInput(draft.input_per_million_usd),
+    output_per_million_usd: nullableNumberInput(draft.output_per_million_usd),
+    unit_price_usd: nullableNumberInput(draft.unit_price_usd),
+    source: draft.source.trim(),
+    source_url: draft.source_url.trim() || null,
+    confidence: draft.confidence,
+    premium: draft.premium,
+    active: draft.active,
+    reviewed_on: draft.reviewed_on,
+  }
+}
+
+function numberInputValue(value: number | null) {
+  return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
+}
+
+function nullableNumberInput(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function pricingOperationLabel(value: PricingAdminRow['operation']) {
+  if (value === 'chat.message') return 'Text'
+  if (value === 'image.generate') return 'Image'
+  if (value === 'video.submit') return 'Video'
+  return value
+}
+
+function pricingUnitLabel(value: PricingAdminRow['billing_unit']) {
+  if (value === 'token') return 'Token'
+  if (value === 'image') return 'Image'
+  if (value === 'megapixel') return 'Megapixel'
+  if (value === 'video') return 'Video'
+  if (value === 'quote') return 'Quote'
+  return value
+}
+
+function pricingStatusClass(active: boolean) {
+  return active
+    ? 'rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700'
+    : 'rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500'
 }
 
 function formatCompactTokens(value: number) {
