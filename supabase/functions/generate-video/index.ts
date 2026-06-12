@@ -110,7 +110,7 @@ Deno.serve(async (req) => {
 
     const modelHint = modelSlugHint(model)
     const defaultSlug = modelSlugHint(DEFAULT_TEXT_VIDEO_MODEL) ?? MODELS.hailuo.slug
-    const slug = (job as { slug?: string | null } | null)?.slug || slugIn || modelHint || defaultSlug
+    const slug = canonicalQueueSlug((job as { slug?: string | null } | null)?.slug || slugIn || modelHint || defaultSlug)
     const sres = await fetch(`https://queue.fal.run/${slug}/requests/${request_id}/status`, { headers: { Authorization: `Key ${fal.key}` } })
     if (!sres.ok) return json({ status: 'ERROR', message: `status ${sres.status}` })
     const sdata = await sres.json() as { status: string; queue_position?: number }
@@ -173,10 +173,11 @@ Deno.serve(async (req) => {
       body: JSON.stringify(payload),
     })
     if (!submitRes.ok) return jsonError(`FAL submit failed (${submitRes.status}): ${(await submitRes.text()).slice(0, 200)}`, 502)
-    const submission = await submitRes.json() as { request_id: string }
-    const recordError = await recordVideoJob(supabase, projectId, submission.request_id, slug, prompt)
+    const submission = await submitRes.json() as { request_id: string; response_url?: string; status_url?: string }
+    const queueSlug = queueSlugFromUrl(submission.response_url ?? submission.status_url) ?? canonicalQueueSlug(slug)
+    const recordError = await recordVideoJob(supabase, projectId, submission.request_id, queueSlug, prompt)
     if (recordError) return jsonError(recordError, 500)
-    return json({ request_id: submission.request_id, slug, model: alias, tier: selectedModel.tier, estimated_cost: selectedModel.estimate })
+    return json({ request_id: submission.request_id, slug: queueSlug, model: alias, tier: selectedModel.tier, estimated_cost: selectedModel.estimate })
   }
 
   const encoder = new TextEncoder()
@@ -202,15 +203,16 @@ Deno.serve(async (req) => {
         }
         const submission = await submitRes.json() as { request_id: string; status_url?: string; response_url?: string }
         const requestId = submission.request_id
-        const statusUrl = submission.status_url ?? `https://queue.fal.run/${slug}/requests/${requestId}/status`
-        const resultUrl = submission.response_url ?? `https://queue.fal.run/${slug}/requests/${requestId}`
-        const recordError = await recordVideoJob(supabase, projectId, requestId, slug, prompt)
+        const queueSlug = queueSlugFromUrl(submission.response_url ?? submission.status_url) ?? canonicalQueueSlug(slug)
+        const statusUrl = submission.status_url ?? `https://queue.fal.run/${queueSlug}/requests/${requestId}/status`
+        const resultUrl = submission.response_url ?? `https://queue.fal.run/${queueSlug}/requests/${requestId}`
+        const recordError = await recordVideoJob(supabase, projectId, requestId, queueSlug, prompt)
         if (recordError) {
           send('error', { message: recordError })
           controller.close()
           return
         }
-        send('started', { model_used: slug, request_id: requestId })
+        send('started', { model_used: queueSlug, request_id: requestId })
 
         // Video gen is slower than image — poll every 3s, cap at 600 attempts
         // = 30 min worst case (large Sora 2 jobs can take 5-10 min).
@@ -317,6 +319,25 @@ function normalizeEmail(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const email = value.trim().toLowerCase()
   return email.includes('@') ? email : null
+}
+
+function queueSlugFromUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  try {
+    const url = new URL(value)
+    if (url.hostname !== 'queue.fal.run') return null
+    const marker = url.pathname.indexOf('/requests/')
+    if (marker <= 1) return null
+    return canonicalQueueSlug(url.pathname.slice(1, marker))
+  } catch {
+    return null
+  }
+}
+
+function canonicalQueueSlug(slug: string): string {
+  const normalized = slug.trim().replace(/^\/+|\/+$/g, '')
+  if (normalized.startsWith('fal-ai/minimax/')) return 'fal-ai/minimax'
+  return normalized
 }
 
 async function recordVideoJob(
