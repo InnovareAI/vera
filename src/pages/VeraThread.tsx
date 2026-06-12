@@ -505,7 +505,7 @@ export default function VeraThread() {
           if (resumedJobs.current.has(job.request_id)) continue
           resumedJobs.current.add(job.request_id)
           if (job.message_id) setMessages(prev => prev.map(m => m.id === job.message_id ? { ...m, videoPending: true } : m))
-          void pollVideo(job.request_id, job.slug ?? 'veo-3', job.message_id ?? crypto.randomUUID(), { postId: job.post_id })
+          void pollVideo(job.request_id, job.slug ?? 'hailuo', job.message_id ?? crypto.randomUUID(), { postId: job.post_id })
         }
       })
     return () => { cancelled = true }
@@ -811,7 +811,7 @@ export default function VeraThread() {
             // page lost the clip with no id to recover it. Now any 'rendering'
             // job is resumed on load (see the resume effect below).
             const reqId = ev.request_id as string
-            const vslug = (ev.slug as string) ?? 'veo-3'
+            const vslug = (ev.slug as string) ?? 'hailuo'
             if (activeProject?.id) {
               void supabase.from('video_jobs').upsert({
                 request_id: reqId, slug: vslug, post_id: streamDraftId,
@@ -1666,7 +1666,7 @@ function buildLaunchActions(stats: { pending: number; campaigns: number }): Laun
   const a: LaunchAction[] = []
   a.push({ icon: PenLine, title: 'Draft a Post', sub: 'Sharp copy, text first', prompt: 'Draft a punchy LinkedIn post for this brand: one sharp hook, three crisp points, a soft CTA. Text only for now, then ask if I want a matching image.' })
   a.push({ icon: ImagePlus, title: 'Create a Visual', sub: 'Image, infographic, or carousel', prompt: 'I want to create a visual for a post. Offer me the options (infographic, carousel, quote card, or a custom image), or let me describe my own, then build a tight image prompt and generate it.' })
-  a.push({ icon: Clapperboard, title: 'Make a Video', sub: 'A short motion clip', prompt: 'Create a short video clip for a post. Ask me the concept and vibe, then generate it.' })
+  a.push({ icon: Clapperboard, title: 'Video Brief', sub: 'Concept, storyboard, estimate', prompt: 'Help me plan a short video post. Start with the concept, storyboard, caption, model recommendation, and estimated cost. Do not render the video until I explicitly approve the paid generation.' })
   a.push({ icon: Zap, title: 'Write Hooks', sub: '5 sharp opening lines', prompt: "Write 5 scroll-stopping opening hooks in this brand's voice for a topic I give you. Punchy, specific, no cliches." })
   a.push(stats.campaigns > 0
     ? { icon: Megaphone, title: 'Improve Campaign', sub: `${stats.campaigns} in this workspace`, prompt: "Review this brand's campaigns and suggest the highest-impact improvement to theme, angle, cadence, or channel mix." }

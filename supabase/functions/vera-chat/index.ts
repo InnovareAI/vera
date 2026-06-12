@@ -508,6 +508,13 @@ Generation tools:
   makes finishing media attach to the WRONG post, risks timeouts, and overwhelms
   the operator; strictly one-at-a-time keeps every visual pinned to the right
   draft and the work calm.
+  VIDEO COST CONTROL: default video generation to the prototype tier only
+  (hailuo for text-to-video, hailuo-i2v for image-to-video). Do not select
+  Kling, Sora, Veo, Seedance, "hero", or any raw fal model slug for ordinary
+  video asks. Those are premium video choices and the backend blocks them unless
+  a separate paid premium flow is explicitly enabled. When the operator is still
+  exploring, create a written video brief or storyboard first and ask for approval
+  before rendering a real clip.
 - plan_campaign — YOUR PATH FOR ANY BATCH / MULTI-POST ask: "plan the month",
   "plan next month for <client>", "a month of LinkedIn posts", "build a campaign
   on X", "the next 4 weeks", "a week of content". In ONE call it writes the whole
@@ -532,9 +539,11 @@ Generation tools:
   FIRST, then call generate_carousel with ONE entry per frame. HARD RULE: a
   carousel ask gets EVERY frame generated — NEVER answer it with a single
   generate_image. If they describe five frames, you produce five.
-- generate_video — generates a real video clip (MP4) via fal.ai (Veo 3 text-to-video,
-  or image-to-video when given an image_url); it streams into the thread + attaches to the draft.
-  If the ask is a video POST and no draft exists yet, save_draft the caption FIRST, then call this.
+- generate_video — generates a real video clip (MP4) via Vera's cost-controlled
+  video router. Default models are hailuo for text-to-video and hailuo-i2v for
+  image-to-video. Premium video models like Kling, Sora, Veo, Seedance, and
+  "hero" aliases are not defaults. If the ask is a video POST and no draft
+  exists yet, save_draft the caption FIRST, then call this.
 - generate_video_brief — produces a written video-production brief (no clip)
 
 Workspace tools:
@@ -1439,14 +1448,14 @@ const TOOLS = [
   },
   {
     name: 'generate_video',
-    description: 'Generate an actual video clip (MP4) via fal.ai and stream it into the thread. Use when the operator asks to "make/create a video", "animate this", "turn this image into a video", or wants a short motion clip for a post. Text-to-video by default (Veo 3); pass image_url to animate an existing still (an image-to-video engine is chosen automatically). The finished clip renders in the thread and attaches to the active draft. IMPORTANT: this attaches to an EXISTING draft — if the operator wants a video POST and you have not saved a draft yet, call save_draft for the caption FIRST so the clip has a post card to attach to (otherwise it is stranded in the chat with nothing to review). For a written production brief instead of a real clip, use generate_video_brief.',
+    description: 'Generate an actual video clip (MP4) via Vera\'s cost-controlled video router and stream it into the thread. Use only after the operator explicitly asks to render a real clip. Text-to-video defaults to "hailuo"; image-to-video defaults to "hailuo-i2v". Do not choose Kling, Sora, Veo, Seedance, "hero", or raw fal slugs for ordinary requests because those are premium choices and are blocked by default. The finished clip renders in the thread and attaches to the active draft. IMPORTANT: this attaches to an EXISTING draft. If the operator wants a video POST and you have not saved a draft yet, call save_draft for the caption FIRST so the clip has a post card to attach to. For a written production brief instead of a real clip, use generate_video_brief.',
     input_schema: {
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'What the video should show — subject, motion, camera, mood. Be vivid and concrete; this drives the generation.' },
         image_url: { type: 'string', description: 'Optional. A still image URL to animate (image-to-video). When set, an image-to-video model is used.' },
         aspect_ratio: { type: 'string', enum: ['16:9', '9:16', '1:1'], description: 'Optional. Default 16:9. Use 9:16 for Reels / Shorts / TikTok.' },
-        model: { type: 'string', description: 'Optional engine override: "veo-3" (default text-to-video), "sora-2" (premium), "kling-3" (image-to-video).' },
+        model: { type: 'string', description: 'Optional engine override. Use "hailuo" for text-to-video prototypes or "hailuo-i2v" when image_url is provided. Premium engines such as Kling, Sora, Veo, and Seedance are blocked unless a separate paid flow is enabled.' },
       },
       required: ['prompt'],
     },
@@ -1827,7 +1836,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
             const fn = imgPrompt ? 'generate-image' : 'generate-video'
             const body = imgPrompt
               ? { prompt: imgPrompt, model: 'nano-banana', image_size: 'square_hd', project_id: ctx.projectId }
-              : { prompt: vidPrompt, model: 'veo-3', aspect_ratio: '16:9', project_id: ctx.projectId }
+              : { prompt: vidPrompt, model: 'hailuo', aspect_ratio: '16:9', project_id: ctx.projectId }
             const res = await fetch(`${ctx.supabaseUrl}/functions/v1/${fn}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
@@ -2118,7 +2127,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         const body = {
           action: 'submit',
           prompt: input.prompt as string,
-          model: (input.model as string) ?? (input.image_url ? 'kling-3' : 'veo-3'),
+          model: (input.model as string) ?? (input.image_url ? 'hailuo-i2v' : 'hailuo'),
           image_url: (input.image_url as string) ?? undefined,
           aspect_ratio: (input.aspect_ratio as string) ?? '16:9',
           project_id: ctx.projectId,

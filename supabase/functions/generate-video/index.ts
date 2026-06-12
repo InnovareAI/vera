@@ -26,29 +26,43 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const FAL_API_KEY = Deno.env.get('FAL_API_KEY')
 
-// Curated video model whitelist. Split by text-to-video vs image-to-video.
-// the caller picks based on whether they're supplying image_url.
-const MODELS: Record<string, string> = {
-  // ─── Text-to-video ───────────────────────────────────────────────────────
-  // DEFAULT — Google Veo 3. Native audio, strong cinematic quality, ~30-90s
-  // generation per 5-8s clip. Best general-purpose text-to-video on FAL.
-  'veo-3':         'fal-ai/veo3',
-  'veo3':          'fal-ai/veo3',
-  // Sora 2 — OpenAI's flagship video model. Premium, photorealistic.
-  'sora-2':        'fal-ai/sora-2',
-  'sora':          'fal-ai/sora-2',
-  'hero':          'fal-ai/sora-2',
-  // MiniMax Hailuo — cheaper, ~5-10s clips, fine for social B-roll.
-  'minimax':       'fal-ai/minimax-video',
-  'hailuo':        'fal-ai/minimax-video',
-  // ─── Image-to-video ─────────────────────────────────────────────────────
-  // Pass image_url + prompt for camera direction / motion. Used to bring a
-  // generated hero image (e.g. fashion campaign still) into motion.
-  'kling-3':       'fal-ai/kling-video/v3/pro/image-to-video',
-  'kling':         'fal-ai/kling-video/v3/pro/image-to-video',
-  'kling-2.6':     'fal-ai/kling-video/v2.6/pro/image-to-video',
-  'kling-2.5':     'fal-ai/kling-video/v2.5-turbo/pro/image-to-video',
-  'seedance-i2v':  'bytedance/seedance-2.0/image-to-video',
+type VideoTier = 'standard' | 'premium'
+type VideoKind = 'text' | 'image'
+
+type VideoModel = {
+  slug: string
+  tier: VideoTier
+  kind: VideoKind
+  estimate: string
+}
+
+const DEFAULT_TEXT_VIDEO_MODEL = Deno.env.get('DEFAULT_VIDEO_MODEL') ?? 'hailuo'
+const DEFAULT_IMAGE_VIDEO_MODEL = Deno.env.get('DEFAULT_IMAGE_VIDEO_MODEL') ?? 'hailuo-i2v'
+const PREMIUM_VIDEO_MODELS_ENABLED = Deno.env.get('PREMIUM_VIDEO_MODELS_ENABLED') === 'true'
+
+// Curated video model whitelist. Do not allow arbitrary fal slugs on submit:
+// that is how an expensive endpoint can bypass cost controls.
+const MODELS: Record<string, VideoModel> = {
+  // Standard prototype tier. fal prices Hailuo 2.3 Standard at $0.28 per 6s
+  // generation and $0.56 per 10s generation at 768p.
+  'hailuo':              { slug: 'fal-ai/minimax/hailuo-2.3/standard/text-to-video', tier: 'standard', kind: 'text', estimate: '$0.28 per 6s clip' },
+  'hailuo-2.3':          { slug: 'fal-ai/minimax/hailuo-2.3/standard/text-to-video', tier: 'standard', kind: 'text', estimate: '$0.28 per 6s clip' },
+  'hailuo-standard':     { slug: 'fal-ai/minimax/hailuo-2.3/standard/text-to-video', tier: 'standard', kind: 'text', estimate: '$0.28 per 6s clip' },
+  'minimax':             { slug: 'fal-ai/minimax/hailuo-2.3/standard/text-to-video', tier: 'standard', kind: 'text', estimate: '$0.28 per 6s clip' },
+  'hailuo-i2v':          { slug: 'fal-ai/minimax/hailuo-2.3/standard/image-to-video', tier: 'standard', kind: 'image', estimate: '$0.28 per 6s clip' },
+  'hailuo-2.3-i2v':      { slug: 'fal-ai/minimax/hailuo-2.3/standard/image-to-video', tier: 'standard', kind: 'image', estimate: '$0.28 per 6s clip' },
+  'minimax-i2v':         { slug: 'fal-ai/minimax/hailuo-2.3/standard/image-to-video', tier: 'standard', kind: 'image', estimate: '$0.28 per 6s clip' },
+
+  // Premium tier. These must never be picked by vague "make a video" requests.
+  'veo-3':               { slug: 'fal-ai/veo3', tier: 'premium', kind: 'text', estimate: 'premium video endpoint' },
+  'veo3':                { slug: 'fal-ai/veo3', tier: 'premium', kind: 'text', estimate: 'premium video endpoint' },
+  'sora-2':              { slug: 'fal-ai/sora-2', tier: 'premium', kind: 'text', estimate: 'premium video endpoint' },
+  'sora':                { slug: 'fal-ai/sora-2', tier: 'premium', kind: 'text', estimate: 'premium video endpoint' },
+  'kling-3':             { slug: 'fal-ai/kling-video/v3/pro/image-to-video', tier: 'premium', kind: 'image', estimate: '$0.112-$0.196 per second' },
+  'kling':               { slug: 'fal-ai/kling-video/v3/pro/image-to-video', tier: 'premium', kind: 'image', estimate: '$0.112-$0.196 per second' },
+  'kling-2.6':           { slug: 'fal-ai/kling-video/v2.6/pro/image-to-video', tier: 'premium', kind: 'image', estimate: '$0.07-$0.14 per second' },
+  'kling-2.5':           { slug: 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video', tier: 'premium', kind: 'image', estimate: 'premium video endpoint' },
+  'seedance-i2v':        { slug: 'bytedance/seedance-2.0/image-to-video', tier: 'premium', kind: 'image', estimate: '$0.3034 per second at 720p on fal' },
 }
 
 Deno.serve(async (req) => {
@@ -58,7 +72,7 @@ Deno.serve(async (req) => {
 
   const {
     prompt,
-    model = 'veo-3',
+    model,
     image_url,
     duration,
     aspect_ratio = '16:9',
@@ -66,6 +80,7 @@ Deno.serve(async (req) => {
     action,                 // 'submit' | 'status' | undefined (legacy stream)
     request_id,             // for action: 'status'
     slug: slugIn,           // legacy status hint; DB slug wins
+    premium_approved,
   } = await req.json().catch(() => ({}))
 
   const json = (obj: unknown, status = 200) =>
@@ -91,7 +106,9 @@ Deno.serve(async (req) => {
     const fal = await resolveFalKey(supabase, jobProjectId, access.orgId)
     if (!fal.ok) return fal.response
 
-    const slug = (job as { slug?: string | null } | null)?.slug || slugIn || MODELS[model] || model
+    const modelHint = modelSlugHint(model)
+    const defaultSlug = modelSlugHint(DEFAULT_TEXT_VIDEO_MODEL) ?? MODELS.hailuo.slug
+    const slug = (job as { slug?: string | null } | null)?.slug || slugIn || modelHint || defaultSlug
     const sres = await fetch(`https://queue.fal.run/${slug}/requests/${request_id}/status`, { headers: { Authorization: `Key ${fal.key}` } })
     if (!sres.ok) return json({ status: 'ERROR', message: `status ${sres.status}` })
     const sdata = await sres.json() as { status: string; queue_position?: number }
@@ -115,15 +132,33 @@ Deno.serve(async (req) => {
   const fal = await resolveFalKey(supabase, projectId, access.orgId)
   if (!fal.ok) return fal.response
 
-  const slug = MODELS[model] ?? model
+  const resolved = resolveVideoModel(model, !!image_url)
+  if (!resolved.ok) return resolved.response
+  const { alias, model: selectedModel, slug } = resolved
+  if (selectedModel.kind === 'image' && !image_url) {
+    return jsonError(`${alias} is an image-to-video model and requires image_url.`, 400)
+  }
+  if (selectedModel.kind === 'text' && image_url) {
+    return jsonError(`${alias} is a text-to-video model. Use hailuo-i2v for image-to-video.`, 400)
+  }
+  if (selectedModel.tier === 'premium' && (!PREMIUM_VIDEO_MODELS_ENABLED || premium_approved !== true)) {
+    return jsonError(
+      `Premium video model "${alias}" is blocked by default (${selectedModel.estimate}). Use hailuo or hailuo-i2v for prototypes, or enable an explicit paid premium video flow first.`,
+      402,
+    )
+  }
 
   // Build per-model payload. Different FAL video endpoints accept slightly
   // different parameter names; keep this conservative — pass only fields the
   // upstream model is likely to understand.
   const payload: Record<string, unknown> = { prompt }
-  if (image_url)    payload.image_url   = image_url
-  if (duration)     payload.duration    = duration       // some models use "duration_seconds"
-  if (aspect_ratio) payload.aspect_ratio = aspect_ratio
+  if (image_url) {
+    if (slug.includes('kling-video')) payload.start_image_url = image_url
+    else payload.image_url = image_url
+  }
+  const safeDuration = normalizeDuration(duration)
+  if (safeDuration) payload.duration = safeDuration
+  if (aspect_ratio && selectedModel.tier === 'premium') payload.aspect_ratio = aspect_ratio
 
   // ── ASYNC submit ── fire the fal job and return the request_id immediately;
   // the frontend then polls action:'status'. No long-held connection.
@@ -137,7 +172,7 @@ Deno.serve(async (req) => {
     const submission = await submitRes.json() as { request_id: string }
     const recordError = await recordVideoJob(supabase, projectId, submission.request_id, slug, prompt)
     if (recordError) return jsonError(recordError, 500)
-    return json({ request_id: submission.request_id, slug })
+    return json({ request_id: submission.request_id, slug, model: alias, tier: selectedModel.tier, estimated_cost: selectedModel.estimate })
   }
 
   const encoder = new TextEncoder()
@@ -221,6 +256,58 @@ Deno.serve(async (req) => {
 })
 
 function delay(ms: number) { return new Promise(r => setTimeout(r, ms)) }
+
+function resolveVideoModel(
+  requested: unknown,
+  hasImage: boolean,
+): { ok: true; alias: string; model: VideoModel; slug: string } | { ok: false; response: Response } {
+  const fallback = hasImage ? DEFAULT_IMAGE_VIDEO_MODEL : DEFAULT_TEXT_VIDEO_MODEL
+  const hasExplicitRequest = typeof requested === 'string' && requested.trim().length > 0
+  const requestedAlias = modelAlias(requested)
+  if (hasExplicitRequest && !requestedAlias) {
+    return {
+      ok: false,
+      response: jsonError(
+        `Unknown video model "${String(requested)}". Allowed prototype models: hailuo, hailuo-i2v. Premium models are blocked unless explicitly enabled.`,
+        400,
+      ),
+    }
+  }
+  const alias = requestedAlias ?? modelAlias(fallback)
+  if (!alias) {
+    return {
+      ok: false,
+      response: jsonError(
+        `Unknown video model "${String(requested ?? fallback)}". Allowed prototype models: hailuo, hailuo-i2v. Premium models are blocked unless explicitly enabled.`,
+        400,
+      ),
+    }
+  }
+  const model = MODELS[alias]
+  return { ok: true, alias, model, slug: model.slug }
+}
+
+function modelSlugHint(requested: unknown): string | null {
+  const alias = modelAlias(requested)
+  return alias ? MODELS[alias].slug : null
+}
+
+function modelAlias(requested: unknown): string | null {
+  if (typeof requested !== 'string') return null
+  const raw = requested.trim()
+  if (!raw) return null
+  const normalized = raw.toLowerCase()
+  if (MODELS[normalized]) return normalized
+  return Object.entries(MODELS).find(([, model]) => model.slug.toLowerCase() === normalized)?.[0] ?? null
+}
+
+function normalizeDuration(value: unknown): string | null {
+  if (value === undefined || value === null || value === '') return null
+  const raw = String(value).trim()
+  if (raw === '10') return '10'
+  if (raw === '6') return '6'
+  return null
+}
 
 async function recordVideoJob(
   supabase: AdminClient,
