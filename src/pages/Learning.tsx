@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ElementType, ReactNode } from 'react'
-import { ArrowRight, BarChart3, Lightbulb, RefreshCw, Share2, Sparkles, Target, TrendingUp } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { ArrowRight, BarChart3, Lightbulb, RefreshCw, Send, Share2, Sparkles, Target, TrendingUp } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { ContentMetricSnapshot, Post } from '../lib/supabase'
 import { parseProjectInstructions, type BusinessContext, type BusinessContextKey } from '../lib/businessContext'
@@ -26,10 +27,20 @@ type Insight = {
   tone: string
 }
 
+type HandoffCandidate = {
+  id: string
+  title: string
+  channel: string
+  score: number
+  triggers: string[]
+  prompt: string
+}
+
 const DEMAND_METRICS = new Set(['views', 'impressions', 'reach', 'engagements', 'likes', 'comments', 'shares', 'clicks', 'saves'])
 
 export default function Learning() {
   const { activeProject } = useProject()
+  const navigate = useNavigate()
   const [posts, setPosts] = useState<Post[]>([])
   const [snapshots, setSnapshots] = useState<ContentMetricSnapshot[]>([])
   const [loading, setLoading] = useState(true)
@@ -80,10 +91,17 @@ export default function Learning() {
   const insights = useMemo(() => buildInsights(posts, metrics), [posts, metrics])
   const experiments = useMemo(() => buildExperiments(posts, metrics), [posts, metrics])
   const topRows = useMemo(() => buildTopRows(posts, metrics), [posts, metrics])
+  const businessContext = useMemo(() => parseProjectInstructions(activeProject?.instructions ?? '').businessContext, [activeProject?.instructions])
   const operatingRows = useMemo(() => {
-    const parsed = parseProjectInstructions(activeProject?.instructions ?? '')
-    return buildOperatingRows(parsed.businessContext)
-  }, [activeProject?.instructions])
+    return buildOperatingRows(businessContext)
+  }, [businessContext])
+  const handoffCandidates = useMemo(() => buildHandoffCandidates(posts, metrics, businessContext), [posts, metrics, businessContext])
+
+  function briefInCommand(candidate: HandoffCandidate) {
+    if (!activeProject?.id || !activeProject.slug) return
+    sessionStorage.setItem(`vera-command-prefill:${activeProject.id}`, candidate.prompt)
+    navigate(`/p/${activeProject.slug}/vera`)
+  }
 
   return (
     <div style={{ padding: `${space[8]} ${space[8]} 0`, maxWidth: 1180 }}>
@@ -138,6 +156,24 @@ export default function Learning() {
               <LearningState>Add a demand operating model in the Demand Brain so VERA knows what traction, approval, and SAM handoff mean for this client.</LearningState>
             )}
           </div>
+        </Panel>
+      </section>
+
+      <section style={{ marginBottom: space[8] }}>
+        <Panel>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: space[3], marginBottom: space[4], flexWrap: 'wrap' }}>
+            <SectionLabel>SAM handoff queue</SectionLabel>
+            <span style={{ color: color.ghost, fontSize: t.size.cap }}>{handoffCandidates.length} candidate{handoffCandidates.length === 1 ? '' : 's'}</span>
+          </div>
+          {handoffCandidates.length ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: space[3] }}>
+              {handoffCandidates.map(candidate => (
+                <HandoffCard key={candidate.id} candidate={candidate} onBrief={() => briefInCommand(candidate)} />
+              ))}
+            </div>
+          ) : (
+            <LearningState>No handoff candidates yet. VERA needs measured posts with comments, shares, clicks, saves, or a strong demand score.</LearningState>
+          )}
         </Panel>
       </section>
 
@@ -228,6 +264,29 @@ function SignalRow({ label, value, body }: { label: string; value: number; body:
   )
 }
 
+function HandoffCard({ candidate, onBrief }: { candidate: HandoffCandidate; onBrief: () => void }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: space[3], padding: space[4], border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: space[3], justifyContent: 'space-between' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.35 }}>{candidate.title}</div>
+          <div style={{ color: color.ghost, fontSize: t.size.cap, marginTop: 2 }}>{candidate.channel}</div>
+        </div>
+        <span style={{ flexShrink: 0, padding: '4px 8px', borderRadius: radius.pill, background: 'var(--accent-tint)', color: color.accent, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>{candidate.score}</span>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {candidate.triggers.map(trigger => (
+          <span key={trigger} style={{ padding: '3px 8px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: color.ink2, fontSize: t.size.micro }}>{trigger}</span>
+        ))}
+      </div>
+      <button onClick={onBrief} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, width: '100%', marginTop: 'auto', padding: '8px 11px', borderRadius: radius.md, border: `1px solid ${color.line}`, background: color.surface, color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.medium, cursor: 'pointer' }}>
+        <Send size={13} />
+        Brief in Command
+      </button>
+    </div>
+  )
+}
+
 function OperatingRow({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ padding: space[3], border: `1px solid ${color.line}`, borderRadius: radius.sm, background: color.surface }}>
@@ -255,6 +314,47 @@ function buildOperatingRows(context: BusinessContext) {
   return fields
     .map(field => ({ label: field.label, value: context[field.key].trim() }))
     .filter(row => row.value.length > 0)
+}
+
+function buildHandoffCandidates(posts: Post[], metrics: Map<string, LearningMetric>, context: BusinessContext): HandoffCandidate[] {
+  return posts
+    .map(post => {
+      const metric = metrics.get(post.id)
+      if (!metric) return null
+      const score = demandScore(metric)
+      const triggers = [
+        metric.comments > 0 ? `${metric.comments} comment${metric.comments === 1 ? '' : 's'}` : '',
+        metric.shares > 0 ? `${metric.shares} share${metric.shares === 1 ? '' : 's'}` : '',
+        metric.clicks > 0 ? `${metric.clicks} click${metric.clicks === 1 ? '' : 's'}` : '',
+        metric.saves > 0 ? `${metric.saves} save${metric.saves === 1 ? '' : 's'}` : '',
+        score >= 25 ? `score ${score}` : '',
+      ].filter(Boolean)
+      if (!triggers.length) return null
+      const title = post.title || post.copy?.slice(0, 84) || 'Untitled content'
+      const channel = post.channel || metric.provider || 'Unassigned'
+      const prompt = [
+        `Create a SAM handoff brief for this VERA content signal.`,
+        ``,
+        `Client: ${context.companyName || 'current client'}`,
+        `Asset: ${title}`,
+        `Channel: ${channel}`,
+        `Triggers: ${triggers.join(', ')}`,
+        `Demand score: ${score}`,
+        context.engagementSignals ? `Client-defined engagement signals: ${context.engagementSignals}` : '',
+        context.samHandoffRules ? `Client-defined SAM handoff rules: ${context.samHandoffRules}` : '',
+        ``,
+        `Return:`,
+        `1. why this signal matters`,
+        `2. likely buyer pain or intent`,
+        `3. accounts or people SAM should research`,
+        `4. outreach angle and objection to prepare for`,
+        `5. next VERA content experiment`,
+      ].filter(Boolean).join('\n')
+      return { id: post.id, title, channel, score, triggers, prompt }
+    })
+    .filter((candidate): candidate is HandoffCandidate => !!candidate)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6)
 }
 
 function buildMetrics(rows: ContentMetricSnapshot[]) {

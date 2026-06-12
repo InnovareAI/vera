@@ -490,6 +490,16 @@ export default function VeraThread() {
   }, [activeProject?.id, sessionId])
 
   useEffect(() => {
+    if (!activeProject?.id) return
+    const key = `vera-command-prefill:${activeProject.id}`
+    const prefill = sessionStorage.getItem(key)
+    if (!prefill) return
+    sessionStorage.removeItem(key)
+    setInput(current => current.trim() ? current : prefill)
+    setTimeout(() => taRef.current?.focus(), 0)
+  }, [activeProject?.id])
+
+  useEffect(() => {
     if (!activeProject?.id || !sessionId || !historyLoaded) return
     try {
       saveLocalChatMessages(activeProject.id, sessionId, messages)
