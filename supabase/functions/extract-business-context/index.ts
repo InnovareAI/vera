@@ -5,6 +5,7 @@ import mammoth from "npm:mammoth@1.10.0"
 import type { AdminClient } from "../_shared/auth.ts"
 import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
+import { resolveUnipileResearchConnection } from "../_shared/unipile-research.ts"
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -177,7 +178,7 @@ Deno.serve(async (req) => {
 
   if (body.pull_sources) {
     fileName = "website and social sources"
-    const pulled = await pullSourceContent(supabase, project.org_id, existing)
+    const pulled = await pullSourceContent(supabase, project.org_id, existing, auth.user.id)
     sources = pulled.sources
     if (!pulled.text.trim()) return jsonError("No readable source content found. Check the URLs or configure Innovare Apify.", 400)
     content = {
@@ -360,10 +361,11 @@ async function pullSourceContent(
   supabase: SupabaseAdminClient,
   orgId: string,
   context: Partial<BusinessContext>,
+  requesterUserId: string,
 ) {
   const docs: SourceDocument[] = []
   const sources: SourceReport[] = []
-  const unipile = await resolveUnipileConnection(supabase, orgId)
+  const unipile = await resolveUnipileConnection(supabase, orgId, requesterUserId)
 
   async function addSource(
     label: string,
@@ -408,19 +410,12 @@ async function pullSourceContent(
   }
 }
 
-async function resolveUnipileConnection(supabase: SupabaseAdminClient, orgId: string) {
+async function resolveUnipileConnection(supabase: SupabaseAdminClient, orgId: string, requesterUserId: string) {
   if (!UNIPILE_API_KEY || !UNIPILE_BASE_URL) return { accountId: null, error: "Unipile is not configured" }
 
-  const { data, error } = await supabase
-    .from("organizations")
-    .select("unipile_account_id")
-    .eq("id", orgId)
-    .maybeSingle()
-
-  if (error) return { accountId: null, error: `Unipile lookup failed: ${error.message}` }
-  const accountId = (data as { unipile_account_id?: string | null } | null)?.unipile_account_id ?? null
-  if (!accountId) return { accountId: null, error: "Unipile is not connected for this workspace" }
-  return { accountId, error: null }
+  const connection = await resolveUnipileResearchConnection(supabase as AdminClient, orgId, { requesterUserId })
+  if (!connection.ok) return { accountId: null, error: connection.error }
+  return { accountId: connection.accountId, error: null }
 }
 
 async function pullConnectedSocial(

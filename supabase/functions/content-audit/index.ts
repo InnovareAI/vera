@@ -13,6 +13,7 @@ import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { resolveProjectTextRuntime, streamText, type TextRuntime } from '../_shared/text-runtime.ts'
+import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -52,7 +53,7 @@ interface FetchResult {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
-  const { org_id, project_id } = await req.json().catch(() => ({}))
+  const { org_id, project_id, operator_user_id } = await req.json().catch(() => ({}))
   if (!org_id) {
     return new Response(JSON.stringify({ error: 'org_id required' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -67,6 +68,7 @@ Deno.serve(async (req) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) as unknown as AdminClient
   const auth = await requireProjectMember(req, supabase, SUPABASE_SERVICE_ROLE_KEY, project_id, corsHeaders, org_id)
   if (!auth.ok) return auth.response
+  const requesterUserId = auth.service ? cleanString(operator_user_id) : auth.userId
   const runtime = await resolveProjectTextRuntime(supabase, org_id, project_id, {
     purpose: 'Content audit',
   })
@@ -90,15 +92,15 @@ Deno.serve(async (req) => {
         const auditId = run.id as string
         send('started', { audit_id: auditId })
 
-        // 2. Fetch channels + org (for unipile_account_id)
-        const [{ data: channels, error: chErr }, { data: org, error: orgErr }] = await Promise.all([
+        // 2. Fetch channels + research account. A workspace account wins; an
+        // InnovareAI operator can fall back to the shared research profile.
+        const [{ data: channels, error: chErr }, unipile] = await Promise.all([
           supabase.from('channel_profiles').select('channel, url').eq('org_id', org_id).eq('is_active', true),
-          supabase.from('organizations').select('unipile_account_id').eq('id', org_id).maybeSingle(),
+          resolveUnipileResearchConnection(supabase, org_id, { requesterUserId }),
         ])
         if (chErr) throw new Error(`channels query failed: ${chErr.message}`)
-        if (orgErr) throw new Error(`org query failed: ${orgErr.message}`)
         if (!channels?.length) throw new Error('No channels configured for this org')
-        const unipileAccountId = (org?.unipile_account_id as string | null) ?? null
+        const unipileAccountId = unipile.ok ? unipile.accountId : null
         send('channels_loaded', { channels, unipile_connected: !!unipileAccountId })
 
         // 3. Fetch content from each channel
@@ -830,4 +832,8 @@ Rules:
     proposal = { brand_voice: { raw }, personas: [], skills: [] }
   }
   return { proposal, inputTokens: response.inputTokens, outputTokens: response.outputTokens }
+}
+
+function cleanString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }

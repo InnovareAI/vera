@@ -16,6 +16,7 @@ import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { resolveProjectTextRuntime, streamText } from '../_shared/text-runtime.ts'
+import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -34,7 +35,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ success: false, error: 'Method not allowed' }, 405)
   }
 
-  const { org_id, project_id, principles: enabledIn } = await req.json().catch(() => ({}))
+  const { org_id, project_id, principles: enabledIn, operator_user_id } = await req.json().catch(() => ({}))
   if (!org_id) return jsonResponse({ success: false, error: 'org_id required' }, 400)
   if (!project_id) return jsonResponse({ success: false, error: 'project_id required' }, 400)
   // Caller can pass a subset of the 5 principles to score. Default: all 5.
@@ -51,6 +52,7 @@ Deno.serve(async (req) => {
   // and never another tenant reading this org's audit.
   const access = await requireProjectMember(req, supabase, SUPABASE_SERVICE_ROLE_KEY, project_id, corsHeaders, org_id)
   if (!access.ok) return access.response
+  const requesterUserId = access.service ? cleanString(operator_user_id) : access.userId
   const runtime = await resolveProjectTextRuntime(supabase, org_id, project_id, {
     purpose: 'Brew360 audit',
   })
@@ -62,13 +64,15 @@ Deno.serve(async (req) => {
   //    the same person as the brand's primary LinkedIn identity).
   const { data: org } = await supabase
     .from('organizations')
-    .select('name, unipile_account_id, settings')
+    .select('name, settings')
     .eq('id', org_id)
     .maybeSingle()
-  if (!org?.unipile_account_id) {
-    return jsonResponse({ success: false, error: 'No LinkedIn account connected. Run the Connect LinkedIn step first.' }, 400)
+  const accountName = (org as { name?: string | null } | null)?.name ?? 'Workspace'
+  const unipile = await resolveUnipileResearchConnection(supabase, org_id, { requesterUserId })
+  if (!unipile.ok) {
+    return jsonResponse({ success: false, error: `${unipile.error} Connect LinkedIn for this workspace or use an InnovareAI operator account.` }, 400)
   }
-  const accountId = org.unipile_account_id as string
+  const accountId = unipile.accountId
   const headers = { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' }
 
   // Resolve audit target: prefer the org's linkedin_personal channel URL slug.
@@ -314,7 +318,7 @@ Analyze this profile and content against the 360Brew algorithm. Return the JSON 
       const send = (event: string, data: unknown) =>
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ event, ...((data ?? {}) as object) })}\n\n`))
 
-      send('started', { profile_summary, posts_analyzed: postsContext.length, account_name: org.name })
+      send('started', { profile_summary, posts_analyzed: postsContext.length, account_name: accountName })
 
       let raw = ''
       try {
@@ -335,7 +339,7 @@ Analyze this profile and content against the 360Brew algorithm. Return the JSON 
         if (!match) throw new Error('No JSON found in AI response')
         const audit = JSON.parse(match[0])
 
-        const payload = { success: true, audit, profile_summary, posts_analyzed: postsContext.length, account_name: org.name }
+        const payload = { success: true, audit, profile_summary, posts_analyzed: postsContext.length, account_name: accountName }
         await supabase.from('linkedin_audits').insert({
           org_id, project_id, kind: 'brew360', result: payload as Json, enabled_principles: enabled,
         })
@@ -373,4 +377,8 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
+}
+
+function cleanString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }

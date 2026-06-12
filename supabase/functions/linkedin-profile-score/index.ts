@@ -14,6 +14,7 @@ import { createClient } from 'npm:@supabase/supabase-js'
 import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
 import { completeText, resolveProjectTextRuntime, type TextRuntime } from '../_shared/text-runtime.ts'
+import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -60,7 +61,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ success: false, error: 'Method not allowed' }, 405)
 
-  const { org_id, project_id, vanity } = await req.json().catch(() => ({}))
+  const { org_id, project_id, vanity, operator_user_id } = await req.json().catch(() => ({}))
   if (!org_id) return json({ success: false, error: 'org_id required' }, 400)
   if (!project_id) return json({ success: false, error: 'project_id required' }, 400)
   if (!UNIPILE_DSN || !UNIPILE_API_KEY) return json({ success: false, error: 'UNIPILE not configured' }, 500)
@@ -71,6 +72,7 @@ Deno.serve(async (req) => {
   // and never another tenant scoring this org's profile.
   const access = await requireProjectMember(req, supabase, SUPABASE_SERVICE_ROLE_KEY, project_id, corsHeaders, org_id)
   if (!access.ok) return access.response
+  const requesterUserId = access.service ? cleanString(operator_user_id) : access.userId
   const runtimeResult = await resolveProjectTextRuntime(supabase, org_id, project_id, {
     purpose: 'LinkedIn profile qualitative review',
     anthropicModel: 'claude-haiku-4-5',
@@ -78,11 +80,12 @@ Deno.serve(async (req) => {
   const textRuntime = runtimeResult.ok ? runtimeResult.runtime : null
 
   const { data: org } = await supabase
-    .from('organizations').select('unipile_account_id, settings').eq('id', org_id).maybeSingle()
-  if (!org?.unipile_account_id) {
-    return json({ success: false, error: 'No LinkedIn account connected for this org.' }, 400)
+    .from('organizations').select('settings').eq('id', org_id).maybeSingle()
+  const unipile = await resolveUnipileResearchConnection(supabase, org_id, { requesterUserId })
+  if (!unipile.ok) {
+    return json({ success: false, error: `${unipile.error} Connect LinkedIn for this workspace or use an InnovareAI operator account.` }, 400)
   }
-  const accountId = org.unipile_account_id as string
+  const accountId = unipile.accountId
   const headers = { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' }
 
   // Resolve target. Priority order:
@@ -466,4 +469,8 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
+}
+
+function cleanString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }

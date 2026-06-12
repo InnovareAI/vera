@@ -2741,7 +2741,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
             fetch(`${ctx.supabaseUrl}/functions/v1/${fn}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
-              body: JSON.stringify({ org_id: ctx.orgId, project_id: ctx.projectId }),
+              body: JSON.stringify({ org_id: ctx.orgId, project_id: ctx.projectId, operator_user_id: ctx.userId }),
             }).catch(() => {})
           }
           return { result: 'All audits queued for this client space. Results should appear on the LinkedIn audit page shortly.' }
@@ -2758,7 +2758,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         fetch(`${ctx.supabaseUrl}/functions/v1/${fn}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
-          body: JSON.stringify({ org_id: ctx.orgId, project_id: ctx.projectId }),
+          body: JSON.stringify({ org_id: ctx.orgId, project_id: ctx.projectId, operator_user_id: ctx.userId }),
         }).catch(() => {})
         return { result: `${kind} audit kicked off — check the LinkedIn audit page in ~30s.` }
       }
