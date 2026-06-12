@@ -24,7 +24,13 @@ import Markdown from '../components/Markdown'
 import { downloadMarkdown } from '../lib/exportDoc'
 import { markdownToText } from '../lib/mdToText'
 import { hasBusinessContext, parseProjectInstructions, type BusinessContext, type BusinessContextKey } from '../lib/businessContext'
-import { demandChannelMatrixPrompt, demandChannelsFromContext } from '../lib/demandModel'
+import {
+  DEFAULT_DEMAND_OPERATING_MODEL,
+  DEMAND_PLATFORM_DEFINITIONS,
+  DEMAND_SOURCE_KEYS,
+  demandChannelMatrixPrompt,
+  demandChannelsFromContext,
+} from '../lib/demandModel'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -339,12 +345,16 @@ interface CampaignData {
 
 type DemandPlanSnapshot = {
   completeness: number
+  sourceCount: number
+  sourceTotal: number
   objective: string
   conversionPath: string
   channels: string[]
   formats: string[]
   signals: string
   handoff: string
+  approvals: string[]
+  learning: string[]
   missing: string[]
 }
 
@@ -367,8 +377,13 @@ function splitList(value: string, max = 5) {
     .slice(0, max)
 }
 
+const DEFAULT_FIRST_WAVE_CHANNELS = DEMAND_PLATFORM_DEFINITIONS.map(platform => platform.label)
+const DEFAULT_APPROVAL_ITEMS = ['Case based', 'One named owner', 'All stakeholders for high-risk work']
+const DEFAULT_LEARNING_ITEMS = ['Weekly performance review', 'Refresh platform best practices', 'Turn wins into reusable skills']
+
 function buildDemandPlanSnapshot(context: BusinessContext): DemandPlanSnapshot {
   const filled = DEMAND_PLAN_FIELDS.filter(field => context[field.key].trim()).length
+  const sourceCount = DEMAND_SOURCE_KEYS.filter(key => context[key].trim()).length
   const missing = DEMAND_PLAN_FIELDS
     .filter(field => !context[field.key].trim())
     .map(field => field.label)
@@ -376,14 +391,20 @@ function buildDemandPlanSnapshot(context: BusinessContext): DemandPlanSnapshot {
   const sourceChannels = demandChannelsFromContext(context, 8)
   const strategyChannels = splitList(context.channelStrategy, 6)
   const formats = splitList(context.contentFormats, 5)
+  const approvalItems = splitList(context.approvalModel, 3)
+  const learningItems = splitList(context.learningCadence, 3)
   return {
     completeness: Math.round((filled / DEMAND_PLAN_FIELDS.length) * 100),
-    objective: context.demandObjective.trim() || context.contentGoals.trim() || 'No demand objective set yet.',
-    conversionPath: context.conversionPath.trim() || 'Define where attention should go next.',
-    channels: sourceChannels.length ? sourceChannels.slice(0, 6) : strategyChannels.slice(0, 6),
+    sourceCount,
+    sourceTotal: DEMAND_SOURCE_KEYS.length,
+    objective: context.demandObjective.trim() || context.contentGoals.trim() || DEFAULT_DEMAND_OPERATING_MODEL.demandObjective,
+    conversionPath: context.conversionPath.trim() || DEFAULT_DEMAND_OPERATING_MODEL.conversionPath,
+    channels: sourceChannels.length ? sourceChannels.slice(0, 8) : (strategyChannels.length ? strategyChannels.slice(0, 8) : DEFAULT_FIRST_WAVE_CHANNELS),
     formats: formats.length ? formats : ['Posts', 'Carousels', 'Video storyboards', 'Long form'],
-    signals: context.engagementSignals.trim() || 'Comments, shares, clicks, traffic, and objections.',
-    handoff: context.samHandoffRules.trim() || 'Define when engagement becomes SAM research.',
+    signals: context.engagementSignals.trim() || DEFAULT_DEMAND_OPERATING_MODEL.engagementSignals,
+    handoff: context.samHandoffRules.trim() || DEFAULT_DEMAND_OPERATING_MODEL.samHandoffRules,
+    approvals: approvalItems.length ? approvalItems : DEFAULT_APPROVAL_ITEMS,
+    learning: learningItems.length ? learningItems : DEFAULT_LEARNING_ITEMS,
     missing,
   }
 }
@@ -2022,6 +2043,11 @@ function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {
           </div>
           <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, marginTop: space[2], lineHeight: 1.4 }}>{plan.objective}</div>
           <div style={{ color: color.ghost, fontSize: t.size.cap, lineHeight: 1.5, marginTop: 3 }}>{plan.conversionPath}</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: space[3] }}>
+            <PlanPill tone={ready ? 'accent' : 'neutral'}>{ready ? 'Client model active' : 'Demand baseline active'}</PlanPill>
+            <PlanPill>{plan.sourceCount}/{plan.sourceTotal} sources connected</PlanPill>
+            <PlanPill>Sellable workspace model</PlanPill>
+          </div>
         </div>
         <button onClick={onOpenBrain} title="Open Demand Brain" style={{ flexShrink: 0, padding: '6px 10px', borderRadius: radius.pill, border: `1px solid ${ready ? 'var(--accent-line)' : color.line}`, background: ready ? 'var(--accent-tint)' : color.paper2, color: ready ? color.accent : color.ink2, fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
           {plan.completeness}% ready
@@ -2029,9 +2055,11 @@ function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: space[3], marginBottom: space[4] }}>
-        <PlanCluster icon={Network} label="Channels" items={plan.channels.length ? plan.channels : ['Add channels in Brain']} />
+        <PlanCluster icon={Network} label="Channels" items={plan.channels.length ? plan.channels : ['Add channels in Brain']} max={8} />
         <PlanCluster icon={FileText} label="Formats" items={plan.formats} />
         <PlanCluster icon={Share2} label="Signals" items={splitList(plan.signals, 4)} />
+        <PlanCluster icon={Check} label="Approvals" items={plan.approvals} />
+        <PlanCluster icon={RefreshCw} label="Learning" items={plan.learning} />
       </div>
 
       {plan.missing.length > 0 && (
@@ -2052,7 +2080,29 @@ function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {
   )
 }
 
-function PlanCluster({ icon: Icon, label, items }: { icon: React.ElementType; label: string; items: string[] }) {
+function PlanPill({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'accent' }) {
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      minHeight: 22,
+      padding: '3px 8px',
+      borderRadius: radius.pill,
+      border: `1px solid ${tone === 'accent' ? 'var(--accent-line)' : color.line}`,
+      background: tone === 'accent' ? 'var(--accent-tint)' : color.paper2,
+      color: tone === 'accent' ? color.accent : color.ghost,
+      fontSize: t.size.micro,
+      fontWeight: t.weight.medium,
+      whiteSpace: 'nowrap',
+    }}>
+      {children}
+    </span>
+  )
+}
+
+function PlanCluster({ icon: Icon, label, items, max = 5 }: { icon: React.ElementType; label: string; items: string[]; max?: number }) {
+  const visibleItems = items.slice(0, max)
+  const overflow = Math.max(0, items.length - visibleItems.length)
   return (
     <div style={{ minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium, marginBottom: space[2] }}>
@@ -2060,9 +2110,12 @@ function PlanCluster({ icon: Icon, label, items }: { icon: React.ElementType; la
         {label}
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {items.slice(0, 5).map(item => (
+        {visibleItems.map(item => (
           <span key={item} style={{ maxWidth: '100%', padding: '4px 8px', borderRadius: radius.pill, background: color.paper2, border: `1px solid ${color.line}`, color: color.ink2, fontSize: t.size.micro, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item}</span>
         ))}
+        {overflow > 0 && (
+          <span style={{ padding: '4px 8px', borderRadius: radius.pill, background: color.paper2, border: `1px solid ${color.line}`, color: color.ghost, fontSize: t.size.micro }}>+{overflow}</span>
+        )}
       </div>
     </div>
   )
