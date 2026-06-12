@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ElementType, ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, BarChart3, Lightbulb, RefreshCw, Send, Share2, Sparkles, Target, TrendingUp } from 'lucide-react'
+import { ArrowRight, BarChart3, CheckCircle2, Lightbulb, RefreshCw, Send, Share2, Sparkles, Target, TrendingUp } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { ContentMetricSnapshot, Post } from '../lib/supabase'
 import { parseProjectInstructions, type BusinessContext, type BusinessContextKey } from '../lib/businessContext'
+import {
+  DEMAND_GROWTH_OUTCOMES,
+  DEMAND_LEARNING_LOOP,
+  DEMAND_PLATFORM_DEFINITIONS,
+  applyDemandDefaults,
+  type DemandPlatformKey,
+} from '../lib/demandModel'
 import { useProject } from '../lib/projectContext'
 import { useRightRail } from '../lib/rightRailContext'
 import { Button, PageHeader, SectionLabel, color, radius, space, type as t } from '../design'
@@ -34,6 +41,19 @@ type HandoffCandidate = {
   score: number
   triggers: string[]
   prompt: string
+}
+
+type ChannelLearningRow = {
+  key: DemandPlatformKey
+  label: string
+  initials: string
+  publishing: string
+  role: string
+  sourceSet: boolean
+  posts: number
+  measured: number
+  score: number
+  signals: string[]
 }
 
 const DEMAND_METRICS = new Set(['views', 'impressions', 'reach', 'engagements', 'likes', 'comments', 'shares', 'clicks', 'saves'])
@@ -87,17 +107,20 @@ export default function Learning() {
   }, [load])
 
   const metrics = useMemo(() => buildMetrics(snapshots), [snapshots])
-  const summary = useMemo(() => buildSummary(posts, metrics), [posts, metrics])
+  const summary = useMemo(() => buildSummary(posts, metrics, snapshots.length), [posts, metrics, snapshots.length])
   const insights = useMemo(() => buildInsights(posts, metrics), [posts, metrics])
   const experiments = useMemo(() => buildExperiments(posts, metrics), [posts, metrics])
   const topRows = useMemo(() => buildTopRows(posts, metrics), [posts, metrics])
   const businessContext = useMemo(() => parseProjectInstructions(activeProject?.instructions ?? '').businessContext, [activeProject?.instructions])
+  const demandContext = useMemo(() => applyDemandDefaults(businessContext), [businessContext])
   const operatingRows = useMemo(() => {
-    return buildOperatingRows(businessContext)
-  }, [businessContext])
-  const handoffCandidates = useMemo(() => buildHandoffCandidates(posts, metrics, businessContext), [posts, metrics, businessContext])
+    return buildOperatingRows(demandContext)
+  }, [demandContext])
+  const channelRows = useMemo(() => buildChannelRows(posts, metrics, demandContext), [posts, metrics, demandContext])
+  const measuredChannels = channelRows.filter(row => row.measured > 0).length
+  const handoffCandidates = useMemo(() => buildHandoffCandidates(posts, metrics, demandContext), [posts, metrics, demandContext])
 
-  function briefInCommand(candidate: HandoffCandidate) {
+  function briefInVera(candidate: HandoffCandidate) {
     if (!activeProject?.id || !activeProject.slug) return
     sessionStorage.setItem(`vera-command-prefill:${activeProject.id}`, candidate.prompt)
     navigate(`/p/${activeProject.slug}/vera`)
@@ -130,6 +153,35 @@ export default function Learning() {
         <MetricCard icon={TrendingUp} label="Engagement rate" value={summary.engagementRateLabel} detail={summary.views ? `${summary.views.toLocaleString()} views or reach` : 'Waiting for traffic data'} />
       </section>
 
+      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: space[5], alignItems: 'start', marginBottom: space[8] }}>
+        <Panel>
+          <SectionLabel>Learning model</SectionLabel>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))', gap: space[3], marginTop: space[4] }}>
+            {DEMAND_LEARNING_LOOP.map(step => (
+              <div key={step.title} style={{ padding: space[4], border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2 }}>
+                <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>{step.title}</div>
+                <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.45 }}>{step.body}</p>
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel>
+          <SectionLabel>Growth outcomes</SectionLabel>
+          <p style={{ margin: `${space[4]} 0 ${space[3]}`, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.5 }}>
+            Vera optimizes for demand signals, not raw output volume. The first wave is comments, shares, qualified traffic, buyer questions, and SAM research triggers.
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+            {DEMAND_GROWTH_OUTCOMES.map(item => (
+              <span key={item} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: radius.pill, background: color.paper2, border: `1px solid ${color.line}`, color: color.ink2, fontSize: t.size.micro }}>
+                <CheckCircle2 size={12} style={{ color: color.success }} />
+                {item}
+              </span>
+            ))}
+          </div>
+        </Panel>
+      </section>
+
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: space[5], alignItems: 'start', marginBottom: space[8] }}>
         <Panel>
           <SectionLabel>What VERA learned</SectionLabel>
@@ -148,6 +200,7 @@ export default function Learning() {
             <SignalRow label="Comments" value={summary.comments} body="High-intent replies and objections should become SAM research context." />
             <SignalRow label="Shares" value={summary.shares} body="Shares indicate message resonance and account expansion potential." />
             <SignalRow label="Clicks" value={summary.clicks} body="Traffic from content should trigger follow-up angles, not just reporting." />
+            <SignalRow label="Traffic" value={summary.views} body="Views and reach are useful only when they lead to engagement, qualified visits, or sharper market learning." />
           </div>
           <div style={{ display: 'grid', gap: space[2], marginTop: space[4] }}>
             {operatingRows.length ? operatingRows.map(row => (
@@ -161,6 +214,18 @@ export default function Learning() {
 
       <section style={{ marginBottom: space[8] }}>
         <Panel>
+          <SectionLabel action={`${measuredChannels}/${channelRows.length} measured`}>Channel learning coverage</SectionLabel>
+          <p style={{ margin: `${space[4]} 0`, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.5 }}>
+            Each client can use all channels, but Vera should only scale the channels where source context, approval rules, and performance evidence exist.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 230px), 1fr))', gap: space[3] }}>
+            {channelRows.map(row => <ChannelLearningCard key={row.key} row={row} />)}
+          </div>
+        </Panel>
+      </section>
+
+      <section style={{ marginBottom: space[8] }}>
+        <Panel>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: space[3], marginBottom: space[4], flexWrap: 'wrap' }}>
             <SectionLabel>SAM handoff queue</SectionLabel>
             <span style={{ color: color.ghost, fontSize: t.size.cap }}>{handoffCandidates.length} candidate{handoffCandidates.length === 1 ? '' : 's'}</span>
@@ -168,7 +233,7 @@ export default function Learning() {
           {handoffCandidates.length ? (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: space[3] }}>
               {handoffCandidates.map(candidate => (
-                <HandoffCard key={candidate.id} candidate={candidate} onBrief={() => briefInCommand(candidate)} />
+                <HandoffCard key={candidate.id} candidate={candidate} onBrief={() => briefInVera(candidate)} />
               ))}
             </div>
           ) : (
@@ -177,7 +242,7 @@ export default function Learning() {
         </Panel>
       </section>
 
-      <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: space[5], alignItems: 'start', marginBottom: space[8] }}>
+      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: space[5], alignItems: 'start', marginBottom: space[8] }}>
         <Panel>
           <SectionLabel>Next demand experiments</SectionLabel>
           <div style={{ display: 'grid', gap: space[3], marginTop: space[4] }}>
@@ -281,8 +346,57 @@ function HandoffCard({ candidate, onBrief }: { candidate: HandoffCandidate; onBr
       </div>
       <button onClick={onBrief} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, width: '100%', marginTop: 'auto', padding: '8px 11px', borderRadius: radius.md, border: `1px solid ${color.line}`, background: color.surface, color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.medium, cursor: 'pointer' }}>
         <Send size={13} />
-        Brief in Command
+        Brief in Vera
       </button>
+    </div>
+  )
+}
+
+function ChannelLearningCard({ row }: { row: ChannelLearningRow }) {
+  const status = row.measured > 0
+    ? 'Learning'
+    : row.posts > 0
+      ? 'Needs sync'
+      : row.sourceSet
+        ? 'Ready'
+        : 'Needs source'
+  const tone = row.measured > 0 ? color.success : row.posts > 0 ? color.warn : row.sourceSet ? color.info : color.ghost
+  return (
+    <div style={{ padding: space[4], border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2, minHeight: 176, display: 'flex', flexDirection: 'column', gap: space[3] }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: space[3] }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: space[3], minWidth: 0 }}>
+          <span style={{ width: 32, height: 32, borderRadius: radius.sm, background: color.surface, color: color.accent, border: `1px solid ${color.line}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>
+            {row.initials}
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</div>
+            <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: 1 }}>{row.publishing}</div>
+          </div>
+        </div>
+        <span style={{ color: tone, fontSize: t.size.micro, fontWeight: t.weight.semibold, whiteSpace: 'nowrap' }}>{status}</span>
+      </div>
+      <p style={{ margin: 0, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.45 }}>{row.role}</p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6, marginTop: 'auto' }}>
+        <MiniStat label="Posts" value={row.posts} />
+        <MiniStat label="Measured" value={row.measured} />
+        <MiniStat label="Score" value={row.score} />
+      </div>
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+        {row.signals.slice(0, 3).map(signal => (
+          <span key={signal} style={{ padding: '3px 7px', borderRadius: radius.pill, background: color.surface, border: `1px solid ${color.line}`, color: color.ghost, fontSize: t.size.micro }}>
+            {signal}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MiniStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div style={{ padding: '7px 8px', borderRadius: radius.sm, background: color.surface, border: `1px solid ${color.line}` }}>
+      <div style={{ color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+      <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: 1 }}>{label}</div>
     </div>
   )
 }
@@ -316,6 +430,63 @@ function buildOperatingRows(context: BusinessContext) {
     .filter(row => row.value.length > 0)
 }
 
+function buildChannelRows(posts: Post[], metrics: Map<string, LearningMetric>, context: BusinessContext): ChannelLearningRow[] {
+  const byChannel = new Map<DemandPlatformKey, { posts: number; measured: number; score: number }>()
+  for (const post of posts) {
+    const metric = metrics.get(post.id)
+    const key = platformKeyForPost(post, metric)
+    if (!key) continue
+    const current = byChannel.get(key) ?? { posts: 0, measured: 0, score: 0 }
+    current.posts += 1
+    if (metric && (metric.views || metric.engagements || metric.comments || metric.shares || metric.clicks || metric.saves)) {
+      current.measured += 1
+      current.score += demandScore(metric)
+    }
+    byChannel.set(key, current)
+  }
+
+  return DEMAND_PLATFORM_DEFINITIONS.map(platform => {
+    const counts = byChannel.get(platform.key) ?? { posts: 0, measured: 0, score: 0 }
+    return {
+      key: platform.key,
+      label: platform.label,
+      initials: platform.initials,
+      publishing: publishingLabel(platform.publishing),
+      role: platform.role,
+      sourceSet: platform.sourceKey ? !!context[platform.sourceKey].trim() : platform.key === 'email',
+      posts: counts.posts,
+      measured: counts.measured,
+      score: counts.score,
+      signals: platform.outcomeSignals,
+    }
+  })
+}
+
+function platformKeyForPost(post: Post, metric?: LearningMetric): DemandPlatformKey | null {
+  const value = [post.channel, post.provider, metric?.provider]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+  if (!value) return null
+  if (value.includes('linkedin') || value.includes('unipile')) return 'linkedin'
+  if (value.includes('youtube') || value.includes('youtu.be')) return 'youtube'
+  if (value.includes('medium')) return 'medium'
+  if (value.includes('quora')) return 'quora'
+  if (value.includes('reddit')) return 'reddit'
+  if (value === 'x' || value.includes('twitter') || value.includes('x.com')) return 'x'
+  if (value.includes('instagram') || value.includes('meta_instagram')) return 'instagram'
+  if (value.includes('facebook') || value.includes('meta_facebook')) return 'facebook'
+  if (value.includes('blog') || value.includes('wordpress') || value.includes('cms')) return 'blog'
+  if (value.includes('email') || value.includes('newsletter')) return 'email'
+  return null
+}
+
+function publishingLabel(value: string) {
+  if (value === 'manual-first') return 'manual first'
+  if (value === 'read-only') return 'read only'
+  return value
+}
+
 function buildHandoffCandidates(posts: Post[], metrics: Map<string, LearningMetric>, context: BusinessContext): HandoffCandidate[] {
   return posts
     .map(post => {
@@ -342,6 +513,7 @@ function buildHandoffCandidates(posts: Post[], metrics: Map<string, LearningMetr
         `Demand score: ${score}`,
         context.engagementSignals ? `Client-defined engagement signals: ${context.engagementSignals}` : '',
         context.samHandoffRules ? `Client-defined SAM handoff rules: ${context.samHandoffRules}` : '',
+        context.approvalModel ? `Approval model: ${context.approvalModel}` : '',
         ``,
         `Return:`,
         `1. why this signal matters`,
@@ -386,7 +558,7 @@ function buildMetrics(rows: ContentMetricSnapshot[]) {
   return byPost
 }
 
-function buildSummary(posts: Post[], metrics: Map<string, LearningMetric>) {
+function buildSummary(posts: Post[], metrics: Map<string, LearningMetric>, snapshotCount: number) {
   const published = posts.filter(post => post.posted_at || post.published_at || post.status?.toLowerCase() === 'posted').length
   const approved = posts.filter(post => post.status?.toLowerCase() === 'approved').length
   const scheduled = posts.filter(post => post.scheduled_at).length
@@ -405,7 +577,7 @@ function buildSummary(posts: Post[], metrics: Map<string, LearningMetric>) {
     approved,
     scheduled,
     measured,
-    metricCount: metrics.size,
+    metricCount: snapshotCount,
     views: totals.views,
     comments: totals.comments,
     shares: totals.shares,

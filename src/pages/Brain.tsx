@@ -28,7 +28,10 @@ import {
 } from '../lib/businessContext'
 import {
   DEMAND_APPROVAL_MODES,
+  DEMAND_COMMERCIAL_REQUIREMENTS,
   DEMAND_CONTENT_JOBS,
+  DEMAND_GROWTH_OUTCOMES,
+  DEMAND_LEARNING_LOOP,
   DEMAND_OUTCOME_SIGNALS,
   DEMAND_PLATFORM_DEFINITIONS,
   DEMAND_SOURCE_KEYS,
@@ -514,7 +517,7 @@ export default function Brain() {
               </p>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
-              {DEMAND_PLATFORM_DEFINITIONS.slice(0, 8).map(platform => (
+              {DEMAND_PLATFORM_DEFINITIONS.map(platform => (
                 <div key={platform.key} title={platform.role} style={{ padding: '7px 8px', borderRadius: radius.sm, border: `1px solid ${color.line}`, background: color.surface }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: t.size.micro, color: color.ink, fontWeight: t.weight.semibold }}>
                     <span style={{ width: 22, height: 22, borderRadius: radius.sm, background: color.accentSoft, color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{platform.initials}</span>
@@ -604,6 +607,16 @@ export default function Brain() {
             <DemandDefaultPanel title="Content jobs" items={DEMAND_CONTENT_JOBS} />
             <DemandDefaultPanel title="Approval modes" items={DEMAND_APPROVAL_MODES} />
             <DemandDefaultPanel title="Outcome signals" items={DEMAND_OUTCOME_SIGNALS} />
+            <DemandDefaultPanel title="Growth outcomes" items={DEMAND_GROWTH_OUTCOMES} />
+            <DemandDefaultPanel title="Product guardrails" items={DEMAND_COMMERCIAL_REQUIREMENTS} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))', gap: space[3], marginBottom: space[4] }}>
+            {DEMAND_LEARNING_LOOP.map(step => (
+              <div key={step.title} style={{ padding: space[4], background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
+                <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>{step.title}</div>
+                <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.45 }}>{step.body}</p>
+              </div>
+            ))}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: space[4] }}>
             <Field label="Demand objective">

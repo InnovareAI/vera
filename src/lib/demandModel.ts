@@ -173,20 +173,25 @@ export const DEMAND_CONTENT_JOBS = [
   'Images',
   'Video storyboards',
   'Short clips',
+  'YouTube scripts',
+  'YouTube descriptions',
   'Long-form articles',
+  'Medium essays',
   'Quora answers',
   'Reddit research briefs',
+  'X POV tests',
   'Comments and replies',
   'Newsletters',
   'SAM handoff briefs',
 ]
 
 export const DEMAND_APPROVAL_MODES = [
+  'Single named approver',
   'Operator only',
   'Client lead',
   'All stakeholders',
   'Legal or compliance',
-  'Case based by person, channel, topic, or claim risk',
+  'Case based by person, channel, topic, campaign, or claim risk',
 ]
 
 export const DEMAND_OUTCOME_SIGNALS = [
@@ -199,6 +204,41 @@ export const DEMAND_OUTCOME_SIGNALS = [
   'buying triggers',
   'warm accounts',
   'meeting requests',
+]
+
+export const DEMAND_GROWTH_OUTCOMES = [
+  'comments that reveal pain or intent',
+  'shares that expand account reach',
+  'qualified traffic to owned pages',
+  'buyer questions worth answering',
+  'objections SAM can research',
+  'content patterns worth repeating',
+]
+
+export const DEMAND_LEARNING_LOOP = [
+  {
+    title: 'Ingest',
+    body: 'Pull website, SEO headers, product pages, blog, LinkedIn, Instagram, YouTube, Medium, Quora, Reddit, Facebook, and X where available.',
+  },
+  {
+    title: 'Interpret',
+    body: 'Separate tone of voice by medium when the evidence supports it, then keep a shared brand core for consistency.',
+  },
+  {
+    title: 'Experiment',
+    body: 'Create platform-native variants for hooks, formats, CTAs, claims, and creator voices before scaling a pattern.',
+  },
+  {
+    title: 'Optimize',
+    body: 'Update best practices, channel rules, SAM handoff triggers, and next content briefs from comments, shares, traffic, and conversion signals.',
+  },
+]
+
+export const DEMAND_COMMERCIAL_REQUIREMENTS = [
+  'Per-client provider keys and model entitlements',
+  'Shared research profiles that never grant client publishing rights',
+  'Case-based approvals by person, channel, topic, and claim risk',
+  'Measured content loops that improve recommendations over time',
 ]
 
 export const DEMAND_PROVIDER_READINESS = [
@@ -226,14 +266,14 @@ export const DEFAULT_DEMAND_OPERATING_MODEL: Pick<
   | 'samHandoffRules'
   | 'learningCadence'
 > = {
-  demandObjective: 'Create B2B top-of-funnel demand that produces useful conversations, traffic, and sales research signals.',
+  demandObjective: 'Create B2B top-of-funnel demand that produces useful conversations, comments, shares, qualified traffic, and sales research signals.',
   conversionPath: 'Move attention into comments, shares, qualified site traffic, newsletter or event opt-ins, direct messages, and SAM follow-up queues.',
-  channelStrategy: 'Use LinkedIn for authority and founder voice, YouTube for depth, Medium and blog for long-form demand capture, Quora for buyer questions, Reddit for listening and language mining, Instagram and Facebook for visual proof and community trust, and X only when speed or conversation entry matters.',
+  channelStrategy: 'Use LinkedIn for authority and founder voice, YouTube for depth and Shorts, Medium and blog for long-form demand capture, Quora for buyer questions, Reddit for listening and language mining, Instagram and Facebook for visual proof and community trust, and X when speed or conversation entry matters.',
   contentFormats: DEMAND_CONTENT_JOBS.join(', '),
-  approvalModel: 'Case based. Some posts can be approved by one owner, sensitive claims or named-person content need all required stakeholders.',
+  approvalModel: 'Case based. Some posts can be approved by one named owner, sensitive claims, named-person content, or high-risk channels need all required stakeholders.',
   engagementSignals: DEMAND_OUTCOME_SIGNALS.join(', '),
   samHandoffRules: 'Hand off named accounts, repeated objections, buying-trigger comments, competitor mentions, high-intent clicks, inbound questions, and people asking for examples or pricing.',
-  learningCadence: 'Review performance weekly, refresh channel-specific tone and platform best practices monthly, and turn what works into repeatable skills.',
+  learningCadence: 'Review performance weekly, update what works and what does not from every useful signal, refresh channel-specific tone and platform best practices monthly, and turn repeatable wins into skills.',
 }
 
 export function applyDemandDefaults(context: BusinessContext): BusinessContext {
