@@ -34,6 +34,7 @@ import type { AdminClient } from '../_shared/auth.ts'
 import { DEFAULT_AI_POLICY, checkProjectAiBudget, loadProjectAiPolicy } from '../_shared/ai-policy.ts'
 import { isPlatformMediaProject } from '../_shared/client-media-keys.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
+import { completeText, type TextRuntime } from '../_shared/text-runtime.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1742,6 +1743,7 @@ async function executeTool(
     allowImageGeneration?: boolean
     allowVideoGeneration?: boolean
     embeddingRuntime?: EmbeddingRuntime | null
+    textRuntime: TextRuntime
   },
 ): Promise<{ result: string; image_url?: string; video_url?: string }> {
   try {
@@ -1892,18 +1894,17 @@ async function executeTool(
           if (names.length) categoryClause = `\n\nAssign each post exactly one CATEGORY from this client's set: ${names.join(', ')}. Put the exact category name in the post's "category" field, and spread the campaign sensibly across the categories.`
         }
 
-        // One structured generation call for the whole arc.
-        const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')!
-        const planRes = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: MODEL,
-            max_tokens: 6000,
+        // One structured generation call for the whole arc. Use the active
+        // client text runtime so campaign planning never falls back to
+        // InnovareAI's platform Anthropic key for non-platform projects.
+        let planResult: { text: string; inputTokens: number | null; outputTokens: number | null }
+        try {
+          planResult = await completeText(ctx.textRuntime, {
+            maxTokens: 6000,
+            temperature: 0.2,
+            json: true,
             system: `You are VERA, InnovareAI's creative content partner. You write sharp, platform-native demand content for ${channelLabel} in the brand voice. American spelling. Never invent statistics or fake quotes.${brandBrief ? `\n\nBRAND VOICE:\n${brandBrief}` : ''}`,
-            messages: [{
-              role: 'user',
-              content: `Plan a ${channelLabel} B2B demand campaign and write every post.
+            user: `Plan a ${channelLabel} B2B demand campaign and write every post.
 
 Brief: ${brief}
 
@@ -1924,12 +1925,21 @@ Produce a coherent arc of EXACTLY ${count} posts that build on each other (no re
 
 Output ONLY valid JSON — no prose, no markdown fences — in exactly this shape:
 {"campaign_name":"<short punchy name>","theme":"<one-line narrative anchor>","posts":[{"title":"<4-8 word internal title>","channel":"<one target channel>","copy":"<the full post>","hashtags":["tag","tag"],"category":"<one category name from the set above, or empty if none>"}]}`,
-            }],
-          }),
-        })
-        if (!planRes.ok) return { result: `Campaign planning failed: ${planRes.status} ${(await planRes.text()).slice(0, 160)}` }
-        const planData = await planRes.json() as { content?: Array<{ type: string; text?: string }> }
-        const rawText = (planData.content ?? []).filter(b => b.type === 'text').map(b => b.text).join('').trim()
+          })
+          await logGenerationUsage(ctx.supabase, {
+            orgId: ctx.orgId,
+            projectId: ctx.projectId,
+            provider: ctx.textRuntime.provider,
+            model: ctx.textRuntime.model,
+            operation: 'campaign.plan',
+            inputTokens: planResult.inputTokens,
+            outputTokens: planResult.outputTokens,
+            metadata: { key_source: ctx.textRuntime.keySource, channel_count: channels.length, post_count: count },
+          })
+        } catch (error) {
+          return { result: `Campaign planning failed: ${error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180)}` }
+        }
+        const rawText = planResult.text.trim()
         const jsonStr = rawText.slice(rawText.indexOf('{'), rawText.lastIndexOf('}') + 1)
         let plan: { campaign_name?: string; theme?: string; posts?: Array<{ title?: string; channel?: string; copy?: string; hashtags?: string[]; image_prompt?: string; category?: string }> }
         try { plan = JSON.parse(jsonStr) } catch { return { result: 'Campaign planning returned malformed output — try again.' } }
@@ -2822,22 +2832,13 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           .limit(8)
         if (!sources?.length) return { result: 'Source items not found.' }
 
-        // Compose the article via Claude (use the same anthropic instance)
-        const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')!
-        const synthRes = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'x-api-key': anthropicKey,
-            'anthropic-version': '2023-06-01',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 3000,
+        let synthResult: { text: string; inputTokens: number | null; outputTokens: number | null }
+        try {
+          synthResult = await completeText(ctx.textRuntime, {
+            maxTokens: 3000,
+            temperature: 0.2,
             system: 'You are a research librarian synthesizing source material into a canonical wiki article. Output Markdown only.',
-            messages: [{
-              role: 'user',
-              content: `Synthesize a wiki article on the topic: "${topic}".
+            user: `Synthesize a wiki article on the topic: "${topic}".
 
 Sources (verbatim, cite by [source N] inline where you draw a claim from one):
 
@@ -2852,14 +2853,21 @@ Write the article with:
 - 400-1000 words
 
 Do NOT fabricate claims. If sources contradict, surface the contradiction.`,
-            }],
-          }),
-        })
-        if (!synthRes.ok) {
-          return { result: `Synthesis failed: ${synthRes.status} ${(await synthRes.text()).slice(0, 200)}` }
+          })
+          await logGenerationUsage(ctx.supabase, {
+            orgId: ctx.orgId,
+            projectId: ctx.projectId,
+            provider: ctx.textRuntime.provider,
+            model: ctx.textRuntime.model,
+            operation: 'knowledge.synthesize',
+            inputTokens: synthResult.inputTokens,
+            outputTokens: synthResult.outputTokens,
+            metadata: { key_source: ctx.textRuntime.keySource, source_count: sources.length, theme_count: themes.length },
+          })
+        } catch (error) {
+          return { result: `Synthesis failed: ${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}` }
         }
-        const synthData = await synthRes.json() as { content?: Array<{ type: string; text?: string }> }
-        const body = (synthData.content ?? []).filter(b => b.type === 'text').map(b => b.text).join('').trim()
+        const body = synthResult.text.trim()
         if (!body) return { result: 'Synthesis returned empty body.' }
 
         // Extract a 1-2 sentence summary (first 2 sentences after any frontmatter)
@@ -4215,7 +4223,7 @@ Deno.serve(async (req) => {
     clientHasFalKey
   )
   const allowVideoGeneration = clientHasFalKey && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled)
-  const platformOnlyTools = new Set(['run_pipeline', 'run_audit', 'kb_synthesize'])
+  const platformOnlyTools = new Set(['run_pipeline', 'run_audit'])
   const enabledTools = TOOLS.filter(tool => {
     if (!platformTextAllowed && platformOnlyTools.has(tool.name)) return false
     if (!allowVideoGeneration && tool.name === 'generate_video') return false
@@ -4252,7 +4260,10 @@ Deno.serve(async (req) => {
   const useThinking = enableThinking && effectiveModel === MODEL
   const chatProvider = clientOpenRouterKey ? 'openrouter' : 'anthropic'
   const chatModel = clientOpenRouterKey ? OPENROUTER_TEXT_MODEL : effectiveModel
-  const chatKeySource = clientOpenRouterKey ? 'client' : (platformTextAllowed ? 'platform' : 'client')
+  const chatKeySource: TextRuntime['keySource'] = clientOpenRouterKey ? 'client' : (platformTextAllowed ? 'platform' : 'client')
+  const textRuntime: TextRuntime = chatProvider === 'openrouter'
+    ? { provider: 'openrouter', key: effectiveApiKey, model: chatModel, keySource: 'client' }
+    : { provider: 'anthropic', key: effectiveApiKey, model: chatModel, keySource: chatKeySource }
   if (projectId) {
     try {
       const budget = await checkProjectAiBudget(supabase, projectId, {
@@ -4336,6 +4347,7 @@ Deno.serve(async (req) => {
               allowImageGeneration,
               allowVideoGeneration,
               embeddingRuntime,
+              textRuntime,
             },
           })
           fullText = r.fullText
@@ -4445,6 +4457,7 @@ Deno.serve(async (req) => {
                 allowImageGeneration,
                 allowVideoGeneration,
                 embeddingRuntime,
+                textRuntime,
               })
               if (exec.image_url) {
                 generatedImages.push(exec.image_url)

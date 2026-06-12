@@ -80,6 +80,9 @@ export function estimateGenerationUsageCost(usage: GenerationUsageEstimateInput)
     usage.operation === "chat.message" ||
     usage.operation === "business_context.extract" ||
     usage.operation === "knowledge.classify" ||
+    usage.operation === "knowledge.synthesize" ||
+    usage.operation === "campaign.plan" ||
+    usage.operation.startsWith("chat.tool.") ||
     usage.operation.startsWith("audit.")
   ) return estimateTextCost(usage)
   if (usage.operation === "knowledge.embed") return estimateEmbeddingCost(usage)
