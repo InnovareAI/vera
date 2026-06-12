@@ -225,7 +225,10 @@ Current state:
 - Command surfaces those budget warnings as operator toasts, while usage logs keep the warning metadata for audits.
 - Performance now supports manual lifetime metric entry for API-light channels and fallback cases, including Medium, Quora, Reddit, X, and any provider where sync is incomplete.
 - Manual metrics capture views, reach, comments, shares, saves, clicks, qualified traffic, buyer questions, and meeting requests as normalized `content_metric_snapshots`.
+- Learning now turns synced and manual metrics into demand insights, next experiment prompts, SAM handoff candidates, and buyer-intent weighted demand scores.
+- Learning now proposes inactive, client-scoped skills from measured evidence, such as repeatable demand patterns, buyer-intent response loops, and qualified-traffic CTA tests.
+- AI Settings now supports deep links into the Skills view so Learning can send operators straight to review and enable proposed client skills.
 
 Next step:
 
-- Turn synced and manual performance signals into learning recommendations that propose the next brief, platform mix, and SAM handoff actions.
+- Add the weekly learning cadence: generate a client notice that summarizes what changed, which skill proposals need review, and which SAM handoff actions should be queued.

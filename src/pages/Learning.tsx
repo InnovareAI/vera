@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ElementType, ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, BarChart3, CheckCircle2, Lightbulb, RefreshCw, Send, Share2, Sparkles, Target, TrendingUp } from 'lucide-react'
+import { ArrowRight, BarChart3, CheckCircle2, Lightbulb, RefreshCw, Send, Share2, Sparkles, Target, TrendingUp, Zap } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { ContentMetricSnapshot, Post } from '../lib/supabase'
 import { parseProjectInstructions, type BusinessContext, type BusinessContextKey } from '../lib/businessContext'
@@ -50,6 +50,22 @@ type HandoffCandidate = {
   prompt: string
 }
 
+type LearningSkillProposal = {
+  key: string
+  name: string
+  description: string
+  triggerDescription: string
+  triggerWhen: Record<string, unknown>
+  promptModule: string
+  gotchas: string[]
+  goodExamples: Array<{ label: string; text: string }>
+  sourceRefs: Array<{ label: string; text: string }>
+  tags: string[]
+  confidence: 'medium' | 'high'
+  performanceNotes: string
+  injectedInto: 'strategist' | 'writer' | 'all'
+}
+
 type ChannelLearningRow = {
   key: DemandPlatformKey
   label: string
@@ -86,6 +102,8 @@ export default function Learning() {
   const [snapshots, setSnapshots] = useState<ContentMetricSnapshot[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [skillMessage, setSkillMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+  const [savingSkillKey, setSavingSkillKey] = useState<string | null>(null)
   useRightRail(null, [])
 
   const load = useCallback(async () => {
@@ -140,6 +158,7 @@ export default function Learning() {
   const experiments = useMemo(() => buildExperiments(posts, metrics, demandContext, channelRows), [posts, metrics, demandContext, channelRows])
   const measuredChannels = channelRows.filter(row => row.measured > 0).length
   const handoffCandidates = useMemo(() => buildHandoffCandidates(posts, metrics, demandContext), [posts, metrics, demandContext])
+  const skillProposals = useMemo(() => buildSkillProposals(posts, metrics, demandContext, channelRows), [posts, metrics, demandContext, channelRows])
 
   function briefInVera(candidate: HandoffCandidate) {
     if (!activeProject?.id || !activeProject.slug) return
@@ -151,6 +170,79 @@ export default function Learning() {
     if (!activeProject?.id || !activeProject.slug) return
     sessionStorage.setItem(`vera-command-prefill:${activeProject.id}`, experiment.prompt)
     navigate(`/p/${activeProject.slug}/vera`)
+  }
+
+  async function saveSkillProposal(proposal: LearningSkillProposal) {
+    if (!activeProject?.id || !activeProject.org_id) {
+      setSkillMessage({ tone: 'danger', text: 'Pick a client workspace before saving a learning skill.' })
+      return
+    }
+
+    setSavingSkillKey(proposal.key)
+    setSkillMessage(null)
+    const payload = {
+      org_id: activeProject.org_id,
+      project_id: activeProject.id,
+      type: 'content',
+      name: proposal.name,
+      description: proposal.description,
+      injected_into: proposal.injectedInto,
+      prompt_module: proposal.promptModule,
+      trigger_when: proposal.triggerWhen,
+      trigger_description: proposal.triggerDescription,
+      gotchas: proposal.gotchas,
+      good_examples: proposal.goodExamples,
+      bad_examples: [],
+      source_refs: proposal.sourceRefs,
+      confidence: proposal.confidence,
+      performance_notes: proposal.performanceNotes,
+      tags: proposal.tags,
+      is_system: false,
+      is_active: false,
+      last_reviewed_at: null,
+    }
+
+    const { data: existing, error: lookupError } = await supabase
+      .from('skills')
+      .select('id, is_active')
+      .eq('project_id', activeProject.id)
+      .eq('name', proposal.name)
+      .maybeSingle()
+
+    if (lookupError) {
+      setSavingSkillKey(null)
+      setSkillMessage({ tone: 'danger', text: lookupError.message })
+      return
+    }
+
+    const result = existing?.id
+      ? await supabase
+          .from('skills')
+          .update({ ...payload, is_active: Boolean(existing.is_active) })
+          .eq('id', existing.id)
+          .select('id')
+          .single()
+      : await supabase
+          .from('skills')
+          .insert(payload)
+          .select('id')
+          .single()
+
+    setSavingSkillKey(null)
+    if (result.error) {
+      setSkillMessage({ tone: 'danger', text: result.error.message })
+      return
+    }
+    setSkillMessage({
+      tone: 'success',
+      text: existing?.id
+        ? 'Updated the existing client skill proposal. Active status was preserved.'
+        : 'Saved an inactive client skill proposal. Review it in AI Settings before enabling.',
+    })
+  }
+
+  function openSkillSettings() {
+    navigate('/skills?view=skills&scope=client&q=learning-proposal')
   }
 
   return (
@@ -300,6 +392,39 @@ export default function Learning() {
           </div>
         </Panel>
       </section>
+
+      <section style={{ marginBottom: space[8] }}>
+        <Panel>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: space[3], marginBottom: space[4], flexWrap: 'wrap' }}>
+            <SectionLabel>Reusable skill proposals</SectionLabel>
+            <button onClick={openSkillSettings} style={{ border: 0, background: 'transparent', padding: 0, color: color.accent, fontSize: t.size.cap, fontWeight: t.weight.medium, cursor: 'pointer' }}>
+              Review in AI Settings
+            </button>
+          </div>
+          <p style={{ margin: `0 0 ${space[4]}`, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.5 }}>
+            These are inactive client skills generated from measured evidence. Save them as proposals, inspect the recipe, then enable the ones VERA should use.
+          </p>
+          {skillMessage && (
+            <div style={{ marginBottom: space[4], padding: space[3], border: `1px solid ${skillMessage.tone === 'success' ? color.success : color.danger}`, borderRadius: radius.md, color: skillMessage.tone === 'success' ? color.success : color.danger, background: color.paper2, fontSize: t.size.cap }}>
+              {skillMessage.text}
+            </div>
+          )}
+          {skillProposals.length ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: space[3] }}>
+              {skillProposals.map(proposal => (
+                <SkillProposalCard
+                  key={proposal.key}
+                  proposal={proposal}
+                  saving={savingSkillKey === proposal.key}
+                  onSave={() => void saveSkillProposal(proposal)}
+                />
+              ))}
+            </div>
+          ) : (
+            <LearningState>Learning skills appear once VERA has measured demand assets. Add manual metrics or sync provider metrics to produce evidence-backed proposals.</LearningState>
+          )}
+        </Panel>
+      </section>
     </div>
   )
 }
@@ -389,6 +514,35 @@ function ExperimentCard({ experiment, onBrief }: { experiment: Experiment; onBri
         <Send size={12} />
         Brief
       </button>
+    </div>
+  )
+}
+
+function SkillProposalCard({ proposal, saving, onSave }: { proposal: LearningSkillProposal; saving: boolean; onSave: () => void }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: space[3], padding: space[4], border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: space[3] }}>
+        <span style={{ width: 30, height: 30, borderRadius: radius.sm, background: color.surface, color: color.accent, border: `1px solid ${color.line}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Zap size={15} />
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.35 }}>{proposal.name}</div>
+          <p style={{ margin: `${space[1]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>{proposal.description}</p>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <span style={{ padding: '3px 8px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: color.ghost, fontSize: t.size.micro }}>
+          {proposal.confidence}
+        </span>
+        {proposal.tags.slice(0, 4).map(tag => (
+          <span key={tag} style={{ padding: '3px 8px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: color.ghost, fontSize: t.size.micro }}>
+            {tag}
+          </span>
+        ))}
+      </div>
+      <Button variant="secondary" size="sm" leading={<Zap size={13} />} loading={saving} onClick={onSave}>
+        Save proposal
+      </Button>
     </div>
   )
 }
@@ -810,6 +964,158 @@ function buildExperiments(
       ].join('\n'),
     },
   ]
+}
+
+function buildSkillProposals(
+  posts: Post[],
+  metrics: Map<string, LearningMetric>,
+  context: BusinessContext,
+  channels: ChannelLearningRow[],
+): LearningSkillProposal[] {
+  const proposals: LearningSkillProposal[] = []
+  const top = buildTopRows(posts, metrics)[0]
+  const topMetric = top ? metrics.get(top.id) : null
+  const bestChannel = channels
+    .filter(channel => channel.measured > 0)
+    .sort((a, b) => b.score - a.score)[0]
+  const company = context.companyName || 'this client'
+  const platform = bestChannel?.label ?? top?.channel ?? 'the strongest measured channel'
+  const topTitle = top?.title ?? 'the strongest measured asset'
+  const evidenceLine = top && topMetric
+    ? `${topTitle} on ${top.channel} scored ${top.score} from ${metricEvidence(topMetric)}.`
+    : ''
+
+  if (top && topMetric) {
+    proposals.push({
+      key: 'repeat-strongest-pattern',
+      name: `Learning proposal: repeat ${platform} demand pattern`,
+      description: `Use measured evidence from ${company} to repeat the strongest demand asset pattern without copying the same post.`,
+      triggerDescription: `Use when drafting or reviewing ${platform} content after VERA identifies a top-performing demand asset.`,
+      triggerWhen: {
+        source: 'learning-loop',
+        platform,
+        job: ['draft', 'review', 'variant'],
+        metric_signal: ['comments', 'shares', 'clicks', 'qualified_traffic', 'buyer_questions', 'meeting_requests'],
+      },
+      promptModule: [
+        `Purpose: repeat the strongest measured demand pattern for ${company} without reusing the same copy.`,
+        ``,
+        `Evidence: ${evidenceLine}`,
+        ``,
+        `Process:`,
+        `1. Identify the winning topic, hook, proof type, speaker, CTA, and buyer intent signal.`,
+        `2. Keep the brand core and adapt the structure to the selected medium.`,
+        `3. Create a fresh variation for the next ICP or buying situation.`,
+        `4. Preserve claims discipline. Do not invent metrics, client names, or proof.`,
+        `5. Define which metric should prove the pattern is worth scaling next.`,
+        ``,
+        `Output: draft, approval route, measurement target, and SAM handoff condition.`,
+      ].join('\n'),
+      gotchas: [
+        'Do not copy the old post structure so closely that the channel looks repetitive.',
+        'Do not optimize only for views if buyer questions or meeting requests are available.',
+        'Do not use a named-person voice unless the speaker evidence supports it.',
+      ],
+      goodExamples: [{ label: 'Evidence', text: evidenceLine || topTitle }],
+      sourceRefs: [{ label: 'Learning Loop', text: `Top asset: ${topTitle}` }],
+      tags: ['learning-proposal', 'demand-pattern', platform.toLowerCase().replace(/\s+/g, '-')],
+      confidence: top.score >= 30 ? 'high' : 'medium',
+      performanceNotes: evidenceLine,
+      injectedInto: 'writer',
+    })
+  }
+
+  const totals = Array.from(metrics.values()).reduce((acc, metric) => ({
+    qualifiedTraffic: acc.qualifiedTraffic + metric.qualifiedTraffic,
+    buyerQuestions: acc.buyerQuestions + metric.buyerQuestions,
+    meetingRequests: acc.meetingRequests + metric.meetingRequests,
+  }), { qualifiedTraffic: 0, buyerQuestions: 0, meetingRequests: 0 })
+
+  if (totals.buyerQuestions > 0 || totals.meetingRequests > 0) {
+    proposals.push({
+      key: 'buyer-intent-loop',
+      name: 'Learning proposal: buyer intent response loop',
+      description: `Turn buyer questions and meeting requests for ${company} into follow-up content and SAM research tasks.`,
+      triggerDescription: 'Use when a content asset produces buyer questions, meeting intent, objections, or high-value comments.',
+      triggerWhen: {
+        source: 'learning-loop',
+        job: ['sam-handoff', 'follow-up-content', 'reply-planning'],
+        metric_signal: ['buyer_questions', 'meeting_requests', 'comments'],
+      },
+      promptModule: [
+        `Purpose: convert buyer intent from content into the next VERA and SAM actions.`,
+        ``,
+        `Evidence: ${totals.buyerQuestions} buyer question${totals.buyerQuestions === 1 ? '' : 's'} and ${totals.meetingRequests} meeting request${totals.meetingRequests === 1 ? '' : 's'} are visible in the current learning window.`,
+        ``,
+        `Process:`,
+        `1. Classify each question or meeting signal by pain, urgency, persona, and buying stage.`,
+        `2. Recommend the reply, the next content asset, and the SAM research angle.`,
+        `3. Identify the account or person fields SAM should enrich before outreach.`,
+        `4. Keep the content useful. Do not turn every signal into a hard sales CTA.`,
+        ``,
+        `Output: buyer intent summary, reply angle, next asset brief, SAM handoff brief, and measurement target.`,
+      ].join('\n'),
+      gotchas: [
+        'Do not treat low-context reactions as buyer intent.',
+        'Do not publish a sales-heavy follow-up if the signal is only educational.',
+        'Do not hand off to SAM without a clear research question or account trigger.',
+      ],
+      goodExamples: [{ label: 'Intent', text: `${totals.buyerQuestions} buyer questions, ${totals.meetingRequests} meeting requests.` }],
+      sourceRefs: [{ label: 'Learning Loop', text: 'Buyer intent summary metrics.' }],
+      tags: ['learning-proposal', 'buyer-intent', 'sam-handoff'],
+      confidence: totals.meetingRequests > 0 ? 'high' : 'medium',
+      performanceNotes: `${totals.buyerQuestions} buyer questions, ${totals.meetingRequests} meeting requests, ${totals.qualifiedTraffic} qualified visits.`,
+      injectedInto: 'strategist',
+    })
+  } else if (totals.qualifiedTraffic > 0) {
+    proposals.push({
+      key: 'qualified-traffic-cta',
+      name: 'Learning proposal: qualified traffic CTA test',
+      description: `Use qualified traffic for ${company} to test a sharper CTA before scaling the same topic.`,
+      triggerDescription: 'Use when content produces qualified visits but no buyer questions or meeting requests yet.',
+      triggerWhen: {
+        source: 'learning-loop',
+        job: ['cta-test', 'conversion-brief'],
+        metric_signal: ['qualified_traffic'],
+      },
+      promptModule: [
+        `Purpose: turn qualified visits into buyer questions or meeting requests.`,
+        ``,
+        `Evidence: ${totals.qualifiedTraffic} qualified visit${totals.qualifiedTraffic === 1 ? '' : 's'} with no buyer question or meeting request yet.`,
+        ``,
+        `Process:`,
+        `1. Keep the winning topic, but change the CTA and proof path.`,
+        `2. Offer a next step that fits top-of-funnel intent.`,
+        `3. Add one question that invites a real buyer objection or use case.`,
+        `4. Measure buyer questions and meeting requests before increasing output volume.`,
+      ].join('\n'),
+      gotchas: [
+        'Do not mistake traffic for commercial intent.',
+        'Do not increase volume before testing a conversion path.',
+      ],
+      goodExamples: [{ label: 'Traffic', text: `${totals.qualifiedTraffic} qualified visits need a sharper conversion proof point.` }],
+      sourceRefs: [{ label: 'Learning Loop', text: 'Qualified traffic without buyer intent.' }],
+      tags: ['learning-proposal', 'qualified-traffic', 'cta-test'],
+      confidence: 'medium',
+      performanceNotes: `${totals.qualifiedTraffic} qualified visits without buyer questions or meeting requests.`,
+      injectedInto: 'strategist',
+    })
+  }
+
+  return proposals.slice(0, 3)
+}
+
+function metricEvidence(metric: LearningMetric) {
+  const parts = [
+    metric.comments ? `${metric.comments} comments` : '',
+    metric.shares ? `${metric.shares} shares` : '',
+    metric.clicks ? `${metric.clicks} clicks` : '',
+    metric.qualifiedTraffic ? `${metric.qualifiedTraffic} qualified visits` : '',
+    metric.buyerQuestions ? `${metric.buyerQuestions} buyer questions` : '',
+    metric.meetingRequests ? `${metric.meetingRequests} meeting requests` : '',
+    metric.views ? `${metric.views} views or reach` : '',
+  ].filter(Boolean)
+  return parts.length ? parts.join(', ') : 'measured demand signals'
 }
 
 function buildTopRows(posts: Post[], metrics: Map<string, LearningMetric>) {

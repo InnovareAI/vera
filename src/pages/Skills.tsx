@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CSSProperties, Dispatch, ElementType, ReactNode, SetStateAction } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
   BarChart3,
@@ -211,7 +212,18 @@ function parseJsonObject(value: string): Record<string, unknown> {
   return parsed as Record<string, unknown>
 }
 
+function parseViewMode(value: string | null): ViewMode | null {
+  if (value === 'constitution' || value === 'skills' || value === 'evals') return value
+  return null
+}
+
+function parseScopeFilter(value: string | null): ScopeFilter | null {
+  if (value === 'all' || value === 'global' || value === 'workspace' || value === 'client') return value
+  return null
+}
+
 export default function Skills() {
+  const [searchParams] = useSearchParams()
   const { activeOrg } = useOrg()
   const { activeProject } = useProject()
   const activeOrgId = activeOrg?.id ?? null
@@ -222,13 +234,13 @@ export default function Skills() {
   const [performance, setPerformance] = useState<Record<string, SkillPerformance>>({})
   const [evalScenarios, setEvalScenarios] = useState<EvalScenario[]>([])
   const [evalError, setEvalError] = useState<string | null>(null)
-  const [view, setView] = useState<ViewMode>('constitution')
+  const [view, setView] = useState<ViewMode>(() => parseViewMode(searchParams.get('view')) ?? 'constitution')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(() => searchParams.get('q') ?? '')
   const [typeFilter, setTypeFilter] = useState<SkillType | 'all'>('all')
-  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all')
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>(() => parseScopeFilter(searchParams.get('scope')) ?? 'all')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
@@ -280,6 +292,15 @@ export default function Skills() {
   }, [activeOrgId, activeProjectId])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    const nextView = parseViewMode(searchParams.get('view'))
+    const nextScope = parseScopeFilter(searchParams.get('scope'))
+    const nextQuery = searchParams.get('q')
+    if (nextView) setView(nextView)
+    if (nextScope) setScopeFilter(nextScope)
+    if (nextQuery !== null) setQuery(nextQuery)
+  }, [searchParams])
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase()
