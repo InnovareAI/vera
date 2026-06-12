@@ -34,6 +34,10 @@ type Insight = {
   tone: string
 }
 
+type Experiment = Insight & {
+  prompt: string
+}
+
 type HandoffCandidate = {
   id: string
   title: string
@@ -109,7 +113,6 @@ export default function Learning() {
   const metrics = useMemo(() => buildMetrics(snapshots), [snapshots])
   const summary = useMemo(() => buildSummary(posts, metrics, snapshots.length), [posts, metrics, snapshots.length])
   const insights = useMemo(() => buildInsights(posts, metrics), [posts, metrics])
-  const experiments = useMemo(() => buildExperiments(posts, metrics), [posts, metrics])
   const topRows = useMemo(() => buildTopRows(posts, metrics), [posts, metrics])
   const businessContext = useMemo(() => parseProjectInstructions(activeProject?.instructions ?? '').businessContext, [activeProject?.instructions])
   const demandContext = useMemo(() => applyDemandDefaults(businessContext), [businessContext])
@@ -117,12 +120,19 @@ export default function Learning() {
     return buildOperatingRows(demandContext)
   }, [demandContext])
   const channelRows = useMemo(() => buildChannelRows(posts, metrics, demandContext), [posts, metrics, demandContext])
+  const experiments = useMemo(() => buildExperiments(posts, metrics, demandContext, channelRows), [posts, metrics, demandContext, channelRows])
   const measuredChannels = channelRows.filter(row => row.measured > 0).length
   const handoffCandidates = useMemo(() => buildHandoffCandidates(posts, metrics, demandContext), [posts, metrics, demandContext])
 
   function briefInVera(candidate: HandoffCandidate) {
     if (!activeProject?.id || !activeProject.slug) return
     sessionStorage.setItem(`vera-command-prefill:${activeProject.id}`, candidate.prompt)
+    navigate(`/p/${activeProject.slug}/vera`)
+  }
+
+  function briefExperimentInVera(experiment: Experiment) {
+    if (!activeProject?.id || !activeProject.slug) return
+    sessionStorage.setItem(`vera-command-prefill:${activeProject.id}`, experiment.prompt)
     navigate(`/p/${activeProject.slug}/vera`)
   }
 
@@ -247,15 +257,7 @@ export default function Learning() {
           <SectionLabel>Next demand experiments</SectionLabel>
           <div style={{ display: 'grid', gap: space[3], marginTop: space[4] }}>
             {experiments.map(experiment => (
-              <div key={experiment.title} style={{ display: 'flex', alignItems: 'flex-start', gap: space[3], padding: space[4], border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2 }}>
-                <span style={{ width: 28, height: 28, borderRadius: radius.pill, background: 'var(--accent-tint)', color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <Lightbulb size={15} />
-                </span>
-                <span>
-                  <span style={{ display: 'block', color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>{experiment.title}</span>
-                  <span style={{ display: 'block', color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5, marginTop: 2 }}>{experiment.body}</span>
-                </span>
-              </div>
+              <ExperimentCard key={experiment.title} experiment={experiment} onBrief={() => briefExperimentInVera(experiment)} />
             ))}
           </div>
         </Panel>
@@ -352,6 +354,24 @@ function HandoffCard({ candidate, onBrief }: { candidate: HandoffCandidate; onBr
   )
 }
 
+function ExperimentCard({ experiment, onBrief }: { experiment: Experiment; onBrief: () => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'stretch', gap: space[3], padding: space[4], border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2 }}>
+      <span style={{ width: 28, height: 28, borderRadius: radius.pill, background: 'var(--accent-tint)', color: experiment.tone, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <Lightbulb size={15} />
+      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'block', color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>{experiment.title}</span>
+        <span style={{ display: 'block', color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5, marginTop: 2 }}>{experiment.body}</span>
+      </span>
+      <button onClick={onBrief} title="Brief this experiment in Vera" style={{ flexShrink: 0, alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 10px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: color.ink, fontSize: t.size.micro, fontWeight: t.weight.medium, cursor: 'pointer' }}>
+        <Send size={12} />
+        Brief
+      </button>
+    </div>
+  )
+}
+
 function ChannelLearningCard({ row }: { row: ChannelLearningRow }) {
   const status = row.measured > 0
     ? 'Learning'
@@ -421,6 +441,9 @@ function LearningState({ children }: { children: ReactNode }) {
 function buildOperatingRows(context: BusinessContext) {
   const fields: Array<{ key: BusinessContextKey; label: string }> = [
     { key: 'demandObjective', label: 'Objective' },
+    { key: 'speakerStrategy', label: 'Speakers' },
+    { key: 'platformToneOfVoice', label: 'Platform TOV' },
+    { key: 'approvalStakeholders', label: 'Approvers' },
     { key: 'engagementSignals', label: 'Signals' },
     { key: 'samHandoffRules', label: 'SAM handoff' },
     { key: 'learningCadence', label: 'Learning cadence' },
@@ -514,6 +537,9 @@ function buildHandoffCandidates(posts: Post[], metrics: Map<string, LearningMetr
         context.engagementSignals ? `Client-defined engagement signals: ${context.engagementSignals}` : '',
         context.samHandoffRules ? `Client-defined SAM handoff rules: ${context.samHandoffRules}` : '',
         context.approvalModel ? `Approval model: ${context.approvalModel}` : '',
+        context.approvalStakeholders ? `Approval stakeholders: ${context.approvalStakeholders}` : '',
+        context.speakerStrategy ? `Speaker strategy: ${context.speakerStrategy}` : '',
+        context.platformToneOfVoice ? `Platform tone of voice: ${context.platformToneOfVoice}` : '',
         ``,
         `Return:`,
         `1. why this signal matters`,
@@ -632,24 +658,75 @@ function buildInsights(posts: Post[], metrics: Map<string, LearningMetric>): Ins
   return insights
 }
 
-function buildExperiments(posts: Post[], metrics: Map<string, LearningMetric>): Insight[] {
+function buildExperiments(
+  posts: Post[],
+  metrics: Map<string, LearningMetric>,
+  context: BusinessContext,
+  channels: ChannelLearningRow[],
+): Experiment[] {
   const top = buildTopRows(posts, metrics)[0]
   const base = top?.title ?? 'the current strongest client proof point'
+  const bestChannel = channels
+    .filter(channel => channel.measured > 0)
+    .sort((a, b) => b.score - a.score)[0]
+  const nextChannel = bestChannel?.label ?? channels.find(channel => channel.sourceSet)?.label ?? 'LinkedIn'
+  const speaker = context.speakerStrategy || 'Choose brand, founder, expert, or team voice based on the asset and source evidence.'
+  const tone = context.platformToneOfVoice || 'Keep the brand core, then adapt structure and tone to the selected medium.'
+  const approvals = context.approvalStakeholders || context.approvalModel || 'Use case-based approval routing before publishing.'
+  const commonContext = [
+    `Client: ${context.companyName || 'current client'}`,
+    `Demand objective: ${context.demandObjective || 'create B2B top-of-funnel demand'}`,
+    `Speaker strategy: ${speaker}`,
+    `Platform tone of voice: ${tone}`,
+    `Approval routing: ${approvals}`,
+    `Engagement signals: ${context.engagementSignals || 'comments, shares, saves, clicks, and qualified traffic'}`,
+    `SAM handoff rules: ${context.samHandoffRules || 'turn useful objections, buyer questions, and high-intent engagement into sales research'}`,
+  ].join('\n')
   return [
     {
       title: 'Create three ICP-specific variations',
       body: `Turn ${base} into founder, operator, and technical buyer versions. Compare comments and shares by ICP.`,
       tone: color.accent,
+      prompt: [
+        `Plan the next VERA demand experiment: three ICP-specific variations.`,
+        ``,
+        commonContext,
+        ``,
+        `Source asset or proof point: ${base}`,
+        `Primary channel to test: ${nextChannel}`,
+        ``,
+        `Return the experiment brief, the three variants, the approval route for each, and the exact metric Vera should compare after publishing.`,
+      ].join('\n'),
     },
     {
       title: 'Test one problem-aware thread',
       body: 'Lead with the pain before the offer. Measure comments, saves, and profile or site clicks as the top-of-funnel signal.',
       tone: color.success,
+      prompt: [
+        `Plan and draft one problem-aware demand experiment.`,
+        ``,
+        commonContext,
+        ``,
+        `Primary channel to test: ${nextChannel}`,
+        `Core proof or theme: ${base}`,
+        ``,
+        `Draft the asset, define the CTA, define the approval route, and explain which comments, shares, saves, clicks, or traffic signals would prove this angle is worth scaling.`,
+      ].join('\n'),
     },
     {
       title: 'Build one SAM handoff angle',
       body: 'Convert the highest-engagement topic into a sales research angle for SAM, with objections and account triggers included.',
       tone: color.info,
+      prompt: [
+        `Create a SAM handoff experiment from VERA performance learning.`,
+        ``,
+        commonContext,
+        ``,
+        `Strongest current signal: ${base}`,
+        `Channel context: ${nextChannel}`,
+        ``,
+        `Return a SAM research brief, likely account triggers, objections to prepare for, and the next content asset Vera should create to create more of this signal.`,
+      ].join('\n'),
     },
   ]
 }
