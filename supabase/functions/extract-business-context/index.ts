@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import Anthropic from "npm:@anthropic-ai/sdk"
 import mammoth from "npm:mammoth@1.10.0"
 import type { AdminClient } from "../_shared/auth.ts"
-import { isMasterOrg, loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
@@ -225,13 +225,13 @@ async function resolveExtractionRuntime(
   orgId: string,
   requiresAnthropicDocuments: boolean,
 ): Promise<{ ok: true; runtime: ExtractionRuntime } | { ok: false; response: Response }> {
-  let master = false
+  let platformProject: boolean
   try {
-    master = await isMasterOrg(supabase, orgId)
+    platformProject = await isPlatformMediaProject(supabase, projectId, orgId)
   } catch (error) {
     return { ok: false, response: jsonError(`Could not resolve workspace billing policy: ${errorMessage(error)}`, 500) }
   }
-  if (master) {
+  if (platformProject) {
     if (!ANTHROPIC_API_KEY) return { ok: false, response: jsonError("ANTHROPIC_API_KEY is not configured", 500) }
     return {
       ok: true,
@@ -239,8 +239,8 @@ async function resolveExtractionRuntime(
     }
   }
 
-  let openRouter: { key: string; provider: string } | null = null
-  let anthropic: { key: string; provider: string } | null = null
+  let openRouter: { key: string; provider: string } | null
+  let anthropic: { key: string; provider: string } | null
   try {
     const results = await Promise.all([
       requiresAnthropicDocuments ? Promise.resolve(null) : loadClientApiKey(supabase, projectId, ["openrouter"]),

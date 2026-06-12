@@ -4,7 +4,7 @@
 // canManageProject — the space owner / org admins); listing + revoking are
 // direct, gated by client_api_keys RLS (can_project_manage).
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Activity, Bot, CheckCircle2, Clapperboard, Clock3, Crown, ImagePlus, KeyRound, Lock, RefreshCw, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react'
+import { Activity, BookOpen, Bot, CheckCircle2, Clapperboard, Clock3, Crown, ImagePlus, KeyRound, Lock, RefreshCw, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { useProject } from '../lib/projectContext'
@@ -52,7 +52,7 @@ const DEFAULT_AI_POLICY: AiPolicy = {
 const PROVIDERS = [
   { value: 'openrouter', label: 'OpenRouter (text + images)' },
   { value: 'anthropic', label: 'Anthropic (text)' },
-  { value: 'openai', label: 'OpenAI (images)' },
+  { value: 'openai', label: 'OpenAI (images + embeddings)' },
   { value: 'fal', label: 'FAL (images + video)' },
 ]
 const providerLabel = (v: string) => PROVIDERS.find(p => p.value === v)?.label ?? v
@@ -234,6 +234,14 @@ export default function ClientKeys() {
             : 'Add OpenRouter for the normal image path, or FAL/OpenAI for provider-specific image models.',
     },
     {
+      icon: BookOpen,
+      title: 'Searchable knowledge',
+      ready: activeProviders.has('openai'),
+      body: activeProviders.has('openai')
+        ? 'OpenAI embeddings are active. Uploaded and pasted knowledge can become searchable for this client.'
+        : 'Add a client OpenAI key before ingesting searchable knowledge sources.',
+    },
+    {
       icon: Clapperboard,
       title: 'Video rendering',
       ready: aiPolicy.standard_video_enabled && (activeProviders.has('fal') || activeProviders.has('fal_ai')),
@@ -253,7 +261,7 @@ export default function ClientKeys() {
       <PageHeader
         eyebrow={activeProject.name}
         title="API keys"
-        subtitle="Connect this space to its own AI provider keys. Keys are stored encrypted and used only for this client. OpenRouter covers text and supported image models. FAL is required for client-owned video generation."
+        subtitle="Connect this space to its own AI provider keys. Keys are stored encrypted and used only for this client. OpenRouter covers text and supported image models. OpenAI covers searchable knowledge embeddings. FAL is required for client-owned video generation."
       />
 
       <section style={{ marginBottom: space[8] }}>
@@ -341,6 +349,7 @@ export default function ClientKeys() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))', gap: space[3], marginBottom: space[5] }}>
             <UsageMetric icon={Activity} label="Events" value={formatNumber(usageSummary.events)} detail="Last 30 days" tone="info" />
             <UsageMetric icon={Bot} label="Text tokens" value={formatNumber(usageSummary.tokens)} detail={`${formatNumber(usageSummary.chatEvents)} chat turns`} tone="success" />
+            <UsageMetric icon={BookOpen} label="Knowledge" value={formatNumber(usageSummary.knowledgeEvents)} detail={`${formatNumber(usageSummary.embeddingEvents)} embeds`} tone="info" />
             <UsageMetric icon={ImagePlus} label="Images" value={formatNumber(usageSummary.images)} detail={`${formatNumber(usageSummary.imageEvents)} image events`} tone="warn" />
             <UsageMetric icon={Clapperboard} label="Videos" value={formatNumber(usageSummary.videos)} detail={`${formatNumber(usageSummary.videoEvents)} submits`} tone="danger" />
             <UsageMetric icon={KeyRound} label="Client key" value={formatNumber(usageSummary.clientKeyEvents)} detail={`${formatNumber(usageSummary.platformKeyEvents)} platform-backed`} tone="success" />
@@ -355,7 +364,7 @@ export default function ClientKeys() {
             <p style={{ fontSize: t.size.cap, color: color.ghost, margin: 0 }}>Loading usage...</p>
           ) : usageRows.length === 0 ? (
             <div style={{ border: `1px dashed ${color.line}`, borderRadius: radius.md, padding: space[5], textAlign: 'center' }}>
-              <p style={{ fontSize: t.size.cap, color: color.ghost, margin: 0 }}>No usage recorded in the last 30 days. Completed chat, image, and video runs will appear here.</p>
+              <p style={{ fontSize: t.size.cap, color: color.ghost, margin: 0 }}>No usage recorded in the last 30 days. Completed chat, knowledge, image, and video runs will appear here.</p>
             </div>
           ) : (
             <UsageTable rows={usageRows.slice(0, 12)} />
@@ -565,6 +574,10 @@ function summarizeUsage(rows: GenerationUsageRow[]) {
       summary.events += 1
       summary.tokens += tokens
       if (operation === 'chat.message') summary.chatEvents += 1
+      if (operation.startsWith('knowledge.')) {
+        summary.knowledgeEvents += 1
+        if (operation === 'knowledge.embed') summary.embeddingEvents += 1
+      }
       if (operation.startsWith('image.')) {
         summary.imageEvents += 1
         summary.images += numberFromMetadata(metadata.num_images, 1)
@@ -587,6 +600,8 @@ function summarizeUsage(rows: GenerationUsageRow[]) {
       events: 0,
       tokens: 0,
       chatEvents: 0,
+      knowledgeEvents: 0,
+      embeddingEvents: 0,
       images: 0,
       imageEvents: 0,
       videos: 0,
@@ -635,7 +650,7 @@ function numberFromMetadata(value: unknown, fallback: number) {
 
 function formatMeter(row: GenerationUsageRow, metadata: UsageMetadata) {
   const operation = row.operation ?? ''
-  if (operation === 'chat.message') {
+  if (operation === 'chat.message' || operation.startsWith('knowledge.')) {
     return `${formatNumber((row.input_tokens ?? 0) + (row.output_tokens ?? 0))} tokens`
   }
   if (operation.startsWith('image.')) {

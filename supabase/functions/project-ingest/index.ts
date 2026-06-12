@@ -23,11 +23,16 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database, Json } from '../_shared/database.types.ts'
 import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
+import { isPlatformMediaProject, loadClientApiKey } from '../_shared/client-media-keys.ts'
+import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { extractText, getDocumentProxy } from 'npm:unpdf@0.12.1'
 import mammoth from 'npm:mammoth@1.8.0'
 
 const OPENAI_API_KEY    = Deno.env.get('OPENAI_API_KEY') ?? ''
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
+const OPENAI_EMBED_MODEL = Deno.env.get('OPENAI_EMBED_MODEL') ?? 'text-embedding-3-small'
+const ANTHROPIC_CLASSIFY_MODEL = Deno.env.get('ANTHROPIC_CLASSIFY_MODEL') ?? 'claude-haiku-4-5'
+const OPENROUTER_CLASSIFY_MODEL = Deno.env.get('OPENROUTER_CLASSIFY_MODEL') ?? 'google/gemini-2.5-flash'
 const SUPABASE_URL      = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY       = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
@@ -38,6 +43,13 @@ const cors = {
 }
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+
+type ProjectScope = { id: string; org_id: string; name?: string | null }
+type EmbedRuntime = { provider: 'openai'; key: string; model: string; keySource: 'platform' | 'client' }
+type ClassifyRuntime =
+  | { provider: 'anthropic'; key: string; model: string; keySource: 'platform' | 'client' }
+  | { provider: 'openrouter'; key: string; model: string; keySource: 'client' }
+type IngestRuntimes = { embedding: EmbedRuntime; classifier: ClassifyRuntime | null }
 
 // ─── helpers ─────────────────────────────────────────────────────────
 function chunkText(text: string, max = 1200, overlap = 150): string[] {
@@ -51,15 +63,21 @@ function chunkText(text: string, max = 1200, overlap = 150): string[] {
   return out.filter(c => c.trim().length > 50)
 }
 
-async function embed(text: string): Promise<number[]> {
+async function embed(
+  supabase: AdminClient,
+  project: ProjectScope,
+  runtime: EmbedRuntime,
+  text: string,
+): Promise<number[]> {
+  const startedAt = Date.now()
   const res = await fetch('https://api.openai.com/v1/embeddings', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      'Authorization': `Bearer ${runtime.key}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'text-embedding-3-small',
+      model: runtime.model,
       input: text.slice(0, 8000), // hard cap to be safe
     }),
   })
@@ -67,7 +85,18 @@ async function embed(text: string): Promise<number[]> {
     const err = await res.text()
     throw new Error(`OpenAI embed failed: ${res.status} ${err.slice(0, 200)}`)
   }
-  const data = await res.json() as { data: Array<{ embedding: number[] }> }
+  const data = await res.json() as { data: Array<{ embedding: number[] }>; usage?: { prompt_tokens?: number; total_tokens?: number } }
+  await logGenerationUsage(supabase, {
+    orgId: project.org_id,
+    projectId: project.id,
+    provider: runtime.provider,
+    model: runtime.model,
+    operation: 'knowledge.embed',
+    inputTokens: data.usage?.prompt_tokens ?? data.usage?.total_tokens ?? null,
+    outputTokens: 0,
+    durationMs: Date.now() - startedAt,
+    metadata: { key_source: runtime.keySource },
+  })
   return data.data[0].embedding
 }
 
@@ -140,24 +169,28 @@ Deno.serve(async (req) => {
   const auth = await requireProjectMember(req, supabase, SERVICE_KEY, project_id, cors)
   if (!auth.ok) return auth.response
 
-  // Verify project exists
   const { data: project, error: projErr } = await supabase
     .from('projects')
     .select('id, org_id, name')
     .eq('id', project_id)
     .maybeSingle()
   if (projErr || !project) return json(404, { error: 'project not found' })
+  const projectScope = project as ProjectScope
 
   try {
     if (kind === 'paste') {
-      return await ingestText(supabase, project_id, body.title as string ?? 'Pasted note', body.content as string, 'paste', null, null, null)
+      const runtimes = await resolveIngestRuntimes(supabase as unknown as AdminClient, projectScope)
+      if (!runtimes.ok) return runtimes.response
+      return await ingestText(supabase, projectScope, runtimes.value, body.title as string ?? 'Pasted note', body.content as string, 'paste', null, null, null)
     }
     if (kind === 'url') {
       const sourceUrl = body.source_url as string
       if (!sourceUrl) return json(400, { error: 'source_url required for kind=url' })
+      const runtimes = await resolveIngestRuntimes(supabase as unknown as AdminClient, projectScope)
+      if (!runtimes.ok) return runtimes.response
       const text = await fetchUrlText(sourceUrl)
       const title = (body.title as string) || sourceUrl
-      return await ingestText(supabase, project_id, title, text, 'url', sourceUrl, null, null)
+      return await ingestText(supabase, projectScope, runtimes.value, title, text, 'url', sourceUrl, null, null)
     }
     if (kind === 'file') {
       const storagePath = body.storage_path as string
@@ -194,6 +227,15 @@ Deno.serve(async (req) => {
       const isDocx      = DOCX_MIMES.has(mimeType)
 
       if (isPlainText || isPdf || isDocx) {
+        const runtimes = await resolveIngestRuntimes(supabase as unknown as AdminClient, projectScope)
+        if (!runtimes.ok) {
+          return json(200, {
+            ok: true,
+            asset_id: assetRow.id,
+            chunks_ingested: 0,
+            note: `asset stored; text was not made searchable: ${runtimes.message}`,
+          })
+        }
         const { data: fileBlob, error: dlErr } = await supabase.storage
           .from('project-assets')
           .download(storagePath)
@@ -217,7 +259,7 @@ Deno.serve(async (req) => {
         if (!text || text.trim().length < 30) {
           return json(200, { ok: true, asset_id: assetRow.id, chunks_ingested: 0, note: 'asset stored; extracted text too short to embed' })
         }
-        const knowledgeResult = await ingestText(supabase, project_id, fileName, text, 'upload', null, fileName, fileSize)
+        const knowledgeResult = await ingestText(supabase, projectScope, runtimes.value, fileName, text, 'upload', null, fileName, fileSize)
         const knowledgeJson = await knowledgeResult.json() as { id?: string; chunks_ingested?: number }
         if (knowledgeJson.id) {
           await supabase.from('project_assets')
@@ -244,6 +286,82 @@ Deno.serve(async (req) => {
   }
 })
 
+async function resolveIngestRuntimes(
+  supabase: AdminClient,
+  project: ProjectScope,
+): Promise<{ ok: true; value: IngestRuntimes } | { ok: false; response: Response; message: string }> {
+  let platformProject: boolean
+  try {
+    platformProject = await isPlatformMediaProject(supabase, project.id, project.org_id)
+  } catch (error) {
+    return {
+      ok: false,
+      response: json(500, { error: `Could not resolve workspace billing policy: ${errorMessage(error)}` }),
+      message: 'workspace billing policy could not be resolved',
+    }
+  }
+
+  if (platformProject) {
+    if (!OPENAI_API_KEY) {
+      return {
+        ok: false,
+        response: json(500, { error: 'OPENAI_API_KEY is not configured for knowledge embeddings.' }),
+        message: 'platform OpenAI embeddings are not configured',
+      }
+    }
+    return {
+      ok: true,
+      value: {
+        embedding: { provider: 'openai', key: OPENAI_API_KEY, model: OPENAI_EMBED_MODEL, keySource: 'platform' },
+        classifier: ANTHROPIC_API_KEY
+          ? { provider: 'anthropic', key: ANTHROPIC_API_KEY, model: ANTHROPIC_CLASSIFY_MODEL, keySource: 'platform' }
+          : null,
+      },
+    }
+  }
+
+  let openai: { key: string; provider: string } | null
+  try {
+    openai = await loadClientApiKey(supabase, project.id, ['openai'])
+  } catch (error) {
+    return {
+      ok: false,
+      response: json(403, { error: `Client OpenAI key for knowledge embeddings is unavailable: ${errorMessage(error)}` }),
+      message: `client OpenAI key is unavailable: ${errorMessage(error)}`,
+    }
+  }
+  if (!openai?.key) {
+    return {
+      ok: false,
+      response: json(403, { error: 'Searchable knowledge ingestion requires this client space to use its own OpenAI key for embeddings.' }),
+      message: 'add a client OpenAI key for searchable knowledge embeddings',
+    }
+  }
+
+  let classifier: ClassifyRuntime | null = null
+  try {
+    const [openRouter, anthropic] = await Promise.all([
+      loadClientApiKey(supabase, project.id, ['openrouter']),
+      loadClientApiKey(supabase, project.id, ['anthropic']),
+    ])
+    if (openRouter?.key) {
+      classifier = { provider: 'openrouter', key: openRouter.key, model: OPENROUTER_CLASSIFY_MODEL, keySource: 'client' }
+    } else if (anthropic?.key) {
+      classifier = { provider: 'anthropic', key: anthropic.key, model: ANTHROPIC_CLASSIFY_MODEL, keySource: 'client' }
+    }
+  } catch (error) {
+    console.warn(`knowledge classifier key unavailable: ${errorMessage(error)}`)
+  }
+
+  return {
+    ok: true,
+    value: {
+      embedding: { provider: 'openai', key: openai.key, model: OPENAI_EMBED_MODEL, keySource: 'client' },
+      classifier,
+    },
+  }
+}
+
 // ─── classify — VERA reads each ingested doc and tags it ──────────────
 // Async, fire-and-forget after the knowledge row is inserted. Sets:
 //   · kind        — brief / voice / audit / positioning / case_study /
@@ -256,10 +374,12 @@ Deno.serve(async (req) => {
 // retrieval even if classification fails.
 async function classifyAndStore(
   supabase: AdminClient,
+  project: ProjectScope,
+  runtime: ClassifyRuntime | null,
   knowledgeId: string,
   content: string,
 ): Promise<void> {
-  if (!ANTHROPIC_API_KEY) return
+  if (!runtime) return
 
   const sys = `You are VERA, a B2B content strategist reading a document an operator just dropped into their project's knowledge base.
 
@@ -290,7 +410,7 @@ Suggestion examples:
   · "Keep as reference — I'll pull it in when relevant."`
 
   const body = {
-    model: 'claude-haiku-4-5',
+    model: runtime.model,
     max_tokens: 1024,
     system: sys,
     messages: [{
@@ -300,21 +420,11 @@ Suggestion examples:
   }
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) {
-      console.warn(`classify: anthropic ${res.status}`)
-      return
-    }
-    const data = await res.json() as { content?: Array<{ type: string; text?: string }> }
-    const text = data.content?.find(c => c.type === 'text')?.text?.trim() ?? ''
+    const startedAt = Date.now()
+    const result = runtime.provider === 'openrouter'
+      ? await classifyWithOpenRouter(runtime, sys, body.messages[0].content)
+      : await classifyWithAnthropic(runtime, body)
+    const text = result.text
     // Strip markdown fences if Claude wrapped JSON
     const cleaned = text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim()
     let parsed: { kind?: string; summary?: string; extracted?: unknown; suggestion?: string }
@@ -331,15 +441,88 @@ Suggestion examples:
       suggestion: parsed.suggestion ?? null,
       classified_at: new Date().toISOString(),
     }).eq('id', knowledgeId)
+    await logGenerationUsage(supabase, {
+      orgId: project.org_id,
+      projectId: project.id,
+      provider: runtime.provider,
+      model: runtime.model,
+      operation: 'knowledge.classify',
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      durationMs: Date.now() - startedAt,
+      metadata: { key_source: runtime.keySource },
+    })
   } catch (e) {
     console.warn(`classify: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+async function classifyWithAnthropic(
+  runtime: Extract<ClassifyRuntime, { provider: 'anthropic' }>,
+  body: Record<string, unknown>,
+): Promise<{ text: string; inputTokens: number | null; outputTokens: number | null }> {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': runtime.key,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`anthropic ${res.status}`)
+  const data = await res.json() as {
+    content?: Array<{ type: string; text?: string }>
+    usage?: { input_tokens?: number; output_tokens?: number }
+  }
+  return {
+    text: data.content?.find(c => c.type === 'text')?.text?.trim() ?? '',
+    inputTokens: data.usage?.input_tokens ?? null,
+    outputTokens: data.usage?.output_tokens ?? null,
+  }
+}
+
+async function classifyWithOpenRouter(
+  runtime: Extract<ClassifyRuntime, { provider: 'openrouter' }>,
+  system: string,
+  userContent: string,
+): Promise<{ text: string; inputTokens: number | null; outputTokens: number | null }> {
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${runtime.key}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://vera.innovareai.com',
+      'X-Title': 'VERA Knowledge Classification',
+    },
+    body: JSON.stringify({
+      model: runtime.model,
+      temperature: 0.2,
+      max_tokens: 1024,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: userContent },
+      ],
+    }),
+  })
+  if (!res.ok) throw new Error(`openrouter ${res.status}`)
+  const data = await res.json() as {
+    choices?: Array<{ message?: { content?: string | null } }>
+    usage?: { prompt_tokens?: number; completion_tokens?: number }
+  }
+  return {
+    text: data.choices?.[0]?.message?.content?.trim() ?? '',
+    inputTokens: data.usage?.prompt_tokens ?? null,
+    outputTokens: data.usage?.completion_tokens ?? null,
   }
 }
 
 // ─── ingestText — chunks, embeds, writes to project_knowledge ────────
 async function ingestText(
   supabase: AdminClient,
-  projectId: string,
+  project: ProjectScope,
+  runtimes: IngestRuntimes,
   title: string,
   content: string,
   sourceKind: 'paste' | 'url' | 'upload',
@@ -357,12 +540,12 @@ async function ingestText(
 
   // We store ONE row per document with the full content + an embedding of the
   // head (first ~1200 chars). For larger docs, future revision can split rows.
-  const headEmbedding = await embed(chunks[0])
+  const headEmbedding = await embed(supabase, project, runtimes.embedding, chunks[0])
 
   const { data: row, error: insErr } = await supabase
     .from('project_knowledge')
     .insert({
-      project_id: projectId,
+      project_id: project.id,
       title,
       content,
       source_kind: sourceKind,
@@ -379,7 +562,11 @@ async function ingestText(
   // Fire-and-forget so the upload response stays fast; the UI polls or
   // re-fetches and shows the classification when ready (typically 1-3s).
   // @ts-expect-error EdgeRuntime is provided by the Supabase edge runtime.
-  EdgeRuntime.waitUntil(classifyAndStore(supabase, row.id as string, content))
+  EdgeRuntime.waitUntil(classifyAndStore(supabase, project, runtimes.classifier, row.id as string, content))
 
   return json(200, { ok: true, id: row.id, chunks_ingested: chunks.length })
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
 }

@@ -290,10 +290,9 @@ Vera constitution:
 // Embed text via OpenAI. Returns null on failure so callers can decide
 // whether to skip indexing or hard-fail. Bounded retry + truncation on
 // the embedding API's 8192-token input cap (rough char approximation).
-async function embedText(text: string): Promise<number[] | null> {
-  const key = Deno.env.get('OPENAI_API_KEY')
-  if (!key) {
-    console.warn('OPENAI_API_KEY missing — embedding skipped')
+async function embedText(text: string, runtime?: EmbeddingRuntime | null): Promise<number[] | null> {
+  if (!runtime?.key) {
+    console.warn('embedding key missing — embedding skipped')
     return null
   }
   // Truncate to ~28k chars (≈7k tokens, safe margin under 8192 cap)
@@ -301,8 +300,8 @@ async function embedText(text: string): Promise<number[] | null> {
   try {
     const res = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: EMBEDDING_MODEL, input }),
+      headers: { 'Authorization': `Bearer ${runtime.key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: runtime.model, input }),
     })
     if (!res.ok) {
       console.warn('embed failed', res.status, (await res.text()).slice(0, 200))
@@ -818,12 +817,47 @@ async function loadBrandVoice(
   return { data: (data && data.length) ? (data[0] as Record<string, unknown>) : null }
 }
 
+async function resolveEmbeddingRuntime(
+  supabase: AdminClient,
+  projectId: string | null,
+  platformTextAllowed: boolean,
+): Promise<EmbeddingRuntime | null> {
+  if (platformTextAllowed) {
+    const key = Deno.env.get('OPENAI_API_KEY')
+    return key ? { key, model: EMBEDDING_MODEL, keySource: 'platform' } : null
+  }
+  if (!projectId) return null
+
+  try {
+    const { data } = await supabase.from('client_api_keys')
+      .select('secret_ciphertext')
+      .eq('project_id', projectId)
+      .eq('provider', 'openai')
+      .eq('status', 'active')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const cipher = (data as { secret_ciphertext?: string } | null)?.secret_ciphertext
+    if (!cipher) return null
+    const key = await decryptClientSecret(cipher)
+    if (!key) {
+      console.warn('client OpenAI embedding key could not be decrypted')
+      return null
+    }
+    return { key, model: EMBEDDING_MODEL, keySource: 'client' }
+  } catch (error) {
+    console.warn('client OpenAI embedding key lookup failed', error)
+    return null
+  }
+}
+
 async function loadContext(
   supabase: AdminClient,
   orgId: string,
   userId: string | null,
   lastUserMessage?: string,
   projectId?: string | null,
+  embeddingRuntime?: EmbeddingRuntime | null,
 ): Promise<WorkspaceContext> {
   const skillsQuery = supabase.from('skills')
     .select('org_id, name, type, description, project_id, trigger_description, gotchas, confidence, sort_order')
@@ -921,7 +955,7 @@ async function loadContext(
         .map(r => [r.name, { invocations: r.total_invocations, approval_rate: r.approval_rate }]),
     ),
     kbStats: await loadKbStats(supabase, orgId),
-    kbHits: lastUserMessage ? await retrieveKbHits(supabase, orgId, lastUserMessage) : [],
+    kbHits: lastUserMessage ? await retrieveKbHits(supabase, orgId, lastUserMessage, embeddingRuntime) : [],
     integrations: ((integrationsRes.data ?? []) as WorkspaceContext['integrations']).filter(row =>
       row.status !== 'revoked'
     ),
@@ -932,7 +966,7 @@ async function loadContext(
     },
     activeProject: projectId ? await loadActiveProject(supabase, orgId, projectId) : undefined,
     projectKnowledge: projectId && lastUserMessage
-      ? await retrieveProjectKnowledge(supabase, projectId, lastUserMessage)
+      ? await retrieveProjectKnowledge(supabase, projectId, lastUserMessage, embeddingRuntime)
       : [],
     observations: await loadObservations(supabase, orgId, projectId ?? null),
   }
@@ -995,10 +1029,12 @@ async function retrieveProjectKnowledge(
   supabase: AdminClient,
   projectId: string,
   query: string,
+  embeddingRuntime?: EmbeddingRuntime | null,
 ): Promise<WorkspaceContext['projectKnowledge']> {
   if (query.length < 24) return []
   try {
-    const embedding = await embedText(query)
+    const embedding = await embedText(query, embeddingRuntime)
+    if (!embedding) return []
     const { data, error } = await (supabase as unknown as {
       rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>
     }).rpc('project_knowledge_search', {
@@ -1045,10 +1081,11 @@ async function retrieveKbHits(
   supabase: AdminClient,
   orgId: string,
   query: string,
+  embeddingRuntime?: EmbeddingRuntime | null,
 ): Promise<WorkspaceContext['kbHits']> {
   // Skip embedding cost for trivially short turns (greetings, yes/no, etc.)
   if (query.length < 24) return []
-  const embedding = await embedText(query)
+  const embedding = await embedText(query, embeddingRuntime)
   if (!embedding) return []
   const { data, error } = await supabase.rpc('kb_semantic_search', {
     org_filter: orgId,
@@ -1704,6 +1741,7 @@ async function executeTool(
     userPrompt?: string | null
     allowImageGeneration?: boolean
     allowVideoGeneration?: boolean
+    embeddingRuntime?: EmbeddingRuntime | null
   },
 ): Promise<{ result: string; image_url?: string; video_url?: string }> {
   try {
@@ -2459,7 +2497,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         if (ingestToBrain) {
           ctx.emit({ type: 'tool_progress', tool: 'web_research', status: 'saving research to Brain…' })
           const content = buildWebResearchContent(query, research.items)
-          const embedding = await embedText(content)
+          const embedding = await embedText(content, ctx.embeddingRuntime)
           const { data: row, error } = await ctx.supabase.from('kb_raw').insert({
             org_id: ctx.orgId,
             kind: 'web_capture',
@@ -2690,7 +2728,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           ?? '(untitled)'
         const source = (input.source as string | undefined) ?? 'manual'
 
-        const embedding = await embedText(content)
+        const embedding = await embedText(content, ctx.embeddingRuntime)
         const { data: row, error } = await ctx.supabase.from('kb_raw').insert({
           org_id: ctx.orgId,
           kind, source, title, content,
@@ -2712,7 +2750,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
       case 'kb_search': {
         const query = input.query as string
         const limit = Math.min((input.limit as number) ?? 6, 20)
-        const embedding = await embedText(query)
+        const embedding = await embedText(query, ctx.embeddingRuntime)
         if (!embedding) {
           // Fallback: keyword search across raw + articles
           const { data, error } = await ctx.supabase.from('kb_raw')
@@ -2751,7 +2789,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
 
         // If no source_ids provided, find relevant raw items via semantic search
         if (sourceIds.length === 0) {
-          const embedding = await embedText(topic)
+          const embedding = await embedText(topic, ctx.embeddingRuntime)
           if (embedding) {
             const { data } = await ctx.supabase.rpc('kb_semantic_search', {
               org_filter: ctx.orgId,
@@ -2825,7 +2863,7 @@ Do NOT fabricate claims. If sources contradict, surface the contradiction.`,
           .replace(/^-+|-+$/g, '')
           .slice(0, 60)
 
-        const embedding = await embedText(`${topic}\n${summary}\n${body}`)
+        const embedding = await embedText(`${topic}\n${summary}\n${body}`, ctx.embeddingRuntime)
         const { data: article, error: artErr } = await ctx.supabase.from('kb_articles').upsert({
           org_id: ctx.orgId,
           slug,
@@ -3828,6 +3866,7 @@ const MAX_TOOL_ROUNDS = 5  // safety cap so a tool loop can't run forever
 // OpenRouter serves Claude, so quality matches; override per deployment if the
 // slug changes.
 const OPENROUTER_TEXT_MODEL = Deno.env.get('OPENROUTER_TEXT_MODEL') ?? 'anthropic/claude-sonnet-4.6'
+type EmbeddingRuntime = { key: string; model: string; keySource: 'platform' | 'client' }
 
 // Isolated OpenRouter (OpenAI-format) agent loop for a project running its text
 // on its own OpenRouter key. Reuses executeTool and emits the SAME SSE events as
@@ -3964,12 +4003,7 @@ Deno.serve(async (req) => {
     })
   }
 
-  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
-  if (!anthropicKey) {
-    return new Response(JSON.stringify({ error: 'ANTHROPIC_API_KEY not configured' }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
-  }
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
 
   const supabase = createClient<Database>(
     Deno.env.get('SUPABASE_URL')!,
@@ -4008,11 +4042,27 @@ Deno.serve(async (req) => {
   })
   if (!assistantMessageGuard.ok) return assistantMessageGuard.response
 
+  let orgIsMaster: boolean
+  let platformKeyProject = false
+  try {
+    const { data: orgRow, error: orgError } = await supabase.from('organizations').select('is_master').eq('id', orgId).maybeSingle()
+    if (orgError) return jsonError(orgError.message, 500)
+    orgIsMaster = !!(orgRow as { is_master?: boolean } | null)?.is_master
+    if (projectId) platformKeyProject = await isPlatformMediaProject(supabase, projectId, orgId)
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Could not verify workspace AI billing scope', 500)
+  }
+  if (!orgIsMaster && !projectId) {
+    return jsonError('Client chat requires an active client space with its own OpenRouter or Anthropic key.', 403)
+  }
+  const platformTextAllowed = orgIsMaster && (!projectId || platformKeyProject)
+  const embeddingRuntime = await resolveEmbeddingRuntime(supabase, projectId, platformTextAllowed)
+
   // Fetch workspace context (including KB hits for this turn). Non-fatal —
   // if it fails we fall back to a minimal prompt so chat still works.
   let contextBlock: string
   try {
-    const ctx = await loadContext(supabase, orgId, effectiveUserId, lastUserText, projectId)
+    const ctx = await loadContext(supabase, orgId, effectiveUserId, lastUserText, projectId, embeddingRuntime)
     contextBlock = renderContext(ctx, route)
   } catch (err) {
     console.error('vera-chat: context load failed', err)
@@ -4073,25 +4123,14 @@ Deno.serve(async (req) => {
   const enableThinking = analyticalCues.test(lastUserText.toLowerCase())
 
   // Model + key selection per workspace:
-  //   • the agency's own (master) org -> Sonnet on the InnovareAI key
+  //   • the platform project -> Sonnet on the InnovareAI key
   //   • client space with its own OpenRouter key -> OpenRouter on their key
   //   • client space with its own Anthropic key -> Sonnet on their key
   //   • client spaces without BYOK text keys are blocked, never routed onto
   //     the InnovareAI platform key.
-  let orgIsMaster: boolean
-  try {
-    const { data: orgRow, error: orgError } = await supabase.from('organizations').select('is_master').eq('id', orgId).maybeSingle()
-    if (orgError) return jsonError(orgError.message, 500)
-    orgIsMaster = !!(orgRow as { is_master?: boolean } | null)?.is_master
-  } catch (error) {
-    return jsonError(error instanceof Error ? error.message : 'Could not verify workspace AI billing scope', 500)
-  }
-  if (!orgIsMaster && !projectId) {
-    return jsonError('Client chat requires an active client space with its own OpenRouter or Anthropic key.', 403)
-  }
-
+  if (platformTextAllowed && !anthropicKey) return jsonError('ANTHROPIC_API_KEY not configured', 500)
   const effectiveModel = MODEL
-  let effectiveApiKey = anthropicKey   // InnovareAI / platform key (default)
+  let effectiveApiKey = platformTextAllowed ? anthropicKey : ''
   let clientAnthropicKey: string | null = null
 
   // Per-client OpenRouter text routing: a project with its own active OpenRouter
@@ -4112,7 +4151,7 @@ Deno.serve(async (req) => {
       return jsonError(error instanceof Error ? error.message : 'Could not load OpenRouter key for this client space.', 500)
     }
   }
-  if (!orgIsMaster && projectId && !clientOpenRouterKey) {
+  if (!platformTextAllowed && projectId && !clientOpenRouterKey) {
     try {
       const { data: ownAnthropic } = await supabase.from('client_api_keys')
         .select('secret_ciphertext').eq('project_id', projectId).eq('provider', 'anthropic').eq('status', 'active')
@@ -4160,14 +4199,7 @@ Deno.serve(async (req) => {
       aiPolicy = DEFAULT_AI_POLICY
     }
   }
-  let platformMediaProject = false
-  if (projectId) {
-    try {
-      platformMediaProject = await isPlatformMediaProject(supabase, projectId, orgId)
-    } catch {
-      platformMediaProject = false
-    }
-  }
+  const platformMediaProject = platformKeyProject
   const allowImageGeneration = !!projectId && aiPolicy.imagesEnabled && (
     platformMediaProject ||
     !!clientOpenRouterKey ||
@@ -4175,7 +4207,9 @@ Deno.serve(async (req) => {
     clientHasFalKey
   )
   const allowVideoGeneration = clientHasFalKey && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled)
+  const platformOnlyTools = new Set(['run_pipeline', 'run_audit', 'kb_synthesize'])
   const enabledTools = TOOLS.filter(tool => {
+    if (!platformTextAllowed && platformOnlyTools.has(tool.name)) return false
     if (!allowVideoGeneration && tool.name === 'generate_video') return false
     if (!allowImageGeneration && (tool.name === 'generate_image' || tool.name === 'generate_infographic' || tool.name === 'generate_carousel')) return false
     return true
@@ -4210,7 +4244,7 @@ Deno.serve(async (req) => {
   const useThinking = enableThinking && effectiveModel === MODEL
   const chatProvider = clientOpenRouterKey ? 'openrouter' : 'anthropic'
   const chatModel = clientOpenRouterKey ? OPENROUTER_TEXT_MODEL : effectiveModel
-  const chatKeySource = clientOpenRouterKey ? 'client' : (effectiveApiKey === anthropicKey ? 'platform' : 'client')
+  const chatKeySource = clientOpenRouterKey ? 'client' : (platformTextAllowed ? 'platform' : 'client')
   if (projectId) {
     try {
       const budget = await checkProjectAiBudget(supabase, projectId, {
@@ -4293,6 +4327,7 @@ Deno.serve(async (req) => {
               userPrompt: lastUserText ?? null,
               allowImageGeneration,
               allowVideoGeneration,
+              embeddingRuntime,
             },
           })
           fullText = r.fullText
@@ -4401,6 +4436,7 @@ Deno.serve(async (req) => {
                 userPrompt: lastUserText ?? null,
                 allowImageGeneration,
                 allowVideoGeneration,
+                embeddingRuntime,
               })
               if (exec.image_url) {
                 generatedImages.push(exec.image_url)

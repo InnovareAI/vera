@@ -76,7 +76,12 @@ export type GenerationCostEstimate = {
 }
 
 export function estimateGenerationUsageCost(usage: GenerationUsageEstimateInput): GenerationCostEstimate | null {
-  if (usage.operation === "chat.message" || usage.operation === "business_context.extract") return estimateTextCost(usage)
+  if (
+    usage.operation === "chat.message" ||
+    usage.operation === "business_context.extract" ||
+    usage.operation === "knowledge.classify"
+  ) return estimateTextCost(usage)
+  if (usage.operation === "knowledge.embed") return estimateEmbeddingCost(usage)
   if (usage.operation === "image.generate") return estimateImageCost(usage)
   if (usage.operation === "video.submit") return estimateVideoSubmitCost(usage)
   return null
@@ -98,6 +103,19 @@ function estimateTextCost(usage: GenerationUsageEstimateInput): GenerationCostEs
   const costUsd = (inputTokens / 1_000_000) * pricing.inputPerMillion
     + (outputTokens / 1_000_000) * pricing.outputPerMillion
   return roundedEstimate(costUsd, pricing.source, "high")
+}
+
+function estimateEmbeddingCost(usage: GenerationUsageEstimateInput): GenerationCostEstimate | null {
+  const inputTokens = usage.inputTokens ?? 0
+  if (inputTokens <= 0) return null
+
+  const model = usage.model.toLowerCase()
+  if (!model.includes("text-embedding-3-small")) return null
+  return roundedEstimate(
+    (inputTokens / 1_000_000) * 0.02,
+    "openai_text_embedding_3_small_pricing_2026_06_12",
+    "medium",
+  )
 }
 
 function estimateImageCost(usage: GenerationUsageEstimateInput): GenerationCostEstimate | null {
