@@ -2957,6 +2957,21 @@ export type Database = {
         Args: { p_locked_by: string; p_post_id: string; p_publisher_id: string }
         Returns: boolean
       }
+      claim_content_post_publish: {
+        Args: {
+          p_channel: string
+          p_claimed_by: string
+          p_org_id: string | null
+          p_post_id: string
+          p_project_id: string | null
+          p_stale_after?: string
+        }
+        Returns: {
+          message: string
+          ok: boolean
+          status: number
+        }[]
+      }
       get_publisher_credentials: { Args: { p_id: string }; Returns: Json }
       is_platform_admin: { Args: { p_user: string }; Returns: boolean }
       kai_org_id: { Args: never; Returns: string }
