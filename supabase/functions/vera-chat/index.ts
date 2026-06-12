@@ -515,6 +515,14 @@ Generation tools:
   a separate paid premium flow is explicitly enabled. When the operator is still
   exploring, create a written video brief or storyboard first and ask for approval
   before rendering a real clip.
+  STORYBOARD FIRST: for any video, Reel, Short, TikTok, animated post, product
+  demo, or image-to-video planning request, call generate_video_storyboard before
+  generate_video unless a storyboard is already present in the current thread
+  and the operator explicitly approves rendering that storyboard. The storyboard
+  is the planning artifact and must include scene beats, timing, visual
+  direction, camera/motion notes, text overlays, caption, model recommendation,
+  and cost estimate. Only call generate_video after the operator explicitly
+  approves rendering the storyboard as a paid clip.
 - plan_campaign — YOUR PATH FOR ANY BATCH / MULTI-POST ask: "plan the month",
   "plan next month for <client>", "a month of LinkedIn posts", "build a campaign
   on X", "the next 4 weeks", "a week of content". In ONE call it writes the whole
@@ -544,6 +552,8 @@ Generation tools:
   image-to-video. Premium video models like Kling, Sora, Veo, Seedance, and
   "hero" aliases are not defaults. If the ask is a video POST and no draft
   exists yet, save_draft the caption FIRST, then call this.
+- generate_video_storyboard — produces a structured storyboard, caption, model
+  recommendation, and cost estimate (no clip). This is the default video step.
 - generate_video_brief — produces a written video-production brief (no clip)
 
 Workspace tools:
@@ -1430,6 +1440,25 @@ const TOOLS = [
         },
       },
       required: ['kind'],
+    },
+  },
+  {
+    name: 'generate_video_storyboard',
+    description: 'Create a structured storyboard for a video, Reel, Short, TikTok, product demo, animated post, or image-to-video concept. This does not render a clip. Use this before generate_video for every video workflow. Return scene beats, timing, visual direction, camera and motion notes, text overlays, caption, model recommendation, and estimated prototype cost. Only after the operator approves this storyboard should generate_video be called.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        topic: { type: 'string', description: 'The subject or concept for the video.' },
+        platform: { type: 'string', enum: ['linkedin', 'instagram_reel', 'tiktok', 'youtube_short', 'youtube_long', 'website', 'other'], description: 'Where the video will be used. Default: linkedin.' },
+        objective: { type: 'string', description: 'What the video should achieve, such as awareness, education, conversion, trust, launch, event promo, or proof.' },
+        audience: { type: 'string', description: 'Optional audience descriptor.' },
+        duration_sec: { type: 'number', description: 'Target video length. Default 15 for short-form, 30 for LinkedIn or website.' },
+        scene_count: { type: 'number', description: 'Number of storyboard scenes. Default derived from duration, usually 4-6.' },
+        source_image_url: { type: 'string', description: 'Optional still image URL if this is image-to-video.' },
+        tone: { type: 'string', description: 'Optional tone or visual mood, such as premium, documentary, playful, direct, editorial, cinematic, raw, or founder-led.' },
+        key_points: { type: 'array', items: { type: 'string' }, description: 'Optional points that must appear in the video.' },
+      },
+      required: ['topic'],
     },
   },
   {
@@ -2494,6 +2523,10 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         return { result: `${kind} audit kicked off — check the LinkedIn audit page in ~30s.` }
       }
 
+      case 'generate_video_storyboard': {
+        return { result: buildVideoStoryboard(input) }
+      }
+
       case 'generate_video_brief': {
         const format = input.format as string
         const topic = input.topic as string
@@ -3029,6 +3062,141 @@ function formatWebResearchResult(query: string, items: WebResearchItem[], ingest
   }
   lines.push('Use these sources to write the requested brief now. Ground claims in the source snippets above. Do not claim the research was ingested unless the ingest line says it was.')
   return lines.join('\n')
+}
+
+function buildVideoStoryboard(input: Record<string, unknown>): string {
+  const topic = cleanOneLine(input.topic, 'Untitled video concept')
+  const platform = cleanOneLine(input.platform, 'linkedin')
+  const objective = cleanOneLine(input.objective, 'awareness')
+  const audience = cleanOneLine(input.audience, 'target audience')
+  const tone = cleanOneLine(input.tone, 'clear, brand-led, polished')
+  const sourceImageUrl = cleanOneLine(input.source_image_url, '')
+  const duration = clampNumber(input.duration_sec, platform.includes('youtube_long') ? 60 : platform === 'website' ? 30 : 15, 6, 90)
+  const sceneCount = clampNumber(input.scene_count, duration <= 10 ? 4 : duration <= 20 ? 5 : 6, 3, 8)
+  const secondsPerScene = Math.max(1, Math.round((duration / sceneCount) * 10) / 10)
+  const keyPoints = Array.isArray(input.key_points)
+    ? input.key_points.map(item => cleanOneLine(item, '')).filter(Boolean).slice(0, 6)
+    : []
+  const aspect = aspectForPlatform(platform)
+  const model = sourceImageUrl ? 'hailuo-i2v' : 'hailuo'
+  const estimate = duration <= 6 ? '$0.28' : duration <= 10 ? '$0.56' : `about $${(Math.ceil(duration / 6) * 0.28).toFixed(2)} if rendered as multiple 6s prototype clips`
+  const beats = [
+    ['Pattern break', 'Open on the most specific visual proof of the idea. Make the first second stop the scroll.'],
+    ['Context', 'Show why this matters now. Keep the frame simple and readable.'],
+    ['Mechanism', 'Reveal the process, system, product detail, or human action behind the promise.'],
+    ['Proof', 'Show outcome, contrast, metric, customer moment, or tangible before and after.'],
+    ['Takeaway', 'Turn the visual into one clear lesson or reason to care.'],
+    ['CTA', 'End with a low-friction action or memorable closing frame.'],
+    ['Variant beat', 'Add an alternate angle for cutdowns or platform-specific pacing.'],
+    ['Safety beat', 'Hold a clean final frame for subtitles, logo, or link overlay.'],
+  ].slice(0, sceneCount)
+
+  const lines: string[] = []
+  lines.push(`# Storyboard: ${topic}`)
+  lines.push('')
+  lines.push(`Format: ${platformLabel(platform)} (${aspect})`)
+  lines.push(`Objective: ${objective}`)
+  lines.push(`Audience: ${audience}`)
+  lines.push(`Tone: ${tone}`)
+  lines.push(`Target length: ${duration}s across ${sceneCount} scenes`)
+  lines.push(`Recommended prototype model: ${model}`)
+  lines.push(`Estimated prototype render cost: ${estimate}`)
+  lines.push('Status: storyboard only. No video has been rendered.')
+  if (sourceImageUrl) lines.push(`Source image: ${sourceImageUrl}`)
+  if (keyPoints.length) {
+    lines.push('')
+    lines.push('Must-cover points:')
+    keyPoints.forEach((point, index) => lines.push(`${index + 1}. ${point}`))
+  }
+  lines.push('')
+  lines.push('## Scene Board')
+
+  beats.forEach(([label, guidance], index) => {
+    const start = Math.round(index * secondsPerScene * 10) / 10
+    const end = index === beats.length - 1 ? duration : Math.round((index + 1) * secondsPerScene * 10) / 10
+    const point = keyPoints[index % Math.max(keyPoints.length, 1)] ?? topic
+    lines.push('')
+    lines.push(`### Scene ${index + 1}: ${label} (${start}s-${end}s)`)
+    lines.push(`Visual: ${guidance}`)
+    lines.push(`Motion: One controlled move, such as a slow push, parallax drift, hand action, reveal, or subject turn. Avoid busy camera movement.`)
+    lines.push(`On-screen text: ${index === 0 ? shortOverlay(topic) : shortOverlay(point)}`)
+    lines.push(`Voice or caption beat: ${sceneCaptionBeat(label, topic, point)}`)
+    lines.push(`Prompt note: ${promptNoteForScene(label, topic, tone, aspect)}`)
+  })
+
+  lines.push('')
+  lines.push('## Caption Draft')
+  lines.push(makeStoryboardCaption(topic, objective, platform))
+  lines.push('')
+  lines.push('## Render Prompt To Approve')
+  lines.push(makeRenderPrompt(topic, platform, tone, aspect, beats.map(([label]) => label), keyPoints, sourceImageUrl))
+  lines.push('')
+  lines.push('Next step: approve this storyboard to render a prototype clip, or ask Vera to revise the scenes first.')
+  return lines.join('\n')
+}
+
+function cleanOneLine(value: unknown, fallback: string): string {
+  const text = typeof value === 'string' ? value : ''
+  return text.replace(/\s+/g, ' ').trim().slice(0, 500) || fallback
+}
+
+function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const num = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(num)) return fallback
+  return Math.max(min, Math.min(max, Math.round(num)))
+}
+
+function aspectForPlatform(platform: string): string {
+  if (/instagram|tiktok|short|reel/i.test(platform)) return '9:16'
+  if (/linkedin|website|youtube_long/i.test(platform)) return '16:9'
+  return '1:1 or 16:9'
+}
+
+function platformLabel(platform: string): string {
+  return platform
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase())
+}
+
+function shortOverlay(value: string): string {
+  const words = value.replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean).slice(0, 6)
+  return words.length ? words.join(' ') : 'The key idea'
+}
+
+function sceneCaptionBeat(label: string, topic: string, point: string): string {
+  const lower = label.toLowerCase()
+  if (lower.includes('pattern')) return `Open with the tension behind ${topic}.`
+  if (lower.includes('context')) return `Explain why ${topic} matters to the viewer right now.`
+  if (lower.includes('mechanism')) return `Show how ${point} actually works.`
+  if (lower.includes('proof')) return `Make the proof visible, specific, and easy to believe.`
+  if (lower.includes('takeaway')) return `Name the useful lesson in one direct sentence.`
+  if (lower.includes('cta')) return `Close with the next action, not a hard sell.`
+  return `Support the core idea: ${topic}.`
+}
+
+function promptNoteForScene(label: string, topic: string, tone: string, aspect: string): string {
+  return `${label} scene for "${topic}", ${tone} visual style, ${aspect} framing, realistic motion, readable composition, no garbled text.`
+}
+
+function makeStoryboardCaption(topic: string, objective: string, platform: string): string {
+  const cta = /instagram|tiktok|short|reel/i.test(platform)
+    ? 'Save this if you want the short version before the deep dive.'
+    : 'Worth pressure-testing before the next campaign goes live.'
+  return `${topic} is not just a content idea. It is a positioning test.\n\nThe goal: ${objective}.\n\nIf the first frame earns attention and the proof lands quickly, the story can do more than look good. It can teach the audience what to believe next.\n\n${cta}`
+}
+
+function makeRenderPrompt(
+  topic: string,
+  platform: string,
+  tone: string,
+  aspect: string,
+  beats: string[],
+  keyPoints: string[],
+  sourceImageUrl: string,
+): string {
+  const pointText = keyPoints.length ? ` Must include: ${keyPoints.join('; ')}.` : ''
+  const source = sourceImageUrl ? ` Animate the provided source image as the first frame.` : ''
+  return `Create a ${platformLabel(platform)} video about "${topic}" in a ${tone} style. Aspect ratio ${aspect}. Structure the clip around these beats: ${beats.join(', ')}.${pointText}${source} Use controlled camera movement, realistic lighting, clean composition, and natural pacing. Avoid fake UI text, distorted typography, extra logos, and chaotic motion.`
 }
 
 function cleanWebText(raw: string): string {

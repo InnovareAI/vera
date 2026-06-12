@@ -311,6 +311,7 @@ const TOOL_LABEL: Record<string, string> = {
   run_pipeline: 'Drafting with the team',
   generate_image: 'Generating image',
   generate_infographic: 'Generating infographic',
+  generate_video_storyboard: 'Building storyboard',
   generate_video: 'Generating video',
   web_search: 'Searching the web',
   kb_search: 'Checking knowledge',
@@ -1666,7 +1667,7 @@ function buildLaunchActions(stats: { pending: number; campaigns: number }): Laun
   const a: LaunchAction[] = []
   a.push({ icon: PenLine, title: 'Draft a Post', sub: 'Sharp copy, text first', prompt: 'Draft a punchy LinkedIn post for this brand: one sharp hook, three crisp points, a soft CTA. Text only for now, then ask if I want a matching image.' })
   a.push({ icon: ImagePlus, title: 'Create a Visual', sub: 'Image, infographic, or carousel', prompt: 'I want to create a visual for a post. Offer me the options (infographic, carousel, quote card, or a custom image), or let me describe my own, then build a tight image prompt and generate it.' })
-  a.push({ icon: Clapperboard, title: 'Video Brief', sub: 'Concept, storyboard, estimate', prompt: 'Help me plan a short video post. Start with the concept, storyboard, caption, model recommendation, and estimated cost. Do not render the video until I explicitly approve the paid generation.' })
+  a.push({ icon: Clapperboard, title: 'Storyboard', sub: 'Scenes, timing, estimate', prompt: 'Create a storyboard for a short video post. Include scene beats, timing, camera and motion notes, caption, model recommendation, and estimated prototype cost. Do not render the video until I explicitly approve the paid generation.' })
   a.push({ icon: Zap, title: 'Write Hooks', sub: '5 sharp opening lines', prompt: "Write 5 scroll-stopping opening hooks in this brand's voice for a topic I give you. Punchy, specific, no cliches." })
   a.push(stats.campaigns > 0
     ? { icon: Megaphone, title: 'Improve Campaign', sub: `${stats.campaigns} in this workspace`, prompt: "Review this brand's campaigns and suggest the highest-impact improvement to theme, angle, cadence, or channel mix." }
