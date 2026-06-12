@@ -21,6 +21,7 @@ import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import { requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
 import { slugify } from '../_shared/markdown.ts'
+import { acquirePublishLockForOpenPost, releasePublishLock } from '../_shared/publish-guard.ts'
 import type {
   HealthCheckResult, DryRunResult, PublishResult, VerifyResult, UnpublishResult,
   PostInput, PublisherError,
@@ -187,10 +188,10 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
     return { ok: true, remote_id: prior.remote_id as string | undefined, remote_url: prior.remote_url as string | undefined,
       attempt_id: prior.id as string, latency_ms: Date.now() - t0, verified: true }
   }
-  const { data: lockData } = await supabase.rpc('acquire_publish_lock', { p_post_id: post_id, p_publisher_id: publisher_id, p_locked_by: null as unknown as string })
-  if (!lockData) {
+  const publishLock = await acquirePublishLockForOpenPost(supabase, post_id, publisher_id, null)
+  if (!publishLock.ok) {
     return { ok: false, attempt_id: '', latency_ms: Date.now() - t0,
-      error: typed('validation_failed', 'Concurrent publish in progress.', 'Wait 5 min.') }
+      error: typed('validation_failed', publishLock.message, publishLock.recoveryAction) }
   }
 
   try {
@@ -267,7 +268,7 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
     })
     return { ok: true, remote_id: entryId, verified, attempt_id, latency_ms: Date.now() - t0 }
   } finally {
-    await supabase.rpc('release_publish_lock', { p_post_id: post_id, p_publisher_id: publisher_id })
+    await releasePublishLock(supabase, post_id, publisher_id)
   }
 }
 
