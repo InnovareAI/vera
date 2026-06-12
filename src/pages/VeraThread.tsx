@@ -92,6 +92,11 @@ type ProviderCapabilities = {
   imageReady: boolean
   videoReady: boolean
   needsTextKey: boolean
+  defaultTextModel: string | null
+  defaultImageModel: string
+  defaultVideoModel: string
+  defaultImageVideoModel: string
+  monthlyBudgetUsd: number | null
 }
 type StoredAttachment =
   | { kind: 'image'; url: string }
@@ -103,16 +108,75 @@ type WireContentBlock =
   | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
   | DocumentBlock
 
+const DEFAULT_CLIENT_AI_POLICY = {
+  imagesEnabled: true,
+  standardVideoEnabled: false,
+  premiumMediaEnabled: false,
+  defaultTextModel: null as string | null,
+  defaultImageModel: 'nano-banana',
+  defaultVideoModel: 'hailuo',
+  defaultImageVideoModel: 'hailuo-i2v',
+  monthlyBudgetUsd: null as number | null,
+}
+
+const DEFAULT_PROVIDER_CAPABILITIES: ProviderCapabilities = {
+  loaded: false,
+  isMaster: false,
+  hasAnthropic: false,
+  hasOpenRouter: false,
+  hasOpenAI: false,
+  hasFal: false,
+  imagesEnabled: DEFAULT_CLIENT_AI_POLICY.imagesEnabled,
+  standardVideoEnabled: DEFAULT_CLIENT_AI_POLICY.standardVideoEnabled,
+  premiumMediaEnabled: DEFAULT_CLIENT_AI_POLICY.premiumMediaEnabled,
+  hasPlatformImageEntitlement: false,
+  hasPlatformVideoEntitlement: false,
+  textReady: false,
+  imageReady: false,
+  videoReady: false,
+  needsTextKey: false,
+  defaultTextModel: DEFAULT_CLIENT_AI_POLICY.defaultTextModel,
+  defaultImageModel: DEFAULT_CLIENT_AI_POLICY.defaultImageModel,
+  defaultVideoModel: DEFAULT_CLIENT_AI_POLICY.defaultVideoModel,
+  defaultImageVideoModel: DEFAULT_CLIENT_AI_POLICY.defaultImageVideoModel,
+  monthlyBudgetUsd: DEFAULT_CLIENT_AI_POLICY.monthlyBudgetUsd,
+}
+
+const PREMIUM_IMAGE_MODELS = new Set(['ideogram', 'recraft', 'imagen-4', 'gpt-image-2'])
+
 function parseClientAiPolicy(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { imagesEnabled: true, standardVideoEnabled: false, premiumMediaEnabled: false }
+    return DEFAULT_CLIENT_AI_POLICY
   }
   const policy = value as Record<string, unknown>
   return {
     imagesEnabled: typeof policy.images_enabled === 'boolean' ? policy.images_enabled : true,
     standardVideoEnabled: typeof policy.standard_video_enabled === 'boolean' ? policy.standard_video_enabled : false,
     premiumMediaEnabled: typeof policy.premium_media_enabled === 'boolean' ? policy.premium_media_enabled : false,
+    defaultTextModel: typeof policy.default_text_model === 'string' && policy.default_text_model.trim() ? policy.default_text_model.trim() : null,
+    defaultImageModel: typeof policy.default_image_model === 'string' && policy.default_image_model.trim() ? policy.default_image_model.trim() : DEFAULT_CLIENT_AI_POLICY.defaultImageModel,
+    defaultVideoModel: typeof policy.default_video_model === 'string' && policy.default_video_model.trim() ? policy.default_video_model.trim() : DEFAULT_CLIENT_AI_POLICY.defaultVideoModel,
+    defaultImageVideoModel: typeof policy.default_image_video_model === 'string' && policy.default_image_video_model.trim() ? policy.default_image_video_model.trim() : DEFAULT_CLIENT_AI_POLICY.defaultImageVideoModel,
+    monthlyBudgetUsd: typeof policy.monthly_budget_usd === 'number' && Number.isFinite(policy.monthly_budget_usd) ? policy.monthly_budget_usd : null,
   }
+}
+
+function modelLabel(value: string | null | undefined) {
+  if (!value) return ''
+  const labels: Record<string, string> = {
+    'nano-banana': 'Nano Banana',
+    seedream: 'Seedream',
+    'seedream-v4.5': 'Seedream v4.5',
+    'qwen-image': 'Qwen Image',
+    'z-image-turbo': 'Z-Image Turbo',
+    ideogram: 'Ideogram 3',
+    recraft: 'Recraft v3',
+    'imagen-4': 'Imagen 4',
+    'gpt-image-2': 'OpenAI Image Gen 2',
+    hailuo: 'Hailuo text-to-video',
+    'hailuo-i2v': 'Hailuo image-to-video',
+  }
+  return labels[value] ?? value
 }
 
 function extension(name: string) {
@@ -588,23 +652,7 @@ export default function VeraThread() {
     return () => { cancelled = true }
   }, [activeProject?.id, sessionId])
 
-  const [providerCapabilities, setProviderCapabilities] = useState<ProviderCapabilities>({
-    loaded: false,
-    isMaster: false,
-    hasAnthropic: false,
-    hasOpenRouter: false,
-    hasOpenAI: false,
-    hasFal: false,
-    imagesEnabled: true,
-    standardVideoEnabled: false,
-    premiumMediaEnabled: false,
-    hasPlatformImageEntitlement: false,
-    hasPlatformVideoEntitlement: false,
-    textReady: false,
-    imageReady: false,
-    videoReady: false,
-    needsTextKey: false,
-  })
+  const [providerCapabilities, setProviderCapabilities] = useState<ProviderCapabilities>(DEFAULT_PROVIDER_CAPABILITIES)
   const demandPlan = useMemo(() => {
     const parsed = parseProjectInstructions(activeProject?.instructions ?? '')
     return buildDemandPlanSnapshot(parsed.businessContext)
@@ -612,23 +660,7 @@ export default function VeraThread() {
 
   useEffect(() => {
     if (!activeOrg?.id || !activeProject?.id) {
-      setProviderCapabilities({
-        loaded: false,
-        isMaster: false,
-        hasAnthropic: false,
-        hasOpenRouter: false,
-        hasOpenAI: false,
-        hasFal: false,
-        imagesEnabled: true,
-        standardVideoEnabled: false,
-        premiumMediaEnabled: false,
-        hasPlatformImageEntitlement: false,
-        hasPlatformVideoEntitlement: false,
-        textReady: false,
-        imageReady: false,
-        videoReady: false,
-        needsTextKey: false,
-      })
+      setProviderCapabilities(DEFAULT_PROVIDER_CAPABILITIES)
       return
     }
     let cancelled = false
@@ -680,6 +712,11 @@ export default function VeraThread() {
         imageReady: aiPolicy.imagesEnabled && ((platformMediaProject && hasPlatformImageEntitlement) || hasOpenRouter || hasOpenAI || hasFal),
         videoReady: (hasFal && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled)) || hasPlatformVideoEntitlement,
         needsTextKey: !platformMediaProject && !hasAnthropic && !hasOpenRouter,
+        defaultTextModel: aiPolicy.defaultTextModel,
+        defaultImageModel: aiPolicy.defaultImageModel,
+        defaultVideoModel: aiPolicy.defaultVideoModel,
+        defaultImageVideoModel: aiPolicy.defaultImageVideoModel,
+        monthlyBudgetUsd: aiPolicy.monthlyBudgetUsd,
       })
     })()
     return () => { cancelled = true }
@@ -1887,6 +1924,113 @@ function buildLaunchActions(stats: { pending: number; campaigns: number }): Laun
   return a.slice(0, 6)
 }
 
+type ModelRouteRecommendation = {
+  icon: React.ElementType
+  label: string
+  status: string
+  body: string
+  tone: 'success' | 'warn' | 'danger' | 'info'
+}
+
+function modelRouteRecommendations(capabilities: ProviderCapabilities): ModelRouteRecommendation[] {
+  const textModel = capabilities.defaultTextModel
+    ? modelLabel(capabilities.defaultTextModel)
+    : 'provider default, prefer Gemini-class low-cost routing when quality is sufficient'
+  const imageModel = modelLabel(capabilities.defaultImageModel)
+  const videoModel = modelLabel(capabilities.defaultVideoModel)
+  const imageVideoModel = modelLabel(capabilities.defaultImageVideoModel)
+  const imagePremium = PREMIUM_IMAGE_MODELS.has(capabilities.defaultImageModel)
+
+  const text = !capabilities.textReady
+    ? {
+        icon: KeyRound,
+        label: 'Text',
+        status: 'Missing client key',
+        body: 'Add client OpenRouter or Anthropic. Do not fall back to platform text spend for client work.',
+        tone: 'danger' as const,
+      }
+    : capabilities.hasOpenRouter
+      ? {
+          icon: KeyRound,
+          label: 'Text',
+          status: 'Client OpenRouter',
+          body: `Use the client OpenRouter key. Default: ${textModel}.`,
+          tone: 'success' as const,
+        }
+      : capabilities.hasAnthropic
+        ? {
+            icon: KeyRound,
+            label: 'Text',
+            status: 'Client Anthropic',
+            body: `Use the client Anthropic key. Default: ${textModel || 'provider default'}. Add OpenRouter for higher-volume cost control.`,
+            tone: 'success' as const,
+          }
+        : {
+            icon: KeyRound,
+            label: 'Text',
+            status: 'Platform approved',
+            body: 'Platform text is only acceptable inside approved InnovareAI workspaces.',
+            tone: 'warn' as const,
+          }
+
+  const image = !capabilities.imagesEnabled
+    ? {
+        icon: ImagePlus,
+        label: 'Image',
+        status: 'Disabled by policy',
+        body: 'Image and carousel rendering are disabled for this client space.',
+        tone: 'info' as const,
+      }
+    : !capabilities.imageReady
+      ? {
+          icon: ImagePlus,
+          label: 'Image',
+          status: 'Prompt only',
+          body: 'Keep image work as a prompt, storyboard, or production brief until a client key or entitlement is available.',
+          tone: 'danger' as const,
+        }
+      : imagePremium
+        ? {
+            icon: ImagePlus,
+            label: 'Image',
+            status: capabilities.premiumMediaEnabled ? 'Premium selected' : 'Premium default needs review',
+            body: `${imageModel} is a premium default. Use only when the client budget and production need justify it.`,
+            tone: 'warn' as const,
+          }
+        : {
+            icon: ImagePlus,
+            label: 'Image',
+            status: 'Standard prototype tier',
+            body: `Default: ${imageModel}. Use Nano Banana or Seedream-style routes before premium image models.`,
+            tone: 'success' as const,
+          }
+
+  const video = !capabilities.videoReady
+    ? {
+        icon: Clapperboard,
+        label: 'Video',
+        status: 'Storyboard only',
+        body: 'Real renders require a client-owned FAL key or an approved platform video entitlement.',
+        tone: 'danger' as const,
+      }
+    : {
+        icon: Clapperboard,
+        label: 'Video',
+        status: capabilities.premiumMediaEnabled ? 'Render approved' : 'Standard render',
+        body: `Storyboard first. Text-to-video: ${videoModel}. Image-to-video: ${imageVideoModel}.`,
+        tone: capabilities.premiumMediaEnabled ? 'warn' as const : 'success' as const,
+      }
+
+  return [text, image, video]
+}
+
+function routeToneStyle(tone: ModelRouteRecommendation['tone']) {
+  if (tone === 'success') return { border: color.success, bg: color.surface, fg: color.success }
+  if (tone === 'warn') return { border: color.warn, bg: color.surface, fg: color.warn }
+  if (tone === 'danger') return { border: color.danger, bg: color.surface, fg: color.danger }
+  return { border: color.line, bg: color.surface, fg: color.info }
+}
+
 function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: ProviderCapabilities; onAddKey?: () => void }) {
   const needsText = capabilities.needsTextKey
   const imageLocked = !capabilities.imageReady
@@ -1909,30 +2053,6 @@ function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: Pr
     { icon: KeyRound, label: 'Text', ready: capabilities.textReady },
     { icon: ImagePlus, label: 'Images', ready: capabilities.imageReady },
     { icon: Clapperboard, label: 'Video', ready: capabilities.videoReady },
-  ]
-  const recommendations = [
-    {
-      label: 'Text',
-      body: capabilities.textReady
-        ? capabilities.hasOpenRouter
-          ? 'Use the client OpenRouter key. Prefer a low-cost content model such as Gemini when quality is sufficient.'
-          : capabilities.hasAnthropic
-            ? 'Use the client Anthropic key for high-trust writing and strategy work.'
-            : 'Use platform text only inside approved InnovareAI workspaces.'
-        : 'Add a client OpenRouter key first. Do not fall back to platform text spend for client work.',
-    },
-    {
-      label: 'Image',
-      body: capabilities.imageReady
-        ? 'Default to the standard prototype tier, Nano Banana or Seedream style routes. Premium image models need explicit selection.'
-        : 'Keep image work as a prompt, storyboard, or production brief until a client key or entitlement is available.',
-    },
-    {
-      label: 'Video',
-      body: capabilities.videoReady
-        ? 'Storyboard first, then render only after explicit approval. Use standard video unless premium media is enabled.'
-        : 'Keep video as storyboard-first. Real renders require a client-owned FAL key or approved platform video entitlement.',
-    },
   ]
 
   return (
@@ -1958,26 +2078,65 @@ function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: Pr
         {rows.map(row => {
           const Icon = row.icon
           return (
-            <span key={row.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: radius.pill, border: `1px solid ${row.ready ? 'var(--success-line)' : 'var(--accent-line)'}`, background: row.ready ? 'var(--success-tint)' : color.surface, color: row.ready ? color.success : color.ink2, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>
+            <span key={row.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: radius.pill, border: `1px solid ${row.ready ? color.success : color.accentLine}`, background: color.surface, color: row.ready ? color.success : color.ink2, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>
               <Icon size={12} />
               {row.label}: {row.ready ? 'ready' : 'locked'}
             </span>
           )
         })}
       </div>
-      <div style={{ marginTop: space[4], display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: space[2] }}>
-        {recommendations.map(item => (
-          <div key={item.label} style={{ padding: space[3], borderRadius: radius.md, background: color.surface, border: `1px solid ${color.line}` }}>
-            <div style={{ fontSize: t.size.micro, fontWeight: t.weight.semibold, color: color.accent, textTransform: 'uppercase', letterSpacing: 0, marginBottom: 4 }}>
-              Recommended {item.label}
-            </div>
-            <div style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5 }}>
-              {item.body}
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
+  )
+}
+
+function ModelRoutingPanel({ capabilities, onAddKey }: { capabilities: ProviderCapabilities; onAddKey?: () => void }) {
+  const routes = modelRouteRecommendations(capabilities)
+  const budget = capabilities.monthlyBudgetUsd
+    ? `Monthly cap: $${capabilities.monthlyBudgetUsd.toFixed(0)}`
+    : 'No monthly cap set'
+
+  return (
+    <section style={{ width: '100%', maxWidth: 760, marginTop: space[4], padding: space[4], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, textAlign: 'left' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: space[3], marginBottom: space[3] }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: color.accent, fontSize: t.size.micro, fontWeight: t.weight.semibold, textTransform: 'uppercase', letterSpacing: 0 }}>
+            <KeyRound size={12} />
+            Model routing
+          </div>
+          <div style={{ color: color.ghost, fontSize: t.size.cap, lineHeight: 1.45, marginTop: 3 }}>
+            Client keys first. Standard models by default. Premium and platform spend need explicit approval.
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <span style={{ padding: '4px 8px', borderRadius: radius.pill, background: color.paper2, border: `1px solid ${color.line}`, color: color.ghost, fontSize: t.size.micro, fontWeight: t.weight.medium }}>
+            {budget}
+          </span>
+          {onAddKey && (
+            <button onClick={onAddKey} style={{ padding: '6px 10px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.paper2, color: color.ink2, fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
+              Provider keys
+            </button>
+          )}
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: space[2] }}>
+        {routes.map(route => {
+          const Icon = route.icon
+          const tone = routeToneStyle(route.tone)
+          return (
+            <div key={route.label} style={{ padding: space[3], borderRadius: radius.md, background: tone.bg, border: `1px solid ${tone.border}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                <Icon size={13} style={{ color: tone.fg, flexShrink: 0 }} />
+                <span style={{ color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold }}>{route.label}</span>
+                <span style={{ marginLeft: 'auto', color: tone.fg, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>{route.status}</span>
+              </div>
+              <div style={{ color: color.ink2, fontSize: t.size.micro, lineHeight: 1.45 }}>
+                {route.body}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
@@ -2014,6 +2173,10 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
       )}
 
       {composer}
+
+      {providerCapabilities.loaded && (
+        <ModelRoutingPanel capabilities={providerCapabilities} onAddKey={onAddKey} />
+      )}
 
       <DemandPlanPanel plan={demandPlan} projectName={projectName} onRun={onRun} onOpenBrain={onOpenBrain} />
 
