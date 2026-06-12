@@ -14,7 +14,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database, Json } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
-import { requirePostMember } from '../_shared/auth.ts'
+import { requirePostMember, requireProjectMember } from '../_shared/auth.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -29,6 +29,19 @@ const STORAGE_BUCKET = 'vera-images'
 const STORYBOARD_IMAGE_MODEL = Deno.env.get('STORYBOARD_IMAGE_MODEL') ?? 'nano-banana'
 
 type Frame = { image_prompt?: string; text?: string | null }
+
+type CarouselScope = {
+  orgId: string
+  projectId: string
+  postId: string | null
+}
+
+function jsonError(message: string, status: number): Response {
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
 
 async function uploadToStorage(supabase: AdminClient, orgId: string, source: string): Promise<string> {
   let bytes: Uint8Array
@@ -59,7 +72,7 @@ async function renderFrame(
   orgId: string,
   prompt: string,
   aspect: string,
-  projectId: string | null,
+  projectId: string,
 ): Promise<string> {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-image`, {
     method: 'POST',
@@ -101,17 +114,10 @@ async function renderFrame(
 async function processJob(
   supabase: AdminClient,
   jobId: string,
-  postId: string | null,
+  scope: CarouselScope,
   frames: Frame[],
   aspect: string,
-  projectId: string | null,
 ) {
-  // Find the post's org for storage pathing.
-  let orgId = ''
-  if (postId) {
-    const { data } = await supabase.from('content_posts').select('org_id').eq('id', postId).maybeSingle()
-    orgId = (data as { org_id?: string } | null)?.org_id ?? ''
-  }
   // Render ALL frames in parallel. This is a background task (the HTTP response
   // already returned), so there's no foreground SSE to hold open — and finishing
   // in ~one frame's time instead of the sum means we're far LESS likely to hit
@@ -123,12 +129,12 @@ async function processJob(
   const flush = async () => {
     const built = compact()
     await supabase.from('media_jobs').update({ result: { frames: built }, updated_at: new Date().toISOString() }).eq('id', jobId)
-    if (postId && built.length) {
-      const { data: ex } = await supabase.from('content_posts').select('media_metadata').eq('id', postId).maybeSingle()
+    if (scope.postId && built.length) {
+      const { data: ex } = await supabase.from('content_posts').select('media_metadata').eq('id', scope.postId).maybeSingle()
       const meta = (ex && typeof (ex as { media_metadata?: unknown }).media_metadata === 'object' && (ex as { media_metadata?: unknown }).media_metadata)
         ? (ex as { media_metadata: Record<string, unknown> }).media_metadata : {}
       meta.frames = built
-      await supabase.from('content_posts').update({ media_url: built[0].url, media_type: 'carousel', media_metadata: meta as Json }).eq('id', postId)
+      await supabase.from('content_posts').update({ media_url: built[0].url, media_type: 'carousel', media_metadata: meta as Json }).eq('id', scope.postId)
     }
   }
   // Each frame gets up to 3 attempts — image endpoints throw the odd transient
@@ -137,7 +143,7 @@ async function processJob(
   await Promise.all(frames.map(async (f, i) => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const url = await renderFrame(supabase, orgId, f.image_prompt ?? '', aspect, projectId)
+        const url = await renderFrame(supabase, scope.orgId, f.image_prompt ?? '', aspect, scope.projectId)
         slots[i] = { url, text: f.text ?? null }
         break
       } catch (e) {
@@ -157,6 +163,49 @@ async function processJob(
   }).eq('id', jobId)
 }
 
+async function resolveCarouselScope(
+  req: Request,
+  supabase: AdminClient,
+  body: { post_id?: string; project_id?: string },
+): Promise<{ ok: true; scope: CarouselScope } | { ok: false; response: Response }> {
+  const requestedProjectId = typeof body.project_id === 'string' && body.project_id.trim()
+    ? body.project_id.trim()
+    : null
+  const postId = typeof body.post_id === 'string' && body.post_id.trim()
+    ? body.post_id.trim()
+    : null
+
+  if (postId) {
+    const { data: post, error } = await supabase
+      .from('content_posts')
+      .select('id, org_id, project_id')
+      .eq('id', postId)
+      .maybeSingle()
+    if (error) return { ok: false, response: jsonError(error.message, 500) }
+
+    const row = post as { org_id?: string | null; project_id?: string | null } | null
+    if (!row) return { ok: false, response: jsonError('Post not found', 404) }
+    if (!row.org_id || !row.project_id) {
+      return { ok: false, response: jsonError('Carousel generation requires a client-scoped post.', 400) }
+    }
+    if (requestedProjectId && requestedProjectId !== row.project_id) {
+      return { ok: false, response: jsonError('Post and project_id do not match.', 403) }
+    }
+
+    const access = await requirePostMember(req, supabase, SERVICE_KEY, postId, corsHeaders)
+    if (!access.ok) return access
+    return { ok: true, scope: { orgId: row.org_id, projectId: row.project_id, postId } }
+  }
+
+  if (!requestedProjectId) {
+    return { ok: false, response: jsonError('project_id is required for carousel generation.', 400) }
+  }
+
+  const access = await requireProjectMember(req, supabase, SERVICE_KEY, requestedProjectId, corsHeaders)
+  if (!access.ok) return access
+  return { ok: true, scope: { orgId: access.orgId, projectId: requestedProjectId, postId: null } }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   try {
@@ -168,18 +217,16 @@ Deno.serve(async (req) => {
     const aspect = body.aspect ?? body.aspect_ratio ?? 'square_hd'
     const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
 
-    // Caller must be the service (vera-chat internal) or a signed-in member who
-    // owns the target post — never an anonymous caller. Mirrors the other
-    // service-role functions' guards (close the only-unguarded media endpoint).
-    const access = await requirePostMember(req, supabase, SERVICE_KEY, body.post_id ?? null, corsHeaders)
-    if (!access.ok) return access.response
+    const resolvedScope = await resolveCarouselScope(req, supabase, body)
+    if (!resolvedScope.ok) return resolvedScope.response
+    const { scope } = resolvedScope
 
     // Enqueue the job (durable record), then return immediately and process in
     // the background — the request isn't held open for the render.
     const { data: job, error } = await supabase.from('media_jobs').insert({
       kind: 'carousel',
-      post_id: body.post_id ?? null,
-      project_id: body.project_id ?? null,
+      post_id: scope.postId,
+      project_id: scope.projectId,
       session_id: body.session_id ?? null,
       spec: { frames, aspect, model: STORYBOARD_IMAGE_MODEL },
       status: 'processing',
@@ -192,10 +239,9 @@ Deno.serve(async (req) => {
     EdgeRuntime.waitUntil(processJob(
       supabase,
       jobId,
-      body.post_id ?? null,
+      scope,
       frames,
       aspect,
-      body.project_id ?? null,
     ))
 
     return new Response(JSON.stringify({ job_id: jobId, status: 'processing', total: frames.length }), {
