@@ -40,6 +40,7 @@ import type {
   IntegrationCapabilities,
 } from '../lib/supabase'
 import { useProject } from '../lib/projectContext'
+import { demandPlatformForProvider, type DemandPlatformDefinition } from '../lib/demandModel'
 
 interface IntegrationTemplate {
   provider: ClientIntegrationProvider
@@ -211,11 +212,11 @@ const PROVIDERS: IntegrationTemplate[] = [
     label: 'X',
     eyebrow: 'Later, paid API',
     description: 'Prepare X posts for manual handoff now. Add official API publishing only when the client plan covers X usage.',
-    connectionKind: 'oauth',
-    credentialRoute: 'X OAuth 2.0 with tweet read and write scopes',
+    connectionKind: 'manual',
+    credentialRoute: 'Manual handoff by default. Add X OAuth only when the client plan explicitly covers paid API usage',
     primaryLabel: 'X handle or profile URL',
     primaryPlaceholder: 'https://x.com/brand',
-    scopes: ['tweet.read', 'tweet.write', 'users.read', 'offline.access'],
+    scopes: ['manual.publish', 'public.read', 'traffic.review'],
     capabilities: { read: true, ingest: true, analyze: true },
     setupNote: 'Keep manual handoff first. Add API publishing only when the client plan covers X API usage.',
     icon: Hash,
@@ -281,18 +282,18 @@ const PROVIDERS: IntegrationTemplate[] = [
   },
   {
     provider: 'reddit',
-    category: 'social',
-    group: 'Organic social',
+    category: 'content_source',
+    group: 'Content platforms',
     label: 'Reddit',
-    eyebrow: 'Community channels',
-    description: 'Read subreddit context, draft posts and comments, and publish only when community rules and approvals are clear.',
-    connectionKind: 'oauth',
-    credentialRoute: 'Reddit OAuth with identity, submit, read, and edit scopes',
+    eyebrow: 'Read-only listening',
+    description: 'Read subreddit context, mine objections, draft community-safe posts and comments, and keep final posting as a human decision.',
+    connectionKind: 'manual',
+    credentialRoute: 'No client credential by default. Use public listening, target subreddit URLs, and approved manual handoff',
     primaryLabel: 'Reddit profile or subreddit',
     primaryPlaceholder: 'r/community or u/brand',
-    scopes: ['identity', 'read', 'submit', 'edit', 'history'],
-    capabilities: { read: true, ingest: true, analyze: true, publish: true, schedule: true },
-    setupNote: 'Needs Reddit OAuth and a community-rules review step before any publishing action.',
+    scopes: ['public.read', 'community.rules', 'manual.publish'],
+    capabilities: { read: true, ingest: true, analyze: true },
+    setupNote: 'Use Reddit for market listening and draft prep. Final posting stays manual unless a client-specific approved adapter is added later.',
     launch: {
       priority: 'wave_1',
       workstream: 'Content platforms',
@@ -653,12 +654,20 @@ function activeCapabilities(capabilities: IntegrationCapabilities): string[] {
     .map(({ label }) => label)
 }
 
+function publishingModeLabel(mode: DemandPlatformDefinition['publishing']): string {
+  if (mode === 'manual-first') return 'Manual first'
+  if (mode === 'read-only') return 'Read only'
+  if (mode === 'cms') return 'CMS'
+  return 'Connected'
+}
+
 function buildIntegrationConfig(
   template: IntegrationTemplate,
   draft: Pick<Draft, 'primaryRef' | 'notes' | 'approvalRequired'>,
   previousConfig: Record<string, unknown> = {},
 ): Record<string, unknown> {
   const launch = launchMeta(template)
+  const demandPlatform = demandPlatformForProvider(template.provider)
   return {
     ...previousConfig,
     primary_ref: draft.primaryRef.trim(),
@@ -671,6 +680,10 @@ function buildIntegrationConfig(
     adapter_state: launch.adapterState,
     next_build: launch.nextBuild,
     required_setup: launch.requirements,
+    demand_role: demandPlatform?.role,
+    demand_workflow: demandPlatform?.workflow,
+    publishing_mode: demandPlatform?.publishing,
+    outcome_signals: demandPlatform?.outcomeSignals,
   }
 }
 
@@ -1300,6 +1313,7 @@ export function ClientIntegrationsCard() {
   const StatusIcon = STATUS_META[draft.status].icon
   const SelectedIcon = selectedTemplate.icon
   const selectedLaunch = launchMeta(selectedTemplate)
+  const selectedDemandPlatform = demandPlatformForProvider(selectedTemplate.provider)
   const researchAccountId = researchProfile?.unipile_account_id ?? null
   const researchConnected = !!researchAccountId
   const researchHealth = researchProfile?.unipile_health_status ?? 'not connected'
@@ -1398,7 +1412,7 @@ export function ClientIntegrationsCard() {
               <Rocket size={15} /> First-wave integrations
             </p>
             <p style={{ color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.45, margin: '4px 0 0', maxWidth: 680 }}>
-              Focus on Search Console, GA4, LinkedIn through Unipile, WordPress, Meta, and YouTube first. X stays manual-first until paid API usage is justified.
+              Focus on Search Console, GA4, LinkedIn through Unipile, WordPress, Meta, YouTube, Medium, Quora, and Reddit first. X stays manual-first until paid API usage is justified.
             </p>
           </div>
           <button
@@ -1420,6 +1434,7 @@ export function ClientIntegrationsCard() {
           {WAVE_ONE_TEMPLATES.map(template => {
             const row = rowByProvider.get(template.provider)
             const launch = launchMeta(template)
+            const demandPlatform = demandPlatformForProvider(template.provider)
             const ProviderIcon = template.icon
             const status = row?.status ?? 'not_connected'
             const StatusDot = STATUS_META[status].icon
@@ -1475,7 +1490,7 @@ export function ClientIntegrationsCard() {
                     {launch.workstream}
                   </span>
                   <span style={{ display: 'block', color: 'var(--ghost)', fontSize: 10, lineHeight: 1.25, marginTop: 4 }}>
-                    {launch.adapterState}
+                    {demandPlatform ? `${publishingModeLabel(demandPlatform.publishing)} · ${demandPlatform.outcomeSignals.slice(0, 2).join(', ')}` : launch.adapterState}
                   </span>
                 </span>
               </button>
@@ -1506,6 +1521,7 @@ export function ClientIntegrationsCard() {
                 const active = selectedProvider === template.provider
                 const status = row?.status ?? 'not_connected'
                 const statusMeta = STATUS_META[status]
+                const demandPlatform = demandPlatformForProvider(template.provider)
                 const ProviderIcon = template.icon
                 const RowStatusIcon = statusMeta.icon
                 return (
@@ -1556,6 +1572,11 @@ export function ClientIntegrationsCard() {
                       <span style={{ display: 'block', color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.35, marginTop: 2 }}>
                         {template.eyebrow}
                       </span>
+                      {demandPlatform && (
+                        <span style={{ display: 'block', color: 'var(--ghost)', fontSize: 11, lineHeight: 1.35, marginTop: 3 }}>
+                          {publishingModeLabel(demandPlatform.publishing)} · {demandPlatform.outcomeSignals.slice(0, 2).join(', ')}
+                        </span>
+                      )}
                     </span>
                   </button>
                 )
@@ -1608,6 +1629,41 @@ export function ClientIntegrationsCard() {
           </div>
 
           <div className="p-4 space-y-4">
+            {selectedDemandPlatform && (
+              <div style={{ background: `${selectedTemplate.accent}0f`, border: `1px solid ${selectedTemplate.accent}26`, borderRadius: 'var(--radius-md)', padding: 12 }}>
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0">
+                    <p className="inline-flex items-center gap-2" style={{ color: 'var(--ink)', fontSize: 12, fontWeight: 750, margin: 0 }}>
+                      <Rocket size={14} style={{ color: selectedTemplate.accent }} />
+                      Demand role
+                    </p>
+                    <p style={{ color: 'var(--ink)', fontSize: 13, lineHeight: 1.45, margin: '5px 0 0' }}>
+                      {selectedDemandPlatform.role}
+                    </p>
+                    <p style={{ color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.45, margin: '5px 0 0' }}>
+                      {selectedDemandPlatform.workflow}
+                    </p>
+                  </div>
+                  <span
+                    style={{
+                      ...chipStyle,
+                      color: selectedTemplate.accent,
+                      background: 'var(--surface)',
+                      borderColor: `${selectedTemplate.accent}3a`,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {publishingModeLabel(selectedDemandPlatform.publishing)}
+                  </span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {selectedDemandPlatform.outcomeSignals.map(signal => (
+                    <span key={signal} style={{ ...chipStyle, color: selectedTemplate.accent, background: 'var(--surface)' }}>{signal}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-md)', padding: 12 }}>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">

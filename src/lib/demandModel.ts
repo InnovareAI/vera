@@ -125,6 +125,32 @@ export const DEMAND_PLATFORM_DEFINITIONS: DemandPlatformDefinition[] = [
   },
 ]
 
+const DEMAND_PROVIDER_PLATFORM: Record<string, DemandPlatformKey> = {
+  linkedin: 'linkedin',
+  youtube: 'youtube',
+  medium: 'medium',
+  quora: 'quora',
+  reddit: 'reddit',
+  x: 'x',
+  meta_instagram: 'instagram',
+  meta_facebook_pages: 'facebook',
+  wordpress: 'blog',
+  webflow: 'blog',
+  contentful: 'blog',
+  sanity: 'blog',
+  strapi: 'blog',
+  hubspot_cms: 'blog',
+  ghost: 'blog',
+  shopify_blog: 'blog',
+  custom_cms: 'blog',
+}
+
+export function demandPlatformForProvider(provider: string): DemandPlatformDefinition | null {
+  const key = DEMAND_PROVIDER_PLATFORM[provider]
+  if (!key) return null
+  return DEMAND_PLATFORM_DEFINITIONS.find(platform => platform.key === key) ?? null
+}
+
 export const DEMAND_SOURCE_KEYS: BusinessContextKey[] = [
   'website',
   'linkedinCompany',
