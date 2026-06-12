@@ -3739,7 +3739,7 @@ function jsonError(message: string, status: number) {
 }
 
 type MemberAccess =
-  | { ok: true; userId: string | null; email: string | null; service: boolean }
+  | { ok: true; userId: string; email: string | null; service: false }
   | { ok: false; response: Response }
 
 async function authorizeMemberRequest(
@@ -3751,7 +3751,8 @@ async function authorizeMemberRequest(
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
   const isService = !!bearer && bearer === serviceKey
-  if (!isService && !bearer) return { ok: false, response: jsonError('Unauthorized', 401) }
+  if (isService) return { ok: false, response: jsonError('User session required', 401) }
+  if (!bearer) return { ok: false, response: jsonError('Unauthorized', 401) }
 
   if (projectId) {
     const { data: project, error: projectError } = await supabase
@@ -3763,8 +3764,6 @@ async function authorizeMemberRequest(
     if (!project) return { ok: false, response: jsonError('Client not found', 404) }
     if ((project as { org_id: string }).org_id !== orgId) return { ok: false, response: jsonError('Forbidden', 403) }
   }
-
-  if (isService) return { ok: true, userId: null, email: null, service: true }
 
   const { data: auth, error: authError } = await supabase.auth.getUser(bearer)
   if (authError || !auth.user) return { ok: false, response: jsonError('Unauthorized', 401) }
@@ -3810,22 +3809,12 @@ async function userHasScopeAccess(
 }
 
 async function resolveEffectiveUserId(
-  supabase: AdminClient,
   access: Extract<MemberAccess, { ok: true }>,
   requestedUserId: string | null,
-  orgId: string,
-  projectId: string | null,
-): Promise<{ ok: true; userId: string | null } | { ok: false; response: Response }> {
-  if (access.userId) return { ok: true, userId: access.userId }
-  if (!access.service || !requestedUserId) return { ok: true, userId: null }
+): Promise<{ ok: true; userId: string } | { ok: false; response: Response }> {
+  if (!requestedUserId || requestedUserId === access.userId) return { ok: true, userId: access.userId }
   if (!isUuid(requestedUserId)) return { ok: false, response: jsonError('Invalid user_id', 400) }
-  try {
-    const allowed = await userHasScopeAccess(supabase, requestedUserId, orgId, projectId)
-    if (!allowed) return { ok: false, response: jsonError('Forbidden', 403) }
-    return { ok: true, userId: requestedUserId }
-  } catch (error) {
-    return { ok: false, response: jsonError(error instanceof Error ? error.message : 'Could not verify user scope', 500) }
-  }
+  return { ok: false, response: jsonError('user_id does not match authenticated user', 403) }
 }
 
 async function assertChatMessageWritable(
@@ -4030,7 +4019,7 @@ Deno.serve(async (req) => {
   )
   const access = await authorizeMemberRequest(req, supabase, orgId, projectId)
   if (!access.ok) return access.response
-  const resolvedUser = await resolveEffectiveUserId(supabase, access, requestedUserId, orgId, projectId)
+  const resolvedUser = await resolveEffectiveUserId(access, requestedUserId)
   if (!resolvedUser.ok) return resolvedUser.response
   const effectiveUserId = resolvedUser.userId
 
