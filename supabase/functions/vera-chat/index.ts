@@ -70,6 +70,7 @@ const UNIPILE_API_KEY = Deno.env.get('UNIPILE_API_KEY') ?? ''
 const UNIPILE_BASE_URL = normalizeUnipileBaseUrl(
   Deno.env.get('UNIPILE_BASE_URL') ?? Deno.env.get('UNIPILE_API_URL') ?? Deno.env.get('UNIPILE_DSN') ?? '',
 )
+const APIFY_API_TOKEN = Deno.env.get('APIFY_API_TOKEN') ?? Deno.env.get('APIFY_TOKEN') ?? ''
 
 const VERA_MARKETING_EXPERTISE = `
 Marketing and content strategy expertise:
@@ -412,24 +413,30 @@ you did and what's next — don't narrate the tool call itself.
 
 Tools-first defaults — don't outsource work the tools can do:
 - Before asking the operator to paste content from a public URL, try
-  web_search. The operator should never have to copy-paste a public web
-  page into chat for you to read — that's what web_search is for.
+  web_research. The operator should never have to copy-paste a public web
+  page into chat for you to read — that's what web_research is for.
 - Before asking "what should the post highlight?" or "what's the key
   message?", check whether you can answer that yourself by fetching the
-  source (web_search), checking the workspace context (brand voice,
+  source (web_research), checking the workspace context (brand voice,
   audit, memories, kb_hits), or applying a relevant skill. Use the
   operator's input for things only they know (preferences, context,
   decisions) — not for things you can research.
 - "I don't have access to X" is the wrong answer if X is on the public
-  web — try web_search first. If web_search fails, then say what failed
+  web — try web_research first. If web_research fails, then say what failed
   and offer kb_ingest as a fallback.
 - LinkedIn is different from generic public web. If the operator asks for
   LinkedIn profile analysis, posts, tone of voice, company-page context, or
   a named person's recent posts, use linkedin_research whenever you have a
-  LinkedIn URL or public identifier. If they only give a name, try web_search
+  LinkedIn URL or public identifier. If they only give a name, try web_research
   first to find the public LinkedIn URL, then call linkedin_research. Do not
-  ask them to paste 5-10 posts unless both web_search and linkedin_research
+  ask them to paste 5-10 posts unless both web_research and linkedin_research
   fail or no profile URL can be identified.
+- Public research briefs: when the operator asks to "pull research", "research
+  this", "build a brief", or "ingest research", call web_research in the same
+  turn. If they ask to save or ingest it, set ingest_to_brain=true. Never say
+  "rich haul", "let me ingest this", or "I found sources" until web_research
+  or another real tool has returned sources. Never call kb_ingest for research
+  you have not actually fetched.
 - Action over interrogation: draft a first version with what you can
   gather, then ask one targeted question. Don't run a multi-question
   intake before producing anything.
@@ -544,13 +551,14 @@ Knowledge tools:
   through the workspace's shared Unipile research profile. Use it for
   LinkedIn audits, tone of voice, profile/company page context, and client
   research. It does not publish and it does not grant client posting access.
-- web_search — Anthropic-managed live web search. Your DEFAULT for any
-  public web content: company sites (including InnovareAI's own —
-  innovareai.com, sam.innovareai.com), product pages, articles, posts,
-  LinkedIn profiles, press releases, blogs, stats, news. Don't restrict
-  it to "competitors" or "breaking news" — use it any time the source
-  is a public URL. Capped at 5 searches per turn — be deliberate but
-  don't be stingy.
+- web_research — first-party public web research via InnovareAI Apify. Use
+  it for research briefs, current public topics, pages, articles, blogs,
+  Google updates, industry reports, and any request to pull and ingest public
+  research. This works in both platform and client-key chat modes.
+- web_search — Anthropic-managed live web search, available only in the
+  platform Anthropic runtime. Use it as a quick fallback there. Prefer
+  web_research for research briefs, source snippets, OpenRouter projects,
+  and anything that should be ingested into the Brain.
 - kb_search — semantic search across the workspace knowledge base
   (curated wiki + raw items). Use whenever the operator asks about
   workspace-specific things — competitors, past decisions, customer
@@ -1301,8 +1309,22 @@ const TOOLS = [
     },
   },
   {
+    name: 'web_research',
+    description: 'Fetch public web research through InnovareAI Apify and return grounded source snippets. Use for "pull research", current industry topics, Google updates, GEO, AI search, Google I/O, competitor pages, articles, reports, and any public research that should inform a brief. Set ingest_to_brain=true only when the operator asks to save, remember, ingest, or load it into the Brain.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query or exact URL to fetch. Be specific and include the topic, date/event, and audience when relevant.' },
+        max_results: { type: 'number', description: 'Number of search results/pages to fetch. Default 5, max 8.' },
+        ingest_to_brain: { type: 'boolean', description: 'Whether to store the gathered research as a raw Brain item after fetching it. Default false. Use true only when the operator asks to save or ingest research.' },
+        title: { type: 'string', description: 'Optional Brain/source title. Required when ingest_to_brain is true if a clear title is available.' },
+      },
+      required: ['query'],
+    },
+  },
+  {
     name: 'linkedin_research',
-    description: 'Read-only LinkedIn research through the workspace shared Unipile research profile. Use when the operator asks for LinkedIn profile analysis, company-page context, recent posts, tone of voice, content themes, founder voice, or audit inputs. This tool never publishes. If the operator gives only a name, use web_search first to find the public LinkedIn URL, then call this tool.',
+    description: 'Read-only LinkedIn research through the workspace shared Unipile research profile. Use when the operator asks for LinkedIn profile analysis, company-page context, recent posts, tone of voice, content themes, founder voice, or audit inputs. This tool never publishes. If the operator gives only a name, use web_research first to find the public LinkedIn URL, then call this tool.',
     input_schema: {
       type: 'object',
       properties: {
@@ -2248,10 +2270,55 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         return { result: `${data.length} memor${data.length === 1 ? 'y' : 'ies'} matching "${query}":\n${lines.join('\n')}` }
       }
 
+      case 'web_research': {
+        const query = String(input.query ?? '').trim()
+        if (!query) return { result: 'web_research needs a query or URL.' }
+        const maxResults = Math.max(1, Math.min(Number(input.max_results) || 5, 8))
+        const ingestToBrain = input.ingest_to_brain === true
+        const title = String(input.title ?? '').trim() || `Web research: ${query}`.slice(0, 140)
+
+        ctx.emit({ type: 'tool_progress', tool: 'web_research', status: `researching ${maxResults} source${maxResults === 1 ? '' : 's'}…` })
+        const research = await runPublicWebResearch(query, maxResults)
+        if (!research.ok) return { result: research.error }
+
+        let ingestLine = 'Not ingested into Brain because ingest_to_brain was false.'
+        if (ingestToBrain) {
+          ctx.emit({ type: 'tool_progress', tool: 'web_research', status: 'saving research to Brain…' })
+          const content = buildWebResearchContent(query, research.items)
+          const embedding = await embedText(content)
+          const { data: row, error } = await ctx.supabase.from('kb_raw').insert({
+            org_id: ctx.orgId,
+            kind: 'web_capture',
+            source: query,
+            title,
+            content,
+            embedding: embedding ? vec(embedding) : null,
+            ingested_by: ctx.userId,
+          }).select('id').single()
+          if (error) {
+            ingestLine = `Brain ingest failed after research fetch: ${error.message}`
+          } else {
+            const id = (row as { id: string }).id
+            ctx.supabase.from('kb_change_log').insert({
+              org_id: ctx.orgId,
+              event: 'ingest',
+              ref_table: 'kb_raw',
+              ref_id: id,
+              detail: { kind: 'web_capture', title, source: query, embedded: !!embedding, source_count: research.items.length },
+            }).then(() => {})
+            ingestLine = `Ingested into Brain as "${title}" (${id.slice(0, 8)}), ${embedding ? 'embedded' : 'stored without embedding'}.`
+          }
+        }
+
+        return {
+          result: formatWebResearchResult(query, research.items, ingestLine),
+        }
+      }
+
       case 'linkedin_research': {
         const target = String(input.target ?? '').trim()
         if (!target) {
-          return { result: 'LinkedIn research needs a profile or company URL, public identifier, or provider id. If the operator gave only a name, use web_search first to find the LinkedIn URL.' }
+          return { result: 'LinkedIn research needs a profile or company URL, public identifier, or provider id. If the operator gave only a name, use web_research first to find the LinkedIn URL.' }
         }
         if (!UNIPILE_API_KEY || !UNIPILE_BASE_URL) {
           return { result: 'LinkedIn research is unavailable because Unipile is not configured on the server.' }
@@ -2274,7 +2341,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         const limit = Math.max(1, Math.min(Number(input.limit) || 12, 30))
         const parsed = parseLinkedInTarget(target, requestedType)
         if (!parsed.identifier) {
-          return { result: `Could not resolve a LinkedIn public identifier from "${target}". Use web_search to find the exact LinkedIn URL, then call linkedin_research again.` }
+          return { result: `Could not resolve a LinkedIn public identifier from "${target}". Use web_research to find the exact LinkedIn URL, then call linkedin_research again.` }
         }
 
         ctx.emit({ type: 'tool_progress', tool: 'linkedin_research', status: `reading ${parsed.kind === 'company' ? 'company page' : 'profile'}…` })
@@ -2806,6 +2873,168 @@ Do NOT fabricate claims. If sources contradict, surface the contradiction.`,
     console.error(`tool ${name} threw`, err)
     return { result: `Tool ${name} crashed: ${err instanceof Error ? err.message : String(err)}` }
   }
+}
+
+type WebResearchItem = {
+  title: string
+  url: string
+  text: string
+}
+type WebResearchResult =
+  | { ok: true; items: WebResearchItem[] }
+  | { ok: false; error: string }
+
+async function runPublicWebResearch(query: string, maxResults: number): Promise<WebResearchResult> {
+  if (!APIFY_API_TOKEN) {
+    return { ok: false, error: 'Public web research is unavailable because APIFY_API_TOKEN is not configured on the server.' }
+  }
+
+  const standbyParams = new URLSearchParams({
+    token: APIFY_API_TOKEN,
+    query,
+    maxResults: String(maxResults),
+    outputFormats: 'markdown',
+    requestTimeoutSecs: '45',
+    scrapingTool: 'browser-playwright',
+    maxRequestRetries: '1',
+    dynamicContentWaitSecs: '3',
+    removeCookieWarnings: 'true',
+  })
+  const standbyResponse = await fetch(`https://rag-web-browser.apify.actor/search?${standbyParams.toString()}`, {
+    signal: AbortSignal.timeout(75_000),
+  }).catch(error => error instanceof Error ? error : new Error(String(error)))
+  if (!(standbyResponse instanceof Error) && standbyResponse.ok) {
+    const payload = await standbyResponse.json().catch(() => []) as unknown
+    const parsed = parseWebResearchPayload(payload, maxResults)
+    if (parsed.ok) return parsed
+  }
+
+  const actorUrl = `https://api.apify.com/v2/acts/apify~rag-web-browser/run-sync-get-dataset-items?format=json&clean=true&token=${encodeURIComponent(APIFY_API_TOKEN)}&timeout=120`
+  const response = await fetch(actorUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query,
+      maxResults,
+      outputFormats: ['markdown'],
+      requestTimeoutSecs: 30,
+      scrapingTool: 'browser-playwright',
+      dynamicContentWaitSecs: 3,
+      maxRequestRetries: 1,
+      proxyConfiguration: { useApifyProxy: true },
+    }),
+    signal: AbortSignal.timeout(130_000),
+  })
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    return { ok: false, error: `Public web research failed: Apify HTTP ${response.status}: ${body.slice(0, 300)}` }
+  }
+
+  const payload = await response.json().catch(() => []) as unknown
+  return parseWebResearchPayload(payload, maxResults, query)
+}
+
+function parseWebResearchPayload(payload: unknown, maxResults: number, query?: string): WebResearchResult {
+  const rows = Array.isArray(payload) ? payload : [payload]
+  const items = rows
+    .map(normalizeWebResearchItem)
+    .filter((item): item is WebResearchItem => !!item && item.text.length > 120)
+    .slice(0, maxResults)
+
+  if (!items.length) {
+    return { ok: false, error: query ? `Public web research returned no readable source text for "${query}". Try a narrower query or a specific URL.` : 'Public web research returned no readable source text.' }
+  }
+
+  return { ok: true, items }
+}
+
+function normalizeWebResearchItem(value: unknown): WebResearchItem | null {
+  if (!value || typeof value !== 'object') return null
+  const item = value as Record<string, unknown>
+  const metadata = typeof item.metadata === 'object' && item.metadata !== null ? item.metadata as Record<string, unknown> : {}
+  const title = cleanWebText(
+    stringField(item, 'title')
+    || stringField(metadata, 'title')
+    || stringField(item, 'name')
+    || 'Untitled source',
+  ).slice(0, 180)
+  const url = stringField(item, 'url')
+    || stringField(item, 'loadedUrl')
+    || stringField(item, 'sourceUrl')
+    || stringField(metadata, 'url')
+    || stringField(metadata, 'sourceURL')
+    || ''
+  const text = cleanWebText(
+    stringField(item, 'markdown')
+    || stringField(item, 'text')
+    || stringField(item, 'content')
+    || stringField(item, 'description')
+    || stringField(metadata, 'description')
+    || compactObjectText(item),
+  )
+  if (!text) return null
+  return { title, url, text }
+}
+
+function compactObjectText(value: unknown, depth = 0): string {
+  if (value == null || depth > 2) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) return value.slice(0, 8).map(item => compactObjectText(item, depth + 1)).filter(Boolean).join('\n')
+  if (typeof value !== 'object') return ''
+  const object = value as Record<string, unknown>
+  return Object.entries(object)
+    .filter(([key]) => /title|headline|summary|description|text|content|markdown|body|url|source|date|published/i.test(key))
+    .slice(0, 18)
+    .map(([key, raw]) => `${humanize(key)}: ${compactObjectText(raw, depth + 1).slice(0, 1200)}`)
+    .filter(line => line.length > 10)
+    .join('\n')
+}
+
+function buildWebResearchContent(query: string, items: WebResearchItem[]): string {
+  return [
+    `Research query: ${query}`,
+    `Captured at: ${new Date().toISOString()}`,
+    '',
+    ...items.map((item, index) => [
+      `## Source ${index + 1}: ${item.title}`,
+      item.url ? `URL: ${item.url}` : 'URL: unknown',
+      '',
+      item.text.slice(0, 24_000),
+    ].join('\n')),
+  ].join('\n\n').slice(0, 150_000)
+}
+
+function formatWebResearchResult(query: string, items: WebResearchItem[], ingestLine: string): string {
+  const lines: string[] = []
+  lines.push(`Public web research for: ${query}`)
+  lines.push(`Sources fetched: ${items.length}`)
+  lines.push(ingestLine)
+  lines.push('')
+  for (const [index, item] of items.entries()) {
+    lines.push(`${index + 1}. ${item.title}`)
+    if (item.url) lines.push(`URL: ${item.url}`)
+    lines.push(`Excerpt: ${item.text.slice(0, 1600)}`)
+    lines.push('')
+  }
+  lines.push('Use these sources to write the requested brief now. Ground claims in the source snippets above. Do not claim the research was ingested unless the ingest line says it was.')
+  return lines.join('\n')
+}
+
+function cleanWebText(raw: string): string {
+  return raw
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 type LinkedInTargetKind = 'person' | 'company'
