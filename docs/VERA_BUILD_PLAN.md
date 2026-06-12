@@ -204,7 +204,8 @@ Current state:
 - Command shows text, image, and video routing before generation.
 - Command shows budget classes: no spend, low token cost, standard image, premium image, storyboard-only, standard video, or premium video risk.
 - Command now adds provider-aware estimate guides for common text, image, and video routes. These are operator-facing planning estimates, not billing records.
+- Command and client API-key settings share one frontend model economics module for labels, premium classification, model options, and planning estimates.
 
 Next step:
 
-- Move estimate guides out of frontend constants into normalized provider pricing metadata, then reconcile them with actual usage logs and client budget limits.
+- Move the shared frontend guide into normalized backend/provider pricing metadata, then reconcile planning estimates with actual generation log usage and client budget limits.

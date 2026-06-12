@@ -8,6 +8,18 @@ import { Activity, AlertTriangle, BookOpen, Bot, CheckCircle2, Clapperboard, Clo
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { useProject } from '../lib/projectContext'
+import {
+  IMAGE_MODEL_OPTIONS,
+  IMAGE_VIDEO_MODEL_OPTIONS,
+  MODEL_PRICE_GUIDE_LAST_REVIEWED,
+  VIDEO_MODEL_OPTIONS,
+  imageSpendEstimate,
+  isPremiumImageModel,
+  modelLabel,
+  textSpendEstimate,
+  videoSpendEstimate,
+  type SpendEstimate,
+} from '../lib/modelEconomics'
 import { PageHeader, SectionLabel, Button, Field, Input, Select, Textarea, color, space, type as t, radius, useToast } from '../design'
 
 type ClientApiKey = {
@@ -56,28 +68,6 @@ const DEFAULT_AI_POLICY: AiPolicy = {
   default_video_model: 'hailuo',
   default_image_video_model: 'hailuo-i2v',
 }
-
-const IMAGE_MODEL_OPTIONS = [
-  { value: 'nano-banana', label: 'Nano Banana, standard' },
-  { value: 'seedream', label: 'Seedream v4, standard' },
-  { value: 'seedream-v4.5', label: 'Seedream v4.5, standard' },
-  { value: 'qwen-image', label: 'Qwen Image, standard' },
-  { value: 'z-image-turbo', label: 'Z-Image Turbo, standard' },
-  { value: 'ideogram', label: 'Ideogram 3, premium' },
-  { value: 'recraft', label: 'Recraft v3, premium' },
-  { value: 'imagen-4', label: 'Imagen 4, premium' },
-  { value: 'gpt-image-2', label: 'OpenAI Image Gen 2, premium' },
-]
-
-const VIDEO_MODEL_OPTIONS = [
-  { value: 'hailuo', label: 'Hailuo text-to-video, standard' },
-]
-
-const IMAGE_VIDEO_MODEL_OPTIONS = [
-  { value: 'hailuo-i2v', label: 'Hailuo image-to-video, standard' },
-]
-
-const PREMIUM_IMAGE_MODELS = new Set(['ideogram', 'recraft', 'imagen-4', 'gpt-image-2'])
 
 const PROVIDERS = [
   { value: 'openrouter', label: 'OpenRouter (text + images)' },
@@ -350,7 +340,8 @@ export default function ClientKeys() {
             ))}
           </div>
           <p style={{ fontSize: t.size.micro, color: color.faint, margin: `${space[4]} 0 0`, lineHeight: 1.5 }}>
-            Vera should default to cheap and fast prototype paths. Premium media stays locked unless this client has a cap and an explicit policy toggle.
+            Vera should default to cheap and fast prototype paths. Premium media stays locked unless this client has a cap and an explicit policy toggle.{' '}
+            Pricing guide reviewed {MODEL_PRICE_GUIDE_LAST_REVIEWED}. Estimates are planning guides and final billing comes from provider usage logs.
           </p>
         </div>
       </section>
@@ -586,6 +577,7 @@ type RoutingRow = {
   label: string
   status: string
   detail: string
+  estimate?: SpendEstimate
   tone: 'success' | 'warn' | 'danger' | 'info'
 }
 
@@ -603,7 +595,7 @@ function GuardMetric({ icon: Icon, label, value, detail, tone }: SpendGuardMetri
   )
 }
 
-function RouteRow({ icon: Icon, label, status, detail, tone }: RoutingRow) {
+function RouteRow({ icon: Icon, label, status, detail, estimate, tone }: RoutingRow) {
   const toneColor = tone === 'success' ? color.success : tone === 'warn' ? color.warn : tone === 'danger' ? color.danger : color.info
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '32px minmax(0, 1fr) auto', alignItems: 'center', gap: space[3], padding: space[3], borderRadius: radius.md, border: `1px solid ${color.line}`, background: color.paper2 }}>
@@ -613,6 +605,11 @@ function RouteRow({ icon: Icon, label, status, detail, tone }: RoutingRow) {
       <span style={{ minWidth: 0 }}>
         <span style={{ display: 'block', color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>{label}</span>
         <span style={{ display: 'block', color: color.ghost, fontSize: t.size.cap, lineHeight: 1.4, marginTop: 1 }}>{detail}</span>
+        {estimate && (
+          <span style={{ display: 'block', color: color.faint, fontSize: t.size.micro, lineHeight: 1.35, marginTop: 4 }}>
+            {estimate.label}. {estimate.detail}
+          </span>
+        )}
       </span>
       <span style={{ color: toneColor, fontSize: t.size.micro, fontWeight: t.weight.semibold, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
         {status}
@@ -629,7 +626,7 @@ function buildSpendGuard(aiPolicy: AiPolicy, activeProviders: Set<string>, usage
   const used = usageSummary.currentMonthCost
   const remaining = budget ? Math.max(0, budget - used) : null
   const budgetPct = budget ? Math.min(100, Math.round((used / budget) * 100)) : null
-  const premiumDefault = PREMIUM_IMAGE_MODELS.has(aiPolicy.default_image_model)
+  const premiumDefault = isPremiumImageModel(aiPolicy.default_image_model)
   const hasClientText = activeProviders.has('openrouter') || activeProviders.has('anthropic')
   const hasClientMedia = activeProviders.has('openrouter') || activeProviders.has('openai') || activeProviders.has('fal') || activeProviders.has('fal_ai')
   const hasClientVideo = activeProviders.has('fal') || activeProviders.has('fal_ai')
@@ -684,23 +681,28 @@ function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>): Rou
   const hasAnthropic = activeProviders.has('anthropic')
   const hasOpenAI = activeProviders.has('openai')
   const hasFal = activeProviders.has('fal') || activeProviders.has('fal_ai')
-  const imageIsPremium = PREMIUM_IMAGE_MODELS.has(aiPolicy.default_image_model)
+  const imageIsPremium = isPremiumImageModel(aiPolicy.default_image_model)
+  const hasClientText = hasOpenRouter || hasAnthropic
+  const hasClientMedia = hasOpenRouter || hasOpenAI || hasFal
+  const hasClientVideo = hasFal
   return [
     {
       icon: Bot,
       label: 'Text generation',
-      status: hasOpenRouter || hasAnthropic ? 'Client' : 'Missing',
+      status: hasClientText ? 'Client' : 'Missing',
+      estimate: textSpendEstimate(aiPolicy.default_text_model, !hasClientText ? 'missing' : hasOpenRouter ? 'openrouter' : 'anthropic'),
       detail: hasOpenRouter
         ? `Runs through the client OpenRouter key${aiPolicy.default_text_model ? ` using ${aiPolicy.default_text_model}` : ' with provider default routing'}.`
         : hasAnthropic
           ? `Runs through the client Anthropic key${aiPolicy.default_text_model ? ` using ${aiPolicy.default_text_model}` : ''}.`
           : 'Add OpenRouter or Anthropic so client chat does not depend on platform keys.',
-      tone: hasOpenRouter || hasAnthropic ? 'success' : 'danger',
+      tone: hasClientText ? 'success' : 'danger',
     },
     {
       icon: ImagePlus,
       label: 'Image generation',
-      status: !aiPolicy.images_enabled ? 'Locked' : hasOpenRouter || hasOpenAI || hasFal ? 'Client' : 'Missing',
+      status: !aiPolicy.images_enabled ? 'Locked' : hasClientMedia ? 'Client' : 'Missing',
+      estimate: imageSpendEstimate(aiPolicy.default_image_model, aiPolicy.images_enabled, hasClientMedia, imageIsPremium),
       detail: !aiPolicy.images_enabled
         ? 'Disabled by policy. Vera should provide prompts or briefs only.'
         : hasOpenRouter
@@ -710,7 +712,7 @@ function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>): Rou
             : hasFal
               ? `${modelLabel(aiPolicy.default_image_model)} can use the client FAL route.`
               : 'Add OpenRouter for the normal path, or OpenAI/FAL for provider-specific media.',
-      tone: !aiPolicy.images_enabled ? 'info' : hasOpenRouter || hasOpenAI || hasFal ? (imageIsPremium ? 'warn' : 'success') : 'danger',
+      tone: !aiPolicy.images_enabled ? 'info' : hasClientMedia ? (imageIsPremium ? 'warn' : 'success') : 'danger',
     },
     {
       icon: Crown,
@@ -724,11 +726,12 @@ function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>): Rou
     {
       icon: Clapperboard,
       label: 'Video rendering',
-      status: aiPolicy.standard_video_enabled && hasFal ? 'Client' : 'Storyboard',
+      status: aiPolicy.standard_video_enabled && hasClientVideo ? 'Client' : 'Storyboard',
+      estimate: videoSpendEstimate(aiPolicy.default_video_model, aiPolicy.standard_video_enabled && hasClientVideo, aiPolicy.premium_media_enabled),
       detail: aiPolicy.standard_video_enabled
-        ? hasFal ? `${modelLabel(aiPolicy.default_video_model)} and ${modelLabel(aiPolicy.default_image_video_model)} run only through the client FAL key.` : 'Policy allows standard video, but Vera still needs a client FAL key.'
+        ? hasClientVideo ? `${modelLabel(aiPolicy.default_video_model)} and ${modelLabel(aiPolicy.default_image_video_model)} run only through the client FAL key.` : 'Policy allows standard video, but Vera still needs a client FAL key.'
         : 'Real clips are locked. Vera should create storyboards, prompts, and production briefs.',
-      tone: aiPolicy.standard_video_enabled ? (hasFal ? 'success' : 'danger') : 'info',
+      tone: aiPolicy.standard_video_enabled ? (hasClientVideo ? 'success' : 'danger') : 'info',
     },
   ]
 }
@@ -966,14 +969,6 @@ function formatKeySource(value: string) {
   if (value === 'client') return 'Client'
   if (value === 'platform') return 'Platform'
   return 'Unknown'
-}
-
-function modelLabel(value: string) {
-  return [
-    ...IMAGE_MODEL_OPTIONS,
-    ...VIDEO_MODEL_OPTIONS,
-    ...IMAGE_VIDEO_MODEL_OPTIONS,
-  ].find(option => option.value === value)?.label.split(',')[0] ?? value
 }
 
 function formatNumber(value: number) {
