@@ -11,9 +11,11 @@
 // POST { org_id }  →  { success, audit, profile_summary, posts_analyzed }
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
-import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
-import { requireOrgMember, type AdminClient } from '../_shared/auth.ts'
+import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
+import type { Json } from '../_shared/database.types.ts'
+import { logGenerationUsage } from '../_shared/generation-usage.ts'
+import { resolveProjectTextRuntime, streamText } from '../_shared/text-runtime.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -21,7 +23,6 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')
 const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const UNIPILE_DSN     = Deno.env.get('UNIPILE_DSN')
@@ -33,23 +34,27 @@ Deno.serve(async (req) => {
     return jsonResponse({ success: false, error: 'Method not allowed' }, 405)
   }
 
-  const { org_id, principles: enabledIn } = await req.json().catch(() => ({}))
+  const { org_id, project_id, principles: enabledIn } = await req.json().catch(() => ({}))
   if (!org_id) return jsonResponse({ success: false, error: 'org_id required' }, 400)
+  if (!project_id) return jsonResponse({ success: false, error: 'project_id required' }, 400)
   // Caller can pass a subset of the 5 principles to score. Default: all 5.
   const ALL_PRINCIPLES = ['semantic_personalization','meaningful_engagement','relationship_intelligence','language_purity','content_authority'] as const
   const enabled: string[] = Array.isArray(enabledIn) && enabledIn.length
     ? (enabledIn as string[]).filter(p => (ALL_PRINCIPLES as readonly string[]).includes(p))
     : [...ALL_PRINCIPLES]
   if (!enabled.length) return jsonResponse({ success: false, error: 'At least one principle must be enabled.' }, 400)
-  if (!ANTHROPIC_API_KEY) return jsonResponse({ success: false, error: 'ANTHROPIC_API_KEY not configured' }, 500)
   if (!UNIPILE_DSN || !UNIPILE_API_KEY) return jsonResponse({ success: false, error: 'UNIPILE not configured' }, 500)
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) as unknown as AdminClient
 
   // Caller must be the service (internal) or an org member — never anonymous,
   // and never another tenant reading this org's audit.
-  const access = await requireOrgMember(req, supabase as unknown as AdminClient, SUPABASE_SERVICE_ROLE_KEY, org_id, corsHeaders)
+  const access = await requireProjectMember(req, supabase, SUPABASE_SERVICE_ROLE_KEY, project_id, corsHeaders, org_id)
   if (!access.ok) return access.response
+  const runtime = await resolveProjectTextRuntime(supabase, org_id, project_id, {
+    purpose: 'Brew360 audit',
+  })
+  if (!runtime.ok) return jsonResponse({ success: false, error: runtime.message }, runtime.status)
 
   // 1) Get connected LinkedIn account + the org's channel URLs (channel_profiles
   //    is the source of truth for "which profile to audit"; the Unipile session
@@ -198,8 +203,7 @@ Deno.serve(async (req) => {
     brand.system_prompt ? `System prompt: ${brand.system_prompt}` : '',
   ].filter(Boolean).join('\n') : ''
 
-  // 5) Claude analysis
-  const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY })
+  // 5) AI analysis
 
   const principleDefs: Record<string, string> = {
     semantic_personalization: '**SEMANTIC_PERSONALIZATION** - Does the profile headline + about section align with posted content topics? Building authority in a specific domain or scattered?',
@@ -314,19 +318,18 @@ Analyze this profile and content against the 360Brew algorithm. Return the JSON 
 
       let raw = ''
       try {
-        const msgStream = anthropic.messages.stream({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 4096,
+        const completion = await streamText(runtime.runtime, {
+          maxTokens: 4096,
           temperature: 0.3,
           system: systemPrompt,
-          messages: [{ role: 'user', content: userMessage }],
+          user: userMessage,
+          json: true,
+          onText: text => {
+            raw += text
+            send('chunk', { text })
+          },
         })
-        for await (const ev of msgStream) {
-          if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
-            raw += ev.delta.text
-            send('chunk', { text: ev.delta.text })
-          }
-        }
+        raw = completion.text
 
         const match = raw.match(/\{[\s\S]*\}/)
         if (!match) throw new Error('No JSON found in AI response')
@@ -334,7 +337,17 @@ Analyze this profile and content against the 360Brew algorithm. Return the JSON 
 
         const payload = { success: true, audit, profile_summary, posts_analyzed: postsContext.length, account_name: org.name }
         await supabase.from('linkedin_audits').insert({
-          org_id, kind: 'brew360', result: payload, enabled_principles: enabled,
+          org_id, project_id, kind: 'brew360', result: payload as Json, enabled_principles: enabled,
+        })
+        await logGenerationUsage(supabase, {
+          orgId: org_id,
+          projectId: project_id,
+          provider: runtime.runtime.provider,
+          model: runtime.runtime.model,
+          operation: 'audit.brew360',
+          inputTokens: completion.inputTokens,
+          outputTokens: completion.outputTokens,
+          metadata: { key_source: runtime.runtime.keySource, posts_analyzed: postsContext.length },
         })
         send('done', payload)
         controller.close()

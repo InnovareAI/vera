@@ -18,6 +18,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Loader2, ArrowRight, RotateCw, Check, ChevronRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useRightRail } from '../lib/rightRailContext'
+import { useAuth } from '../lib/auth'
+import { useProject } from '../lib/projectContext'
 
 const PROFILE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/linkedin-profile-score`
 const BREW_URL    = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/brew360-audit`
@@ -60,6 +62,9 @@ interface BrewResult {
 export default function LinkedInScore() {
   const { orgId } = useParams<{ orgId: string }>()
   const navigate = useNavigate()
+  const { session } = useAuth()
+  const { activeProject } = useProject()
+  const projectId = activeProject?.org_id === orgId ? activeProject?.id ?? null : null
 
   const [enabledPrinciples, setEnabledPrinciples] = useState<string[]>(() => {
     try {
@@ -106,13 +111,17 @@ export default function LinkedInScore() {
 
   const runProfile = useCallback(async () => {
     if (!orgId) return
+    if (!session?.access_token || !projectId) {
+      setError('Open this audit from an active client space and sign in again.')
+      return
+    }
     setProfileLoading(true)
     setError(null)
     try {
       const res = await fetch(PROFILE_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({ org_id: orgId }),
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ org_id: orgId, project_id: projectId }),
       })
       const data = await res.json() as ProfileResult & { error?: string }
       if (!data.success) throw new Error(data.error || `HTTP ${res.status}`)
@@ -120,17 +129,21 @@ export default function LinkedInScore() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally { setProfileLoading(false) }
-  }, [orgId])
+  }, [orgId, projectId, session?.access_token])
 
   const runBrew = useCallback(async () => {
     if (!orgId) return
+    if (!session?.access_token || !projectId) {
+      setError('Open this audit from an active client space and sign in again.')
+      return
+    }
     setBrewLoading(true)
     setError(null)
     try {
       const res = await fetch(BREW_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({ org_id: orgId, principles: enabledPrinciples }),
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ org_id: orgId, project_id: projectId, principles: enabledPrinciples }),
       })
       if (!res.body) throw new Error('No response body')
       const reader = res.body.getReader()
@@ -153,13 +166,13 @@ export default function LinkedInScore() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally { setBrewLoading(false) }
-  }, [orgId, enabledPrinciples])
+  }, [orgId, projectId, session?.access_token, enabledPrinciples])
 
   // On first mount: load org settings (toggles) + cached results from
   // linkedin_audits + brand_voice existence (drives Continue visibility).
   // Only fetch fresh audits if no cached row exists.
   useEffect(() => {
-    if (!orgId) return
+    if (!orgId || !projectId) return
     let cancelled = false
     async function load() {
       // 1. Load org toggle settings (if set, override localStorage)
@@ -187,6 +200,7 @@ export default function LinkedInScore() {
         .from('linkedin_audits')
         .select('kind, result, created_at')
         .eq('org_id', orgId!)
+        .eq('project_id', projectId)
         .order('created_at', { ascending: false })
         .limit(20)
       if (cancelled) return
@@ -211,7 +225,7 @@ export default function LinkedInScore() {
     load()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId])
+  }, [orgId, projectId])
 
   // Update runAt when fresh results land
   useEffect(() => { if (profile && !profileLoading) setProfileRunAt(new Date().toISOString()) }, [profile, profileLoading])
@@ -237,7 +251,7 @@ export default function LinkedInScore() {
   return (
     <div className="max-w-4xl mx-auto py-8 px-4 pb-16">
       {/* Audit context — extracted from website, operator reviews + edits */}
-      <AuditContextCard orgId={orgId!} />
+      <AuditContextCard orgId={orgId!} projectId={projectId} accessToken={session?.access_token ?? null} />
 
       {/* Verdict + audited-against, lifted out of the algo card so it reads */}
       {/* once as the foundation rather than nested inside one of two scores. */}
@@ -508,7 +522,7 @@ interface AuditIntent {
   blog_posts_sampled?: number
 }
 
-function AuditContextCard({ orgId }: { orgId: string }) {
+function AuditContextCard({ orgId, projectId, accessToken }: { orgId: string; projectId: string | null; accessToken: string | null }) {
   const [intent, setIntent] = useState<AuditIntent | null>(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
@@ -532,11 +546,16 @@ function AuditContextCard({ orgId }: { orgId: string }) {
   async function extractFromWebsite() {
     setExtracting(true)
     setError(null)
+    if (!projectId || !accessToken) {
+      setError('Open this audit from an active client space and sign in again.')
+      setExtracting(false)
+      return
+    }
     try {
       const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-audit-intent`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({ org_id: orgId, force: true }),
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${accessToken}` },
+        body: JSON.stringify({ org_id: orgId, project_id: projectId, force: true }),
       })
       const data = await res.json()
       if (!data.success) throw new Error(data.error ?? `HTTP ${res.status}`)

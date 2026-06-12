@@ -10,9 +10,10 @@
 // Otherwise scores the connected account's own profile.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
-import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
-import { requireOrgMember, type AdminClient } from '../_shared/auth.ts'
+import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
+import type { Json } from '../_shared/database.types.ts'
+import { completeText, resolveProjectTextRuntime, type TextRuntime } from '../_shared/text-runtime.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -20,7 +21,6 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')
 const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const UNIPILE_DSN     = Deno.env.get('UNIPILE_DSN')
@@ -60,17 +60,22 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ success: false, error: 'Method not allowed' }, 405)
 
-  const { org_id, vanity } = await req.json().catch(() => ({}))
+  const { org_id, project_id, vanity } = await req.json().catch(() => ({}))
   if (!org_id) return json({ success: false, error: 'org_id required' }, 400)
-  if (!ANTHROPIC_API_KEY) return json({ success: false, error: 'ANTHROPIC_API_KEY not configured' }, 500)
+  if (!project_id) return json({ success: false, error: 'project_id required' }, 400)
   if (!UNIPILE_DSN || !UNIPILE_API_KEY) return json({ success: false, error: 'UNIPILE not configured' }, 500)
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) as unknown as AdminClient
 
   // Caller must be the service (internal) or an org member — never anonymous,
   // and never another tenant scoring this org's profile.
-  const access = await requireOrgMember(req, supabase as unknown as AdminClient, SUPABASE_SERVICE_ROLE_KEY, org_id, corsHeaders)
+  const access = await requireProjectMember(req, supabase, SUPABASE_SERVICE_ROLE_KEY, project_id, corsHeaders, org_id)
   if (!access.ok) return access.response
+  const runtimeResult = await resolveProjectTextRuntime(supabase, org_id, project_id, {
+    purpose: 'LinkedIn profile qualitative review',
+    anthropicModel: 'claude-haiku-4-5',
+  })
+  const textRuntime = runtimeResult.ok ? runtimeResult.runtime : null
 
   const { data: org } = await supabase
     .from('organizations').select('unipile_account_id, settings').eq('id', org_id).maybeSingle()
@@ -135,7 +140,7 @@ Deno.serve(async (req) => {
   // Keep prompt tiny so it returns in well under the edge wall-clock limit.
   let headlineReview: { score: number; observations: string[]; rewrite: string } | null = null
   try {
-    const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY })
+    if (!textRuntime) throw new Error('No client text runtime configured')
     const sys = `You are a LinkedIn headline expert. You score a headline 0-100 and propose one concrete rewrite. Output ONLY valid JSON:
 { "score": <0-100>, "observations": ["3-5 specific observations about the current headline"], "rewrite": "<a single concrete proposed headline, ≤120 chars>" }
 
@@ -167,26 +172,21 @@ ${auditIntent.offer          ? `- Offer: ${auditIntent.offer}` : ''}
 ${auditIntent.value_prop     ? `- Value prop: ${auditIntent.value_prop}` : ''}
 ${auditIntent.themes?.length ? `- Themes: ${auditIntent.themes.join(', ')}` : ''}` : ''
 
-    const aiPromise = anthropic.messages.create({
-      model: 'claude-haiku-4-5',
-      max_tokens: 600,
+    const response = await completeText(textRuntime as TextRuntime, {
+      maxTokens: 600,
       temperature: 0.3,
+      json: true,
       system: sys,
-      messages: [{ role: 'user', content: `Headline: "${profile.headline ?? ''}"
+      user: `Headline: "${profile.headline ?? ''}"
 
 Location: ${profile.location ?? '—'}
 Followers: ${profile.follower_count ?? 0}
 Is creator: ${profile.is_creator ?? false}
 
 About / summary:
-${(profile.summary ?? '').slice(0, 1500) || '(empty)'}${intentBlock}` }],
+${(profile.summary ?? '').slice(0, 1500) || '(empty)'}${intentBlock}`,
     })
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('LLM timeout')), 25_000),
-    )
-    const response = await Promise.race([aiPromise, timeoutPromise])
-    const content = response.content[0]
-    const raw = content.type === 'text' ? content.text : ''
+    const raw = response.text
     const m = raw.match(/\{[\s\S]*\}/)
     if (m) headlineReview = JSON.parse(m[0])
   } catch { /* non-fatal */ }
@@ -236,7 +236,7 @@ ${(profile.summary ?? '').slice(0, 1500) || '(empty)'}${intentBlock}` }],
 
   // Persist when scoring the connected account's own profile (skip for ad-hoc lookups by vanity).
   if (!vanity || vanity === 'me') {
-    await supabase.from('linkedin_audits').insert({ org_id, kind: 'profile', result: payload })
+    await supabase.from('linkedin_audits').insert({ org_id, project_id, kind: 'profile', result: payload as unknown as Json })
   }
 
   return json(payload)

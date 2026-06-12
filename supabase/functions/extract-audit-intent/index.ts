@@ -22,8 +22,11 @@
 // `force=true` re-extracts even if audit_intent already exists.
 
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
-import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
+import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
+import type { Json } from '../_shared/database.types.ts'
+import { logGenerationUsage } from '../_shared/generation-usage.ts'
+import { completeText, resolveProjectTextRuntime } from '../_shared/text-runtime.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -33,7 +36,6 @@ const corsHeaders = {
 
 const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-const ANTHROPIC_API_KEY         = Deno.env.get('ANTHROPIC_API_KEY')
 
 const CANDIDATE_PATHS = ['/', '/about', '/about-us', '/product', '/pricing', '/customers', '/solutions']
 const PAGE_CHAR_CAP = 12_000  // per page, cap before LLM
@@ -48,14 +50,17 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') {
     return json({ success: false, error: 'Method not allowed' }, 405)
   }
-  if (!ANTHROPIC_API_KEY) {
-    return json({ success: false, error: 'ANTHROPIC_API_KEY not configured' }, 500)
-  }
-
-  const { org_id, force } = await req.json().catch(() => ({}))
+  const { org_id, project_id, force } = await req.json().catch(() => ({}))
   if (!org_id) return json({ success: false, error: 'org_id required' }, 400)
+  if (!project_id) return json({ success: false, error: 'project_id required' }, 400)
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) as unknown as AdminClient
+  const access = await requireProjectMember(req, supabase, SUPABASE_SERVICE_ROLE_KEY, project_id, corsHeaders, org_id)
+  if (!access.ok) return access.response
+  const runtime = await resolveProjectTextRuntime(supabase, org_id, project_id, {
+    purpose: 'Website audit context extraction',
+  })
+  if (!runtime.ok) return json({ success: false, error: runtime.message }, runtime.status)
 
   const { data: org, error } = await supabase
     .from('organizations')
@@ -160,15 +165,13 @@ Deno.serve(async (req) => {
     robotsTxt ? `### /robots.txt (often contains a brand comment)\n${robotsTxt.slice(0, 1_500)}` : '',
   ].filter(Boolean).join('\n\n---\n\n')
 
-  // Ask Claude to extract structured audit_intent
-  const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY })
-  const resp = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 2000,
+  // Ask the resolved client/platform text runtime to extract structured audit_intent
+  const startedAt = Date.now()
+  const resp = await completeText(runtime.runtime, {
+    maxTokens: 2000,
     system: `You are extracting audit context from a B2B company website. Output JSON only — no prose, no markdown fences. Be specific and concrete; vague output produces vague audits.`,
-    messages: [{
-      role: 'user',
-      content: `Company: ${org.name}${org.industry ? ` (${org.industry})` : ''}
+    json: true,
+    user: `Company: ${org.name}${org.industry ? ` (${org.industry})` : ''}
 Website: ${websiteUrl}
 
 Each page below carries STRUCTURED METADATA (title, meta description, OpenGraph, Twitter card, JSON-LD, h1/h2) in addition to body text. The metadata is usually the highest-signal source for positioning — that's where SEO/marketing teams compress the message into a few words. Treat it as primary; use the body to corroborate and add specificity (especially named numbers).
@@ -194,13 +197,20 @@ Required output JSON (no other keys):
   "tone_target":      "<voice profile — e.g. 'sharp, opinion-led practitioner; no buzzwords; data + named examples'>",
   "success_criteria": "<one sentence — what 'winning' on LinkedIn looks like for this profile in 6 months>"
 }`,
-    }],
+  })
+  await logGenerationUsage(supabase, {
+    orgId: org_id,
+    projectId: project_id,
+    provider: runtime.runtime.provider,
+    model: runtime.runtime.model,
+    operation: 'audit.intent.extract',
+    inputTokens: resp.inputTokens,
+    outputTokens: resp.outputTokens,
+    durationMs: Date.now() - startedAt,
+    metadata: { key_source: runtime.runtime.keySource, source_count: fetched.length + blogPosts.length },
   })
 
-  const text = resp.content
-    .filter(b => b.type === 'text')
-    .map(b => b.text)
-    .join('')
+  const text = resp.text
   const cleaned = text.replace(/^```(json)?\s*|\s*```$/g, '').trim()
   let parsed: Record<string, unknown>
   try {
@@ -223,7 +233,7 @@ Required output JSON (no other keys):
   const newSettings = { ...settings, audit_intent }
   const { error: updErr } = await supabase
     .from('organizations')
-    .update({ settings: newSettings })
+    .update({ settings: newSettings as Json })
     .eq('id', org_id)
   if (updErr) return json({ success: false, error: updErr.message }, 500)
 

@@ -10,8 +10,11 @@
 //   → synthesising → chunk(text) → done | error
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
-import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
+import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
+import type { Json } from '../_shared/database.types.ts'
+import { logGenerationUsage } from '../_shared/generation-usage.ts'
+import { resolveProjectTextRuntime, streamText, type TextRuntime } from '../_shared/text-runtime.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,7 +22,6 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-const ANTHROPIC_API_KEY         = Deno.env.get('ANTHROPIC_API_KEY')
 const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const PAGESPEED_API_KEY         = Deno.env.get('PAGESPEED_API_KEY')  // optional — anonymous quota is small but works
@@ -44,19 +46,25 @@ type PageSpeedResult = {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return jsonError('Method not allowed', 405)
-  if (!ANTHROPIC_API_KEY) return jsonError('ANTHROPIC_API_KEY not configured', 500)
 
-  const { org_id, website_url: explicitUrl } = await req.json().catch(() => ({}))
+  const { org_id, project_id, website_url: explicitUrl } = await req.json().catch(() => ({}))
   if (!org_id) return jsonError('org_id required', 400)
+  if (!project_id) return jsonError('project_id required', 400)
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) as unknown as AdminClient
+  const access = await requireProjectMember(req, supabase, SUPABASE_SERVICE_ROLE_KEY, project_id, corsHeaders, org_id)
+  if (!access.ok) return access.response
+  const runtime = await resolveProjectTextRuntime(supabase, org_id, project_id, {
+    purpose: 'SEO audit',
+  })
+  if (!runtime.ok) return jsonError(runtime.message, runtime.status)
+
   const { data: org } = await supabase
     .from('organizations').select('name, website').eq('id', org_id).maybeSingle()
 
   const websiteUrl = (explicitUrl as string) ?? (org?.website as string)
   if (!websiteUrl) return jsonError('No website URL configured on this org — set organizations.website or pass website_url.', 400)
 
-  const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY })
   const encoder = new TextEncoder()
 
   const stream = new ReadableStream({
@@ -122,14 +130,27 @@ Deno.serve(async (req) => {
         const auditId = auditRow?.id as string | undefined
 
         send('synthesising', { audit_id: auditId })
-        const audit = await synthesise(anthropic, signal, send)
+        const startedAt = Date.now()
+        const synthesis = await synthesise(runtime.runtime, signal, send)
+        const audit = synthesis.audit
+        await logGenerationUsage(supabase, {
+          orgId: org_id,
+          projectId: project_id,
+          provider: runtime.runtime.provider,
+          model: runtime.runtime.model,
+          operation: 'audit.seo',
+          inputTokens: synthesis.inputTokens,
+          outputTokens: synthesis.outputTokens,
+          durationMs: Date.now() - startedAt,
+          metadata: { key_source: runtime.runtime.keySource, pages_audited: 1 + innerPages.length },
+        })
 
         // ── Phase 7: persist final result ───────────────────────────────────
         if (auditId) {
           await supabase.from('seo_audits').update({
             status: 'completed',
-            result: audit,
-            page_speed: pageSpeed ?? null,
+            result: audit as Json,
+            page_speed: (pageSpeed ?? null) as unknown as Json,
           }).eq('id', auditId)
         }
 
@@ -353,10 +374,10 @@ function stripHtml(s: string): string {
 // ──────────────────────────────────────────────────────────────────────────────
 
 async function synthesise(
-  anthropic: Anthropic,
+  runtime: TextRuntime,
   signal: Record<string, unknown>,
   send: (event: string, data: unknown) => void,
-): Promise<Record<string, unknown>> {
+): Promise<{ audit: Record<string, unknown>; inputTokens: number | null; outputTokens: number | null }> {
   const sys = `You are KAI's SEO Auditor. You score a website on classical SEO + website optimization signal and propose concrete fixes. Output ONLY valid JSON in exactly this shape — no prose, no markdown fences:
 
 {
@@ -391,27 +412,24 @@ Constraints:
 
   const userMessage = `Audit this website data:\n\n${JSON.stringify(signal, null, 2).slice(0, 18000)}`
 
-  const msgStream = anthropic.messages.stream({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 3000,
+  const completion = await streamText(runtime, {
+    maxTokens: 3000,
     temperature: 0.2,
     system: sys,
-    messages: [{ role: 'user', content: userMessage }],
+    user: userMessage,
+    json: true,
+    onText: text => send('chunk', { text }),
   })
 
-  let raw = ''
-  for await (const ev of msgStream) {
-    if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
-      raw += ev.delta.text
-      send('chunk', { text: ev.delta.text })
-    }
-  }
-
   try {
-    const m = raw.match(/\{[\s\S]*\}/)
-    return m ? JSON.parse(m[0]) : { raw }
+    const m = completion.text.match(/\{[\s\S]*\}/)
+    return {
+      audit: m ? JSON.parse(m[0]) : { raw: completion.text },
+      inputTokens: completion.inputTokens,
+      outputTokens: completion.outputTokens,
+    }
   } catch {
-    return { raw }
+    return { audit: { raw: completion.text }, inputTokens: completion.inputTokens, outputTokens: completion.outputTokens }
   }
 }
 

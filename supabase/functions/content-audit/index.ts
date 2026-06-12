@@ -8,16 +8,17 @@
 // Unknown channels are surfaced as "needs platform setup" in the audit log.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
-import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
-import { requireOrgMember } from '../_shared/auth.ts'
+import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
+import type { Json } from '../_shared/database.types.ts'
+import { logGenerationUsage } from '../_shared/generation-usage.ts'
+import { resolveProjectTextRuntime, streamText, type TextRuntime } from '../_shared/text-runtime.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const UNIPILE_DSN = Deno.env.get('UNIPILE_DSN')
@@ -51,22 +52,29 @@ interface FetchResult {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
-  const { org_id } = await req.json().catch(() => ({}))
+  const { org_id, project_id } = await req.json().catch(() => ({}))
   if (!org_id) {
     return new Response(JSON.stringify({ error: 'org_id required' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
-  if (!ANTHROPIC_API_KEY) {
-    return new Response(JSON.stringify({ error: 'ANTHROPIC_API_KEY not configured' }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  if (!project_id) {
+    return new Response(JSON.stringify({ error: 'project_id required for content audit' }), {
+      status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-  const auth = await requireOrgMember(req, supabase, SUPABASE_SERVICE_ROLE_KEY, org_id, corsHeaders)
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) as unknown as AdminClient
+  const auth = await requireProjectMember(req, supabase, SUPABASE_SERVICE_ROLE_KEY, project_id, corsHeaders, org_id)
   if (!auth.ok) return auth.response
-  const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY })
+  const runtime = await resolveProjectTextRuntime(supabase, org_id, project_id, {
+    purpose: 'Content audit',
+  })
+  if (!runtime.ok) {
+    return new Response(JSON.stringify({ error: runtime.message }), {
+      status: runtime.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
   const encoder = new TextEncoder()
 
   const stream = new ReadableStream({
@@ -112,16 +120,27 @@ Deno.serve(async (req) => {
         send('synthesising', { sources: usable.map(r => ({ channel: r.channel, items: r.items.length })) })
 
         const corpus = buildCorpus(usable)
-        const proposal = await synthesise(anthropic, corpus, send)
+        const synthesis = await synthesise(runtime.runtime, corpus, send)
+        const proposal = synthesis.proposal
+        await logGenerationUsage(supabase, {
+          orgId: org_id,
+          projectId: project_id,
+          provider: runtime.runtime.provider,
+          model: runtime.runtime.model,
+          operation: 'audit.content',
+          inputTokens: synthesis.inputTokens,
+          outputTokens: synthesis.outputTokens,
+          metadata: { key_source: runtime.runtime.keySource },
+        })
 
         // 5. Save proposal
         await supabase.from('audit_runs').update({
           status: 'completed',
-          channels_audited: usable.map(r => ({ channel: r.channel, url: r.url, item_count: r.items.length })),
-          raw_findings: { skipped: results.filter(r => !r.ok).map(r => ({ channel: r.channel, reason: r.reason })) },
-          proposed_brand_voice: proposal.brand_voice,
-          proposed_personas: proposal.personas,
-          proposed_skills: proposal.skills,
+          channels_audited: usable.map(r => ({ channel: r.channel, url: r.url, item_count: r.items.length })) as Json,
+          raw_findings: { skipped: results.filter(r => !r.ok).map(r => ({ channel: r.channel, reason: r.reason })) } as Json,
+          proposed_brand_voice: proposal.brand_voice as Json,
+          proposed_personas: proposal.personas as Json,
+          proposed_skills: proposal.skills as Json,
         }).eq('id', auditId)
 
         send('done', { audit_id: auditId, proposal })
@@ -752,11 +771,10 @@ interface Proposal {
 }
 
 async function synthesise(
-  anthropic: Anthropic,
+  runtime: TextRuntime,
   corpus: string,
   send: (event: string, data: unknown) => void,
-): Promise<Proposal> {
-  let raw = ''
+): Promise<{ proposal: Proposal; inputTokens: number | null; outputTokens: number | null }> {
   const sys = `You are KAI's Auditor. You read a company's existing content and extract a precise model of their voice, audience, and patterns. Output ONLY valid JSON in exactly this shape — no prose, no markdown fences:
 
 {
@@ -793,19 +811,15 @@ Rules:
 - Personas should reflect who the author is writing FOR (their audience), not who the author IS.
 - Skills are reusable patterns: a hook style, a structural template, a recurring argument frame. 2-5 skills max.`
 
-  const msgStream = anthropic.messages.stream({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
+  const response = await streamText(runtime, {
     system: sys,
-    messages: [{ role: 'user', content: `Analyse this content and produce the JSON proposal:\n\n${corpus}` }],
+    user: `Analyse this content and produce the JSON proposal:\n\n${corpus}`,
+    maxTokens: 4096,
+    json: true,
+    onText: text => send('synthesis_chunk', { text }),
   })
 
-  for await (const ev of msgStream) {
-    if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
-      raw += ev.delta.text
-      send('synthesis_chunk', { text: ev.delta.text })
-    }
-  }
+  const raw = response.text
 
   // Parse JSON tolerantly
   let proposal: Proposal
@@ -815,5 +829,5 @@ Rules:
   } catch {
     proposal = { brand_voice: { raw }, personas: [], skills: [] }
   }
-  return proposal
+  return { proposal, inputTokens: response.inputTokens, outputTokens: response.outputTokens }
 }

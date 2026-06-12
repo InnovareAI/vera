@@ -26,6 +26,8 @@ const corsHeaders = {
 const MODEL = 'claude-sonnet-4-6'
 const MIN_CLUSTER_SIZE = 3
 const STALE_DAYS = 60
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')
 
 interface RawItem {
   id: string
@@ -54,12 +56,22 @@ Deno.serve(async (req) => {
       status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
+  if (!isServiceRequest(req)) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  if (!ANTHROPIC_API_KEY) {
+    return new Response(JSON.stringify({ error: 'ANTHROPIC_API_KEY not configured' }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
 
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    SUPABASE_SERVICE_ROLE_KEY,
   )
-  const anthropic = new Anthropic({ apiKey: Deno.env.get('ANTHROPIC_API_KEY')! })
+  const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY })
 
   // Iterate orgs with any KB activity ever (cheap — small table)
   const { data: orgs } = await supabase.from('organizations').select('id, name')
@@ -223,3 +235,9 @@ Rules:
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
 })
+
+function isServiceRequest(req: Request): boolean {
+  const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+  const apiKey = req.headers.get('apikey') ?? ''
+  return !!SUPABASE_SERVICE_ROLE_KEY && (bearer === SUPABASE_SERVICE_ROLE_KEY || apiKey === SUPABASE_SERVICE_ROLE_KEY)
+}

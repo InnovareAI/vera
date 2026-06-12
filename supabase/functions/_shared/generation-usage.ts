@@ -79,7 +79,8 @@ export function estimateGenerationUsageCost(usage: GenerationUsageEstimateInput)
   if (
     usage.operation === "chat.message" ||
     usage.operation === "business_context.extract" ||
-    usage.operation === "knowledge.classify"
+    usage.operation === "knowledge.classify" ||
+    usage.operation.startsWith("audit.")
   ) return estimateTextCost(usage)
   if (usage.operation === "knowledge.embed") return estimateEmbeddingCost(usage)
   if (usage.operation === "image.generate") return estimateImageCost(usage)

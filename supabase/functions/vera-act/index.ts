@@ -97,7 +97,10 @@ Deno.serve(async (req) => {
 async function runAudit(supabase: AdminClient, obs: Record<string, unknown>) {
   const orgId = (obs.action_payload as Record<string, unknown> | null)?.org_id as string
     ?? obs.org_id as string
-  if (!orgId) return
+  const projectId = (obs.action_payload as Record<string, unknown> | null)?.project_id as string
+    ?? obs.project_id as string
+    ?? null
+  if (!orgId || !projectId) return
 
   try {
     // Fire both audit endpoints in parallel. They each write to linkedin_audits.
@@ -108,11 +111,11 @@ async function runAudit(supabase: AdminClient, obs: Record<string, unknown>) {
     }
     const [profileRes, brewRes] = await Promise.all([
       fetch(`${SUPABASE_URL}/functions/v1/linkedin-profile-score`, {
-        method: 'POST', headers, body: JSON.stringify({ org_id: orgId }),
+        method: 'POST', headers, body: JSON.stringify({ org_id: orgId, project_id: projectId }),
       }),
       // brew360-audit streams SSE — we just read it to completion
       fetch(`${SUPABASE_URL}/functions/v1/brew360-audit`, {
-        method: 'POST', headers, body: JSON.stringify({ org_id: orgId }),
+        method: 'POST', headers, body: JSON.stringify({ org_id: orgId, project_id: projectId }),
       }),
     ])
 

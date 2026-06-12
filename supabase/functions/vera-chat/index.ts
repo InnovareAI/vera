@@ -2675,10 +2675,18 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
 
       case 'run_audit': {
         const kind = input.kind as string
+        if (!ctx.projectId) {
+          return { result: 'Audit tools require an active client space.' }
+        }
         if (kind === 'all') {
-          const { error } = await ctx.supabase.rpc('refresh_all_linkedin_audits')
-          if (error) return { result: `Audit refresh failed: ${error.message}` }
-          return { result: 'All audits queued — profile + brew360 + content. Results in ~30s on the LinkedIn audit page.' }
+          for (const fn of ['linkedin-profile-score', 'brew360-audit', 'content-audit']) {
+            fetch(`${ctx.supabaseUrl}/functions/v1/${fn}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
+              body: JSON.stringify({ org_id: ctx.orgId, project_id: ctx.projectId }),
+            }).catch(() => {})
+          }
+          return { result: 'All audits queued for this client space. Results should appear on the LinkedIn audit page shortly.' }
         }
         // Single audit kind: hit the corresponding edge function async
         const fnMap: Record<string, string> = {
@@ -2692,7 +2700,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         fetch(`${ctx.supabaseUrl}/functions/v1/${fn}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
-          body: JSON.stringify({ org_id: ctx.orgId }),
+          body: JSON.stringify({ org_id: ctx.orgId, project_id: ctx.projectId }),
         }).catch(() => {})
         return { result: `${kind} audit kicked off — check the LinkedIn audit page in ~30s.` }
       }

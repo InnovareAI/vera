@@ -26,6 +26,8 @@ const corsHeaders = {
 
 const MODEL = 'claude-sonnet-4-6'  // refinement deserves the heavier model
 const MIN_INVOCATIONS_DEFAULT = 10
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')
 
 const REFINE_PROMPT = (skill: SkillSnapshot) => `
 You are refining a content-generation skill module based on real-world
@@ -107,6 +109,16 @@ Deno.serve(async (req) => {
       status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
+  if (!isServiceRequest(req)) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  if (!ANTHROPIC_API_KEY) {
+    return new Response(JSON.stringify({ error: 'ANTHROPIC_API_KEY not configured' }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
 
   let body: { skill_ids?: string[]; min_invocations?: number; dry_run?: boolean } = {}
   try { body = await req.json().catch(() => ({})) } catch { /* default */ }
@@ -114,10 +126,10 @@ Deno.serve(async (req) => {
   const minInvocations = body.min_invocations ?? MIN_INVOCATIONS_DEFAULT
   const dryRun = body.dry_run === true
 
-  const anthropic = new Anthropic({ apiKey: Deno.env.get('ANTHROPIC_API_KEY')! })
+  const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY })
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    SUPABASE_SERVICE_ROLE_KEY,
   )
 
   // Pull candidate skills — those with ≥min_invocations
@@ -290,3 +302,9 @@ Deno.serve(async (req) => {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
 })
+
+function isServiceRequest(req: Request): boolean {
+  const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+  const apiKey = req.headers.get('apikey') ?? ''
+  return !!SUPABASE_SERVICE_ROLE_KEY && (bearer === SUPABASE_SERVICE_ROLE_KEY || apiKey === SUPABASE_SERVICE_ROLE_KEY)
+}

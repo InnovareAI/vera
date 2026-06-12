@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Loader2, Check, AlertCircle, Sparkles } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../lib/auth'
+import { useProject } from '../lib/projectContext'
 
 const AUDIT_URL   = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/content-audit`
 const CONNECT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/unipile-connect`
@@ -26,6 +28,9 @@ export default function OnboardingAudit() {
   const { orgId } = useParams<{ orgId: string }>()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const { session } = useAuth()
+  const { activeProject } = useProject()
+  const projectId = activeProject?.org_id === orgId ? activeProject?.id ?? null : null
   const [phase, setPhase] = useState<Phase>('preflight')
   const [channels, setChannels] = useState<ChannelsLoaded['channels']>([])
   const [unipileConnected, setUnipileConnected] = useState(false)
@@ -218,14 +223,17 @@ export default function OnboardingAudit() {
 
     async function run() {
       try {
+        if (!session?.access_token || !projectId) {
+          throw new Error('Sign in and open an active client space before running the audit.')
+        }
         const res = await fetch(AUDIT_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'apikey': SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Authorization': `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ org_id: orgId }),
+          body: JSON.stringify({ org_id: orgId, project_id: projectId }),
         })
         if (!res.body) throw new Error('No response body')
         const reader = res.body.getReader()
