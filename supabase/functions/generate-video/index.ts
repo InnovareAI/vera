@@ -129,8 +129,6 @@ Deno.serve(async (req) => {
 
   const access = await requireProjectMember(req, supabase, SERVICE_KEY, projectId, corsHeaders)
   if (!access.ok) return access.response
-  const fal = await resolveFalKey(supabase, projectId, access.orgId)
-  if (!fal.ok) return fal.response
 
   const resolved = resolveVideoModel(model, !!image_url)
   if (!resolved.ok) return resolved.response
@@ -147,6 +145,9 @@ Deno.serve(async (req) => {
       402,
     )
   }
+
+  const fal = await resolveFalKey(supabase, projectId, access.orgId)
+  if (!fal.ok) return fal.response
 
   // Build per-model payload. Different FAL video endpoints accept slightly
   // different parameter names; keep this conservative — pass only fields the
