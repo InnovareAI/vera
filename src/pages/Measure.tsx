@@ -1379,9 +1379,14 @@ function buildProviderReadiness(integrations: ClientIntegration[]): ProviderRead
     { provider: 'linkedin', label: 'LinkedIn', detail: 'Unipile post counters, comments, reactions, and publishing IDs.' },
     { provider: 'meta_facebook_pages', label: 'Facebook Pages', detail: 'Facebook Page insights and post engagement.' },
     { provider: 'meta_instagram', label: 'Instagram Professional', detail: 'Instagram media views, reach, comments, saves, and shares.' },
+    { provider: 'x', label: 'X', detail: 'Manual-first publishing, replies, reposts, link clicks, and traffic-driving signals.' },
     { provider: 'google_search_console', label: 'Google Search Console', detail: 'Search query, page, device, country, and opportunity snapshots.' },
     { provider: 'google_analytics_4', label: 'Google Analytics 4', detail: 'Traffic, sessions, conversions, landing pages, and source performance.' },
     { provider: 'youtube', label: 'YouTube', detail: 'Channel, video, Shorts, view, subscriber, and watch-time analytics.' },
+    { provider: 'medium', label: 'Medium', detail: 'Manual-first article publishing, referral traffic, reads, claps, responses, and long-form themes.' },
+    { provider: 'quora', label: 'Quora', detail: 'Manual-first answer research, views, upvotes, comments, shares, and traffic-driving questions.' },
+    { provider: 'reddit', label: 'Reddit', detail: 'Read-only market listening, comments, upvotes, shares, objections, and traffic intent.' },
+    { provider: 'wordpress', label: 'WordPress', detail: 'Approved article publishing, page performance, referral traffic, and conversion context.' },
   ]
   const byProvider = new Map<string, ClientIntegration>(integrations.map(row => [row.provider, row]))
   return labels.map(item => {
@@ -1525,8 +1530,12 @@ function detectProvider(post: MeasurePost) {
   if (value.includes('linkedin')) return 'linkedin'
   if (value.includes('instagram')) return 'meta_instagram'
   if (value.includes('facebook') || value.includes('fb.watch')) return 'meta_facebook_pages'
+  if (value === 'x' || value.includes('twitter') || value.includes('x.com')) return 'x'
   if (value.includes('youtube') || value.includes('youtu.be')) return 'youtube'
   if (value.includes('medium')) return 'medium'
+  if (value.includes('quora')) return 'quora'
+  if (value.includes('reddit')) return 'reddit'
+  if (value.includes('wordpress')) return 'wordpress'
   if (value.includes('blog')) return 'blog'
   return post.channel || 'unknown'
 }
@@ -1571,7 +1580,14 @@ function providerLabel(provider: string) {
     google_search_console: 'Search Console',
     google_analytics_4: 'GA4',
     youtube: 'YouTube',
+    x: 'X',
     medium: 'Medium',
+    quora: 'Quora',
+    reddit: 'Reddit',
+    wordpress: 'WordPress',
+    tiktok: 'TikTok',
+    pinterest: 'Pinterest',
+    bluesky: 'Bluesky',
     blog: 'Blog',
     unknown: 'Unknown',
   }
@@ -1583,7 +1599,11 @@ function providerDot(provider: string) {
   if (provider === 'meta_instagram') return color.dotPink
   if (provider === 'meta_facebook_pages') return '#6366F1'
   if (provider === 'youtube') return color.danger
+  if (provider === 'x') return color.dotSky
   if (provider === 'medium') return color.dotViolet
+  if (provider === 'quora') return '#b92b27'
+  if (provider === 'reddit') return '#ea580c'
+  if (provider === 'wordpress') return '#7c3aed'
   if (provider === 'blog') return color.dotGreen
   return color.ghost
 }

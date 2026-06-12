@@ -24,7 +24,7 @@ export default function Library() {
     ? `/p/${activeProject.slug}/review?campaign=${campaignId}`
     : `/review?campaign=${campaignId}`
 
-  const platforms = ['All', 'LinkedIn', 'Twitter', 'Instagram', 'Quora', 'Facebook']
+  const platforms = ['All', 'LinkedIn', 'X', 'Instagram', 'Facebook', 'YouTube', 'Medium', 'Quora', 'Reddit', 'Blog', 'Email']
   const statuses = ['All', 'Published', 'Approved', 'Scheduled', 'Pending Review', 'Draft', 'Rejected']
 
   useEffect(() => {
@@ -63,7 +63,7 @@ export default function Library() {
 
   const filtered = posts.filter(p => {
     const matchSearch = !search || (p.title || '').toLowerCase().includes(search.toLowerCase()) || p.copy.toLowerCase().includes(search.toLowerCase())
-    const matchPlatform = platformFilter === 'All' || p.channel?.toLowerCase() === platformFilter.toLowerCase()
+    const matchPlatform = platformFilter === 'All' || normalizePostPlatform(p.channel) === platformFilter
     const matchStatus = statusFilter === 'All' || p.status === statusFilter
     return matchSearch && matchPlatform && matchStatus
   })
@@ -306,6 +306,21 @@ export default function Library() {
       </div>
     </div>
   )
+}
+
+function normalizePostPlatform(channel?: string | null) {
+  const value = (channel ?? '').toLowerCase()
+  if (value.includes('linkedin')) return 'LinkedIn'
+  if (value === 'x' || value.includes('twitter')) return 'X'
+  if (value.includes('instagram')) return 'Instagram'
+  if (value.includes('facebook')) return 'Facebook'
+  if (value.includes('youtube') || value.includes('short')) return 'YouTube'
+  if (value.includes('medium')) return 'Medium'
+  if (value.includes('quora')) return 'Quora'
+  if (value.includes('reddit')) return 'Reddit'
+  if (value.includes('email') || value.includes('newsletter')) return 'Email'
+  if (value.includes('blog') || value.includes('article') || value.includes('substack')) return 'Blog'
+  return channel || 'Other'
 }
 
 // ─── Library right rail ────────────────────────────────────────────────

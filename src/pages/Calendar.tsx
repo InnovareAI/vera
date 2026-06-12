@@ -53,11 +53,16 @@ const KANBAN_COLUMNS = [
 ] as const
 
 const PLATFORM_LANES = [
-  { id: 'instagram', label: 'Instagram', dot: color.dotPink },
   { id: 'linkedin', label: 'LinkedIn', dot: color.dotBlue },
+  { id: 'youtube', label: 'YouTube', dot: color.danger },
+  { id: 'medium', label: 'Medium', dot: color.dotViolet },
+  { id: 'quora', label: 'Quora', dot: '#b92b27' },
+  { id: 'reddit', label: 'Reddit', dot: '#ea580c' },
   { id: 'x', label: 'X', dot: color.dotSky },
-  { id: 'email', label: 'Email', dot: color.dotGreen },
+  { id: 'instagram', label: 'Instagram', dot: color.dotPink },
+  { id: 'facebook', label: 'Facebook', dot: '#6366F1' },
   { id: 'blog', label: 'Blog', dot: color.dotAmber },
+  { id: 'email', label: 'Email', dot: color.dotGreen },
   { id: 'other', label: 'Other', dot: color.ghost },
 ] as const
 
@@ -1677,10 +1682,15 @@ function postStatusBucket(post: Post): KanbanStatus {
 function platformBucket(channel?: string): PlatformLaneId {
   const value = (channel ?? '').toLowerCase()
   if (value.includes('instagram')) return 'instagram'
+  if (value.includes('facebook')) return 'facebook'
   if (value.includes('linkedin')) return 'linkedin'
+  if (value.includes('youtube') || value.includes('short')) return 'youtube'
+  if (value.includes('medium')) return 'medium'
+  if (value.includes('quora')) return 'quora'
+  if (value.includes('reddit')) return 'reddit'
   if (value === 'x' || value.includes('twitter')) return 'x'
   if (value.includes('email') || value.includes('newsletter')) return 'email'
-  if (value.includes('blog') || value.includes('medium') || value.includes('substack')) return 'blog'
+  if (value.includes('blog') || value.includes('article') || value.includes('substack')) return 'blog'
   return 'other'
 }
 

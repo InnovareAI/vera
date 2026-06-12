@@ -18,7 +18,7 @@ import {
 import type { Post } from '../lib/supabase'
 import { color, radius, shadow, type as t } from '../design'
 
-type PlatformKind = 'instagram' | 'linkedin' | 'x' | 'facebook' | 'tiktok' | 'email' | 'blog' | 'generic'
+type PlatformKind = 'instagram' | 'linkedin' | 'x' | 'facebook' | 'tiktok' | 'youtube' | 'reddit' | 'quora' | 'medium' | 'email' | 'blog' | 'generic'
 type Density = 'compact' | 'standard' | 'spacious'
 type MediaFrame = { url: string; text?: string | null }
 
@@ -38,6 +38,10 @@ const platformAccent: Record<PlatformKind, string> = {
   x: color.dotSky,
   facebook: 'var(--dot-indigo)',
   tiktok: '#111111',
+  youtube: color.danger,
+  reddit: '#ea580c',
+  quora: '#b92b27',
+  medium: color.dotViolet,
   email: 'var(--dot-emerald)',
   blog: color.dotViolet,
   generic: color.ghost,
@@ -59,7 +63,7 @@ export function PlatformPostPreview({
   const spec = creativeSpec(post, platform)
   const shellStyle: CSSProperties = {
     width: '100%',
-    maxWidth: platform === 'x' ? 600 : platform === 'instagram' || platform === 'tiktok' ? 480 : 640,
+    maxWidth: platform === 'youtube' ? 720 : platform === 'x' ? 600 : platform === 'instagram' || platform === 'tiktok' ? 480 : 640,
     margin: '0 auto',
     fontFamily: t.family.sans,
     color: color.ink,
@@ -121,6 +125,67 @@ export function PlatformPostPreview({
     )
   }
 
+  if (platform === 'youtube') {
+    return (
+      <article className={className} style={shellStyle}>
+        <MediaBlock post={post} spec={spec} density={density} autoplayMedia={autoplayMedia} />
+        <div style={{ padding: density === 'compact' ? 14 : 18 }}>
+          <h2 style={{ margin: '0 0 8px', color: color.ink, fontSize: density === 'compact' ? t.size.body : t.size.h3, lineHeight: 1.2 }}>{post.title || subjectFromCopy(post.copy) || 'Untitled video'}</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <Avatar profile={profile} size={36} platform={platform} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>{profile.name}</div>
+              <div style={{ color: color.ghost, fontSize: t.size.cap }}>{profile.handle} · 0 subscribers preview</div>
+            </div>
+          </div>
+          <PostText copy={copy} tags={tags} density={density} />
+          <PlatformActionRow
+            actions={[
+              { icon: <ThumbsUp size={16} />, label: 'Like' },
+              { icon: <MessageCircle size={16} />, label: 'Comment' },
+              { icon: <Share2 size={16} />, label: 'Share' },
+            ]}
+          />
+          {showCommentField && <CommentField placeholder="Add a comment..." density={density} />}
+          {showSpec && <CreativeSpec spec={spec} />}
+        </div>
+      </article>
+    )
+  }
+
+  if (platform === 'reddit' || platform === 'quora') {
+    const isQuora = platform === 'quora'
+    return (
+      <article className={className} style={shellStyle}>
+        <div style={{ padding: density === 'compact' ? 14 : 18, borderBottom: `1px solid ${color.line}`, background: color.paper2 }}>
+          <div style={{ color: platformAccent[platform], fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: t.letterSpacing.wide, fontWeight: t.weight.semibold }}>
+            {isQuora ? 'Quora answer preview' : 'Reddit discussion preview'}
+          </div>
+          <h2 style={{ margin: '8px 0 0', color: color.ink, fontSize: density === 'compact' ? t.size.body : t.size.h4, lineHeight: 1.25 }}>{post.title || subjectFromCopy(post.copy) || (isQuora ? 'Draft answer' : 'Draft discussion')}</h2>
+        </div>
+        <div style={{ padding: density === 'compact' ? 14 : 18 }}>
+          <PostText copy={copy} tags={tags} density={density} />
+          <MediaBlock post={post} spec={spec} density={density} autoplayMedia={autoplayMedia} framed />
+          <PlatformActionRow
+            actions={isQuora
+              ? [
+                  { icon: <ThumbsUp size={16} />, label: 'Upvote' },
+                  { icon: <MessageCircle size={16} />, label: 'Comment' },
+                  { icon: <Share2 size={16} />, label: 'Share' },
+                ]
+              : [
+                  { icon: <ThumbsUp size={16} />, label: 'Upvote' },
+                  { icon: <MessageCircle size={16} />, label: 'Comment' },
+                  { icon: <Share2 size={16} />, label: 'Share' },
+                ]}
+          />
+          {showCommentField && <CommentField placeholder={isQuora ? 'Add a comment...' : 'Join the thread...'} density={density} />}
+          {showSpec && <CreativeSpec spec={spec} />}
+        </div>
+      </article>
+    )
+  }
+
   if (platform === 'blog') {
     return (
       <article className={className} style={shellStyle}>
@@ -133,6 +198,31 @@ export function PlatformPostPreview({
         <div style={{ padding: density === 'compact' ? 14 : 20 }}>
           <PostText copy={copy} tags={tags} density={density} />
           {showCommentField && <CommentField placeholder="Join the discussion..." density={density} />}
+          {showSpec && <CreativeSpec spec={spec} />}
+        </div>
+      </article>
+    )
+  }
+
+  if (platform === 'medium') {
+    return (
+      <article className={className} style={shellStyle}>
+        <div style={{ padding: density === 'compact' ? 14 : 20, borderBottom: `1px solid ${color.line}` }}>
+          <div style={{ fontSize: t.size.micro, color: platformAccent.medium, textTransform: 'uppercase', letterSpacing: t.letterSpacing.wide, fontWeight: t.weight.semibold }}>Medium article preview</div>
+          <h2 style={{ margin: '8px 0 4px', color: color.ink, fontSize: density === 'compact' ? t.size.h4 : t.size.h3, lineHeight: 1.2 }}>{post.title || subjectFromCopy(post.copy) || 'Untitled Medium draft'}</h2>
+          <div style={{ color: color.ghost, fontSize: t.size.cap }}>By {profile.name} · {profile.handle} · draft</div>
+        </div>
+        <MediaBlock post={post} spec={spec} density={density} autoplayMedia={autoplayMedia} />
+        <div style={{ padding: density === 'compact' ? 14 : 20 }}>
+          <PostText copy={copy} tags={tags} density={density} />
+          <PlatformActionRow
+            actions={[
+              { icon: <ThumbsUp size={16} />, label: 'Clap' },
+              { icon: <MessageCircle size={16} />, label: 'Respond' },
+              { icon: <Bookmark size={16} />, label: 'Save' },
+            ]}
+          />
+          {showCommentField && <CommentField placeholder="Write a response..." density={density} />}
           {showSpec && <CreativeSpec spec={spec} />}
         </div>
       </article>
@@ -334,6 +424,19 @@ function LinkedInActions({ platform }: { platform: PlatformKind }) {
   )
 }
 
+function PlatformActionRow({ actions }: { actions: Array<{ icon: ReactNode; label: string }> }) {
+  return (
+    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', paddingTop: 14, color: color.ghost }}>
+      {actions.map(action => (
+        <span key={action.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: t.size.cap, fontWeight: t.weight.medium }}>
+          {action.icon}
+          {action.label}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function CaptionBlock({ profileName, copy, tags, density }: { profileName: string; copy: string; tags: string[]; density: Density }) {
   return (
     <div style={{ padding: density === 'compact' ? '4px 12px 10px' : '6px 14px 12px' }}>
@@ -455,8 +558,12 @@ function normalizePlatform(channel?: string | null): PlatformKind {
   if (c === 'x' || c.includes('twitter')) return 'x'
   if (c.includes('facebook')) return 'facebook'
   if (c.includes('tiktok')) return 'tiktok'
+  if (c.includes('youtube') || c.includes('short')) return 'youtube'
+  if (c.includes('reddit')) return 'reddit'
+  if (c.includes('quora')) return 'quora'
+  if (c.includes('medium')) return 'medium'
   if (c.includes('email') || c.includes('newsletter')) return 'email'
-  if (c.includes('blog') || c.includes('medium') || c.includes('substack')) return 'blog'
+  if (c.includes('blog') || c.includes('article') || c.includes('substack')) return 'blog'
   return 'generic'
 }
 
@@ -478,9 +585,13 @@ function creativeSpec(post: Post, platform: PlatformKind): CreativeSpecValue {
     return { aspectRatio: '4 / 5', dimensions: '1080 x 1350', label: 'Instagram feed portrait' }
   }
   if (platform === 'tiktok') return { aspectRatio: '9 / 16', dimensions: '1080 x 1920', label: 'TikTok vertical video' }
+  if (platform === 'youtube') return { aspectRatio: isVertical || descriptor.includes('short') ? '9 / 16' : '16 / 9', dimensions: isVertical || descriptor.includes('short') ? '1080 x 1920' : '1920 x 1080', label: isVertical || descriptor.includes('short') ? 'YouTube Short' : 'YouTube video' }
   if (platform === 'linkedin') return { aspectRatio: isVideo ? '16 / 9' : '1.91 / 1', dimensions: isVideo ? '1920 x 1080' : '1200 x 627', label: isVideo ? 'LinkedIn video' : 'LinkedIn feed image' }
   if (platform === 'x') return { aspectRatio: '16 / 9', dimensions: '1600 x 900', label: 'X media card' }
   if (platform === 'facebook') return { aspectRatio: '4 / 5', dimensions: '1080 x 1350', label: 'Facebook feed portrait' }
+  if (platform === 'reddit') return { aspectRatio: '16 / 9', dimensions: '1200 x 675', label: 'Reddit media attachment' }
+  if (platform === 'quora') return { aspectRatio: '16 / 9', dimensions: '1200 x 675', label: 'Quora answer image' }
+  if (platform === 'medium') return { aspectRatio: '16 / 9', dimensions: '1600 x 900', label: 'Medium hero image' }
   if (platform === 'email') return { aspectRatio: '16 / 9', dimensions: '1200 x 675', label: 'Email hero image' }
   if (platform === 'blog') return { aspectRatio: '16 / 9', dimensions: '1600 x 900', label: 'Article hero image' }
   return { aspectRatio: '16 / 9', dimensions: '1200 x 675', label: 'Generic post media' }

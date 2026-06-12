@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowRight, ArrowLeft, Check, Sparkles, Loader2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
-// Wizard step definitions. Two required org fields (name + website) then 7 optional channels.
+// Wizard step definitions. Two required org fields (name + website) then optional channels.
 type IntroStepDef    = { id: 'welcome'; type: 'intro' }
 type ReviewStepDef   = { id: 'review';  type: 'review' }
 type OrgFieldStepDef = { id: string; type: 'org_field'; field: string; title: string; subtitle: string; placeholder: string; required?: boolean }
@@ -16,10 +16,14 @@ const STEPS: Step[] = [
   { id: 'website',             type: 'org_field', field: 'website',      title: 'Website',              subtitle: "Your company's main website.",                                      placeholder: 'https://acme.com',                       required: true },
   { id: 'linkedin_personal',   type: 'channel', channel: 'linkedin_personal',   field: 'linkedin_personal',   title: 'LinkedIn — personal',     subtitle: "Your own LinkedIn profile. This is where your personal voice lives — the most valuable signal for the audit.", placeholder: 'https://linkedin.com/in/…' },
   { id: 'linkedin_company',    type: 'channel', channel: 'linkedin_company',    field: 'linkedin_company',    title: 'LinkedIn — company',      subtitle: "Your company page on LinkedIn.",                                            placeholder: 'https://linkedin.com/company/…' },
+  { id: 'instagram',           type: 'channel', channel: 'instagram',           field: 'instagram',           title: 'Instagram',               subtitle: 'Your Instagram profile, if it carries audience or voice signal.',            placeholder: 'https://instagram.com/brand' },
   { id: 'blog',                type: 'channel', channel: 'blog',                field: 'blog',                title: 'Website blog',            subtitle: 'Your company blog or thought-leadership content.',                          placeholder: 'https://acme.com/blog' },
   { id: 'linkedin_newsletter', type: 'channel', channel: 'linkedin_newsletter', field: 'linkedin_newsletter', title: 'LinkedIn newsletter',     subtitle: 'If you publish a LinkedIn newsletter, paste its URL. Requires the author\'s personal or company LinkedIn channel above to be configured too — we fetch newsletter issues from their posts feed.',                      placeholder: 'https://linkedin.com/newsletters/…' },
   { id: 'medium',              type: 'channel', channel: 'medium',              field: 'medium',              title: 'Medium',                  subtitle: 'Your Medium profile or publication.',                                       placeholder: '@handle  or  https://medium.com/@handle' },
   { id: 'youtube',             type: 'channel', channel: 'youtube',             field: 'youtube',             title: 'YouTube channel',         subtitle: 'Your YouTube channel — videos, podcast, etc.',                              placeholder: 'https://youtube.com/@channel' },
+  { id: 'quora',               type: 'channel', channel: 'quora',               field: 'quora',               title: 'Quora',                   subtitle: 'Profiles, Spaces, or topics that reveal buyer questions and demand angles.', placeholder: 'https://www.quora.com/profile/brand-or-person' },
+  { id: 'reddit',              type: 'channel', channel: 'reddit',              field: 'reddit',              title: 'Reddit',                  subtitle: 'Target subreddits or profile URLs for market listening and objection mining.', placeholder: 'r/marketing or https://reddit.com/r/marketing' },
+  { id: 'facebook',            type: 'channel', channel: 'facebook',            field: 'facebook',            title: 'Facebook page',           subtitle: 'Your Facebook Page, if it is active for community or local trust.',          placeholder: 'https://facebook.com/brand' },
   { id: 'twitter',             type: 'channel', channel: 'twitter',             field: 'twitter',             title: 'X / Twitter',             subtitle: 'Only fill if you post here weekly or more — otherwise the signal is too thin to be worth fetching.', placeholder: '@handle  or  https://x.com/handle' },
   { id: 'review', type: 'review' },
 ]

@@ -1547,7 +1547,7 @@ const TOOLS = [
       properties: {
         copy: { type: 'string', description: 'The full post copy, ready to publish. Write it well — this is the deliverable.' },
         title: { type: 'string', description: 'Short internal title for the queue (4-8 words).' },
-        channel: { type: 'string', description: 'LinkedIn | Blog | Email | X | Instagram. Default LinkedIn.' },
+        channel: { type: 'string', description: 'LinkedIn | YouTube | Medium | Quora | Reddit | X | Instagram | Facebook | Blog | Email. Default LinkedIn.' },
         format: { type: 'string', description: 'e.g. Text-only, Carousel, Thread, Article. Default Text-only.' },
         hashtags: { type: 'array', items: { type: 'string' }, description: 'Optional hashtags, without the leading #.' },
         image_prompt: { type: 'string', description: 'OMIT BY DEFAULT. Posts are text-first: only pass this when the operator EXPLICITLY asks for an image/visual. When passed, save_draft generates the image, attaches it, and persists it. Never include it just because the channel is visual.' },
@@ -1584,13 +1584,13 @@ const TOOLS = [
   },
   {
     name: 'plan_campaign',
-    description: 'THE AGENTIC BATCH PATH — your move whenever the operator wants more than one post: "plan the month", "plan next month for <client>", "give me a month of LinkedIn posts", "build a campaign on X", "plan the next 4 weeks", "a week of content". In ONE call you generate a coherent content arc AND write every post, assign each a date by cadence, save them all as Pending, and surface a campaign calendar. Do this in a single turn — do NOT draft posts one at a time with save_draft when the ask is for a batch. After it runs, say in one line that the calendar is ready to review and offer to refine any post or generate the images. (save_draft is only for a SINGLE post; run_pipeline is only for one deeply-researched piece.)',
+    description: 'THE AGENTIC BATCH PATH — your move whenever the operator wants more than one post: "plan the month", "plan next month for <client>", "give me a month of LinkedIn posts", "build a campaign on X", "plan YouTube, Medium, Quora, Reddit, and X", "plan the next 4 weeks", "a week of content". In ONE call you generate a coherent content arc AND write every post, assign each a date by cadence, save them all as Pending, and surface a campaign calendar. Do this in a single turn — do NOT draft posts one at a time with save_draft when the ask is for a batch. After it runs, say in one line that the calendar is ready to review and offer to refine any post or generate the images. (save_draft is only for a SINGLE post; run_pipeline is only for one deeply-researched piece.)',
     input_schema: {
       type: 'object',
       properties: {
         brief: { type: 'string', description: 'What the campaign is about — theme, goal, any must-haves. Faithful to the operator\'s intent; you expand it into the arc.' },
         count: { type: 'number', description: 'How many posts to produce. Default 8. Max 12. For "a month" of weekly content use ~4-8; for a denser month use 8-12.' },
-        channel: { type: 'string', description: 'LinkedIn | Blog | Email | X | Instagram. Default LinkedIn.' },
+        channel: { type: 'string', description: 'LinkedIn | YouTube | Medium | Quora | Reddit | X | Instagram | Facebook | Blog | Email. Default LinkedIn.' },
         cadence: { type: 'string', description: 'How far apart to schedule: "weekly" (default), "biweekly", or "daily". One post per slot.' },
         start_date: { type: 'string', description: 'Optional ISO date (YYYY-MM-DD) for the first post. Default: the upcoming Monday.' },
         campaign_name: { type: 'string', description: 'Optional short campaign name. If omitted, VERA names it from the brief.' },
