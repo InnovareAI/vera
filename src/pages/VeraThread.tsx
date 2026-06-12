@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, Copy, Pin, X, Target, Share2, Network } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, Copy, Pin, X, Target, Share2, Network, KeyRound, Lock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -69,6 +69,18 @@ type DocumentBlock = {
 type DocumentAttachment = { kind: 'document'; document: DocumentBlock; name: string; mime: string; size: number; truncated?: boolean }
 type ComposerAttachment = ImageAttachment | DocumentAttachment
 type MessageFile = { name: string; mime: string; size: number }
+type ProviderCapabilities = {
+  loaded: boolean
+  isMaster: boolean
+  hasAnthropic: boolean
+  hasOpenRouter: boolean
+  hasOpenAI: boolean
+  hasFal: boolean
+  textReady: boolean
+  imageReady: boolean
+  videoReady: boolean
+  needsTextKey: boolean
+}
 type StoredAttachment =
   | { kind: 'image'; url: string }
   | { kind: 'video'; url: string }
@@ -534,29 +546,68 @@ export default function VeraThread() {
     return () => { cancelled = true }
   }, [activeProject?.id, sessionId])
 
-  // Does this workspace still need its own Anthropic key? True only for a
-  // non-master client space with no active Anthropic key — those run on the
-  // shared Haiku fallback, so the welcome nudges them to bring their own.
-  const [needsKey, setNeedsKey] = useState(false)
+  const [providerCapabilities, setProviderCapabilities] = useState<ProviderCapabilities>({
+    loaded: false,
+    isMaster: false,
+    hasAnthropic: false,
+    hasOpenRouter: false,
+    hasOpenAI: false,
+    hasFal: false,
+    textReady: false,
+    imageReady: false,
+    videoReady: false,
+    needsTextKey: false,
+  })
   const demandPlan = useMemo(() => {
     const parsed = parseProjectInstructions(activeProject?.instructions ?? '')
     return buildDemandPlanSnapshot(parsed.businessContext)
   }, [activeProject?.instructions])
 
   useEffect(() => {
-    if (!activeOrg?.id || !activeProject?.id) { setNeedsKey(false); return }
+    if (!activeOrg?.id || !activeProject?.id) {
+      setProviderCapabilities({
+        loaded: false,
+        isMaster: false,
+        hasAnthropic: false,
+        hasOpenRouter: false,
+        hasOpenAI: false,
+        hasFal: false,
+        textReady: false,
+        imageReady: false,
+        videoReady: false,
+        needsTextKey: false,
+      })
+      return
+    }
     let cancelled = false
     void (async () => {
-      const [{ data: org }, { data: key }] = await Promise.all([
+      const [{ data: org }, { data: rows }] = await Promise.all([
         supabase.from('organizations').select('is_master').eq('id', activeOrg.id).maybeSingle(),
-        supabase.from('client_api_keys').select('id').eq('project_id', activeProject.id).eq('provider', 'anthropic').eq('status', 'active').limit(1).maybeSingle(),
+        supabase.from('client_api_keys').select('provider').eq('project_id', activeProject.id).eq('status', 'active').in('provider', ['anthropic', 'openrouter', 'openai', 'fal', 'fal_ai']),
       ])
       if (cancelled) return
       const isMaster = !!(org as { is_master?: boolean } | null)?.is_master
-      setNeedsKey(!isMaster && !key)
+      const providers = new Set(((rows ?? []) as Array<{ provider: string | null }>).map(row => row.provider).filter(Boolean) as string[])
+      const platformImageReady = isMaster && activeProject.slug === 'innovareai-brand'
+      const hasAnthropic = providers.has('anthropic')
+      const hasOpenRouter = providers.has('openrouter')
+      const hasOpenAI = providers.has('openai')
+      const hasFal = providers.has('fal') || providers.has('fal_ai')
+      setProviderCapabilities({
+        loaded: true,
+        isMaster,
+        hasAnthropic,
+        hasOpenRouter,
+        hasOpenAI,
+        hasFal,
+        textReady: isMaster || hasAnthropic || hasOpenRouter,
+        imageReady: platformImageReady || hasOpenRouter || hasOpenAI || hasFal,
+        videoReady: hasFal,
+        needsTextKey: !isMaster && !hasAnthropic && !hasOpenRouter,
+      })
     })()
     return () => { cancelled = true }
-  }, [activeOrg?.id, activeProject?.id])
+  }, [activeOrg?.id, activeProject?.id, activeProject?.slug])
 
   // Resume any in-flight video renders on load. A render that was still going
   // when the page was refreshed / closed used to be lost forever (its fal
@@ -1466,7 +1517,8 @@ export default function VeraThread() {
           <Idle onRun={pr => send(pr)} observations={observations} actions={buildLaunchActions(stats)} onDismiss={dismissObservation}
             setup={setup} projectName={activeProject?.name ?? 'this client'}
             onOpenBrain={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/brain`) }}
-            needsKey={needsKey} onAddKey={() => navigate('/clients')}
+            providerCapabilities={providerCapabilities}
+            onAddKey={() => activeProject?.slug ? navigate(`/p/${activeProject.slug}/keys`) : navigate('/clients')}
             demandPlan={demandPlan}
             composer={renderComposer('idle')} />
         ) : (
@@ -1754,7 +1806,53 @@ function buildLaunchActions(stats: { pending: number; campaigns: number }): Laun
   return a.slice(0, 6)
 }
 
-function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain, needsKey, onAddKey, demandPlan, composer }: {
+function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: ProviderCapabilities; onAddKey?: () => void }) {
+  const needsText = capabilities.needsTextKey
+  const textBody = needsText
+    ? 'Add OpenRouter or Anthropic before relying on full-quality client-owned text generation. OpenRouter also covers supported image models.'
+    : 'Text and supported image work can use the connected client provider. Real video stays locked until this client adds FAL.'
+  const title = needsText ? 'Provider key needed' : 'Video rendering locked'
+  const rows = [
+    { icon: KeyRound, label: 'Text', ready: capabilities.textReady },
+    { icon: ImagePlus, label: 'Images', ready: capabilities.imageReady },
+    { icon: Clapperboard, label: 'Video', ready: capabilities.videoReady },
+  ]
+
+  return (
+    <div style={{ width: '100%', maxWidth: 680, marginBottom: space[5], padding: space[5], background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.lg, textAlign: 'left' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: space[3], justifyContent: 'space-between' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink, marginBottom: 5 }}>
+            <Lock size={15} />
+            {title}
+          </div>
+          <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.6, margin: 0 }}>
+            {textBody} If the operator asks for video now, Vera will create a storyboard or production brief instead of rendering a paid clip.
+          </p>
+        </div>
+        {onAddKey && (
+          <button onClick={onAddKey} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: radius.pill, border: 'none', background: color.accent, color: '#fff', fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
+            <KeyRound size={13} />
+            Provider keys
+          </button>
+        )}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: space[4] }}>
+        {rows.map(row => {
+          const Icon = row.icon
+          return (
+            <span key={row.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: radius.pill, border: `1px solid ${row.ready ? 'var(--success-line)' : 'var(--accent-line)'}`, background: row.ready ? 'var(--success-tint)' : color.surface, color: row.ready ? color.success : color.ink2, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>
+              <Icon size={12} />
+              {row.label}: {row.ready ? 'ready' : 'locked'}
+            </span>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain, providerCapabilities, onAddKey, demandPlan, composer }: {
   onRun: (prompt: string) => void
   observations: { id: string; title: string; proposed_action: string | null }[]
   actions: LaunchAction[]
@@ -1762,7 +1860,7 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
   setup: { business: boolean; audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null
   projectName: string
   onOpenBrain: () => void
-  needsKey?: boolean
+  providerCapabilities: ProviderCapabilities
   onAddKey?: () => void
   demandPlan: DemandPlanSnapshot
   composer: ReactNode
@@ -1782,20 +1880,8 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
         Turn client knowledge into campaigns, posts, visuals, storyboards, and demand signals that SAM can use.
       </p>
 
-      {needsKey && (
-        <div style={{ width: '100%', maxWidth: 640, marginBottom: space[5], padding: space[5], background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.lg, textAlign: 'left' }}>
-          <div style={{ fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink, marginBottom: 4 }}>Welcome to Vera, your B2B demand engine</div>
-          <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.6, margin: `0 0 ${space[3]}` }}>
-            Vera turns client knowledge into top-of-funnel demand content: campaigns, posts, visuals, carousels, videos, and the engagement signals that should flow into SAM. <strong>Start exploring right now</strong>. The shared setup is ready for straightforward work; add your own Anthropic key when you want full quality and heavier production.
-          </p>
-          <ol style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.7, margin: `0 0 ${space[3]}`, paddingLeft: 18 }}>
-            <li>Create a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" style={{ color: color.accent, fontWeight: t.weight.medium }}>console.anthropic.com/settings/keys</a></li>
-            <li>Open <strong>Clients → your client space → Provider keys</strong> and paste it in.</li>
-          </ol>
-          <button onClick={onAddKey} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: radius.pill, border: 'none', background: color.accent, color: '#fff', fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
-            Add your Anthropic key →
-          </button>
-        </div>
+      {providerCapabilities.loaded && (providerCapabilities.needsTextKey || !providerCapabilities.videoReady) && (
+        <ProviderCapabilityNotice capabilities={providerCapabilities} onAddKey={onAddKey} />
       )}
 
       {composer}

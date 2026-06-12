@@ -4,7 +4,7 @@
 // canManageProject — the space owner / org admins); listing + revoking are
 // direct, gated by client_api_keys RLS (can_project_manage).
 import { useCallback, useEffect, useState } from 'react'
-import { KeyRound, Trash2 } from 'lucide-react'
+import { Bot, CheckCircle2, Clapperboard, ImagePlus, KeyRound, Lock, Trash2, type LucideIcon } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { useProject } from '../lib/projectContext'
@@ -99,6 +99,39 @@ export default function ClientKeys() {
 
   if (!activeProject) return null
   const active = keys.filter(k => k.status === 'active')
+  const activeProviders = new Set(active.map(k => k.provider))
+  const clientCapabilities = [
+    {
+      icon: Bot,
+      title: 'Text engine',
+      ready: activeProviders.has('openrouter') || activeProviders.has('anthropic'),
+      body: activeProviders.has('openrouter')
+        ? 'OpenRouter is active for chat, content generation, and model testing.'
+        : activeProviders.has('anthropic')
+          ? 'Anthropic is active for chat and content generation.'
+          : 'Add OpenRouter or Anthropic before relying on client-owned text generation.',
+    },
+    {
+      icon: ImagePlus,
+      title: 'Image generation',
+      ready: activeProviders.has('openrouter') || activeProviders.has('openai') || activeProviders.has('fal'),
+      body: activeProviders.has('openrouter')
+        ? 'Nano Banana and supported image models can run through this client OpenRouter key.'
+        : activeProviders.has('openai')
+          ? 'Premium OpenAI image generation is available for this client.'
+          : activeProviders.has('fal')
+            ? 'FAL image models are available for this client.'
+            : 'Add OpenRouter for the normal image path, or FAL/OpenAI for provider-specific image models.',
+    },
+    {
+      icon: Clapperboard,
+      title: 'Video rendering',
+      ready: activeProviders.has('fal') || activeProviders.has('fal_ai'),
+      body: activeProviders.has('fal') || activeProviders.has('fal_ai')
+        ? 'Client-owned FAL is active. Video rendering can run from this client budget.'
+        : 'Locked. Real video rendering requires a client-owned FAL key. Vera will use storyboards and briefs instead.',
+    },
+  ]
 
   const card: React.CSSProperties = { background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5] }
   const statusColor = (s: string) => s === 'active' ? color.success : s === 'invalid' ? color.danger : color.ghost
@@ -110,6 +143,15 @@ export default function ClientKeys() {
         title="API keys"
         subtitle="Connect this space to its own AI provider keys. Keys are stored encrypted and used only for this client. OpenRouter covers text and supported image models. FAL is required for client-owned video generation."
       />
+
+      <section style={{ marginBottom: space[8] }}>
+        <SectionLabel style={{ marginBottom: space[3] }}>Client-owned capabilities</SectionLabel>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: space[3] }}>
+          {clientCapabilities.map(item => (
+            <CapabilityCard key={item.title} {...item} />
+          ))}
+        </div>
+      </section>
 
       <section style={{ marginBottom: space[8] }}>
         <SectionLabel style={{ marginBottom: space[3] }}>Add a key</SectionLabel>
@@ -179,6 +221,34 @@ export default function ClientKeys() {
           </div>
         )}
       </section>
+    </div>
+  )
+}
+
+function CapabilityCard({
+  icon: Icon,
+  title,
+  ready,
+  body,
+}: {
+  icon: LucideIcon
+  title: string
+  ready: boolean
+  body: string
+}) {
+  return (
+    <div style={{ background: ready ? 'var(--success-tint)' : color.surface, border: `1px solid ${ready ? 'var(--success-line)' : color.line}`, borderRadius: radius.lg, padding: space[4], minHeight: 132 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], marginBottom: space[3] }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>
+          <Icon size={16} />
+          {title}
+        </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: ready ? color.success : color.ghost, fontSize: t.size.micro, fontWeight: t.weight.semibold, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          {ready ? <CheckCircle2 size={12} /> : <Lock size={12} />}
+          {ready ? 'Ready' : 'Locked'}
+        </span>
+      </div>
+      <p style={{ color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5, margin: 0 }}>{body}</p>
     </div>
   )
 }
