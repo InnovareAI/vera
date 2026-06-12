@@ -3,8 +3,8 @@
 // shelf. Saving goes through the client-secrets function (which authorizes via
 // canManageProject — the space owner / org admins); listing + revoking are
 // direct, gated by client_api_keys RLS (can_project_manage).
-import { useCallback, useEffect, useState } from 'react'
-import { Bot, CheckCircle2, Clapperboard, ImagePlus, KeyRound, Lock, Trash2, type LucideIcon } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Activity, Bot, CheckCircle2, Clapperboard, Clock3, ImagePlus, KeyRound, Lock, RefreshCw, Trash2, type LucideIcon } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { useProject } from '../lib/projectContext'
@@ -17,6 +17,21 @@ type ClientApiKey = {
   secret_preview: string | null
   status: 'active' | 'invalid' | 'revoked'
   last_used_at: string | null
+  created_at: string
+}
+
+type UsageMetadata = Record<string, unknown>
+
+type GenerationUsageRow = {
+  id: string
+  provider: string | null
+  operation: string | null
+  model_used: string | null
+  input_tokens: number | null
+  output_tokens: number | null
+  duration_ms: number | null
+  cost_usd: number | null
+  usage_metadata: UsageMetadata | null
   created_at: string
 }
 
@@ -39,6 +54,9 @@ export default function ClientKeys() {
   const [secret, setSecret] = useState('')
   const [config, setConfig] = useState('')
   const [saving, setSaving] = useState(false)
+  const [usageRows, setUsageRows] = useState<GenerationUsageRow[]>([])
+  const [usageLoading, setUsageLoading] = useState(true)
+  const [usageError, setUsageError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!activeProject?.id) { setKeys([]); setLoading(false); return }
@@ -53,6 +71,34 @@ export default function ClientKeys() {
   }, [activeProject?.id])
 
   useEffect(() => { void load() }, [load])
+
+  const loadUsage = useCallback(async () => {
+    if (!activeProject?.id) {
+      setUsageRows([])
+      setUsageLoading(false)
+      setUsageError(null)
+      return
+    }
+    setUsageLoading(true)
+    setUsageError(null)
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    const { data, error } = await supabase
+      .from('generation_log')
+      .select('id, provider, operation, model_used, input_tokens, output_tokens, duration_ms, cost_usd, usage_metadata, created_at')
+      .eq('project_id', activeProject.id)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(200)
+    if (error) {
+      setUsageRows([])
+      setUsageError(error.message)
+    } else {
+      setUsageRows((data ?? []) as GenerationUsageRow[])
+    }
+    setUsageLoading(false)
+  }, [activeProject?.id])
+
+  useEffect(() => { void loadUsage() }, [loadUsage])
 
   async function saveKey() {
     if (!activeProject?.id || !session?.access_token) return
@@ -96,6 +142,8 @@ export default function ClientKeys() {
     push({ kind: 'success', title: 'Key revoked' })
     await load()
   }
+
+  const usageSummary = useMemo(() => summarizeUsage(usageRows), [usageRows])
 
   if (!activeProject) return null
   const active = keys.filter(k => k.status === 'active')
@@ -150,6 +198,48 @@ export default function ClientKeys() {
           {clientCapabilities.map(item => (
             <CapabilityCard key={item.title} {...item} />
           ))}
+        </div>
+      </section>
+
+      <section style={{ marginBottom: space[8] }}>
+        <SectionLabel
+          style={{ marginBottom: space[3] }}
+          action={
+            <button
+              type="button"
+              onClick={() => void loadUsage()}
+              title="Refresh usage"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: 0, background: 'transparent', color: color.ghost, cursor: 'pointer', fontSize: t.size.micro, padding: 0 }}
+            >
+              <RefreshCw size={12} /> Refresh
+            </button>
+          }
+        >
+          Usage ledger
+        </SectionLabel>
+        <div style={card}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))', gap: space[3], marginBottom: space[5] }}>
+            <UsageMetric icon={Activity} label="Events" value={formatNumber(usageSummary.events)} detail="Last 30 days" tone="info" />
+            <UsageMetric icon={Bot} label="Text tokens" value={formatNumber(usageSummary.tokens)} detail={`${formatNumber(usageSummary.chatEvents)} chat turns`} tone="success" />
+            <UsageMetric icon={ImagePlus} label="Images" value={formatNumber(usageSummary.images)} detail={`${formatNumber(usageSummary.imageEvents)} image events`} tone="warn" />
+            <UsageMetric icon={Clapperboard} label="Videos" value={formatNumber(usageSummary.videos)} detail={`${formatNumber(usageSummary.videoEvents)} submits`} tone="danger" />
+            <UsageMetric icon={KeyRound} label="Client key" value={formatNumber(usageSummary.clientKeyEvents)} detail={`${formatNumber(usageSummary.platformKeyEvents)} platform-backed`} tone="success" />
+            <UsageMetric icon={Clock3} label="Known spend" value={formatMoney(usageSummary.knownCost)} detail={usageSummary.hasKnownCost ? 'From logged provider cost' : 'Provider billing pending'} tone="info" />
+          </div>
+
+          {usageError ? (
+            <div style={{ border: `1px solid ${color.danger}`, borderRadius: radius.md, padding: space[4], color: color.danger, fontSize: t.size.cap }}>
+              Usage could not load: {usageError}
+            </div>
+          ) : usageLoading ? (
+            <p style={{ fontSize: t.size.cap, color: color.ghost, margin: 0 }}>Loading usage...</p>
+          ) : usageRows.length === 0 ? (
+            <div style={{ border: `1px dashed ${color.line}`, borderRadius: radius.md, padding: space[5], textAlign: 'center' }}>
+              <p style={{ fontSize: t.size.cap, color: color.ghost, margin: 0 }}>No usage recorded in the last 30 days. Completed chat, image, and video runs will appear here.</p>
+            </div>
+          ) : (
+            <UsageTable rows={usageRows.slice(0, 12)} />
+          )}
         </div>
       </section>
 
@@ -223,6 +313,169 @@ export default function ClientKeys() {
       </section>
     </div>
   )
+}
+
+function UsageMetric({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  icon: LucideIcon
+  label: string
+  value: string
+  detail: string
+  tone: 'success' | 'warn' | 'danger' | 'info'
+}) {
+  const toneColor = tone === 'success' ? color.success : tone === 'warn' ? color.warn : tone === 'danger' ? color.danger : color.info
+  return (
+    <div style={{ background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[4], minHeight: 98 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], marginBottom: space[3] }}>
+        <span style={{ fontSize: t.size.micro, color: color.ghost, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: t.weight.semibold }}>{label}</span>
+        <Icon size={15} style={{ color: toneColor }} />
+      </div>
+      <div style={{ color: color.ink, fontSize: t.size.h3, fontWeight: 650, lineHeight: 1.1 }}>{value}</div>
+      <div style={{ color: color.faint, fontSize: t.size.micro, marginTop: space[2] }}>{detail}</div>
+    </div>
+  )
+}
+
+function UsageTable({ rows }: { rows: GenerationUsageRow[] }) {
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 680 }}>
+        <thead>
+          <tr style={{ borderBottom: `1px solid ${color.line}` }}>
+            {['When', 'Operation', 'Provider', 'Model', 'Meter', 'Key'].map(label => (
+              <th key={label} style={{ textAlign: 'left', padding: `${space[2]} ${space[3]}`, color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: t.weight.semibold }}>
+                {label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => {
+            const metadata = safeMetadata(row.usage_metadata)
+            const keySource = typeof metadata.key_source === 'string' ? metadata.key_source : 'unknown'
+            return (
+              <tr key={row.id} style={{ borderBottom: `1px solid ${color.line}` }}>
+                <td style={cellStyle}>{formatDateTime(row.created_at)}</td>
+                <td style={cellStyle}>{formatOperation(row.operation)}</td>
+                <td style={cellStyle}>{providerLabel(row.provider ?? '')}</td>
+                <td style={{ ...cellStyle, maxWidth: 220 }}>
+                  <span title={row.model_used ?? ''} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: t.family.mono }}>
+                    {row.model_used ?? 'unknown'}
+                  </span>
+                </td>
+                <td style={cellStyle}>{formatMeter(row, metadata)}</td>
+                <td style={cellStyle}>
+                  <span style={{ color: keySource === 'client' ? color.success : keySource === 'platform' ? color.warn : color.ghost, fontWeight: t.weight.semibold }}>
+                    {formatKeySource(keySource)}
+                  </span>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+const cellStyle: React.CSSProperties = {
+  padding: `${space[3]} ${space[3]}`,
+  color: color.ink2,
+  fontSize: t.size.cap,
+  verticalAlign: 'middle',
+}
+
+function summarizeUsage(rows: GenerationUsageRow[]) {
+  return rows.reduce(
+    (summary, row) => {
+      const metadata = safeMetadata(row.usage_metadata)
+      const operation = row.operation ?? ''
+      const tokens = (row.input_tokens ?? 0) + (row.output_tokens ?? 0)
+      summary.events += 1
+      summary.tokens += tokens
+      if (operation === 'chat.message') summary.chatEvents += 1
+      if (operation.startsWith('image.')) {
+        summary.imageEvents += 1
+        summary.images += numberFromMetadata(metadata.num_images, 1)
+      }
+      if (operation.startsWith('video.')) {
+        summary.videoEvents += 1
+        summary.videos += 1
+      }
+      if (metadata.key_source === 'client') summary.clientKeyEvents += 1
+      if (metadata.key_source === 'platform') summary.platformKeyEvents += 1
+      if (typeof row.cost_usd === 'number') {
+        summary.knownCost += row.cost_usd
+        summary.hasKnownCost = true
+      }
+      return summary
+    },
+    {
+      events: 0,
+      tokens: 0,
+      chatEvents: 0,
+      images: 0,
+      imageEvents: 0,
+      videos: 0,
+      videoEvents: 0,
+      clientKeyEvents: 0,
+      platformKeyEvents: 0,
+      knownCost: 0,
+      hasKnownCost: false,
+    },
+  )
+}
+
+function safeMetadata(value: UsageMetadata | null): UsageMetadata {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function numberFromMetadata(value: unknown, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function formatMeter(row: GenerationUsageRow, metadata: UsageMetadata) {
+  const operation = row.operation ?? ''
+  if (operation === 'chat.message') {
+    return `${formatNumber((row.input_tokens ?? 0) + (row.output_tokens ?? 0))} tokens`
+  }
+  if (operation.startsWith('image.')) {
+    return `${formatNumber(numberFromMetadata(metadata.num_images, 1))} image${numberFromMetadata(metadata.num_images, 1) === 1 ? '' : 's'}`
+  }
+  if (operation.startsWith('video.')) {
+    const estimate = typeof metadata.estimate === 'string' ? metadata.estimate : null
+    return estimate ?? '1 submit'
+  }
+  if (row.duration_ms) return `${Math.round(row.duration_ms / 100) / 10}s`
+  return 'Recorded'
+}
+
+function formatOperation(value: string | null) {
+  if (!value) return 'Unknown'
+  return value.split('.').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
+}
+
+function formatKeySource(value: string) {
+  if (value === 'client') return 'Client'
+  if (value === 'platform') return 'Platform'
+  return 'Unknown'
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value)
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 }
 
 function CapabilityCard({
