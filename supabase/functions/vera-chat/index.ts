@@ -32,7 +32,7 @@ import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
 import { hasAiUserEntitlement } from '../_shared/ai-entitlements.ts'
-import { DEFAULT_AI_POLICY, checkProjectAiBudget, loadProjectAiPolicy } from '../_shared/ai-policy.ts'
+import { DEFAULT_AI_POLICY, checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError } from '../_shared/ai-policy.ts'
 import { isPlatformMediaProject } from '../_shared/client-media-keys.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { completeText, type TextRuntime } from '../_shared/text-runtime.ts'
@@ -3868,6 +3868,17 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
+function resolveOpenRouterTextModel(value: string | null): string | null {
+  return value && value.trim() ? value.trim() : null
+}
+
+function resolveAnthropicTextModel(value: string | null): string | null {
+  if (!value || !value.trim()) return null
+  const raw = value.trim()
+  if (raw.startsWith('anthropic/')) return raw.slice('anthropic/'.length)
+  return raw.startsWith('claude-') ? raw : null
+}
+
 const MAX_TOOL_ROUNDS = 5  // safety cap so a tool loop can't run forever
 
 // Text model used when a project runs its chat on its own OpenRouter key.
@@ -4136,8 +4147,17 @@ Deno.serve(async (req) => {
   //   • client space with its own Anthropic key -> Sonnet on their key
   //   • client spaces without BYOK text keys are blocked, never routed onto
   //     the InnovareAI platform key.
+  let aiPolicy = DEFAULT_AI_POLICY
+  if (projectId) {
+    try {
+      aiPolicy = await loadProjectAiPolicy(supabase, projectId)
+    } catch {
+      aiPolicy = DEFAULT_AI_POLICY
+    }
+  }
   if (platformTextAllowed && !anthropicKey) return jsonError('ANTHROPIC_API_KEY not configured', 500)
-  const effectiveModel = MODEL
+  const effectiveModel = resolveAnthropicTextModel(aiPolicy.defaultTextModel) ?? MODEL
+  const openRouterChatModel = resolveOpenRouterTextModel(aiPolicy.defaultTextModel) ?? OPENROUTER_TEXT_MODEL
   let effectiveApiKey = platformTextAllowed ? anthropicKey : ''
   let clientAnthropicKey: string | null = null
 
@@ -4159,6 +4179,7 @@ Deno.serve(async (req) => {
       return jsonError(error instanceof Error ? error.message : 'Could not load OpenRouter key for this client space.', 500)
     }
   }
+  if (clientOpenRouterKey) effectiveApiKey = clientOpenRouterKey
   if (!platformTextAllowed && projectId && !clientOpenRouterKey) {
     try {
       const { data: ownAnthropic } = await supabase.from('client_api_keys')
@@ -4212,14 +4233,6 @@ Deno.serve(async (req) => {
       operatorHasPlatformVideo = false
     }
   }
-  let aiPolicy = DEFAULT_AI_POLICY
-  if (projectId) {
-    try {
-      aiPolicy = await loadProjectAiPolicy(supabase, projectId)
-    } catch {
-      aiPolicy = DEFAULT_AI_POLICY
-    }
-  }
   const platformMediaProject = platformKeyProject
   const allowImageGeneration = !!projectId && aiPolicy.imagesEnabled && (
     platformMediaProject ||
@@ -4227,7 +4240,13 @@ Deno.serve(async (req) => {
     clientHasOpenAIKey ||
     clientHasFalKey
   )
-  const allowVideoGeneration = (clientHasFalKey && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled)) || operatorHasPlatformVideo
+  const videoPolicyBudgetError = aiPolicy.standardVideoEnabled
+    ? paidMediaBudgetCapError(aiPolicy, 'video')
+    : aiPolicy.premiumMediaEnabled
+      ? paidMediaBudgetCapError(aiPolicy, 'premium_media')
+      : null
+  const clientVideoPolicyReady = clientHasFalKey && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled) && !videoPolicyBudgetError
+  const allowVideoGeneration = clientVideoPolicyReady || operatorHasPlatformVideo
   const platformOnlyTools = new Set(['run_pipeline', 'run_audit'])
   const enabledTools = TOOLS.filter(tool => {
     if (!platformTextAllowed && platformOnlyTools.has(tool.name)) return false
@@ -4253,7 +4272,9 @@ Deno.serve(async (req) => {
       type: 'text' as const,
       text: [
         '<media_capabilities>',
-        clientHasFalKey
+        videoPolicyBudgetError
+          ? videoPolicyBudgetError
+          : clientHasFalKey
           ? 'Real video generation is unavailable in this client space because the client AI usage policy disables video generation.'
           : 'Real video generation is unavailable in this client space because no client-owned FAL key or operator platform video entitlement is configured.',
         'Do not offer, promise, or call generate_video. If the operator asks for video, create a written production brief with generate_video_brief instead.',
@@ -4274,7 +4295,7 @@ Deno.serve(async (req) => {
   // Haiku doesn't accept Sonnet's extended-thinking param — only enable on Sonnet.
   const useThinking = enableThinking && effectiveModel === MODEL
   const chatProvider = clientOpenRouterKey ? 'openrouter' : 'anthropic'
-  const chatModel = clientOpenRouterKey ? OPENROUTER_TEXT_MODEL : effectiveModel
+  const chatModel = clientOpenRouterKey ? openRouterChatModel : effectiveModel
   const chatKeySource: TextRuntime['keySource'] = clientOpenRouterKey ? 'client' : (platformTextAllowed ? 'platform' : 'client')
   const textRuntime: TextRuntime = chatProvider === 'openrouter'
     ? { provider: 'openrouter', key: effectiveApiKey, model: chatModel, keySource: 'client' }
@@ -4345,7 +4366,7 @@ Deno.serve(async (req) => {
           // This project runs its text on its own OpenRouter key (off platform).
           const r = await runOpenRouterAgent({
             apiKey: clientOpenRouterKey,
-            model: OPENROUTER_TEXT_MODEL,
+            model: chatModel,
             systemText: (systemBlocks as Array<{ text?: string }>).map(b => b.text ?? '').join('\n\n'),
             convo,
             tools: enabledTools as unknown as Array<{ name: string; description?: string; input_schema?: unknown }>,

@@ -14,7 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember } from "../_shared/auth.ts"
-import { checkProjectAiBudget, loadProjectAiPolicy } from "../_shared/ai-policy.ts"
+import { checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError } from "../_shared/ai-policy.ts"
 import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
 
@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return jsonError('Method not allowed', 405)
   const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
 
-  const { prompt, model = DEFAULT_IMAGE_MODEL, image_size = 'square_hd', num_images = 1, quality = 'high', project_id, post_id } = await req.json().catch(() => ({}))
+  const { prompt, model: requestedModel, image_size = 'square_hd', num_images = 1, quality = 'high', project_id, post_id } = await req.json().catch(() => ({}))
   if (!prompt) return jsonError('prompt is required', 400)
   const projectId = typeof project_id === 'string' ? project_id.trim() : ''
   const postId = typeof post_id === 'string' && post_id.trim() ? post_id.trim() : null
@@ -108,9 +108,14 @@ Deno.serve(async (req) => {
   const access = await requireProjectMember(req, supabase, SERVICE_KEY, projectId, corsHeaders)
   if (!access.ok) return access.response
   const aiPolicy = await loadProjectAiPolicy(supabase, projectId)
+  const model = cleanModelAlias(requestedModel) ?? aiPolicy.defaultImageModel ?? DEFAULT_IMAGE_MODEL
   if (!aiPolicy.imagesEnabled) return jsonError('Image generation is disabled for this client space.', 403)
   if (isPremiumImageModel(model) && !aiPolicy.premiumMediaEnabled) {
     return jsonError('Premium image models are disabled for this client space. Use nano-banana, Seedream, Qwen, or another standard model.', 402)
+  }
+  if (isPremiumImageModel(model)) {
+    const budgetCapError = paidMediaBudgetCapError(aiPolicy, 'premium_media')
+    if (budgetCapError) return jsonError(budgetCapError, 402)
   }
   const mediaKeys = await resolveMediaKeys(supabase, projectId, access.orgId)
   if (!mediaKeys.ok) return mediaKeys.response
@@ -440,6 +445,10 @@ function isPremiumImageModel(value: unknown): boolean {
   if (!normalized) return false
   if (PREMIUM_IMAGE_ALIASES.has(normalized)) return true
   return normalized.includes('gpt-image-2') || normalized.includes('/gpt-image-2')
+}
+
+function cleanModelAlias(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 type MediaKeys = {

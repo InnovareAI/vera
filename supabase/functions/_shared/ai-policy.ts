@@ -7,6 +7,10 @@ export type ProjectAiPolicy = {
   standardVideoEnabled: boolean
   premiumMediaEnabled: boolean
   monthlyBudgetUsd: number | null
+  defaultTextModel: string | null
+  defaultImageModel: string
+  defaultVideoModel: string
+  defaultImageVideoModel: string
 }
 
 export const DEFAULT_AI_POLICY: ProjectAiPolicy = {
@@ -14,6 +18,10 @@ export const DEFAULT_AI_POLICY: ProjectAiPolicy = {
   standardVideoEnabled: false,
   premiumMediaEnabled: false,
   monthlyBudgetUsd: null,
+  defaultTextModel: null,
+  defaultImageModel: "nano-banana",
+  defaultVideoModel: "hailuo",
+  defaultImageVideoModel: "hailuo-i2v",
 }
 
 export async function loadProjectAiPolicy(
@@ -37,7 +45,18 @@ export function parseProjectAiPolicy(value: Json | null | undefined): ProjectAiP
     standardVideoEnabled: booleanValue(policy.standard_video_enabled, DEFAULT_AI_POLICY.standardVideoEnabled),
     premiumMediaEnabled: booleanValue(policy.premium_media_enabled, DEFAULT_AI_POLICY.premiumMediaEnabled),
     monthlyBudgetUsd: positiveNumberValue(policy.monthly_budget_usd),
+    defaultTextModel: stringValue(policy.default_text_model, DEFAULT_AI_POLICY.defaultTextModel),
+    defaultImageModel: stringValue(policy.default_image_model, DEFAULT_AI_POLICY.defaultImageModel) ?? DEFAULT_AI_POLICY.defaultImageModel,
+    defaultVideoModel: stringValue(policy.default_video_model, DEFAULT_AI_POLICY.defaultVideoModel) ?? DEFAULT_AI_POLICY.defaultVideoModel,
+    defaultImageVideoModel: stringValue(policy.default_image_video_model, DEFAULT_AI_POLICY.defaultImageVideoModel) ?? DEFAULT_AI_POLICY.defaultImageVideoModel,
   }
+}
+
+export function paidMediaBudgetCapError(policy: ProjectAiPolicy, mediaKind: "video" | "premium_media"): string | null {
+  if (policy.monthlyBudgetUsd && policy.monthlyBudgetUsd > 0) return null
+  return mediaKind === "video"
+    ? "Set a monthly AI budget cap before enabling client-paid video rendering."
+    : "Set a monthly AI budget cap before enabling premium media models."
 }
 
 export type ProjectAiBudgetCheck =
@@ -107,4 +126,8 @@ function booleanValue(value: Json | undefined, fallback: boolean): boolean {
 
 function positiveNumberValue(value: Json | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null
+}
+
+function stringValue(value: Json | undefined, fallback: string | null): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback
 }

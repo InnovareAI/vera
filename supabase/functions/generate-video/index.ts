@@ -15,7 +15,7 @@ import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember, requireSignedInOrService } from "../_shared/auth.ts"
 import { hasAiUserEntitlement, userCanAccessProject } from "../_shared/ai-entitlements.ts"
-import { checkProjectAiBudget, loadProjectAiPolicy } from "../_shared/ai-policy.ts"
+import { checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError } from "../_shared/ai-policy.ts"
 import { loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
 
@@ -157,11 +157,12 @@ Deno.serve(async (req) => {
   const access = await requireProjectMember(req, supabase, SERVICE_KEY, projectId, corsHeaders)
   if (!access.ok) return access.response
   const operatorUserId = access.service ? cleanString(operator_user_id) : access.userId
+  const aiPolicy = await loadProjectAiPolicy(supabase, projectId)
+  const requestedModel = cleanString(model) ?? (image_url ? aiPolicy.defaultImageVideoModel : aiPolicy.defaultVideoModel)
 
-  const resolved = resolveVideoModel(model, !!image_url)
+  const resolved = resolveVideoModel(requestedModel, !!image_url)
   if (!resolved.ok) return resolved.response
   const { alias, model: selectedModel, slug } = resolved
-  const aiPolicy = await loadProjectAiPolicy(supabase, projectId)
 
   let platformStandardVideoAllowed = false
   let platformPremiumVideoAllowed = false
@@ -196,6 +197,10 @@ Deno.serve(async (req) => {
   const tierPlatformAllowed = selectedModel.tier === 'standard'
     ? platformStandardVideoAllowed
     : platformPremiumVideoAllowed
+  if (tierPolicyAllowed) {
+    const budgetCapError = paidMediaBudgetCapError(aiPolicy, selectedModel.tier === 'premium' ? 'premium_media' : 'video')
+    if (budgetCapError) return jsonError(budgetCapError, 402)
+  }
 
   if (selectedModel.tier === 'standard' && !tierPolicyAllowed && !tierPlatformAllowed) {
     return jsonError('Video generation is disabled for this client space. Enable standard video in the client AI usage policy first.', 403)

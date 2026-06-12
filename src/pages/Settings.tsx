@@ -6,7 +6,7 @@ import { useProject } from '../lib/projectContext'
 import { useAuth } from '../lib/auth'
 import {
   Settings2, Users, Mic2, Plug, Building2, Save,
-  CheckCircle2, AlertCircle, Sun, Moon, Monitor, BarChart3, ShieldCheck, RefreshCw
+  CheckCircle2, AlertCircle, Sun, Moon, Monitor, BarChart3, ShieldCheck, RefreshCw, KeyRound
 } from 'lucide-react'
 import { PublishersCard } from '../components/PublishersCard'
 import { ClientIntegrationsCard } from '../components/ClientIntegrationsCard'
@@ -554,21 +554,24 @@ function IntegrationsTab() {
       {/* AI Model Settings */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100">
-          <div className="text-sm font-medium text-gray-800">AI Model Settings</div>
-          <div className="text-xs text-gray-400 mt-0.5">Configure the models powering VERA</div>
+          <div className="text-sm font-medium text-gray-800">AI model defaults</div>
+          <div className="text-xs text-gray-400 mt-0.5">Model defaults are managed per client space so spend and quality stay tied to the right provider keys.</div>
         </div>
         <div className="px-4 py-3 space-y-3">
-          {[
-            { key: 'default_text_model', label: 'Default Text Model', placeholder: 'claude-sonnet-4-6' },
-            { key: 'default_image_model', label: 'Image Generation Model', placeholder: 'google/gemini-3.1-flash-image-preview' },
-          ].map(({ key, label, placeholder }) => (
-            <Field key={key} label={label}>
-              <input className="input" placeholder={placeholder} defaultValue="" />
-            </Field>
-          ))}
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Open a client space, then go to API keys to set text, image, and video defaults. Premium image and video models require an explicit monthly cap before they can run.
+          </p>
+          <button
+            type="button"
+            onClick={() => { window.location.href = '/clients' }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 transition-colors"
+          >
+            <KeyRound size={12} />
+            Open client spaces
+          </button>
           <p className="text-[10px] text-gray-400">
             <AlertCircle size={10} className="inline mr-0.5" />
-            Model overrides apply to new generations only. Stored in org settings.
+            Model defaults apply to new generations only. Existing drafts and jobs keep the model they already used.
           </p>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import Anthropic from "npm:@anthropic-ai/sdk"
 import type { AdminClient } from "./auth.ts"
+import { loadProjectAiPolicy } from "./ai-policy.ts"
 import { isPlatformMediaProject, loadClientApiKey } from "./client-media-keys.ts"
 
 const PLATFORM_ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? ""
@@ -25,9 +26,15 @@ export async function resolveProjectTextRuntime(
     purpose?: string
   } = {},
 ): Promise<TextRuntimeResult> {
-  const anthropicModel = opts.anthropicModel ?? DEFAULT_ANTHROPIC_MODEL
-  const openRouterModel = opts.openRouterModel ?? DEFAULT_OPENROUTER_MODEL
   const purpose = opts.purpose ?? "this AI operation"
+  let defaultTextModel: string | null = null
+  try {
+    defaultTextModel = (await loadProjectAiPolicy(supabase, projectId)).defaultTextModel
+  } catch {
+    defaultTextModel = null
+  }
+  const anthropicModel = opts.anthropicModel ?? resolveAnthropicTextModel(defaultTextModel) ?? DEFAULT_ANTHROPIC_MODEL
+  const openRouterModel = opts.openRouterModel ?? resolveOpenRouterTextModel(defaultTextModel) ?? DEFAULT_OPENROUTER_MODEL
 
   let platformProject: boolean
   try {
@@ -206,4 +213,15 @@ async function completeOpenRouter(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function resolveOpenRouterTextModel(value: string | null): string | null {
+  return value && value.trim() ? value.trim() : null
+}
+
+function resolveAnthropicTextModel(value: string | null): string | null {
+  if (!value || !value.trim()) return null
+  const raw = value.trim()
+  if (raw.startsWith("anthropic/")) return raw.slice("anthropic/".length)
+  return raw.startsWith("claude-") ? raw : null
 }

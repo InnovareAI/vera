@@ -40,6 +40,10 @@ type AiPolicy = {
   standard_video_enabled: boolean
   premium_media_enabled: boolean
   monthly_budget_usd: number | null
+  default_text_model: string | null
+  default_image_model: string
+  default_video_model: string
+  default_image_video_model: string
 }
 
 const DEFAULT_AI_POLICY: AiPolicy = {
@@ -47,7 +51,31 @@ const DEFAULT_AI_POLICY: AiPolicy = {
   standard_video_enabled: false,
   premium_media_enabled: false,
   monthly_budget_usd: null,
+  default_text_model: null,
+  default_image_model: 'nano-banana',
+  default_video_model: 'hailuo',
+  default_image_video_model: 'hailuo-i2v',
 }
+
+const IMAGE_MODEL_OPTIONS = [
+  { value: 'nano-banana', label: 'Nano Banana, standard' },
+  { value: 'seedream', label: 'Seedream v4, standard' },
+  { value: 'seedream-v4.5', label: 'Seedream v4.5, standard' },
+  { value: 'qwen-image', label: 'Qwen Image, standard' },
+  { value: 'z-image-turbo', label: 'Z-Image Turbo, standard' },
+  { value: 'ideogram', label: 'Ideogram 3, premium' },
+  { value: 'recraft', label: 'Recraft v3, premium' },
+  { value: 'imagen-4', label: 'Imagen 4, premium' },
+  { value: 'gpt-image-2', label: 'OpenAI Image Gen 2, premium' },
+]
+
+const VIDEO_MODEL_OPTIONS = [
+  { value: 'hailuo', label: 'Hailuo text-to-video, standard' },
+]
+
+const IMAGE_VIDEO_MODEL_OPTIONS = [
+  { value: 'hailuo-i2v', label: 'Hailuo image-to-video, standard' },
+]
 
 const PROVIDERS = [
   { value: 'openrouter', label: 'OpenRouter (text + images)' },
@@ -73,6 +101,12 @@ export default function ClientKeys() {
   const [usageError, setUsageError] = useState<string | null>(null)
   const [aiPolicy, setAiPolicy] = useState<AiPolicy>(DEFAULT_AI_POLICY)
   const [budgetDraft, setBudgetDraft] = useState('')
+  const [modelDraft, setModelDraft] = useState({
+    default_text_model: '',
+    default_image_model: DEFAULT_AI_POLICY.default_image_model,
+    default_video_model: DEFAULT_AI_POLICY.default_video_model,
+    default_image_video_model: DEFAULT_AI_POLICY.default_image_video_model,
+  })
   const [policySaving, setPolicySaving] = useState(false)
 
   const load = useCallback(async () => {
@@ -121,6 +155,12 @@ export default function ClientKeys() {
     const next = parseAiPolicy(activeProject?.ai_policy)
     setAiPolicy(next)
     setBudgetDraft(next.monthly_budget_usd === null ? '' : String(next.monthly_budget_usd))
+    setModelDraft({
+      default_text_model: next.default_text_model ?? '',
+      default_image_model: next.default_image_model,
+      default_video_model: next.default_video_model,
+      default_image_video_model: next.default_image_video_model,
+    })
   }, [activeProject?.id, activeProject?.ai_policy])
 
   async function saveKey() {
@@ -186,6 +226,10 @@ export default function ClientKeys() {
   }
 
   function togglePolicy(key: 'images_enabled' | 'standard_video_enabled' | 'premium_media_enabled', value: boolean) {
+    if (value && (key === 'standard_video_enabled' || key === 'premium_media_enabled') && !aiPolicy.monthly_budget_usd) {
+      push({ kind: 'warn', title: 'Set a monthly cap first', body: 'Video and premium media require an explicit client budget cap.' })
+      return
+    }
     void saveAiPolicy({ ...aiPolicy, [key]: value })
   }
 
@@ -199,8 +243,23 @@ export default function ClientKeys() {
     const normalized = nextBudget !== null && nextBudget > 0
       ? Math.round(nextBudget * 100) / 100
       : null
+    if (normalized === null && (aiPolicy.standard_video_enabled || aiPolicy.premium_media_enabled)) {
+      push({ kind: 'warn', title: 'Keep a cap for paid media', body: 'Turn off video and premium media before clearing the monthly cap.' })
+      return
+    }
     setBudgetDraft(normalized === null ? '' : String(normalized))
     void saveAiPolicy({ ...aiPolicy, monthly_budget_usd: normalized })
+  }
+
+  function saveModelDefaults() {
+    const next: AiPolicy = {
+      ...aiPolicy,
+      default_text_model: modelDraft.default_text_model.trim() || null,
+      default_image_model: modelDraft.default_image_model || DEFAULT_AI_POLICY.default_image_model,
+      default_video_model: modelDraft.default_video_model || DEFAULT_AI_POLICY.default_video_model,
+      default_image_video_model: modelDraft.default_image_video_model || DEFAULT_AI_POLICY.default_image_video_model,
+    }
+    void saveAiPolicy(next)
   }
 
   const usageSummary = useMemo(() => summarizeUsage(usageRows), [usageRows])
@@ -306,6 +365,53 @@ export default function ClientKeys() {
           <p style={{ fontSize: t.size.micro, color: color.faint, margin: `${space[3]} 0 0`, lineHeight: 1.5 }}>
             Text generation stays available through the selected text provider. Video still requires a client-owned FAL key even when enabled here.
           </p>
+          <div style={{ marginTop: space[5], borderTop: `1px solid ${color.line}`, paddingTop: space[4] }}>
+            <SectionLabel style={{ marginBottom: space[3] }}>Model defaults</SectionLabel>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: space[3] }}>
+              <Field
+                label="Text model"
+                helper="Blank uses the provider default. OpenRouter accepts provider/model slugs."
+              >
+                <Input
+                  value={modelDraft.default_text_model}
+                  onChange={event => setModelDraft(prev => ({ ...prev, default_text_model: event.target.value }))}
+                  placeholder="anthropic/claude-sonnet-4.6"
+                />
+              </Field>
+              <Field label="Image model">
+                <Select
+                  value={modelDraft.default_image_model}
+                  onChange={event => setModelDraft(prev => ({ ...prev, default_image_model: event.target.value }))}
+                >
+                  {IMAGE_MODEL_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </Select>
+              </Field>
+              <Field label="Video model">
+                <Select
+                  value={modelDraft.default_video_model}
+                  onChange={event => setModelDraft(prev => ({ ...prev, default_video_model: event.target.value }))}
+                >
+                  {VIDEO_MODEL_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </Select>
+              </Field>
+              <Field label="Image-to-video model">
+                <Select
+                  value={modelDraft.default_image_video_model}
+                  onChange={event => setModelDraft(prev => ({ ...prev, default_image_video_model: event.target.value }))}
+                >
+                  {IMAGE_VIDEO_MODEL_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </Select>
+              </Field>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: space[3] }}>
+              <Button variant="secondary" leading={<Bot size={14} />} onClick={saveModelDefaults} disabled={policySaving}>
+                Save defaults
+              </Button>
+            </div>
+            <p style={{ fontSize: t.size.micro, color: color.faint, margin: `${space[3]} 0 0`, lineHeight: 1.5 }}>
+              Premium image defaults still require Premium media plus a monthly cap. OpenAI Image Gen 2 should stay a premium override, not the normal default.
+            </p>
+          </div>
           <div style={{ marginTop: space[5], borderTop: `1px solid ${color.line}`, paddingTop: space[4], display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) auto', gap: space[3], alignItems: 'end' }}>
             <Field
               label="Monthly cap (USD)"
@@ -628,6 +734,10 @@ function parseAiPolicy(value: unknown): AiPolicy {
     standard_video_enabled: typeof raw.standard_video_enabled === 'boolean' ? raw.standard_video_enabled : DEFAULT_AI_POLICY.standard_video_enabled,
     premium_media_enabled: typeof raw.premium_media_enabled === 'boolean' ? raw.premium_media_enabled : DEFAULT_AI_POLICY.premium_media_enabled,
     monthly_budget_usd: typeof raw.monthly_budget_usd === 'number' && Number.isFinite(raw.monthly_budget_usd) && raw.monthly_budget_usd > 0 ? raw.monthly_budget_usd : null,
+    default_text_model: typeof raw.default_text_model === 'string' && raw.default_text_model.trim() ? raw.default_text_model.trim() : null,
+    default_image_model: typeof raw.default_image_model === 'string' && raw.default_image_model.trim() ? raw.default_image_model.trim() : DEFAULT_AI_POLICY.default_image_model,
+    default_video_model: typeof raw.default_video_model === 'string' && raw.default_video_model.trim() ? raw.default_video_model.trim() : DEFAULT_AI_POLICY.default_video_model,
+    default_image_video_model: typeof raw.default_image_video_model === 'string' && raw.default_image_video_model.trim() ? raw.default_image_video_model.trim() : DEFAULT_AI_POLICY.default_image_video_model,
   }
 }
 
