@@ -27,7 +27,7 @@ export async function resolveProjectTextRuntime(
   } = {},
 ): Promise<TextRuntimeResult> {
   const purpose = opts.purpose ?? "this AI operation"
-  let defaultTextModel: string | null = null
+  let defaultTextModel: string | null
   try {
     defaultTextModel = (await loadProjectAiPolicy(supabase, projectId)).defaultTextModel
   } catch {

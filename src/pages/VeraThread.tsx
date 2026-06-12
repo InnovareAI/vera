@@ -24,6 +24,7 @@ import Markdown from '../components/Markdown'
 import { downloadMarkdown } from '../lib/exportDoc'
 import { markdownToText } from '../lib/mdToText'
 import { hasBusinessContext, parseProjectInstructions, type BusinessContext, type BusinessContextKey } from '../lib/businessContext'
+import { demandChannelMatrixPrompt, demandChannelsFromContext } from '../lib/demandModel'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -372,16 +373,7 @@ function buildDemandPlanSnapshot(context: BusinessContext): DemandPlanSnapshot {
     .filter(field => !context[field.key].trim())
     .map(field => field.label)
     .slice(0, 4)
-  const sourceChannels = [
-    context.linkedinCompany || context.linkedinProfile ? 'LinkedIn' : '',
-    context.youtube ? 'YouTube' : '',
-    context.medium ? 'Medium' : '',
-    context.quora ? 'Quora' : '',
-    context.reddit ? 'Reddit' : '',
-    context.instagram ? 'Instagram' : '',
-    context.facebook ? 'Facebook' : '',
-    context.x ? 'X' : '',
-  ].filter(Boolean)
+  const sourceChannels = demandChannelsFromContext(context, 8)
   const strategyChannels = splitList(context.channelStrategy, 6)
   const formats = splitList(context.contentFormats, 5)
   return {
@@ -1849,7 +1841,7 @@ function buildLaunchActions(stats: { pending: number; campaigns: number }): Laun
   a.push({ icon: PenLine, title: 'LinkedIn Demand Post', sub: 'ICP, pain, CTA', prompt: 'Draft a LinkedIn post that creates B2B top-of-funnel demand. Include ICP, pain point, market insight, proof angle, soft CTA, and the SAM follow-up signal to watch for.' })
   a.push({ icon: ImagePlus, title: 'Visual Asset', sub: 'Carousel or image', prompt: 'Create a platform-native visual asset for a B2B demand post. Recommend carousel, infographic, quote card, or custom image, then build the prompt and ask before rendering.' })
   a.push({ icon: Clapperboard, title: 'Video Storyboard', sub: 'Scenes and cost', prompt: 'Create a storyboard for a short B2B demand video. Include scene beats, timing, camera notes, caption, model recommendation, and estimated prototype cost. Do not render until I explicitly approve the paid generation.' })
-  a.push({ icon: Zap, title: 'Repurpose Across Channels', sub: 'YT, Medium, Quora, Reddit, X', prompt: 'Turn one core B2B demand idea into platform-native versions for LinkedIn, YouTube, Medium, Quora, Reddit, and X. Keep each version native to the channel.' })
+  a.push({ icon: Zap, title: 'Repurpose Across Channels', sub: 'YT, Medium, Quora, Reddit, X', prompt: 'Turn one core B2B demand idea into platform-native versions for LinkedIn, YouTube, Medium, Quora, Reddit, Instagram, Facebook, blog, email, and X where relevant. Keep each version native to the channel and identify which ones should be manual, connected, or read-only.' })
   a.push(stats.campaigns > 0
     ? { icon: Lightbulb, title: 'SAM Handoff Angles', sub: 'Comments, shares, traffic', prompt: 'Find content topics and engagement signals that should hand off to SAM. Turn comments, shares, clicks, and objections into sales research angles.' }
     : { icon: Lightbulb, title: 'Demand Angles', sub: 'Fresh market hooks', prompt: "Give me 5 B2B demand angles grounded in this client's offer, ICP, buyer pains, proof points, and current market conversations." })
@@ -2017,7 +2009,7 @@ function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {
     cursor: 'pointer',
   }
   const planCampaignPrompt = `Use the saved Demand Brain and operating model for ${projectName} to plan the next B2B top-of-funnel demand campaign. Include ICP, pain, offer, conversion path, approval model, channel roles, content formats, success signals, SAM handoff rules, and the first content batch.`
-  const channelMatrixPrompt = `Build a channel-native distribution matrix for ${projectName}. Cover LinkedIn, YouTube, Medium, Quora, Reddit, and X where relevant. For each channel, define content angle, format, CTA, engagement signal, and what should be handed to SAM.`
+  const channelMatrixPrompt = demandChannelMatrixPrompt(projectName)
   const handoffPrompt = `Create a SAM handoff plan for ${projectName}. Define which comments, shares, clicks, objections, questions, accounts, and traffic signals should become sales research or follow-up, and how VERA should label them.`
   return (
     <section style={{ width: '100%', maxWidth: 760, marginTop: space[5], padding: space[5], background: color.surface, border: `1px solid ${ready ? 'var(--accent-line)' : color.line}`, borderRadius: radius.lg, textAlign: 'left', boxShadow: ready ? 'var(--shadow-pop)' : 'none' }}>

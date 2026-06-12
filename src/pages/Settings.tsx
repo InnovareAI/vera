@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import type { BrandVoice, PlatformConfig } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -11,6 +11,7 @@ import {
 import { PublishersCard } from '../components/PublishersCard'
 import { ClientIntegrationsCard } from '../components/ClientIntegrationsCard'
 import { useTheme, type Theme } from '../lib/themeContext'
+import { DEMAND_PLATFORM_DEFINITIONS, type DemandPlatformKey } from '../lib/demandModel'
 
 type Tab = 'workspace' | 'team' | 'brand' | 'integrations' | 'usage'
 
@@ -48,17 +49,22 @@ type PlatformRuleSetting = {
   note: string
 }
 
+function demandPlatformNote(key: DemandPlatformKey, fallback: string) {
+  const platform = DEMAND_PLATFORM_DEFINITIONS.find(item => item.key === key)
+  return platform ? `${platform.role} ${platform.workflow}` : fallback
+}
+
 const PLATFORM_RULES: PlatformRuleSetting[] = [
-  { id: 'linkedin', label: 'LinkedIn', initials: 'Li', swatch: 'bg-blue-100 text-blue-700', charPlaceholder: '3000', noteTitle: 'Connected through Unipile', note: 'Use this section for channel-specific voice, limits, and model overrides. OAuth and publishing permissions live in Agentic integrations above.' },
-  { id: 'x', label: 'X', initials: 'X', swatch: 'bg-sky-100 text-sky-700', aliases: ['twitter'], charPlaceholder: '280', noteTitle: 'Manual-first channel', note: 'X stays lower priority because API access can be expensive. Use these rules for drafts and manual handoff until an approved connector is enabled.' },
-  { id: 'instagram', label: 'Instagram', initials: 'IG', swatch: 'bg-pink-100 text-pink-700', charPlaceholder: '2200', noteTitle: 'Meta connector', note: 'Use this section for caption rules and creative tone. Account permissions are managed through the Meta integration above.' },
-  { id: 'facebook', label: 'Facebook', initials: 'FB', swatch: 'bg-indigo-100 text-indigo-700', charPlaceholder: '63206', noteTitle: 'Meta connector', note: 'Use this section for Page copy rules. Account permissions are managed through the Meta integration above.' },
-  { id: 'youtube', label: 'YouTube', initials: 'YT', swatch: 'bg-red-100 text-red-700', charPlaceholder: '5000', noteTitle: 'Google connector', note: 'Use this section for video titles, descriptions, Shorts, and long-form tone. Channel access is managed through the YouTube integration above.' },
-  { id: 'medium', label: 'Medium', initials: 'Me', swatch: 'bg-stone-100 text-stone-700', charPlaceholder: '10000', noteTitle: 'Manual publishing', note: 'No API token needed. Add the Medium profile or publication URL in Agentic integrations for RSS ingestion and manual handoff.' },
-  { id: 'quora', label: 'Quora', initials: 'Qu', swatch: 'bg-red-100 text-red-700', charPlaceholder: '5000', noteTitle: 'Answer handoff', note: 'Use this section for answer style, proof rules, and CTA restraint. Final posting remains manual unless a client-specific adapter is approved.' },
-  { id: 'reddit', label: 'Reddit', initials: 'Rd', swatch: 'bg-orange-100 text-orange-700', charPlaceholder: '40000', noteTitle: 'Community-first channel', note: 'Use this section for subreddit tone, rule sensitivity, and non-promotional framing. Vera should research and draft before any human-approved posting.' },
-  { id: 'blog', label: 'Blog', initials: 'Bl', swatch: 'bg-amber-100 text-amber-700', charPlaceholder: '10000', noteTitle: 'CMS handoff', note: 'Use this section for article structure and editorial tone. Publishing credentials belong in WordPress or CMS integrations above.' },
-  { id: 'email', label: 'Email', initials: 'Em', swatch: 'bg-emerald-100 text-emerald-700', charPlaceholder: '5000', noteTitle: 'Nurture channel', note: 'Use this section for newsletter or nurture tone. ESP credentials and sending approvals should stay in dedicated integrations, not in channel rules.' },
+  { id: 'linkedin', label: 'LinkedIn', initials: 'Li', swatch: 'bg-blue-100 text-blue-700', charPlaceholder: '3000', noteTitle: 'Connected through Unipile', note: demandPlatformNote('linkedin', 'Use this section for channel-specific voice, limits, and model overrides.') },
+  { id: 'x', label: 'X', initials: 'X', swatch: 'bg-sky-100 text-sky-700', aliases: ['twitter'], charPlaceholder: '280', noteTitle: 'Manual-first channel', note: demandPlatformNote('x', 'Use these rules for drafts and manual handoff until an approved connector is enabled.') },
+  { id: 'instagram', label: 'Instagram', initials: 'IG', swatch: 'bg-pink-100 text-pink-700', charPlaceholder: '2200', noteTitle: 'Meta connector', note: demandPlatformNote('instagram', 'Use this section for caption rules and creative tone.') },
+  { id: 'facebook', label: 'Facebook', initials: 'FB', swatch: 'bg-indigo-100 text-indigo-700', charPlaceholder: '63206', noteTitle: 'Meta connector', note: demandPlatformNote('facebook', 'Use this section for Page copy rules.') },
+  { id: 'youtube', label: 'YouTube', initials: 'YT', swatch: 'bg-red-100 text-red-700', charPlaceholder: '5000', noteTitle: 'Google connector', note: demandPlatformNote('youtube', 'Use this section for video titles, descriptions, Shorts, and long-form tone.') },
+  { id: 'medium', label: 'Medium', initials: 'Me', swatch: 'bg-stone-100 text-stone-700', charPlaceholder: '10000', noteTitle: 'Manual publishing', note: demandPlatformNote('medium', 'No API token needed. Add the Medium profile or publication URL for ingestion and manual handoff.') },
+  { id: 'quora', label: 'Quora', initials: 'Qu', swatch: 'bg-red-100 text-red-700', charPlaceholder: '5000', noteTitle: 'Answer handoff', note: demandPlatformNote('quora', 'Use this section for answer style, proof rules, and CTA restraint.') },
+  { id: 'reddit', label: 'Reddit', initials: 'Rd', swatch: 'bg-orange-100 text-orange-700', charPlaceholder: '40000', noteTitle: 'Community-first channel', note: demandPlatformNote('reddit', 'Use this section for subreddit tone, rule sensitivity, and non-promotional framing.') },
+  { id: 'blog', label: 'Blog', initials: 'Bl', swatch: 'bg-amber-100 text-amber-700', charPlaceholder: '10000', noteTitle: 'CMS handoff', note: demandPlatformNote('blog', 'Publishing credentials belong in WordPress or CMS integrations above.') },
+  { id: 'email', label: 'Email', initials: 'Em', swatch: 'bg-emerald-100 text-emerald-700', charPlaceholder: '5000', noteTitle: 'Nurture channel', note: demandPlatformNote('email', 'ESP credentials and sending approvals should stay in dedicated integrations, not in channel rules.') },
 ]
 function findPlatformRuleConfig(existing: Partial<PlatformConfig>[], setting: PlatformRuleSetting) {
   const aliases = new Set([setting.id, ...(setting.aliases ?? [])])
@@ -622,7 +628,7 @@ function AiUsageTab() {
   const summary = useMemo(() => summarizeWorkspaceUsage(usageRows), [usageRows])
   const providerRows = useMemo(() => summarizeByProvider(usageRows), [usageRows])
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!activeOrg?.id) return
     setLoading(true)
     setError(null)
@@ -652,9 +658,9 @@ function AiUsageTab() {
       setEntitlements(visibleEntitlements)
     }
     setLoading(false)
-  }
+  }, [activeOrg?.id, projectIds])
 
-  useEffect(() => { void load() }, [activeOrg?.id, projects])
+  useEffect(() => { void load() }, [load])
 
   return (
     <div className="max-w-5xl space-y-5">

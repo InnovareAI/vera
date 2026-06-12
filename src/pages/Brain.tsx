@@ -26,6 +26,15 @@ import {
   type BusinessContext,
   type BusinessContextKey,
 } from '../lib/businessContext'
+import {
+  DEMAND_APPROVAL_MODES,
+  DEMAND_CONTENT_JOBS,
+  DEMAND_OUTCOME_SIGNALS,
+  DEMAND_PLATFORM_DEFINITIONS,
+  DEMAND_SOURCE_KEYS,
+  DEFAULT_DEMAND_OPERATING_MODEL,
+  applyDemandDefaults,
+} from '../lib/demandModel'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -47,20 +56,6 @@ const BUSINESS_DOC_ACCEPT = [
   '.htm',
 ].join(',')
 const MAX_BUSINESS_DOC_BYTES = 20 * 1024 * 1024
-const BUSINESS_SOURCE_KEYS: BusinessContextKey[] = [
-  'website',
-  'linkedinCompany',
-  'linkedinProfile',
-  'linkedinEvents',
-  'linkedinNewsletter',
-  'instagram',
-  'youtube',
-  'medium',
-  'quora',
-  'reddit',
-  'facebook',
-  'x',
-]
 type SourcePullReport = { label?: string; ok?: boolean; items?: number; error?: string }
 
 function fileExtension(name: string) {
@@ -111,6 +106,26 @@ function mergeExtractedContext(current: BusinessContext, extracted: Partial<Busi
     if (typeof value === 'string' && value.trim()) next[key] = value.trim()
   }
   return next
+}
+
+function DemandDefaultPanel({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div style={{ padding: space[4], background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, minWidth: 0 }}>
+      <div style={{ fontSize: t.size.micro, color: color.ghost, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold, marginBottom: space[2] }}>{title}</div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {items.slice(0, 7).map(item => (
+          <span key={item} style={{ padding: '4px 8px', borderRadius: radius.pill, background: color.surface, border: `1px solid ${color.line}`, color: color.ink2, fontSize: t.size.micro, lineHeight: 1.2 }}>
+            {item}
+          </span>
+        ))}
+        {items.length > 7 && (
+          <span style={{ padding: '4px 8px', borderRadius: radius.pill, color: color.ghost, fontSize: t.size.micro, lineHeight: 1.2 }}>
+            +{items.length - 7}
+          </span>
+        )}
+      </div>
+    </div>
+  )
 }
 
 export default function Brain() {
@@ -221,7 +236,7 @@ export default function Brain() {
       setSourceError('Sign in before pulling sources.')
       return
     }
-    if (!BUSINESS_SOURCE_KEYS.some(key => business[key].trim())) {
+    if (!DEMAND_SOURCE_KEYS.some(key => business[key].trim())) {
       setSourceError('Add at least one source URL first.')
       return
     }
@@ -251,7 +266,7 @@ export default function Brain() {
       setBusiness(prev => mergeExtractedContext(prev, data.context ?? {}))
       const reports = data.sources ?? []
       const okCount = reports.filter(item => item.ok).length
-      const total = reports.length || BUSINESS_SOURCE_KEYS.filter(key => business[key].trim()).length
+      const total = reports.length || DEMAND_SOURCE_KEYS.filter(key => business[key].trim()).length
       setSourceStatus(`Pulled ${okCount}/${total} sources. Review and save.`)
     } catch (error) {
       setSourceError(error instanceof Error ? error.message : 'Could not pull these sources.')
@@ -383,12 +398,16 @@ export default function Brain() {
     return <div style={{ padding: space[8], maxWidth: 760 }}><EmptyState icon={<BrainIcon size={22} strokeWidth={1.5} />} title="No active project" body="Pick a client in the left rail to set its brain: instructions, voice, audiences." /></div>
   }
 
-  const sourceCount = BUSINESS_SOURCE_KEYS
+  const sourceCount = DEMAND_SOURCE_KEYS
     .filter(key => business[key].trim()).length
-  const operatingKeys: BusinessContextKey[] = ['demandObjective', 'conversionPath', 'channelStrategy', 'contentFormats', 'approvalModel', 'engagementSignals', 'samHandoffRules', 'learningCadence']
+  const operatingKeys = Object.keys(DEFAULT_DEMAND_OPERATING_MODEL) as BusinessContextKey[]
   const factCount = (['offer', 'audience', 'customerProblems', 'differentiators', 'competitors', 'proofPoints', 'contentGoals', 'constraints'] as BusinessContextKey[])
     .filter(key => business[key].trim()).length
   const operatingCount = operatingKeys.filter(key => business[key].trim()).length
+  const applyLeadGenDefaults = () => {
+    setBusiness(prev => applyDemandDefaults(prev))
+    setSourceStatus('Lead-gen operating defaults added. Review and save.')
+  }
 
   return (
     <div style={{ padding: `${space[8]} ${space[8]} 0`, maxWidth: 1040 }}>
@@ -416,7 +435,7 @@ export default function Brain() {
             </p>
           </div>
           <span style={{ fontSize: t.size.cap, color: color.ghost }}>
-            {sourceCount}/{BUSINESS_SOURCE_KEYS.length} sources · {factCount}/8 context fields · {operatingCount}/{operatingKeys.length} operating fields
+            {sourceCount}/{DEMAND_SOURCE_KEYS.length} sources · {factCount}/8 context fields · {operatingCount}/{operatingKeys.length} operating fields
           </span>
         </div>
 
@@ -494,6 +513,19 @@ export default function Brain() {
                 Pull the website, LinkedIn, Instagram, YouTube, Medium, Quora, Reddit, Facebook, X, events, and newsletters. Innovare handles public scraping; connected LinkedIn and Instagram use Unipile.
               </p>
             </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+              {DEMAND_PLATFORM_DEFINITIONS.slice(0, 8).map(platform => (
+                <div key={platform.key} title={platform.role} style={{ padding: '7px 8px', borderRadius: radius.sm, border: `1px solid ${color.line}`, background: color.surface }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: t.size.micro, color: color.ink, fontWeight: t.weight.semibold }}>
+                    <span style={{ width: 22, height: 22, borderRadius: radius.sm, background: color.accentSoft, color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{platform.initials}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platform.label}</span>
+                  </div>
+                  <div style={{ marginTop: 3, color: color.ghost, fontSize: t.size.micro, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {platform.publishing}
+                  </div>
+                </div>
+              ))}
+            </div>
             {(extractStatus || extractError || sourceStatus || sourceError) && (
               <p style={{ margin: 0, fontSize: t.size.cap, color: (extractError || sourceError) ? color.danger : color.success, lineHeight: 1.5 }}>
                 {extractError || sourceError || extractStatus || sourceStatus}
@@ -563,7 +595,15 @@ export default function Brain() {
               <div style={{ fontSize: t.size.sm, color: color.ink, fontWeight: t.weight.semibold }}>Demand operating model</div>
               <div style={{ fontSize: t.size.cap, color: color.ghost, marginTop: 2 }}>The rules for what VERA creates, who approves it, what counts as traction, and what moves to SAM.</div>
             </div>
-            {instrSaved && <span style={{ fontSize: t.size.cap, color: color.success }}>Saved.</span>}
+            <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
+              <Button variant="secondary" size="sm" onClick={applyLeadGenDefaults}>Use lead-gen defaults</Button>
+              {instrSaved && <span style={{ fontSize: t.size.cap, color: color.success }}>Saved.</span>}
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: space[3], marginBottom: space[4] }}>
+            <DemandDefaultPanel title="Content jobs" items={DEMAND_CONTENT_JOBS} />
+            <DemandDefaultPanel title="Approval modes" items={DEMAND_APPROVAL_MODES} />
+            <DemandDefaultPanel title="Outcome signals" items={DEMAND_OUTCOME_SIGNALS} />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: space[4] }}>
             <Field label="Demand objective">

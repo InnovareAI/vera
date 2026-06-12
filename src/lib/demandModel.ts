@@ -1,0 +1,243 @@
+import type { BusinessContext, BusinessContextKey } from './businessContext'
+
+export type DemandPlatformKey =
+  | 'linkedin'
+  | 'youtube'
+  | 'medium'
+  | 'quora'
+  | 'reddit'
+  | 'x'
+  | 'instagram'
+  | 'facebook'
+  | 'blog'
+  | 'email'
+
+export type DemandPlatformDefinition = {
+  key: DemandPlatformKey
+  label: string
+  sourceKey?: BusinessContextKey
+  initials: string
+  role: string
+  workflow: string
+  outcomeSignals: string[]
+  publishing: 'connected' | 'manual-first' | 'read-only' | 'cms'
+}
+
+export const DEMAND_PLATFORM_DEFINITIONS: DemandPlatformDefinition[] = [
+  {
+    key: 'linkedin',
+    label: 'LinkedIn',
+    sourceKey: 'linkedinCompany',
+    initials: 'Li',
+    role: 'Authority, founder voice, ICP pain, and relationship-led demand.',
+    workflow: 'Use Unipile for connected profiles and company pages. Draft personal, company, event, and newsletter angles separately.',
+    outcomeSignals: ['comments', 'shares', 'profile visits', 'warm accounts'],
+    publishing: 'connected',
+  },
+  {
+    key: 'youtube',
+    label: 'YouTube',
+    sourceKey: 'youtube',
+    initials: 'YT',
+    role: 'Depth, proof, explainers, Shorts, and durable discovery.',
+    workflow: 'Plan storyboards, scripts, titles, descriptions, chapters, Shorts cuts, and upload handoff.',
+    outcomeSignals: ['views', 'watch time', 'subscribers', 'traffic'],
+    publishing: 'connected',
+  },
+  {
+    key: 'medium',
+    label: 'Medium',
+    sourceKey: 'medium',
+    initials: 'Me',
+    role: 'Long-form POV, search-adjacent essays, and reusable campaign anchors.',
+    workflow: 'Manual-first publishing with article drafts, canonical links, and referral tracking.',
+    outcomeSignals: ['reads', 'claps', 'responses', 'referrals'],
+    publishing: 'manual-first',
+  },
+  {
+    key: 'quora',
+    label: 'Quora',
+    sourceKey: 'quora',
+    initials: 'Qu',
+    role: 'Problem-aware demand, buyer questions, objections, and answer-led traffic.',
+    workflow: 'Research questions, draft useful answers, keep CTAs restrained, and require human posting.',
+    outcomeSignals: ['views', 'upvotes', 'comments', 'clicks'],
+    publishing: 'manual-first',
+  },
+  {
+    key: 'reddit',
+    label: 'Reddit',
+    sourceKey: 'reddit',
+    initials: 'Rd',
+    role: 'Market listening, language mining, objection discovery, and community-safe drafts.',
+    workflow: 'Read-first. Draft only when community rules and human approval are clear.',
+    outcomeSignals: ['comments', 'upvotes', 'objections', 'traffic intent'],
+    publishing: 'read-only',
+  },
+  {
+    key: 'x',
+    label: 'X',
+    sourceKey: 'x',
+    initials: 'X',
+    role: 'Fast POV testing, timely takes, conversation entry, and lightweight traffic.',
+    workflow: 'Keep optional and manual-first until the API economics justify deeper integration.',
+    outcomeSignals: ['replies', 'reposts', 'link clicks', 'profile visits'],
+    publishing: 'manual-first',
+  },
+  {
+    key: 'instagram',
+    label: 'Instagram',
+    sourceKey: 'instagram',
+    initials: 'IG',
+    role: 'Visual proof, lifestyle fit, carousels, Reels hooks, and audience warmth.',
+    workflow: 'Use Meta when connected. Keep visual assets platform-native and approval-gated.',
+    outcomeSignals: ['comments', 'shares', 'saves', 'reach'],
+    publishing: 'connected',
+  },
+  {
+    key: 'facebook',
+    label: 'Facebook',
+    sourceKey: 'facebook',
+    initials: 'FB',
+    role: 'Community trust, local or Page audiences, and longer social proof.',
+    workflow: 'Use Meta Pages when connected. Keep engagement management separate from ad workflows.',
+    outcomeSignals: ['comments', 'shares', 'page reach', 'traffic'],
+    publishing: 'connected',
+  },
+  {
+    key: 'blog',
+    label: 'Blog',
+    sourceKey: 'website',
+    initials: 'Bl',
+    role: 'SEO, product education, owned demand capture, and canonical campaign assets.',
+    workflow: 'Publish through WordPress or CMS adapters when configured, otherwise draft for handoff.',
+    outcomeSignals: ['organic traffic', 'assisted conversions', 'time on page', 'internal clicks'],
+    publishing: 'cms',
+  },
+  {
+    key: 'email',
+    label: 'Email',
+    initials: 'Em',
+    role: 'Nurture, reuse, event follow-up, and owned audience conversion.',
+    workflow: 'Draft newsletters and nurture sequences. Sending must stay approval-gated.',
+    outcomeSignals: ['clicks', 'replies', 'traffic', 'meetings'],
+    publishing: 'manual-first',
+  },
+]
+
+export const DEMAND_SOURCE_KEYS: BusinessContextKey[] = [
+  'website',
+  'linkedinCompany',
+  'linkedinProfile',
+  'linkedinEvents',
+  'linkedinNewsletter',
+  'instagram',
+  'youtube',
+  'medium',
+  'quora',
+  'reddit',
+  'facebook',
+  'x',
+]
+
+export const DEMAND_CONTENT_JOBS = [
+  'Campaigns',
+  'Posts',
+  'Carousels',
+  'Images',
+  'Video storyboards',
+  'Short clips',
+  'Long-form articles',
+  'Quora answers',
+  'Reddit research briefs',
+  'Comments and replies',
+  'Newsletters',
+  'SAM handoff briefs',
+]
+
+export const DEMAND_APPROVAL_MODES = [
+  'Operator only',
+  'Client lead',
+  'All stakeholders',
+  'Legal or compliance',
+  'Case based by person, channel, topic, or claim risk',
+]
+
+export const DEMAND_OUTCOME_SIGNALS = [
+  'comments',
+  'shares',
+  'saves',
+  'clicks',
+  'qualified traffic',
+  'objections',
+  'buying triggers',
+  'warm accounts',
+  'meeting requests',
+]
+
+export const DEMAND_PROVIDER_READINESS = [
+  { provider: 'linkedin', label: 'LinkedIn', detail: 'Unipile post counters, comments, reactions, shares, clicks, and publishing IDs.' },
+  { provider: 'meta_facebook_pages', label: 'Facebook Pages', detail: 'Facebook Page insights, comments, shares, page reach, and post engagement.' },
+  { provider: 'meta_instagram', label: 'Instagram Professional', detail: 'Instagram media views, reach, comments, saves, shares, and visual proof signals.' },
+  { provider: 'x', label: 'X', detail: 'Manual-first publishing, replies, reposts, link clicks, and traffic-driving signals.' },
+  { provider: 'google_search_console', label: 'Google Search Console', detail: 'Search query, page, device, country, and opportunity snapshots.' },
+  { provider: 'google_analytics_4', label: 'Google Analytics 4', detail: 'Traffic, sessions, conversions, landing pages, and source performance.' },
+  { provider: 'youtube', label: 'YouTube', detail: 'Channel, video, Shorts, view, subscriber, watch-time, and traffic analytics.' },
+  { provider: 'medium', label: 'Medium', detail: 'Manual-first article publishing, referral traffic, reads, claps, responses, and long-form themes.' },
+  { provider: 'quora', label: 'Quora', detail: 'Manual-first answer research, views, upvotes, comments, shares, and traffic-driving questions.' },
+  { provider: 'reddit', label: 'Reddit', detail: 'Read-only market listening, comments, upvotes, objections, and traffic intent.' },
+  { provider: 'wordpress', label: 'WordPress', detail: 'Approved article publishing, page performance, referral traffic, and conversion context.' },
+]
+
+export const DEFAULT_DEMAND_OPERATING_MODEL: Pick<
+  BusinessContext,
+  | 'demandObjective'
+  | 'conversionPath'
+  | 'channelStrategy'
+  | 'contentFormats'
+  | 'approvalModel'
+  | 'engagementSignals'
+  | 'samHandoffRules'
+  | 'learningCadence'
+> = {
+  demandObjective: 'Create B2B top-of-funnel demand that produces useful conversations, traffic, and sales research signals.',
+  conversionPath: 'Move attention into comments, shares, qualified site traffic, newsletter or event opt-ins, direct messages, and SAM follow-up queues.',
+  channelStrategy: 'Use LinkedIn for authority and founder voice, YouTube for depth, Medium and blog for long-form demand capture, Quora for buyer questions, Reddit for listening and language mining, Instagram and Facebook for visual proof and community trust, and X only when speed or conversation entry matters.',
+  contentFormats: DEMAND_CONTENT_JOBS.join(', '),
+  approvalModel: 'Case based. Some posts can be approved by one owner, sensitive claims or named-person content need all required stakeholders.',
+  engagementSignals: DEMAND_OUTCOME_SIGNALS.join(', '),
+  samHandoffRules: 'Hand off named accounts, repeated objections, buying-trigger comments, competitor mentions, high-intent clicks, inbound questions, and people asking for examples or pricing.',
+  learningCadence: 'Review performance weekly, refresh channel-specific tone and platform best practices monthly, and turn what works into repeatable skills.',
+}
+
+export function applyDemandDefaults(context: BusinessContext): BusinessContext {
+  return {
+    ...context,
+    demandObjective: context.demandObjective || DEFAULT_DEMAND_OPERATING_MODEL.demandObjective,
+    conversionPath: context.conversionPath || DEFAULT_DEMAND_OPERATING_MODEL.conversionPath,
+    channelStrategy: context.channelStrategy || DEFAULT_DEMAND_OPERATING_MODEL.channelStrategy,
+    contentFormats: context.contentFormats || DEFAULT_DEMAND_OPERATING_MODEL.contentFormats,
+    approvalModel: context.approvalModel || DEFAULT_DEMAND_OPERATING_MODEL.approvalModel,
+    engagementSignals: context.engagementSignals || DEFAULT_DEMAND_OPERATING_MODEL.engagementSignals,
+    samHandoffRules: context.samHandoffRules || DEFAULT_DEMAND_OPERATING_MODEL.samHandoffRules,
+    learningCadence: context.learningCadence || DEFAULT_DEMAND_OPERATING_MODEL.learningCadence,
+  }
+}
+
+export function demandChannelsFromContext(context: BusinessContext, max = 8): string[] {
+  const sourceMatches = DEMAND_PLATFORM_DEFINITIONS
+    .filter(platform => platform.sourceKey && context[platform.sourceKey]?.trim())
+    .map(platform => platform.label)
+  const strategyMatches = context.channelStrategy
+    .split(/[\n,;]+/)
+    .map(item => item.trim())
+    .filter(Boolean)
+
+  const merged = [...sourceMatches, ...strategyMatches]
+  return [...new Set(merged)].slice(0, max)
+}
+
+export function demandChannelMatrixPrompt(projectName: string): string {
+  const channels = ['LinkedIn', 'YouTube', 'Medium', 'Quora', 'Reddit', 'Instagram', 'Facebook', 'Blog', 'Email', 'X'].join(', ')
+  return `Build a channel-native B2B demand distribution matrix for ${projectName}. Cover ${channels} where relevant. For each channel, define role, audience moment, format, CTA, engagement signal, traffic path, approval risk, and what should be handed to SAM.`
+}

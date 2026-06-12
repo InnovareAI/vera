@@ -26,6 +26,7 @@ import { useProject } from '../lib/projectContext'
 import { useOrg } from '../lib/orgContext'
 import { Button, PageHeader, SectionLabel, color, radius, space, type as t } from '../design'
 import Markdown from '../components/Markdown'
+import { DEMAND_PROVIDER_READINESS } from '../lib/demandModel'
 
 type RedditListen = {
   id: string
@@ -1375,21 +1376,8 @@ function buildTrendPoints(snapshots: ContentMetricSnapshot[], rows: PostRowData[
 }
 
 function buildProviderReadiness(integrations: ClientIntegration[]): ProviderReadiness[] {
-  const labels: Array<{ provider: string; label: string; detail: string }> = [
-    { provider: 'linkedin', label: 'LinkedIn', detail: 'Unipile post counters, comments, reactions, and publishing IDs.' },
-    { provider: 'meta_facebook_pages', label: 'Facebook Pages', detail: 'Facebook Page insights and post engagement.' },
-    { provider: 'meta_instagram', label: 'Instagram Professional', detail: 'Instagram media views, reach, comments, saves, and shares.' },
-    { provider: 'x', label: 'X', detail: 'Manual-first publishing, replies, reposts, link clicks, and traffic-driving signals.' },
-    { provider: 'google_search_console', label: 'Google Search Console', detail: 'Search query, page, device, country, and opportunity snapshots.' },
-    { provider: 'google_analytics_4', label: 'Google Analytics 4', detail: 'Traffic, sessions, conversions, landing pages, and source performance.' },
-    { provider: 'youtube', label: 'YouTube', detail: 'Channel, video, Shorts, view, subscriber, and watch-time analytics.' },
-    { provider: 'medium', label: 'Medium', detail: 'Manual-first article publishing, referral traffic, reads, claps, responses, and long-form themes.' },
-    { provider: 'quora', label: 'Quora', detail: 'Manual-first answer research, views, upvotes, comments, shares, and traffic-driving questions.' },
-    { provider: 'reddit', label: 'Reddit', detail: 'Read-only market listening, comments, upvotes, shares, objections, and traffic intent.' },
-    { provider: 'wordpress', label: 'WordPress', detail: 'Approved article publishing, page performance, referral traffic, and conversion context.' },
-  ]
   const byProvider = new Map<string, ClientIntegration>(integrations.map(row => [row.provider, row]))
-  return labels.map(item => {
+  return DEMAND_PROVIDER_READINESS.map(item => {
     const row = byProvider.get(item.provider)
     return {
       provider: item.provider,
