@@ -45,7 +45,6 @@ const corsHeaders = {
 // run_pipeline, generate_image). Haiku would narrate "Draft saved" in prose
 // without actually invoking save_draft — leaving an empty draft card.
 const MODEL = 'claude-sonnet-4-6'
-const HAIKU_MODEL = 'claude-haiku-4-5'   // fallback for connected workspaces with no LLM key linked yet
 
 // Decrypt a client's stored BYOK key. Mirrors client-secrets' encryptSecret:
 // AES-GCM, key = SHA-256(envKey), payload "aes-gcm:v1:<b64 iv>:<b64 ciphertext>".
@@ -4074,25 +4073,26 @@ Deno.serve(async (req) => {
   const enableThinking = analyticalCues.test(lastUserText.toLowerCase())
 
   // Model + key selection per workspace:
-  //   • the agency's own (master) org → Sonnet on the InnovareAI key
-  //   • client space with its OWN Anthropic key → Sonnet on THEIR key (BYOK)
-  //   • everyone else → Haiku on the InnovareAI key (the fallback until they
-  //     bring their own Anthropic key — the only provider key we offer/use)
-  let effectiveModel = MODEL
-  let effectiveApiKey = anthropicKey   // InnovareAI / platform key (default)
+  //   • the agency's own (master) org -> Sonnet on the InnovareAI key
+  //   • client space with its own OpenRouter key -> OpenRouter on their key
+  //   • client space with its own Anthropic key -> Sonnet on their key
+  //   • client spaces without BYOK text keys are blocked, never routed onto
+  //     the InnovareAI platform key.
+  let orgIsMaster: boolean
   try {
-    const { data: orgRow } = await supabase.from('organizations').select('is_master').eq('id', orgId).maybeSingle()
-    const isMasterOrg = !!(orgRow as { is_master?: boolean } | null)?.is_master
-    if (!isMasterOrg && projectId) {
-      const { data: ownAnthropic } = await supabase.from('client_api_keys')
-        .select('secret_ciphertext').eq('project_id', projectId).eq('provider', 'anthropic').eq('status', 'active')
-        .order('updated_at', { ascending: false }).limit(1).maybeSingle()
-      const cipher = (ownAnthropic as { secret_ciphertext?: string } | null)?.secret_ciphertext
-      const clientKey = cipher ? await decryptClientSecret(cipher) : null
-      if (clientKey) effectiveApiKey = clientKey   // BYOK: their key, full Sonnet
-      else effectiveModel = HAIKU_MODEL             // no key → Haiku fallback
-    }
-  } catch { /* keep platform defaults on any lookup/decrypt error */ }
+    const { data: orgRow, error: orgError } = await supabase.from('organizations').select('is_master').eq('id', orgId).maybeSingle()
+    if (orgError) return jsonError(orgError.message, 500)
+    orgIsMaster = !!(orgRow as { is_master?: boolean } | null)?.is_master
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Could not verify workspace AI billing scope', 500)
+  }
+  if (!orgIsMaster && !projectId) {
+    return jsonError('Client chat requires an active client space with its own OpenRouter or Anthropic key.', 403)
+  }
+
+  const effectiveModel = MODEL
+  let effectiveApiKey = anthropicKey   // InnovareAI / platform key (default)
+  let clientAnthropicKey: string | null = null
 
   // Per-client OpenRouter text routing: a project with its own active OpenRouter
   // key runs its chat/LLM through OpenRouter on that key, off the platform key
@@ -4104,8 +4104,31 @@ Deno.serve(async (req) => {
         .select('secret_ciphertext').eq('project_id', projectId).eq('provider', 'openrouter').eq('status', 'active')
         .order('updated_at', { ascending: false }).limit(1).maybeSingle()
       const cipher = (orRow as { secret_ciphertext?: string } | null)?.secret_ciphertext
-      if (cipher) clientOpenRouterKey = await decryptClientSecret(cipher)
-    } catch { /* fall back to the Anthropic path on any lookup/decrypt error */ }
+      if (cipher) {
+        clientOpenRouterKey = await decryptClientSecret(cipher)
+        if (!clientOpenRouterKey) return jsonError('Could not decrypt OpenRouter key for this client space.', 500)
+      }
+    } catch (error) {
+      return jsonError(error instanceof Error ? error.message : 'Could not load OpenRouter key for this client space.', 500)
+    }
+  }
+  if (!orgIsMaster && projectId && !clientOpenRouterKey) {
+    try {
+      const { data: ownAnthropic } = await supabase.from('client_api_keys')
+        .select('secret_ciphertext').eq('project_id', projectId).eq('provider', 'anthropic').eq('status', 'active')
+        .order('updated_at', { ascending: false }).limit(1).maybeSingle()
+      const cipher = (ownAnthropic as { secret_ciphertext?: string } | null)?.secret_ciphertext
+      if (cipher) {
+        clientAnthropicKey = await decryptClientSecret(cipher)
+        if (!clientAnthropicKey) return jsonError('Could not decrypt Anthropic key for this client space.', 500)
+      }
+    } catch (error) {
+      return jsonError(error instanceof Error ? error.message : 'Could not load Anthropic key for this client space.', 500)
+    }
+    if (!clientAnthropicKey) {
+      return jsonError('Client chat requires this client space to use its own OpenRouter or Anthropic key.', 403)
+    }
+    effectiveApiKey = clientAnthropicKey
   }
   let clientHasFalKey = false
   if (projectId) {

@@ -1844,7 +1844,7 @@ function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: Pr
   const videoLocked = !capabilities.videoReady
   const title = needsText ? 'Provider key needed' : imageLocked ? 'Media rendering locked' : 'Video rendering locked'
   const notes: string[] = []
-  if (needsText) notes.push('Add OpenRouter or Anthropic before relying on full-quality client-owned text generation.')
+  if (needsText) notes.push('Add OpenRouter or Anthropic before Vera can run client text generation in this space.')
   if (imageLocked) {
     notes.push(capabilities.imagesEnabled
       ? 'Image and carousel rendering needs a client OpenRouter, OpenAI, or FAL key, unless this is an approved platform media project.'
