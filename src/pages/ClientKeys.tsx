@@ -305,7 +305,7 @@ export default function ClientKeys() {
             <UsageMetric icon={ImagePlus} label="Images" value={formatNumber(usageSummary.images)} detail={`${formatNumber(usageSummary.imageEvents)} image events`} tone="warn" />
             <UsageMetric icon={Clapperboard} label="Videos" value={formatNumber(usageSummary.videos)} detail={`${formatNumber(usageSummary.videoEvents)} submits`} tone="danger" />
             <UsageMetric icon={KeyRound} label="Client key" value={formatNumber(usageSummary.clientKeyEvents)} detail={`${formatNumber(usageSummary.platformKeyEvents)} platform-backed`} tone="success" />
-            <UsageMetric icon={Clock3} label="Known spend" value={formatMoney(usageSummary.knownCost)} detail={usageSummary.hasKnownCost ? 'From logged provider cost' : 'Provider billing pending'} tone="info" />
+            <UsageMetric icon={Clock3} label="Estimated spend" value={formatMoney(usageSummary.knownCost)} detail={usageSummary.hasKnownCost ? `${formatNumber(usageSummary.estimatedCostEvents)} estimated rows` : 'Provider billing pending'} tone="info" />
           </div>
 
           {usageError ? (
@@ -539,6 +539,7 @@ function summarizeUsage(rows: GenerationUsageRow[]) {
       if (typeof row.cost_usd === 'number') {
         summary.knownCost += row.cost_usd
         summary.hasKnownCost = true
+        if (metadata.cost_estimate_source) summary.estimatedCostEvents += 1
       }
       return summary
     },
@@ -554,6 +555,7 @@ function summarizeUsage(rows: GenerationUsageRow[]) {
       platformKeyEvents: 0,
       knownCost: 0,
       hasKnownCost: false,
+      estimatedCostEvents: 0,
     },
   )
 }
