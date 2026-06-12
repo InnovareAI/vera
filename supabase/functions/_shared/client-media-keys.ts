@@ -4,7 +4,6 @@ const CLIENT_KEY_ENC = Deno.env.get("CLIENT_API_KEY_ENCRYPTION_KEY") ?? Deno.env
 const PLATFORM_MEDIA_PROJECT_IDS = parseList(Deno.env.get("PLATFORM_MEDIA_PROJECT_IDS") ?? "")
 const PLATFORM_MEDIA_PROJECT_SLUGS = parseList(Deno.env.get("PLATFORM_MEDIA_PROJECT_SLUGS") ?? "innovareai-brand")
 const PLATFORM_FAL_ENABLED = Deno.env.get("PLATFORM_FAL_ENABLED") === "true"
-const PLATFORM_VIDEO_OPERATOR_EMAILS = parseList(Deno.env.get("PLATFORM_VIDEO_OPERATOR_EMAILS") ?? "")
 
 export async function decryptClientSecret(payload: string): Promise<string | null> {
   try {
@@ -86,11 +85,6 @@ export async function loadClientApiKey(
 
 export function isPlatformFalEnabled(): boolean {
   return PLATFORM_FAL_ENABLED
-}
-
-export function isPlatformVideoOperatorEmail(email: string | null | undefined): boolean {
-  if (!email) return false
-  return PLATFORM_VIDEO_OPERATOR_EMAILS.has(email.trim().toLowerCase())
 }
 
 function parseList(value: string): Set<string> {

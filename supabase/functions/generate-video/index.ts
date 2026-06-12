@@ -14,7 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember, requireSignedInOrService } from "../_shared/auth.ts"
-import { isPlatformFalEnabled, isPlatformMediaProject, isPlatformVideoOperatorEmail, loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { isPlatformFalEnabled, isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -81,7 +81,6 @@ Deno.serve(async (req) => {
     request_id,             // for action: 'status'
     slug: slugIn,           // legacy status hint; DB slug wins
     premium_approved,
-    platform_operator_email,
   } = await req.json().catch(() => ({}))
 
   const json = (obj: unknown, status = 200) =>
@@ -104,8 +103,7 @@ Deno.serve(async (req) => {
 
     const access = await requireProjectMember(req, supabase, SERVICE_KEY, jobProjectId, corsHeaders)
     if (!access.ok) return access.response
-    const operatorEmail = access.service ? normalizeEmail(platform_operator_email) : access.email
-    const fal = await resolveFalKey(supabase, jobProjectId, access.orgId, operatorEmail)
+    const fal = await resolveFalKey(supabase, jobProjectId, access.orgId)
     if (!fal.ok) return fal.response
 
     const modelHint = modelSlugHint(model)
@@ -131,7 +129,6 @@ Deno.serve(async (req) => {
 
   const access = await requireProjectMember(req, supabase, SERVICE_KEY, projectId, corsHeaders)
   if (!access.ok) return access.response
-  const operatorEmail = access.service ? normalizeEmail(platform_operator_email) : access.email
 
   const resolved = resolveVideoModel(model, !!image_url)
   if (!resolved.ok) return resolved.response
@@ -149,7 +146,7 @@ Deno.serve(async (req) => {
     )
   }
 
-  const fal = await resolveFalKey(supabase, projectId, access.orgId, operatorEmail)
+  const fal = await resolveFalKey(supabase, projectId, access.orgId)
   if (!fal.ok) return fal.response
 
   // Build per-model payload. Different FAL video endpoints accept slightly
@@ -315,12 +312,6 @@ function normalizeDuration(value: unknown): string | null {
   return null
 }
 
-function normalizeEmail(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const email = value.trim().toLowerCase()
-  return email.includes('@') ? email : null
-}
-
 function queueSlugFromUrl(value: unknown): string | null {
   if (typeof value !== 'string') return null
   try {
@@ -364,18 +355,10 @@ async function resolveFalKey(
   supabase: AdminClient,
   projectId: string,
   orgId: string,
-  operatorEmail: string | null,
 ): Promise<{ ok: true; key: string; source: 'platform' | 'client' } | { ok: false; response: Response }> {
   try {
     const clientKey = await loadClientApiKey(supabase, projectId, ['fal', 'fal_ai'])
     if (clientKey) return { ok: true, key: clientKey.key, source: 'client' }
-
-    if (isPlatformVideoOperatorEmail(operatorEmail)) {
-      if (!FAL_API_KEY) {
-        return { ok: false, response: jsonError('Platform video access is enabled for this account, but FAL_API_KEY is not configured on the server.', 503) }
-      }
-      return { ok: true, key: FAL_API_KEY, source: 'platform' }
-    }
 
     if (isPlatformFalEnabled() && await isPlatformMediaProject(supabase, projectId, orgId)) {
       if (!FAL_API_KEY) return { ok: false, response: jsonError('FAL_API_KEY not configured on the server.', 500) }

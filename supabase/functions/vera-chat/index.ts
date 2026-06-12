@@ -31,7 +31,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
-import { isPlatformFalEnabled, isPlatformMediaProject, isPlatformVideoOperatorEmail } from '../_shared/client-media-keys.ts'
+import { isPlatformFalEnabled, isPlatformMediaProject } from '../_shared/client-media-keys.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1613,7 +1613,6 @@ async function executeTool(
     emit: (event: Record<string, unknown>) => void
     userPrompt?: string | null
     allowVideoGeneration?: boolean
-    platformVideoOperatorEmail?: string | null
   },
 ): Promise<{ result: string; image_url?: string; video_url?: string }> {
   try {
@@ -1871,7 +1870,6 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
                   model: 'hailuo',
                   aspect_ratio: '16:9',
                   project_id: ctx.projectId,
-                  platform_operator_email: ctx.platformVideoOperatorEmail ?? undefined,
                 }
             const res = await fetch(`${ctx.supabaseUrl}/functions/v1/${fn}`, {
               method: 'POST',
@@ -2040,7 +2038,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           ? { ...input, project_id: ctx.projectId }
           : {
               prompt: input.prompt,
-              model: 'seedream-4.5',
+              model: 'nano-banana',
               image_size: (input.aspect_ratio as string) ?? 'square_hd',
               quality: 'high',
               project_id: ctx.projectId,
@@ -2141,7 +2139,6 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
               project_id: ctx.projectId ?? null,
               frames,
               aspect,
-              platform_operator_email: ctx.platformVideoOperatorEmail ?? undefined,
             }),
             signal: AbortSignal.timeout(15000),
           })
@@ -2173,7 +2170,6 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           image_url: (input.image_url as string) ?? undefined,
           aspect_ratio: (input.aspect_ratio as string) ?? '16:9',
           project_id: ctx.projectId,
-          platform_operator_email: ctx.platformVideoOperatorEmail ?? undefined,
         }
         const res = await fetch(`${ctx.supabaseUrl}/functions/v1/generate-video`, {
           method: 'POST',
@@ -3880,22 +3876,16 @@ Deno.serve(async (req) => {
       clientHasFalKey = false
     }
   }
-  const platformVideoOperatorAllowed = isPlatformVideoOperatorEmail(access.email)
-  const platformVideoOperatorAvailable = platformVideoOperatorAllowed && !!Deno.env.get('FAL_API_KEY')
-  const platformVideoOperatorEmail = platformVideoOperatorAvailable ? access.email : null
-  const allowVideoGeneration = allowPlatformMediaProject || clientHasFalKey || platformVideoOperatorAvailable
+  const allowVideoGeneration = allowPlatformMediaProject || clientHasFalKey
   const enabledTools = allowVideoGeneration
     ? TOOLS
     : TOOLS.filter(tool => tool.name !== 'generate_video')
   if (!allowVideoGeneration) {
-    const capabilityReason = platformVideoOperatorAllowed
-      ? 'Your account is allowlisted for platform video, but FAL_API_KEY is not configured on the server.'
-      : 'Real video generation is unavailable in this client space because no client-owned FAL key is configured.'
     systemBlocks.push({
       type: 'text' as const,
       text: [
         '<media_capabilities>',
-        capabilityReason,
+        'Real video generation is unavailable in this client space because no client-owned FAL key is configured.',
         'Do not offer, promise, or call generate_video. If the operator asks for video, create a written production brief with generate_video_brief instead.',
         '</media_capabilities>',
       ].join('\n'),
@@ -3967,7 +3957,6 @@ Deno.serve(async (req) => {
               emit: send,
               userPrompt: lastUserText ?? null,
               allowVideoGeneration,
-              platformVideoOperatorEmail,
             },
           })
           fullText = r.fullText
@@ -4075,7 +4064,6 @@ Deno.serve(async (req) => {
                 emit: send,
                 userPrompt: lastUserText ?? null,
                 allowVideoGeneration,
-                platformVideoOperatorEmail,
               })
               if (exec.image_url) {
                 generatedImages.push(exec.image_url)

@@ -14,7 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember } from "../_shared/auth.ts"
-import { isPlatformFalEnabled, isPlatformMediaProject, isPlatformVideoOperatorEmail, loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { isPlatformFalEnabled, isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -27,10 +27,12 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const FAL_API_KEY = Deno.env.get('FAL_API_KEY')
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
-const DEFAULT_IMAGE_MODEL = Deno.env.get('DEFAULT_IMAGE_MODEL') ?? 'seedream-4.5'
+const DEFAULT_IMAGE_MODEL = Deno.env.get('DEFAULT_IMAGE_MODEL') ?? 'nano-banana'
 
-// FAL-routed models. Seedream 4.5 is the default cheap/fast prototype tier;
-// Nano Banana remains the safe Google fallback/standard option.
+// FAL-routed models. Nano Banana is the default safe Google standard option
+// because it can also route through a client's OpenRouter key when no FAL key
+// exists. Seedream remains a cheap/fast FAL option for clients with their own
+// FAL key.
 const FAL_MODELS: Record<string, string> = {
   // Gemini 2.5 Flash Image. Wins on editing consistency and remains a safe
   // Google standard option. Around the same cost band as Seedream.
@@ -96,7 +98,7 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return jsonError('Method not allowed', 405)
   const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
 
-  const { prompt, model = DEFAULT_IMAGE_MODEL, image_size = 'square_hd', num_images = 1, quality = 'high', project_id, platform_operator_email } = await req.json().catch(() => ({}))
+  const { prompt, model = DEFAULT_IMAGE_MODEL, image_size = 'square_hd', num_images = 1, quality = 'high', project_id } = await req.json().catch(() => ({}))
   if (!prompt) return jsonError('prompt is required', 400)
   const projectId = typeof project_id === 'string' ? project_id.trim() : ''
   if (!projectId) return jsonError('project_id is required for image generation', 400)
@@ -105,9 +107,7 @@ Deno.serve(async (req) => {
   if (!access.ok) return access.response
   const mediaKeys = await resolveMediaKeys(supabase, projectId, access.orgId)
   if (!mediaKeys.ok) return mediaKeys.response
-  const operatorEmail = access.service ? normalizeEmail(platform_operator_email) : access.email
-  const platformOperatorFalAvailable = isPlatformVideoOperatorEmail(operatorEmail) && !!FAL_API_KEY
-  const platformFalAvailable = platformOperatorFalAvailable || (mediaKeys.isPlatformMediaProject && isPlatformFalEnabled() && !!FAL_API_KEY)
+  const platformFalAvailable = mediaKeys.isPlatformMediaProject && isPlatformFalEnabled() && !!FAL_API_KEY
 
   // Route by alias: explicit OpenAI premium > supported OpenRouter image
   // models > FAL. A client OpenRouter key is used only for aliases we know
@@ -127,7 +127,7 @@ Deno.serve(async (req) => {
     const hasClientKeyForRoute =
       (useOR && !!mediaKeys.openRouterKey) ||
       (useOpenAI && !!mediaKeys.openAIKey) ||
-      (!useOpenAI && !useOR && (!!mediaKeys.falKey || platformOperatorFalAvailable))
+      (!useOpenAI && !useOR && !!mediaKeys.falKey)
     if (!hasClientKeyForRoute) {
       return jsonError('Image generation requires this client space to use its own OpenRouter, OpenAI, or FAL key for the selected model.', 403)
     }
@@ -376,12 +376,6 @@ async function runOpenRouter(
 }
 
 function delay(ms: number) { return new Promise(r => setTimeout(r, ms)) }
-
-function normalizeEmail(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const email = value.trim().toLowerCase()
-  return email.includes('@') ? email : null
-}
 
 type MediaKeys = {
   isPlatformMediaProject: boolean

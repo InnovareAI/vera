@@ -1,7 +1,7 @@
 // Background carousel generation — runs server-side so it isn't bound by the
 // chat SSE turn (which gets force-killed when it batches image renders).
 //
-// POST { post_id, frames:[{image_prompt, text?}], aspect?, session_id?, project_id?, platform_operator_email? }
+// POST { post_id, frames:[{image_prompt, text?}], aspect?, session_id?, project_id? }
 //   → 200 { job_id } IMMEDIATELY, then renders every frame in the background via
 //     EdgeRuntime.waitUntil(): each frame is its own short call to generate-image
 //     (sequential, to keep the resource spike low), uploaded to storage, then the
@@ -60,7 +60,6 @@ async function renderFrame(
   prompt: string,
   aspect: string,
   projectId: string | null,
-  platformOperatorEmail: string | null,
 ): Promise<string> {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-image`, {
     method: 'POST',
@@ -71,7 +70,6 @@ async function renderFrame(
       image_size: aspect,
       quality: 'high',
       project_id: projectId,
-      platform_operator_email: platformOperatorEmail ?? undefined,
     }),
   })
   if (!res.ok || !res.body) throw new Error(`generate-image HTTP ${res.status}`)
@@ -107,7 +105,6 @@ async function processJob(
   frames: Frame[],
   aspect: string,
   projectId: string | null,
-  platformOperatorEmail: string | null,
 ) {
   // Find the post's org for storage pathing.
   let orgId = ''
@@ -140,7 +137,7 @@ async function processJob(
   await Promise.all(frames.map(async (f, i) => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const url = await renderFrame(supabase, orgId, f.image_prompt ?? '', aspect, projectId, platformOperatorEmail)
+        const url = await renderFrame(supabase, orgId, f.image_prompt ?? '', aspect, projectId)
         slots[i] = { url, text: f.text ?? null }
         break
       } catch (e) {
@@ -164,7 +161,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   try {
     const body = await req.json().catch(() => ({})) as {
-      post_id?: string; frames?: Frame[]; aspect_ratio?: string; aspect?: string; session_id?: string; project_id?: string; platform_operator_email?: string
+      post_id?: string; frames?: Frame[]; aspect_ratio?: string; aspect?: string; session_id?: string; project_id?: string
     }
     const frames = Array.isArray(body.frames) ? body.frames : []
     if (!frames.length) return new Response(JSON.stringify({ error: 'no frames' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
@@ -199,7 +196,6 @@ Deno.serve(async (req) => {
       frames,
       aspect,
       body.project_id ?? null,
-      normalizeEmail(body.platform_operator_email),
     ))
 
     return new Response(JSON.stringify({ job_id: jobId, status: 'processing', total: frames.length }), {
@@ -209,9 +205,3 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
   }
 })
-
-function normalizeEmail(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const email = value.trim().toLowerCase()
-  return email.includes('@') ? email : null
-}

@@ -147,10 +147,10 @@ Deno.serve(async (req) => {
     return jsonError('Invalid JSON body', 400)
   }
 
-  // Default to Seedream 4.5 for cheap, fast prototype-quality marketing
-  // assets. Operators can explicitly override to Qwen Image for text-heavy
-  // layouts or a premium model for final brand-critical output.
-  const { title, subtitle, sections, stats, audience, style = 'editorial', model = 'seedream-4.5' } = body
+  // Default to Nano Banana so OpenRouter-only clients can generate without
+  // falling through to the platform FAL key. Operators can explicitly override
+  // to a FAL-only model when that client has its own FAL credential.
+  const { title, subtitle, sections, stats, audience, style = 'editorial', model = 'nano-banana' } = body
   const projectId = typeof body.project_id === 'string' ? body.project_id.trim() : ''
 
   if (!title) return jsonError('title is required', 400)
