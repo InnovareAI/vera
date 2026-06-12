@@ -599,6 +599,49 @@ type GenerationUsageRow = {
   created_at: string
 }
 
+type UsageProject = {
+  id: string
+  name: string
+  slug: string
+  ai_policy?: Record<string, unknown> | null
+}
+
+type UsageAiPolicy = {
+  monthly_budget_usd: number | null
+  images_enabled: boolean
+  standard_video_enabled: boolean
+  premium_media_enabled: boolean
+}
+
+type ClientUsageSummary = {
+  projectId: string | null
+  name: string
+  slug: string | null
+  policy: UsageAiPolicy
+  events: number
+  tokens: number
+  cost: number
+  imageEvents: number
+  videoEvents: number
+  clientEvents: number
+  platformEvents: number
+  unknownEvents: number
+  topModel: string | null
+  topProvider: string | null
+}
+
+type ModelUsageSummary = {
+  key: string
+  provider: string
+  model: string
+  operation: string
+  events: number
+  tokens: number
+  cost: number
+  clientEvents: number
+  platformEvents: number
+}
+
 type AiEntitlementRow = {
   id: string
   user_id: string
@@ -626,7 +669,10 @@ function AiUsageTab() {
   }, [projects])
   const projectIds = useMemo(() => new Set(projects.map(project => project.id)), [projects])
   const summary = useMemo(() => summarizeWorkspaceUsage(usageRows), [usageRows])
+  const clientRows = useMemo(() => summarizeByClient(usageRows, projects as UsageProject[]), [usageRows, projects])
   const providerRows = useMemo(() => summarizeByProvider(usageRows), [usageRows])
+  const modelRows = useMemo(() => summarizeByModel(usageRows), [usageRows])
+  const riskSummary = useMemo(() => summarizeUsageRisk(clientRows), [clientRows])
 
   const load = useCallback(async () => {
     if (!activeOrg?.id) return
@@ -684,12 +730,80 @@ function AiUsageTab() {
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
         <UsageMetric label="Month spend" value={formatUsageUsd(summary.monthCost)} detail={`${summary.monthEvents} events`} />
-        <UsageMetric label="Platform key events" value={String(summary.platformEvents)} detail={`${summary.clientEvents} client-key events`} tone={summary.platformEvents > 0 ? 'warn' : 'neutral'} />
+        <UsageMetric
+          label="Platform key events"
+          value={String(summary.platformEvents)}
+          detail={`${riskSummary.platformExposureClients} client spaces exposed`}
+          tone={riskSummary.platformExposureClients > 0 ? 'danger' : summary.platformEvents > 0 ? 'warn' : 'neutral'}
+        />
         <UsageMetric label="Images" value={String(summary.images)} detail={`${summary.imageEvents} image calls`} />
         <UsageMetric label="Videos" value={String(summary.videos)} detail={`${summary.videoEvents} video calls`} tone={summary.videoEvents > 0 ? 'warn' : 'neutral'} />
+        <UsageMetric
+          label="Budget risk"
+          value={String(riskSummary.budgetAlerts)}
+          detail={`${riskSummary.videoPolicyAlerts} media policy alerts`}
+          tone={riskSummary.budgetAlerts > 0 || riskSummary.videoPolicyAlerts > 0 ? 'danger' : 'neutral'}
+        />
       </div>
+
+      <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-gray-800">Client spend controls</p>
+            <p className="text-xs text-gray-500 mt-0.5">Current month by client space, budget cap, media policy, and key source.</p>
+          </div>
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500">{clientRows.length} spaces</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[920px] border-collapse">
+            <thead>
+              <tr className="border-b border-gray-100">
+                {['Client', 'Spend', 'Budget', 'Activity', 'Media', 'Key source', 'Status'].map(label => (
+                  <th key={label} className="px-4 py-2 text-left text-[10px] uppercase tracking-[0.05em] font-semibold text-gray-400">{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {clientRows.length === 0 && (
+                <tr><td colSpan={7}><EmptyLine text={loading ? 'Loading client spend...' : 'No client usage found this month.'} /></td></tr>
+              )}
+              {clientRows.map(row => {
+                const status = clientUsageStatus(row)
+                return (
+                  <tr key={row.projectId ?? 'workspace'} className="border-b border-gray-100">
+                    <td className="px-4 py-3">
+                      <p className="text-sm font-medium text-gray-800">{row.name}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{row.slug ?? 'workspace scope'}</p>
+                    </td>
+                    <td className="px-4 py-3 text-sm font-semibold text-gray-900">{formatUsageUsd(row.cost)}</td>
+                    <td className="px-4 py-3">
+                      <BudgetCell cost={row.cost} budget={row.policy.monthly_budget_usd} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-xs text-gray-700">{row.events} events</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{formatCompactTokens(row.tokens)} tokens</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-xs text-gray-700">{row.imageEvents} image · {row.videoEvents} video</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{row.topModel ? `${formatProviderName(row.topProvider)} · ${row.topModel}` : 'No model yet'}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-xs text-emerald-700 font-semibold">{row.clientEvents} client</p>
+                      <p className={`text-xs mt-0.5 font-semibold ${row.platformEvents > 0 ? 'text-amber-700' : 'text-gray-400'}`}>{row.platformEvents} platform</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={status.className}>{status.label}</span>
+                      <p className="text-xs text-gray-400 mt-1 max-w-[180px]">{status.detail}</p>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <div className="grid lg:grid-cols-[1.2fr_0.8fr] gap-4">
         <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -736,6 +850,46 @@ function AiUsageTab() {
           </div>
         </section>
       </div>
+
+      <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <p className="text-sm font-medium text-gray-800">Model spend concentration</p>
+          <p className="text-xs text-gray-500 mt-0.5">Highest-cost provider and model pairs for the current month.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] border-collapse">
+            <thead>
+              <tr className="border-b border-gray-100">
+                {['Model', 'Operation', 'Events', 'Tokens', 'Key source', 'Cost'].map(label => (
+                  <th key={label} className="px-4 py-2 text-left text-[10px] uppercase tracking-[0.05em] font-semibold text-gray-400">{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {modelRows.length === 0 && (
+                <tr><td colSpan={6}><EmptyLine text={loading ? 'Loading model spend...' : 'No model spend found this month.'} /></td></tr>
+              )}
+              {modelRows.slice(0, 12).map(row => (
+                <tr key={row.key} className="border-b border-gray-100">
+                  <td className="px-4 py-3">
+                    <p className="text-sm font-medium text-gray-800">{formatProviderName(row.provider)}</p>
+                    <p className="text-xs text-gray-500 font-mono max-w-[260px] truncate" title={row.model}>{row.model}</p>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-700">{formatUsageOperation(row.operation)}</td>
+                  <td className="px-4 py-3 text-xs text-gray-700">{row.events}</td>
+                  <td className="px-4 py-3 text-xs text-gray-700">{formatCompactTokens(row.tokens)}</td>
+                  <td className="px-4 py-3 text-xs">
+                    <span className="font-semibold text-emerald-700">{row.clientEvents} client</span>
+                    <span className="mx-1 text-gray-300">/</span>
+                    <span className={`font-semibold ${row.platformEvents > 0 ? 'text-amber-700' : 'text-gray-400'}`}>{row.platformEvents} platform</span>
+                  </td>
+                  <td className="px-4 py-3 text-xs font-semibold text-gray-900">{formatUsageUsd(row.cost)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100">
@@ -832,18 +986,50 @@ function TagField({ label, hint, items, input, setInput, onAdd, onRemove, color 
   )
 }
 
-function UsageMetric({ label, value, detail, tone = 'neutral' }: { label: string; value: string; detail: string; tone?: 'neutral' | 'warn' }) {
+function UsageMetric({ label, value, detail, tone = 'neutral' }: { label: string; value: string; detail: string; tone?: 'neutral' | 'warn' | 'danger' }) {
+  const toneClass = tone === 'danger'
+    ? 'border-red-200 bg-red-50'
+    : tone === 'warn'
+      ? 'border-amber-200 bg-amber-50'
+      : 'border-gray-200 bg-white'
+  const labelClass = tone === 'danger' ? 'text-red-700' : tone === 'warn' ? 'text-amber-700' : 'text-gray-500'
+  const detailClass = tone === 'danger' ? 'text-red-700' : tone === 'warn' ? 'text-amber-700' : 'text-gray-400'
   return (
-    <div className={`rounded-xl border px-4 py-3 ${tone === 'warn' ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white'}`}>
-      <p className={`text-[11px] font-medium ${tone === 'warn' ? 'text-amber-700' : 'text-gray-500'}`}>{label}</p>
+    <div className={`rounded-xl border px-4 py-3 ${toneClass}`}>
+      <p className={`text-[11px] font-medium ${labelClass}`}>{label}</p>
       <p className="text-xl font-semibold text-gray-900 mt-1">{value}</p>
-      <p className={`text-xs mt-1 ${tone === 'warn' ? 'text-amber-700' : 'text-gray-400'}`}>{detail}</p>
+      <p className={`text-xs mt-1 ${detailClass}`}>{detail}</p>
     </div>
   )
 }
 
 function EmptyLine({ text }: { text: string }) {
   return <div className="px-4 py-6 text-sm text-gray-400">{text}</div>
+}
+
+function BudgetCell({ cost, budget }: { cost: number; budget: number | null }) {
+  if (!budget) {
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500">No cap</p>
+        <p className="text-xs text-gray-400 mt-0.5">Set per client</p>
+      </div>
+    )
+  }
+  const percent = Math.min(100, Math.round((cost / budget) * 100))
+  const barClass = cost >= budget ? 'bg-red-500' : percent >= 80 ? 'bg-amber-500' : 'bg-emerald-500'
+  return (
+    <div className="min-w-[130px]">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-gray-700">{formatUsageUsd(cost)}</p>
+        <p className="text-xs text-gray-400">{percent}%</p>
+      </div>
+      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mt-1.5">
+        <div className={`h-full rounded-full ${barClass}`} style={{ width: `${percent}%` }} />
+      </div>
+      <p className="text-xs text-gray-400 mt-1">cap {formatUsageUsd(budget)}</p>
+    </div>
+  )
 }
 
 function summarizeWorkspaceUsage(rows: GenerationUsageRow[]) {
@@ -876,6 +1062,60 @@ function summarizeWorkspaceUsage(rows: GenerationUsageRow[]) {
   })
 }
 
+function summarizeByClient(rows: GenerationUsageRow[], projects: UsageProject[]): ClientUsageSummary[] {
+  const projectsById = new Map(projects.map(project => [project.id, project]))
+  const modelCounts = new Map<string, Map<string, { model: string; provider: string | null; count: number }>>()
+  const map = new Map<string, ClientUsageSummary>()
+  rows.forEach(row => {
+    const key = row.project_id ?? 'workspace'
+    const project = row.project_id ? projectsById.get(row.project_id) : null
+    const current = map.get(key) ?? {
+      projectId: row.project_id,
+      name: project?.name ?? (row.project_id ? 'Unknown client' : 'Workspace'),
+      slug: project?.slug ?? null,
+      policy: parseUsageAiPolicy(project?.ai_policy),
+      events: 0,
+      tokens: 0,
+      cost: 0,
+      imageEvents: 0,
+      videoEvents: 0,
+      clientEvents: 0,
+      platformEvents: 0,
+      unknownEvents: 0,
+      topModel: null,
+      topProvider: null,
+    }
+    const metadata = usageMetadata(row)
+    const operation = row.operation ?? ''
+    const cost = typeof row.cost_usd === 'number' ? row.cost_usd : 0
+    current.events += 1
+    current.tokens += (row.input_tokens ?? 0) + (row.output_tokens ?? 0)
+    current.cost += cost
+    if (operation.startsWith('image.')) current.imageEvents += 1
+    if (operation.startsWith('video.')) current.videoEvents += 1
+    if (metadata.key_source === 'client') current.clientEvents += 1
+    else if (metadata.key_source === 'platform') current.platformEvents += 1
+    else current.unknownEvents += 1
+    if (row.model_used) {
+      const modelsForClient = modelCounts.get(key) ?? new Map<string, { model: string; provider: string | null; count: number }>()
+      const modelKey = `${row.provider ?? 'unknown'}:${row.model_used}`
+      const model = modelsForClient.get(modelKey) ?? { model: row.model_used, provider: row.provider, count: 0 }
+      model.count += 1
+      modelsForClient.set(modelKey, model)
+      modelCounts.set(key, modelsForClient)
+    }
+    map.set(key, current)
+  })
+  map.forEach((summary, key) => {
+    const top = [...(modelCounts.get(key)?.values() ?? [])].sort((a, b) => b.count - a.count)[0]
+    if (top) {
+      summary.topModel = top.model
+      summary.topProvider = top.provider
+    }
+  })
+  return [...map.values()].sort((a, b) => b.cost - a.cost || b.events - a.events || a.name.localeCompare(b.name))
+}
+
 function summarizeByProvider(rows: GenerationUsageRow[]) {
   const map = new Map<string, { provider: string; events: number; tokens: number; cost: number; platformEvents: number }>()
   rows.forEach(row => {
@@ -888,6 +1128,123 @@ function summarizeByProvider(rows: GenerationUsageRow[]) {
     map.set(provider, current)
   })
   return [...map.values()].sort((a, b) => b.cost - a.cost || b.events - a.events)
+}
+
+function summarizeByModel(rows: GenerationUsageRow[]): ModelUsageSummary[] {
+  const map = new Map<string, ModelUsageSummary>()
+  rows.forEach(row => {
+    const provider = row.provider ?? 'unknown'
+    const model = row.model_used ?? 'unknown'
+    const operation = row.operation ?? 'unknown'
+    const key = `${provider}:${model}:${operation}`
+    const current = map.get(key) ?? {
+      key,
+      provider,
+      model,
+      operation,
+      events: 0,
+      tokens: 0,
+      cost: 0,
+      clientEvents: 0,
+      platformEvents: 0,
+    }
+    current.events += 1
+    current.tokens += (row.input_tokens ?? 0) + (row.output_tokens ?? 0)
+    current.cost += typeof row.cost_usd === 'number' ? row.cost_usd : 0
+    const keySource = usageMetadata(row).key_source
+    if (keySource === 'client') current.clientEvents += 1
+    if (keySource === 'platform') current.platformEvents += 1
+    map.set(key, current)
+  })
+  return [...map.values()].sort((a, b) => b.cost - a.cost || b.events - a.events)
+}
+
+function summarizeUsageRisk(rows: ClientUsageSummary[]) {
+  return rows.reduce((summary, row) => {
+    if (row.platformEvents > 0 && !isPlatformMediaProject(row.slug)) summary.platformExposureClients += 1
+    if (row.policy.monthly_budget_usd && row.cost >= row.policy.monthly_budget_usd) summary.budgetAlerts += 1
+    if (row.videoEvents > 0 && !row.policy.standard_video_enabled) summary.videoPolicyAlerts += 1
+    return summary
+  }, { platformExposureClients: 0, budgetAlerts: 0, videoPolicyAlerts: 0 })
+}
+
+function clientUsageStatus(row: ClientUsageSummary) {
+  const budget = row.policy.monthly_budget_usd
+  const budgetPercent = budget ? row.cost / budget : 0
+  if (row.platformEvents > 0 && !isPlatformMediaProject(row.slug)) {
+    return {
+      level: 'danger' as const,
+      kind: 'platform-key' as const,
+      label: 'Platform key used',
+      detail: 'This client should run on client-owned keys.',
+      className: 'rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700',
+    }
+  }
+  if (budget && row.cost >= budget) {
+    return {
+      level: 'danger' as const,
+      kind: 'budget' as const,
+      label: 'Over cap',
+      detail: 'Disable media or raise the client budget.',
+      className: 'rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700',
+    }
+  }
+  if (row.videoEvents > 0 && !row.policy.standard_video_enabled) {
+    return {
+      level: 'warn' as const,
+      kind: 'media-policy' as const,
+      label: 'Video while locked',
+      detail: 'Review historical events and client policy.',
+      className: 'rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700',
+    }
+  }
+  if (budgetPercent >= 0.8) {
+    return {
+      level: 'warn' as const,
+      kind: 'budget' as const,
+      label: 'Near cap',
+      detail: 'Watch premium media and video usage.',
+      className: 'rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700',
+    }
+  }
+  if (row.events === 0) {
+    return {
+      level: 'neutral' as const,
+      kind: 'empty' as const,
+      label: 'No usage',
+      detail: 'No generation events this month.',
+      className: 'rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500',
+    }
+  }
+  return {
+    level: 'ok' as const,
+    kind: 'ok' as const,
+    label: 'Normal',
+    detail: row.clientEvents > 0 ? 'Spend is client-key backed.' : 'No client-key spend yet.',
+    className: 'rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700',
+  }
+}
+
+function parseUsageAiPolicy(value: unknown): UsageAiPolicy {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      monthly_budget_usd: null,
+      images_enabled: true,
+      standard_video_enabled: false,
+      premium_media_enabled: false,
+    }
+  }
+  const raw = value as Record<string, unknown>
+  return {
+    monthly_budget_usd: typeof raw.monthly_budget_usd === 'number' && Number.isFinite(raw.monthly_budget_usd) && raw.monthly_budget_usd > 0 ? raw.monthly_budget_usd : null,
+    images_enabled: typeof raw.images_enabled === 'boolean' ? raw.images_enabled : true,
+    standard_video_enabled: typeof raw.standard_video_enabled === 'boolean' ? raw.standard_video_enabled : false,
+    premium_media_enabled: typeof raw.premium_media_enabled === 'boolean' ? raw.premium_media_enabled : false,
+  }
+}
+
+function isPlatformMediaProject(slug: string | null) {
+  return slug === 'innovareai-brand'
 }
 
 function usageMetadata(row: GenerationUsageRow): Record<string, unknown> {
