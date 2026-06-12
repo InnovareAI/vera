@@ -25,6 +25,9 @@ type LearningMetric = {
   shares: number
   clicks: number
   saves: number
+  qualifiedTraffic: number
+  buyerQuestions: number
+  meetingRequests: number
   pulledAt: string | null
 }
 
@@ -60,7 +63,21 @@ type ChannelLearningRow = {
   signals: string[]
 }
 
-const DEMAND_METRICS = new Set(['views', 'impressions', 'reach', 'engagements', 'likes', 'comments', 'shares', 'clicks', 'saves'])
+const DEMAND_METRICS = new Set([
+  'views',
+  'impressions',
+  'reach',
+  'engagements',
+  'likes',
+  'reactions',
+  'comments',
+  'shares',
+  'clicks',
+  'saves',
+  'qualified_traffic',
+  'buyer_questions',
+  'meeting_requests',
+])
 
 export default function Learning() {
   const { activeProject } = useProject()
@@ -159,7 +176,8 @@ export default function Learning() {
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: space[4], marginBottom: space[8] }}>
         <MetricCard icon={Target} label="Published assets" value={summary.published} detail={`${summary.approved} approved, ${summary.scheduled} scheduled`} />
         <MetricCard icon={BarChart3} label="Measured assets" value={summary.measured} detail={`${summary.metricCount} metric snapshots`} />
-        <MetricCard icon={Share2} label="Demand signals" value={summary.demandSignals} detail="Comments, shares, saves, clicks" />
+        <MetricCard icon={Share2} label="Demand signals" value={summary.demandSignals} detail="Comments, shares, saves, clicks, traffic" />
+        <MetricCard icon={Sparkles} label="Buyer intent" value={summary.buyerIntent} detail={`${summary.buyerQuestions} questions, ${summary.meetingRequests} meeting requests`} />
         <MetricCard icon={TrendingUp} label="Engagement rate" value={summary.engagementRateLabel} detail={summary.views ? `${summary.views.toLocaleString()} views or reach` : 'Waiting for traffic data'} />
       </section>
 
@@ -210,7 +228,10 @@ export default function Learning() {
             <SignalRow label="Comments" value={summary.comments} body="High-intent replies and objections should become SAM research context." />
             <SignalRow label="Shares" value={summary.shares} body="Shares indicate message resonance and account expansion potential." />
             <SignalRow label="Clicks" value={summary.clicks} body="Traffic from content should trigger follow-up angles, not just reporting." />
-            <SignalRow label="Traffic" value={summary.views} body="Views and reach are useful only when they lead to engagement, qualified visits, or sharper market learning." />
+            <SignalRow label="Qualified traffic" value={summary.qualifiedTraffic} body="Useful visits are stronger than raw reach because they show movement toward owned conversion paths." />
+            <SignalRow label="Buyer questions" value={summary.buyerQuestions} body="Commercial questions should become content angles and SAM research tasks." />
+            <SignalRow label="Meeting requests" value={summary.meetingRequests} body="Meeting intent is the strongest signal that VERA should brief SAM and repeat the source pattern." />
+            <SignalRow label="Reach" value={summary.views} body="Views and reach are useful only when they lead to engagement, qualified visits, or sharper market learning." />
           </div>
           <div style={{ display: 'grid', gap: space[2], marginTop: space[4] }}>
             {operatingRows.length ? operatingRows.map(row => (
@@ -247,7 +268,7 @@ export default function Learning() {
               ))}
             </div>
           ) : (
-            <LearningState>No handoff candidates yet. VERA needs measured posts with comments, shares, clicks, saves, or a strong demand score.</LearningState>
+            <LearningState>No handoff candidates yet. VERA needs measured posts with comments, shares, clicks, saves, buyer questions, meeting requests, or a strong demand score.</LearningState>
           )}
         </Panel>
       </section>
@@ -461,7 +482,7 @@ function buildChannelRows(posts: Post[], metrics: Map<string, LearningMetric>, c
     if (!key) continue
     const current = byChannel.get(key) ?? { posts: 0, measured: 0, score: 0 }
     current.posts += 1
-    if (metric && (metric.views || metric.engagements || metric.comments || metric.shares || metric.clicks || metric.saves)) {
+    if (metric && hasLearningSignal(metric)) {
       current.measured += 1
       current.score += demandScore(metric)
     }
@@ -521,6 +542,9 @@ function buildHandoffCandidates(posts: Post[], metrics: Map<string, LearningMetr
         metric.shares > 0 ? `${metric.shares} share${metric.shares === 1 ? '' : 's'}` : '',
         metric.clicks > 0 ? `${metric.clicks} click${metric.clicks === 1 ? '' : 's'}` : '',
         metric.saves > 0 ? `${metric.saves} save${metric.saves === 1 ? '' : 's'}` : '',
+        metric.qualifiedTraffic > 0 ? `${metric.qualifiedTraffic} qualified visit${metric.qualifiedTraffic === 1 ? '' : 's'}` : '',
+        metric.buyerQuestions > 0 ? `${metric.buyerQuestions} buyer question${metric.buyerQuestions === 1 ? '' : 's'}` : '',
+        metric.meetingRequests > 0 ? `${metric.meetingRequests} meeting request${metric.meetingRequests === 1 ? '' : 's'}` : '',
         score >= 25 ? `score ${score}` : '',
       ].filter(Boolean)
       if (!triggers.length) return null
@@ -556,8 +580,19 @@ function buildHandoffCandidates(posts: Post[], metrics: Map<string, LearningMetr
 }
 
 function buildMetrics(rows: ContentMetricSnapshot[]) {
-  const byPost = new Map<string, LearningMetric>()
+  const latestRows = new Map<string, ContentMetricSnapshot>()
   for (const row of rows) {
+    if (!row.post_id) continue
+    const name = row.metric_name.toLowerCase()
+    const key = `${row.post_id}:${name}`
+    const current = latestRows.get(key)
+    if (!current || new Date(row.pulled_at).getTime() > new Date(current.pulled_at).getTime()) {
+      latestRows.set(key, row)
+    }
+  }
+
+  const byPost = new Map<string, LearningMetric>()
+  for (const row of latestRows.values()) {
     if (!row.post_id) continue
     const metric = byPost.get(row.post_id) ?? {
       postId: row.post_id,
@@ -568,27 +603,47 @@ function buildMetrics(rows: ContentMetricSnapshot[]) {
       shares: 0,
       clicks: 0,
       saves: 0,
+      qualifiedTraffic: 0,
+      buyerQuestions: 0,
+      meetingRequests: 0,
       pulledAt: row.pulled_at ?? null,
     }
     const value = Number(row.metric_value ?? 0)
     const name = row.metric_name.toLowerCase()
     if (name === 'views' || name === 'impressions' || name === 'reach') metric.views = Math.max(metric.views, value)
-    else if (name === 'engagements' || name === 'likes') metric.engagements += value
+    else if (name === 'engagements' || name === 'likes' || name === 'reactions') metric.engagements += value
     else if (name === 'comments') metric.comments += value
     else if (name === 'shares') metric.shares += value
     else if (name === 'clicks') metric.clicks += value
     else if (name === 'saves') metric.saves += value
+    else if (name === 'qualified_traffic') metric.qualifiedTraffic += value
+    else if (name === 'buyer_questions') metric.buyerQuestions += value
+    else if (name === 'meeting_requests') metric.meetingRequests += value
     if (!metric.pulledAt || row.pulled_at > metric.pulledAt) metric.pulledAt = row.pulled_at
     byPost.set(row.post_id, metric)
   }
   return byPost
 }
 
+function hasLearningSignal(metric: LearningMetric) {
+  return !!(
+    metric.views ||
+    metric.engagements ||
+    metric.comments ||
+    metric.shares ||
+    metric.clicks ||
+    metric.saves ||
+    metric.qualifiedTraffic ||
+    metric.buyerQuestions ||
+    metric.meetingRequests
+  )
+}
+
 function buildSummary(posts: Post[], metrics: Map<string, LearningMetric>, snapshotCount: number) {
   const published = posts.filter(post => post.posted_at || post.published_at || post.status?.toLowerCase() === 'posted').length
   const approved = posts.filter(post => post.status?.toLowerCase() === 'approved').length
   const scheduled = posts.filter(post => post.scheduled_at).length
-  const measured = Array.from(metrics.values()).filter(metric => metric.views || metric.engagements || metric.comments || metric.shares || metric.clicks || metric.saves).length
+  const measured = Array.from(metrics.values()).filter(hasLearningSignal).length
   const totals = Array.from(metrics.values()).reduce((acc, metric) => ({
     views: acc.views + metric.views,
     engagements: acc.engagements + metric.engagements + metric.comments + metric.shares + metric.saves + metric.clicks,
@@ -596,7 +651,10 @@ function buildSummary(posts: Post[], metrics: Map<string, LearningMetric>, snaps
     shares: acc.shares + metric.shares,
     clicks: acc.clicks + metric.clicks,
     saves: acc.saves + metric.saves,
-  }), { views: 0, engagements: 0, comments: 0, shares: 0, clicks: 0, saves: 0 })
+    qualifiedTraffic: acc.qualifiedTraffic + metric.qualifiedTraffic,
+    buyerQuestions: acc.buyerQuestions + metric.buyerQuestions,
+    meetingRequests: acc.meetingRequests + metric.meetingRequests,
+  }), { views: 0, engagements: 0, comments: 0, shares: 0, clicks: 0, saves: 0, qualifiedTraffic: 0, buyerQuestions: 0, meetingRequests: 0 })
   const rate = totals.views ? (totals.engagements / totals.views) * 100 : null
   return {
     published,
@@ -608,7 +666,11 @@ function buildSummary(posts: Post[], metrics: Map<string, LearningMetric>, snaps
     comments: totals.comments,
     shares: totals.shares,
     clicks: totals.clicks,
-    demandSignals: totals.comments + totals.shares + totals.clicks + totals.saves,
+    qualifiedTraffic: totals.qualifiedTraffic,
+    buyerQuestions: totals.buyerQuestions,
+    meetingRequests: totals.meetingRequests,
+    buyerIntent: totals.buyerQuestions + totals.meetingRequests,
+    demandSignals: totals.comments + totals.shares + totals.clicks + totals.saves + totals.qualifiedTraffic + totals.buyerQuestions + totals.meetingRequests,
     engagementRateLabel: rate === null ? 'New' : `${rate.toFixed(1)}%`,
   }
 }
@@ -624,6 +686,25 @@ function buildInsights(posts: Post[], metrics: Map<string, LearningMetric>): Ins
       title: 'Repeat the strongest demand asset pattern',
       body: `${top.title} is currently the strongest measured asset. Use its topic, hook structure, channel fit, and CTA as the next variation source.`,
       tone: color.accent,
+    })
+  }
+
+  const intentTotals = Array.from(metrics.values()).reduce((acc, metric) => ({
+    qualifiedTraffic: acc.qualifiedTraffic + metric.qualifiedTraffic,
+    buyerQuestions: acc.buyerQuestions + metric.buyerQuestions,
+    meetingRequests: acc.meetingRequests + metric.meetingRequests,
+  }), { qualifiedTraffic: 0, buyerQuestions: 0, meetingRequests: 0 })
+  if (intentTotals.buyerQuestions > 0 || intentTotals.meetingRequests > 0) {
+    insights.push({
+      title: 'Commercial intent is visible',
+      body: `${intentTotals.buyerQuestions} buyer question${intentTotals.buyerQuestions === 1 ? '' : 's'} and ${intentTotals.meetingRequests} meeting request${intentTotals.meetingRequests === 1 ? '' : 's'} should become SAM research tasks and follow-up content angles.`,
+      tone: color.success,
+    })
+  } else if (intentTotals.qualifiedTraffic > 0) {
+    insights.push({
+      title: 'Traffic needs conversion proof',
+      body: `${intentTotals.qualifiedTraffic} qualified visit${intentTotals.qualifiedTraffic === 1 ? '' : 's'} came from content. The next brief should test a sharper CTA that turns visits into questions or meetings.`,
+      tone: color.info,
     })
   }
 
@@ -685,7 +766,7 @@ function buildExperiments(
   return [
     {
       title: 'Create three ICP-specific variations',
-      body: `Turn ${base} into founder, operator, and technical buyer versions. Compare comments and shares by ICP.`,
+      body: `Turn ${base} into founder, operator, and technical buyer versions. Compare comments, shares, buyer questions, and meeting requests by ICP.`,
       tone: color.accent,
       prompt: [
         `Plan the next VERA demand experiment: three ICP-specific variations.`,
@@ -700,7 +781,7 @@ function buildExperiments(
     },
     {
       title: 'Test one problem-aware thread',
-      body: 'Lead with the pain before the offer. Measure comments, saves, and profile or site clicks as the top-of-funnel signal.',
+      body: 'Lead with the pain before the offer. Measure comments, saves, clicks, qualified traffic, and buyer questions as the top-of-funnel signal.',
       tone: color.success,
       prompt: [
         `Plan and draft one problem-aware demand experiment.`,
@@ -710,7 +791,7 @@ function buildExperiments(
         `Primary channel to test: ${nextChannel}`,
         `Core proof or theme: ${base}`,
         ``,
-        `Draft the asset, define the CTA, define the approval route, and explain which comments, shares, saves, clicks, or traffic signals would prove this angle is worth scaling.`,
+        `Draft the asset, define the CTA, define the approval route, and explain which comments, shares, saves, clicks, qualified visits, buyer questions, or meeting requests would prove this angle is worth scaling.`,
       ].join('\n'),
     },
     {
@@ -725,7 +806,7 @@ function buildExperiments(
         `Strongest current signal: ${base}`,
         `Channel context: ${nextChannel}`,
         ``,
-        `Return a SAM research brief, likely account triggers, objections to prepare for, and the next content asset Vera should create to create more of this signal.`,
+        `Return a SAM research brief, likely account triggers, objections to prepare for, buyer questions to answer, and the next content asset Vera should create to create more of this signal.`,
       ].join('\n'),
     },
   ]
@@ -735,7 +816,7 @@ function buildTopRows(posts: Post[], metrics: Map<string, LearningMetric>) {
   return posts
     .map(post => {
       const metric = metrics.get(post.id)
-      if (!metric) return null
+      if (!metric || !hasLearningSignal(metric)) return null
       return {
         id: post.id,
         title: post.title || post.copy?.slice(0, 80) || 'Untitled content',
@@ -750,5 +831,15 @@ function buildTopRows(posts: Post[], metrics: Map<string, LearningMetric>) {
 }
 
 function demandScore(metric: LearningMetric) {
-  return Math.round(metric.comments * 6 + metric.shares * 5 + metric.clicks * 4 + metric.saves * 3 + metric.engagements + metric.views * 0.01)
+  return Math.round(
+    metric.meetingRequests * 20 +
+    metric.buyerQuestions * 12 +
+    metric.qualifiedTraffic * 7 +
+    metric.comments * 6 +
+    metric.shares * 5 +
+    metric.clicks * 4 +
+    metric.saves * 3 +
+    metric.engagements +
+    metric.views * 0.01,
+  )
 }
