@@ -66,6 +66,10 @@ const MAX_TOKENS = 8192   // ~6k words — fits a full strategy doc/brief inline
 const STORAGE_BUCKET = 'vera-images'
 const EMBEDDING_MODEL = 'text-embedding-3-small'  // 1536 dim, $0.02/M tokens
 const EMBEDDING_DIM = 1536
+const UNIPILE_API_KEY = Deno.env.get('UNIPILE_API_KEY') ?? ''
+const UNIPILE_BASE_URL = normalizeUnipileBaseUrl(
+  Deno.env.get('UNIPILE_BASE_URL') ?? Deno.env.get('UNIPILE_API_URL') ?? Deno.env.get('UNIPILE_DSN') ?? '',
+)
 
 const VERA_MARKETING_EXPERTISE = `
 Marketing and content strategy expertise:
@@ -419,6 +423,13 @@ Tools-first defaults — don't outsource work the tools can do:
 - "I don't have access to X" is the wrong answer if X is on the public
   web — try web_search first. If web_search fails, then say what failed
   and offer kb_ingest as a fallback.
+- LinkedIn is different from generic public web. If the operator asks for
+  LinkedIn profile analysis, posts, tone of voice, company-page context, or
+  a named person's recent posts, use linkedin_research whenever you have a
+  LinkedIn URL or public identifier. If they only give a name, try web_search
+  first to find the public LinkedIn URL, then call linkedin_research. Do not
+  ask them to paste 5-10 posts unless both web_search and linkedin_research
+  fail or no profile URL can be identified.
 - Action over interrogation: draft a first version with what you can
   gather, then ask one targeted question. Don't run a multi-question
   intake before producing anything.
@@ -529,6 +540,10 @@ Workspace tools:
 Knowledge tools:
 - search_skills — find skills by keyword, returns FULL prompt_module
 - recall_memory — search unpinned memories beyond the workspace context
+- linkedin_research — read-only LinkedIn profile and recent-post research
+  through the workspace's shared Unipile research profile. Use it for
+  LinkedIn audits, tone of voice, profile/company page context, and client
+  research. It does not publish and it does not grant client posting access.
 - web_search — Anthropic-managed live web search. Your DEFAULT for any
   public web content: company sites (including InnovareAI's own —
   innovareai.com, sam.innovareai.com), product pages, articles, posts,
@@ -637,6 +652,11 @@ interface WorkspaceContext {
     health_detail: string | null
     last_sync_at: string | null
   }>
+  researchProfile: {
+    linkedin_connected: boolean
+    linkedin_health_status: string | null
+    linkedin_connected_at: string | null
+  }
   // Phase 2b — active project scope + its top-N relevant knowledge items.
   // When project_id is supplied, this defines VERA's scope for the turn.
   // Absent / null = workspace-level chat (default brand context only).
@@ -726,7 +746,7 @@ async function loadContext(
   const [
     orgRes, brandRes, campRes, audRes, auditRes, pendingRes, memRes, skillsRes, perfRes, integrationsRes,
   ] = await Promise.all([
-    supabase.from('organizations').select('name').eq('id', orgId).maybeSingle(),
+    supabase.from('organizations').select('name, unipile_account_id, unipile_health_status, unipile_connected_at').eq('id', orgId).maybeSingle(),
     loadBrandVoice(supabase, orgId, projectId),
     supabase.from('campaigns').select('name, theme, status').eq('org_id', orgId).eq('status', 'active').limit(10),
     supabase.from('audiences').select('kind, name, is_primary').eq('org_id', orgId).limit(10),
@@ -789,6 +809,11 @@ async function loadContext(
     integrations: ((integrationsRes.data ?? []) as WorkspaceContext['integrations']).filter(row =>
       row.status !== 'revoked'
     ),
+    researchProfile: {
+      linkedin_connected: !!((orgRes.data as Record<string, unknown> | null)?.unipile_account_id),
+      linkedin_health_status: ((orgRes.data as Record<string, unknown> | null)?.unipile_health_status as string | null | undefined) ?? null,
+      linkedin_connected_at: ((orgRes.data as Record<string, unknown> | null)?.unipile_connected_at as string | null | undefined) ?? null,
+    },
     activeProject: projectId ? await loadActiveProject(supabase, orgId, projectId) : undefined,
     projectKnowledge: projectId && lastUserMessage
       ? await retrieveProjectKnowledge(supabase, projectId, lastUserMessage)
@@ -994,6 +1019,12 @@ function renderContext(ctx: WorkspaceContext, route: string): string {
   }
 
   lines.push(`Pending review: ${ctx.pendingCount} post${ctx.pendingCount === 1 ? '' : 's'}`)
+
+  if (ctx.researchProfile.linkedin_connected) {
+    lines.push(`Shared LinkedIn research profile: connected; health=${ctx.researchProfile.linkedin_health_status ?? 'unknown'}${ctx.researchProfile.linkedin_connected_at ? `; connected_at=${ctx.researchProfile.linkedin_connected_at.slice(0, 10)}` : ''}. Use linkedin_research for read-only LinkedIn profile, company, and recent-post research across client spaces. This is NOT a publishing connection.`)
+  } else {
+    lines.push(`Shared LinkedIn research profile: not connected. LinkedIn research via Unipile needs Settings > Integrations > Shared LinkedIn research profile.`)
+  }
 
   if (ctx.integrations.length) {
     lines.push(`Integrations (${ctx.integrations.length}) for the active project:`)
@@ -1267,6 +1298,25 @@ const TOOLS = [
         limit: { type: 'number', description: 'Default 8.' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'linkedin_research',
+    description: 'Read-only LinkedIn research through the workspace shared Unipile research profile. Use when the operator asks for LinkedIn profile analysis, company-page context, recent posts, tone of voice, content themes, founder voice, or audit inputs. This tool never publishes. If the operator gives only a name, use web_search first to find the public LinkedIn URL, then call this tool.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', description: 'LinkedIn profile/company URL, public identifier, or provider id. Examples: https://linkedin.com/in/name, https://linkedin.com/company/acme, tvonlinz, innovareai.' },
+        target_type: {
+          type: 'string',
+          enum: ['auto', 'person', 'company'],
+          description: 'Default auto. Use company for /company URLs or company pages; person for /in profile URLs.',
+        },
+        include_profile: { type: 'boolean', description: 'Fetch profile/company metadata. Default true.' },
+        include_posts: { type: 'boolean', description: 'Fetch recent posts. Default true.' },
+        limit: { type: 'number', description: 'Recent posts to fetch. Default 12, max 30.' },
+      },
+      required: ['target'],
     },
   },
   {
@@ -2198,6 +2248,50 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         return { result: `${data.length} memor${data.length === 1 ? 'y' : 'ies'} matching "${query}":\n${lines.join('\n')}` }
       }
 
+      case 'linkedin_research': {
+        const target = String(input.target ?? '').trim()
+        if (!target) {
+          return { result: 'LinkedIn research needs a profile or company URL, public identifier, or provider id. If the operator gave only a name, use web_search first to find the LinkedIn URL.' }
+        }
+        if (!UNIPILE_API_KEY || !UNIPILE_BASE_URL) {
+          return { result: 'LinkedIn research is unavailable because Unipile is not configured on the server.' }
+        }
+
+        const { data: org, error: orgError } = await ctx.supabase
+          .from('organizations')
+          .select('unipile_account_id, unipile_health_status')
+          .eq('id', ctx.orgId)
+          .maybeSingle()
+        if (orgError) return { result: `LinkedIn research profile lookup failed: ${orgError.message}` }
+        const accountId = (org as { unipile_account_id?: string | null } | null)?.unipile_account_id ?? null
+        if (!accountId) {
+          return { result: 'No shared LinkedIn research profile is connected for this workspace. Connect it in Settings > Integrations > Shared LinkedIn research profile, then rerun the research. Do not ask the operator to paste posts if a profile URL is available.' }
+        }
+
+        const requestedType = String(input.target_type ?? 'auto') as 'auto' | 'person' | 'company'
+        const includeProfile = input.include_profile !== false
+        const includePosts = input.include_posts !== false
+        const limit = Math.max(1, Math.min(Number(input.limit) || 12, 30))
+        const parsed = parseLinkedInTarget(target, requestedType)
+        if (!parsed.identifier) {
+          return { result: `Could not resolve a LinkedIn public identifier from "${target}". Use web_search to find the exact LinkedIn URL, then call linkedin_research again.` }
+        }
+
+        ctx.emit({ type: 'tool_progress', tool: 'linkedin_research', status: `reading ${parsed.kind === 'company' ? 'company page' : 'profile'}…` })
+        const research = await fetchLinkedInResearch({
+          accountId,
+          identifier: parsed.identifier,
+          kind: parsed.kind,
+          originalTarget: target,
+          includeProfile,
+          includePosts,
+          limit,
+        })
+
+        if (!research.ok) return { result: research.error }
+        return { result: formatLinkedInResearch(research, (org as { unipile_health_status?: string | null } | null)?.unipile_health_status ?? null) }
+      }
+
       case 'create_skill': {
         const { name, type, description, prompt_module } = input as Record<string, string>
         const skillTypes = new Set(['platform', 'content', 'brand', 'persona', 'enrichment', 'tool'])
@@ -2712,6 +2806,330 @@ Do NOT fabricate claims. If sources contradict, surface the contradiction.`,
     console.error(`tool ${name} threw`, err)
     return { result: `Tool ${name} crashed: ${err instanceof Error ? err.message : String(err)}` }
   }
+}
+
+type LinkedInTargetKind = 'person' | 'company'
+type LinkedInResearchPost = {
+  text: string
+  url?: string
+  published_at?: string
+  metrics?: string
+}
+type LinkedInResearchResult =
+  | {
+      ok: true
+      target: string
+      kind: LinkedInTargetKind
+      identifier: string
+      resolved_id?: string
+      profile?: Record<string, unknown>
+      posts: LinkedInResearchPost[]
+    }
+  | { ok: false; error: string }
+
+function normalizeUnipileBaseUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, '')
+  if (!trimmed) return ''
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+  return withProtocol.endsWith('/api/v1') ? withProtocol : `${withProtocol}/api/v1`
+}
+
+function parseLinkedInTarget(raw: string, requestedType: 'auto' | 'person' | 'company'): { identifier: string; kind: LinkedInTargetKind } {
+  const trimmed = raw.trim()
+  if (!trimmed) return { identifier: '', kind: requestedType === 'company' ? 'company' : 'person' }
+  const requestedKind: LinkedInTargetKind = requestedType === 'company' ? 'company' : 'person'
+
+  try {
+    const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+    const url = new URL(normalized)
+    if (/linkedin\.com$/i.test(url.hostname.replace(/^www\./, '')) || url.hostname.toLowerCase().includes('linkedin.com')) {
+      const parts = url.pathname.split('/').filter(Boolean).map(part => decodeURIComponent(part.replace(/^@/, '')))
+      const section = parts[0]?.toLowerCase()
+      if (section === 'company' || section === 'showcase') return { identifier: parts[1] ?? '', kind: 'company' }
+      if (section === 'in' || section === 'pub') return { identifier: parts[1] ?? '', kind: 'person' }
+      if (parts[0]) return { identifier: parts[0], kind: requestedType === 'company' ? 'company' : 'person' }
+    }
+  } catch {
+    // Fall through to identifier parsing.
+  }
+
+  const compact = trimmed
+    .replace(/^@/, '')
+    .replace(/^linkedin:(person|company):/i, '')
+    .replace(/^company:/i, '')
+    .replace(/^in:/i, '')
+    .replace(/[?#].*$/, '')
+    .replace(/\/+$/, '')
+    .trim()
+  if (!compact || /\s/.test(compact)) return { identifier: '', kind: requestedKind }
+  const kind = requestedType === 'company' || /^company:/i.test(trimmed) ? 'company' : 'person'
+  return { identifier: compact, kind }
+}
+
+async function fetchLinkedInResearch(input: {
+  accountId: string
+  identifier: string
+  kind: LinkedInTargetKind
+  originalTarget: string
+  includeProfile: boolean
+  includePosts: boolean
+  limit: number
+}): Promise<LinkedInResearchResult> {
+  try {
+    if (input.kind === 'company') {
+      return await fetchLinkedInCompanyResearch(input)
+    }
+    return await fetchLinkedInPersonResearch(input)
+  } catch (error) {
+    return { ok: false, error: `LinkedIn research failed: ${error instanceof Error ? error.message : String(error)}` }
+  }
+}
+
+async function fetchLinkedInPersonResearch(input: {
+  accountId: string
+  identifier: string
+  kind: LinkedInTargetKind
+  originalTarget: string
+  includeProfile: boolean
+  includePosts: boolean
+  limit: number
+}): Promise<LinkedInResearchResult> {
+  let profile: Record<string, unknown> | undefined
+  let resolvedId = input.identifier
+
+  if (input.includeProfile || !looksLikeLinkedInProviderId(input.identifier)) {
+    try {
+      profile = await unipileGet(`/users/${encodeURIComponent(input.identifier)}`, {
+        account_id: input.accountId,
+      }) as Record<string, unknown>
+      resolvedId = getLinkedInProviderId(profile) ?? input.identifier
+    } catch (error) {
+      if (!looksLikeLinkedInProviderId(input.identifier)) throw error
+    }
+  }
+
+  const posts = input.includePosts
+    ? await fetchLinkedInPostsByProviderId(resolvedId, input.accountId, input.limit, false)
+    : []
+
+  return {
+    ok: true,
+    target: input.originalTarget,
+    kind: 'person',
+    identifier: input.identifier,
+    resolved_id: resolvedId,
+    profile,
+    posts,
+  }
+}
+
+async function fetchLinkedInCompanyResearch(input: {
+  accountId: string
+  identifier: string
+  kind: LinkedInTargetKind
+  originalTarget: string
+  includeProfile: boolean
+  includePosts: boolean
+  limit: number
+}): Promise<LinkedInResearchResult> {
+  let profile: Record<string, unknown> | undefined
+  let resolvedId = input.identifier
+
+  if (input.includeProfile || !/^\d+$/.test(input.identifier)) {
+    profile = await unipileGet(`/linkedin/company/${encodeURIComponent(input.identifier)}`, {
+      account_id: input.accountId,
+    }) as Record<string, unknown>
+    resolvedId = String(profile.id ?? input.identifier)
+  }
+
+  const posts = input.includePosts
+    ? await fetchLinkedInPostsByProviderId(resolvedId, input.accountId, input.limit, true)
+    : []
+
+  return {
+    ok: true,
+    target: input.originalTarget,
+    kind: 'company',
+    identifier: input.identifier,
+    resolved_id: resolvedId,
+    profile,
+    posts,
+  }
+}
+
+async function fetchLinkedInPostsByProviderId(
+  providerId: string,
+  accountId: string,
+  limit: number,
+  isCompany: boolean,
+): Promise<LinkedInResearchPost[]> {
+  const query: Record<string, string> = {
+    account_id: accountId,
+    limit: String(limit),
+  }
+  if (isCompany) query.is_company = 'true'
+  const data = await unipileGet(`/users/${encodeURIComponent(providerId)}/posts`, query) as Record<string, unknown>
+  const rows = flattenApiItems(data).slice(0, limit)
+  return rows
+    .map(item => {
+      const object = item as Record<string, unknown>
+      const text = cleanLinkedInText(
+        stringField(object, 'text')
+        || stringField(object, 'commentary')
+        || stringField(object, 'content')
+        || stringField(object, 'body')
+        || stringField(object, 'share_commentary')
+        || '',
+      )
+      return {
+        text,
+        url: stringField(object, 'url') || stringField(object, 'share_url') || stringField(object, 'permalink') || undefined,
+        published_at: stringField(object, 'date') || stringField(object, 'created_at') || stringField(object, 'posted_at') || undefined,
+        metrics: formatLinkedInMetrics(object),
+      }
+    })
+    .filter(post => post.text.length > 20)
+}
+
+async function unipileGet(path: string, query: Record<string, string>): Promise<unknown> {
+  if (!UNIPILE_BASE_URL || !UNIPILE_API_KEY) throw new Error('Unipile is not configured')
+  const url = new URL(`${UNIPILE_BASE_URL}${path}`)
+  for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value)
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      'X-API-KEY': UNIPILE_API_KEY,
+    },
+  })
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new Error(`Unipile HTTP ${response.status}: ${body.slice(0, 300)}`)
+  }
+  return response.json()
+}
+
+function formatLinkedInResearch(research: Extract<LinkedInResearchResult, { ok: true }>, healthStatus: string | null): string {
+  const lines: string[] = []
+  lines.push(`LinkedIn research via shared workspace profile${healthStatus ? ` (health: ${healthStatus})` : ''}`)
+  lines.push(`Target: ${research.target}`)
+  lines.push(`Resolved as: ${research.kind} ${research.resolved_id ?? research.identifier}`)
+
+  const profile = research.profile ? summarizeLinkedInProfile(research.profile, research.kind) : ''
+  if (profile) {
+    lines.push('')
+    lines.push('Profile / page context:')
+    lines.push(profile)
+  }
+
+  lines.push('')
+  lines.push(`Recent posts returned: ${research.posts.length}`)
+  if (research.posts.length) {
+    research.posts.forEach((post, index) => {
+      const header = [
+        `${index + 1}.`,
+        post.published_at ? post.published_at.slice(0, 10) : null,
+        post.metrics || null,
+        post.url || null,
+      ].filter(Boolean).join(' ')
+      lines.push(header)
+      lines.push(post.text.slice(0, 1400))
+    })
+  }
+  lines.push('')
+  lines.push('Use these posts as source material for tone of voice, recurring themes, hooks, proof patterns, and content strategy. Do not claim metrics unless they appear above. This tool is read-only and cannot publish.')
+  return lines.join('\n')
+}
+
+function summarizeLinkedInProfile(profile: Record<string, unknown>, kind: LinkedInTargetKind): string {
+  const fields = kind === 'company'
+    ? ['name', 'tagline', 'description', 'industry', 'website', 'company_size', 'follower_count', 'followers_count']
+    : ['first_name', 'last_name', 'name', 'headline', 'occupation', 'summary', 'location', 'public_identifier', 'follower_count', 'connections_count']
+  const lines: string[] = []
+  for (const field of fields) {
+    const value = profile[field]
+    if (value == null) continue
+    if (Array.isArray(value) && !value.length) continue
+    if (typeof value === 'object' && !Array.isArray(value)) continue
+    const text = Array.isArray(value) ? value.join(', ') : String(value)
+    if (!text.trim()) continue
+    lines.push(`${humanize(field)}: ${cleanLinkedInText(text).slice(0, 1200)}`)
+  }
+  if (!lines.length) {
+    const fallback = Object.entries(profile)
+      .filter(([key, value]) => isUsefulLinkedInField(key) && typeof value !== 'object' && value != null)
+      .slice(0, 12)
+      .map(([key, value]) => `${humanize(key)}: ${cleanLinkedInText(String(value)).slice(0, 600)}`)
+    return fallback.join('\n')
+  }
+  return lines.join('\n')
+}
+
+function getLinkedInProviderId(profile: Record<string, unknown>): string | null {
+  const entity = typeof profile.entity === 'object' && profile.entity !== null
+    ? profile.entity as Record<string, unknown>
+    : null
+  return stringField(profile, 'provider_id')
+    || stringField(profile, 'id')
+    || (entity ? stringField(entity, 'provider_id') : '')
+    || null
+}
+
+function looksLikeLinkedInProviderId(value: string): boolean {
+  return /^AC[ow][A-Za-z0-9_-]+$/.test(value) || /^urn:li:/i.test(value)
+}
+
+function flattenApiItems(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value
+  if (!value || typeof value !== 'object') return []
+  const object = value as Record<string, unknown>
+  if (Array.isArray(object.items)) return object.items
+  if (Array.isArray(object.data)) return object.data
+  if (Array.isArray(object.posts)) return object.posts
+  if (Array.isArray(object.results)) return object.results
+  return []
+}
+
+function stringField(object: Record<string, unknown>, key: string): string {
+  const value = object[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function formatLinkedInMetrics(object: Record<string, unknown>): string {
+  const pairs = [
+    ['reactions', numberField(object, 'reaction_counter') ?? numberField(object, 'reactions') ?? numberField(object, 'like_count')],
+    ['comments', numberField(object, 'comment_counter') ?? numberField(object, 'comments') ?? numberField(object, 'comment_count')],
+    ['shares', numberField(object, 'repost_counter') ?? numberField(object, 'shares') ?? numberField(object, 'share_count')],
+    ['views', numberField(object, 'impressions_counter') ?? numberField(object, 'views') ?? numberField(object, 'view_count')],
+  ].filter(([, value]) => typeof value === 'number') as Array<[string, number]>
+  return pairs.length ? pairs.map(([label, value]) => `${value} ${label}`).join(', ') : ''
+}
+
+function numberField(object: Record<string, unknown>, key: string): number | null {
+  const value = object[key]
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value)
+  return null
+}
+
+function cleanLinkedInText(raw: string): string {
+  return raw
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function isUsefulLinkedInField(key: string): boolean {
+  return /name|headline|summary|about|description|tagline|industry|location|followers|connections|website|url|public/i.test(key)
+}
+
+function humanize(key: string): string {
+  return key.replace(/[_-]+/g, ' ')
 }
 
 function jsonError(message: string, status: number) {
