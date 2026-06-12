@@ -12,7 +12,7 @@ import { useState, useEffect, useRef } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   MessageSquare, CheckSquare, Brain,
-  BarChart3, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid, CalendarDays, Library, Plus, Clock, ChevronRight, ChevronLeft, KeyRound,
+  BarChart3, TrendingUp, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid, CalendarDays, Library, Plus, Clock, ChevronRight, ChevronLeft, KeyRound,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
@@ -467,21 +467,20 @@ export default function Layout() {
         {/* Active client — top-of-rail switcher (always-visible context). */}
         <ClientSwitcher />
 
-        {/* Primary nav — grouped into the felt sequence of the work: create in
-            Vera → move it through the Pipeline (approve → schedule → archive) →
-            the Client's brain + how it's landing. Kills the flat-peer trap. */}
+        {/* Primary nav grouped around the B2B demand-content loop. */}
         <nav className="pt-1 space-y-0.5">
-          <RailItem to={p('vera')}      icon={MessageSquare}   label="Vera" onClick={() => window.dispatchEvent(new CustomEvent('vera:home'))} />
+          <RailItem to={p('vera')}      icon={MessageSquare}   label="Command" onClick={() => window.dispatchEvent(new CustomEvent('vera:home'))} />
 
-          <RailLabel>Pipeline</RailLabel>
+          <RailLabel>Production</RailLabel>
           <RailItem to={p('review')}    icon={CheckSquare}     label="Review" badge={pendingCount} />
-          <RailItem to={p('calendar')}  icon={CalendarDays}    label="Calendar" />
-          <RailItem to={p('artifacts')} icon={Library}         label="Artifacts" />
+          <RailItem to={p('calendar')}  icon={CalendarDays}    label="Planner" />
+          <RailItem to={p('artifacts')} icon={Library}         label="Studio" />
 
-          <RailLabel>Client</RailLabel>
-          <RailItem to={p('brain')}     icon={Brain}           label="Brain" />
+          <RailLabel>Demand</RailLabel>
+          <RailItem to={p('brain')}     icon={Brain}           label="Demand Brain" />
           <RailItem to={p('measure')}   icon={BarChart3}       label="Performance" />
-          <RailItem to={p('keys')}      icon={KeyRound}        label="API keys" />
+          <RailItem to={p('learning')}  icon={TrendingUp}      label="Learning" />
+          <RailItem to={p('keys')}      icon={KeyRound}        label="Integrations" />
         </nav>
 
         <RailRecents />

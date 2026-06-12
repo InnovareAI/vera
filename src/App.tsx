@@ -25,6 +25,7 @@ import AcrossClients from './pages/AcrossClients'   // "/" — the shelf
 import VeraThread from './pages/VeraThread'          // /p/:slug/vera
 import Brain from './pages/Brain'                    // /p/:slug/brain
 import Measure from './pages/Measure'                // /p/:slug/measure, visible label: Performance
+import Learning from './pages/Learning'              // /p/:slug/learning
 import ReviewLink from './pages/ReviewLink'          // /r/:reviewToken — public, tokened review link
 import ApprovalIndex from './pages/ApprovalIndex'
 import AcceptInvite from './pages/AcceptInvite'
@@ -61,7 +62,7 @@ export default function App() {
                 {/* clients" shelf lives at /clients for when it's needed.      */}
                 <Route index element={<RootIndex />} />
 
-                {/* ── The DESK ── one client, six loop surfaces. */}
+                {/* ── The DESK ── one client, the demand-content loop. */}
                 <Route path="p/:projectSlug">
                   <Route index element={<Navigate to="vera" replace />} />{/* Vera is home-base (SAM-style) */}
                   <Route path="dashboard"  element={<RedirectFlatToProject section="vera" />} />{/* Home removed → Vera */}
@@ -73,6 +74,7 @@ export default function App() {
                   <Route path="knowledge"  element={<Knowledge />} />{/* legacy KB — folds into Brain next */}
                   <Route path="brain"      element={<Brain />} />
                   <Route path="measure"    element={<Measure />} />
+                  <Route path="learning"   element={<Learning />} />
                   <Route path="keys"       element={<ClientKeys />} />{/* the client's own provider keys */}
                 </Route>
 
@@ -90,6 +92,7 @@ export default function App() {
                 <Route path="library"    element={<RedirectFlatToProject section="review" />} />{/* Library dissolves → Review */}
                 <Route path="calendar"   element={<RedirectFlatToProject section="calendar" />} />{/* flat → project calendar */}
                 <Route path="templates"  element={<RedirectFlatToProject section="knowledge" />} />{/* Templates fold into Knowledge */}
+                <Route path="learning"   element={<RedirectFlatToProject section="learning" />} />
                 <Route path="clients"    element={<AcrossClients />} />{/* the "all clients" shelf — reachable, not the default */}
                 <Route path="agency"     element={<AcrossClients />} />{/* Agency → the shelf */}
 

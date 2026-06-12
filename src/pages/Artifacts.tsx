@@ -419,8 +419,8 @@ export default function Artifacts() {
 
       <PageHeader
         eyebrow={activeProject.name}
-        title="Artifacts"
-        subtitle="Everything for this client in one place: campaigns, posts, media, logos, guidelines, and briefs. Upload brand files here so Vera can reuse and read them."
+        title="Studio"
+        subtitle="Everything VERA produces or reuses for this client: campaigns, posts, media, logos, guidelines, briefs, and demand assets."
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: space[3], marginBottom: space[5] }}>

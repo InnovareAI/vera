@@ -387,8 +387,8 @@ export default function Brain() {
 
   return (
     <div style={{ padding: `${space[8]} ${space[8]} 0`, maxWidth: 1040 }}>
-      <PageHeader eyebrow={activeProject.name} title="Brain"
-        subtitle="The ground truth VERA reasons from for this client: instructions it reads every turn, the brand voice, audiences, and knowledge." />
+      <PageHeader eyebrow={activeProject.name} title="Demand Brain"
+        subtitle="The client demand intelligence VERA uses every turn: ICP, offer, buyer pains, proof, voice, sources, and constraints." />
 
       {/* Agentic-first: let Vera draft the brain from the client's content
           instead of starting blank. Prefills the brand voice for review. */}
@@ -405,9 +405,9 @@ export default function Brain() {
       <section style={{ marginBottom: space[9] }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: space[4], flexWrap: 'wrap', marginBottom: space[3] }}>
           <div>
-            <SectionLabel>Business context</SectionLabel>
+            <SectionLabel>Demand context</SectionLabel>
             <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `${space[2]} 0 0` }}>
-              Start with the company URL, then add the social sources and facts VERA should ground every answer in.
+              Start with the company URL, then add the social sources and facts VERA should use for demand creation.
             </p>
           </div>
           <span style={{ fontSize: t.size.cap, color: color.ghost }}>

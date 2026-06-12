@@ -1665,14 +1665,16 @@ type LaunchAction = { icon: React.ElementType; title: string; sub: string; promp
 // add-knowledge) are reachable by just typing in the composer.
 function buildLaunchActions(stats: { pending: number; campaigns: number }): LaunchAction[] {
   const a: LaunchAction[] = []
-  a.push({ icon: PenLine, title: 'Draft a Post', sub: 'Sharp copy, text first', prompt: 'Draft a punchy LinkedIn post for this brand: one sharp hook, three crisp points, a soft CTA. Text only for now, then ask if I want a matching image.' })
-  a.push({ icon: ImagePlus, title: 'Create a Visual', sub: 'Image, infographic, or carousel', prompt: 'I want to create a visual for a post. Offer me the options (infographic, carousel, quote card, or a custom image), or let me describe my own, then build a tight image prompt and generate it.' })
-  a.push({ icon: Clapperboard, title: 'Storyboard', sub: 'Scenes, timing, estimate', prompt: 'Create a storyboard for a short video post. Include scene beats, timing, camera and motion notes, caption, model recommendation, and estimated prototype cost. Do not render the video until I explicitly approve the paid generation.' })
-  a.push({ icon: Zap, title: 'Write Hooks', sub: '5 sharp opening lines', prompt: "Write 5 scroll-stopping opening hooks in this brand's voice for a topic I give you. Punchy, specific, no cliches." })
   a.push(stats.campaigns > 0
-    ? { icon: Megaphone, title: 'Improve Campaign', sub: `${stats.campaigns} in this workspace`, prompt: "Review this brand's campaigns and suggest the highest-impact improvement to theme, angle, cadence, or channel mix." }
-    : { icon: Megaphone, title: 'Plan a Campaign', sub: 'A drafted, scheduled series', prompt: 'Plan and draft a content campaign for this brand: write the posts and schedule them across the next few weeks.' })
-  a.push({ icon: Lightbulb, title: 'Content Ideas', sub: 'Fresh angles for this brand', prompt: "Give me 5 content ideas grounded in this brand's voice and recent themes." })
+    ? { icon: Megaphone, title: 'Improve Demand Campaign', sub: `${stats.campaigns} active campaign${stats.campaigns === 1 ? '' : 's'}`, prompt: "Review this client's active campaigns and suggest the highest-impact improvement to ICP, pain point, offer, CTA, cadence, and channel mix. Prioritize top-of-funnel demand creation." }
+    : { icon: Megaphone, title: 'Plan Demand Campaign', sub: 'B2B TOF series', prompt: 'Plan a B2B top-of-funnel demand campaign for this client. Define ICP, pain point, offer, funnel goal, channels, success metric, and draft the first content batch.' })
+  a.push({ icon: PenLine, title: 'LinkedIn Demand Post', sub: 'ICP, pain, CTA', prompt: 'Draft a LinkedIn post that creates B2B top-of-funnel demand. Include ICP, pain point, market insight, proof angle, soft CTA, and the SAM follow-up signal to watch for.' })
+  a.push({ icon: ImagePlus, title: 'Visual Asset', sub: 'Carousel or image', prompt: 'Create a platform-native visual asset for a B2B demand post. Recommend carousel, infographic, quote card, or custom image, then build the prompt and ask before rendering.' })
+  a.push({ icon: Clapperboard, title: 'Video Storyboard', sub: 'Scenes and cost', prompt: 'Create a storyboard for a short B2B demand video. Include scene beats, timing, camera notes, caption, model recommendation, and estimated prototype cost. Do not render until I explicitly approve the paid generation.' })
+  a.push({ icon: Zap, title: 'Repurpose Across Channels', sub: 'YT, Medium, Quora, Reddit, X', prompt: 'Turn one core B2B demand idea into platform-native versions for LinkedIn, YouTube, Medium, Quora, Reddit, and X. Keep each version native to the channel.' })
+  a.push(stats.campaigns > 0
+    ? { icon: Lightbulb, title: 'SAM Handoff Angles', sub: 'Comments, shares, traffic', prompt: 'Find content topics and engagement signals that should hand off to SAM. Turn comments, shares, clicks, and objections into sales research angles.' }
+    : { icon: Lightbulb, title: 'Demand Angles', sub: 'Fresh market hooks', prompt: "Give me 5 B2B demand angles grounded in this client's offer, ICP, buyer pains, proof points, and current market conversations." })
   return a.slice(0, 6)
 }
 
@@ -1691,23 +1693,23 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
   const setupDone = !!setup && setup.business && setup.audience && setup.voice && setup.categories && setup.knowledge
   // Persona-first, SAM-clean: when the brain is thin, the FIRST card is "set up
   // the client" (routes to Brain). No separate checklist block.
-  const setupCard: LaunchAction = { icon: Sparkles, title: `Set up ${projectName}`, sub: 'URL, business context, voice', prompt: '', action: 'brain' }
+  const setupCard: LaunchAction = { icon: Sparkles, title: `Set up ${projectName}`, sub: 'URL, ICP, offer, proof', prompt: '', action: 'brain' }
   const grid = (setup && !setupDone ? [setupCard, ...actions] : actions).slice(0, 6)
   return (
     <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: space[8] }}>
       <span style={{ marginBottom: space[5], display: 'inline-flex' }}><VeraAvatar size={56} hero /></span>
       <h1 style={{ fontSize: t.size.h2, fontWeight: t.weight.semibold, color: color.ink, marginBottom: space[2], textAlign: 'center' }}>
-        What should we create today?
+        Create B2B demand for {projectName}
       </h1>
       <p style={{ fontSize: t.size.body, color: color.ghost, marginBottom: space[5], textAlign: 'center', maxWidth: '44ch' }}>
-        Bring Vera a brief, a question, or an idea you want to move forward.
+        Turn client knowledge into campaigns, posts, visuals, storyboards, and demand signals that SAM can use.
       </p>
 
       {needsKey && (
         <div style={{ width: '100%', maxWidth: 640, marginBottom: space[5], padding: space[5], background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.lg, textAlign: 'left' }}>
-          <div style={{ fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink, marginBottom: 4 }}>Welcome to Vera, your AI content partner</div>
+          <div style={{ fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink, marginBottom: 4 }}>Welcome to Vera, your B2B demand engine</div>
           <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.6, margin: `0 0 ${space[3]}` }}>
-            Vera drafts posts, plans multi-week campaigns, and creates images, carousels, and videos for each client. <strong>Start exploring right now</strong> — the shared setup is ready to go, so you can generate content and get a feel for it. It's tuned for straightforward work while shared; when you want full quality and heavier production, add your own Anthropic key (it stays on the shared model until you do).
+            Vera turns client knowledge into top-of-funnel demand content: campaigns, posts, visuals, carousels, videos, and the engagement signals that should flow into SAM. <strong>Start exploring right now</strong>. The shared setup is ready for straightforward work; add your own Anthropic key when you want full quality and heavier production.
           </p>
           <ol style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.7, margin: `0 0 ${space[3]}`, paddingLeft: 18 }}>
             <li>Create a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" style={{ color: color.accent, fontWeight: t.weight.medium }}>console.anthropic.com/settings/keys</a></li>

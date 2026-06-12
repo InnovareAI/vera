@@ -357,8 +357,8 @@ export default function Measure() {
     <div style={{ padding: `${space[8]} ${space[8]} ${space[10]}`, maxWidth: 1320 }}>
       <PageHeader
         eyebrow={activeProject?.name ?? activeOrg?.name ?? 'Workspace'}
-        title="Content Performance"
-        subtitle="A working dashboard for output, bottlenecks, post results, and the next actions Vera should take."
+        title="Demand Performance"
+        subtitle="A working dashboard for output, bottlenecks, post results, engagement signals, traffic, and the next actions Vera should take."
         actions={(
           <Button
             variant="secondary"
