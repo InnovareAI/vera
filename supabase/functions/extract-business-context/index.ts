@@ -2,10 +2,15 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js"
 import Anthropic from "npm:@anthropic-ai/sdk"
 import mammoth from "npm:mammoth@1.10.0"
+import type { AdminClient } from "../_shared/auth.ts"
+import { isMasterOrg, loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { logGenerationUsage } from "../_shared/generation-usage.ts"
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")
+const ANTHROPIC_EXTRACT_MODEL = Deno.env.get("ANTHROPIC_EXTRACT_MODEL") ?? "claude-haiku-4-5"
+const OPENROUTER_EXTRACT_MODEL = Deno.env.get("OPENROUTER_EXTRACT_MODEL") ?? "google/gemini-2.5-flash"
 const APIFY_TOKEN = Deno.env.get("INNOVARE_APIFY_TOKEN") ?? Deno.env.get("APIFY_TOKEN") ?? Deno.env.get("APIFY_API_TOKEN")
 const UNIPILE_API_KEY = Deno.env.get("UNIPILE_API_KEY")
 const UNIPILE_BASE_URL = normalizeUnipileBaseUrl(
@@ -81,6 +86,10 @@ type SourceDocument = {
   items: number
 }
 
+type ExtractionRuntime =
+  | { provider: "anthropic"; key: string; model: string; keySource: "platform" | "client" }
+  | { provider: "openrouter"; key: string; model: string; keySource: "client" }
+
 const FIELD_KEYS = [
   "website",
   "linkedinCompany",
@@ -127,7 +136,6 @@ function normalizeUnipileBaseUrl(raw: string) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
   if (req.method !== "POST") return jsonError("Method not allowed", 405)
-  if (!ANTHROPIC_API_KEY) return jsonError("ANTHROPIC_API_KEY is not configured", 500)
 
   const supabase = createAdminClient()
   const bearer = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "")
@@ -176,25 +184,171 @@ Deno.serve(async (req) => {
   }
   if (!content.ok) return jsonError(content.error, 400)
 
-  const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY })
+  const requiresAnthropicDocuments = content.value.some(block =>
+    !!block && typeof block === "object" && (block as { type?: unknown }).type === "document"
+  )
+  const runtime = await resolveExtractionRuntime(supabase as unknown as AdminClient, project.id, project.org_id, requiresAnthropicDocuments)
+  if (!runtime.ok) return runtime.response
+
+  const startedAt = Date.now()
+  let extraction: Awaited<ReturnType<typeof runExtraction>>
+  try {
+    extraction = await runExtraction(runtime.runtime, content.value)
+  } catch (error) {
+    return jsonError(`Business context extraction failed: ${errorMessage(error)}`, 502)
+  }
+  await logGenerationUsage(supabase as unknown as AdminClient, {
+    orgId: project.org_id,
+    projectId: project.id,
+    provider: runtime.runtime.provider,
+    model: runtime.runtime.model,
+    operation: "business_context.extract",
+    inputTokens: extraction.inputTokens,
+    outputTokens: extraction.outputTokens,
+    durationMs: Date.now() - startedAt,
+    metadata: {
+      task: "extract-business-context",
+      source: fileName,
+      key_source: runtime.runtime.keySource,
+      pulled_sources: !!body.pull_sources,
+      source_count: sources?.length ?? 0,
+    },
+  })
+
+  const context = parseContextJson(extraction.output)
+  return json({ ok: true, context, source: fileName, sources })
+})
+
+async function resolveExtractionRuntime(
+  supabase: AdminClient,
+  projectId: string,
+  orgId: string,
+  requiresAnthropicDocuments: boolean,
+): Promise<{ ok: true; runtime: ExtractionRuntime } | { ok: false; response: Response }> {
+  let master = false
+  try {
+    master = await isMasterOrg(supabase, orgId)
+  } catch (error) {
+    return { ok: false, response: jsonError(`Could not resolve workspace billing policy: ${errorMessage(error)}`, 500) }
+  }
+  if (master) {
+    if (!ANTHROPIC_API_KEY) return { ok: false, response: jsonError("ANTHROPIC_API_KEY is not configured", 500) }
+    return {
+      ok: true,
+      runtime: { provider: "anthropic", key: ANTHROPIC_API_KEY, model: ANTHROPIC_EXTRACT_MODEL, keySource: "platform" },
+    }
+  }
+
+  let openRouter: { key: string; provider: string } | null = null
+  let anthropic: { key: string; provider: string } | null = null
+  try {
+    const results = await Promise.all([
+      requiresAnthropicDocuments ? Promise.resolve(null) : loadClientApiKey(supabase, projectId, ["openrouter"]),
+      loadClientApiKey(supabase, projectId, ["anthropic"]),
+    ])
+    openRouter = results[0]
+    anthropic = results[1]
+  } catch (error) {
+    return { ok: false, response: jsonError(`Client API key for business context extraction is unavailable: ${errorMessage(error)}`, 403) }
+  }
+
+  if (openRouter?.key) {
+    return {
+      ok: true,
+      runtime: { provider: "openrouter", key: openRouter.key, model: OPENROUTER_EXTRACT_MODEL, keySource: "client" },
+    }
+  }
+  if (anthropic?.key) {
+    return {
+      ok: true,
+      runtime: { provider: "anthropic", key: anthropic.key, model: ANTHROPIC_EXTRACT_MODEL, keySource: "client" },
+    }
+  }
+
+  return {
+    ok: false,
+    response: jsonError(
+      requiresAnthropicDocuments
+        ? "Business context PDF extraction requires this client space to use its own Anthropic key."
+        : "Business context extraction requires this client space to use its own OpenRouter or Anthropic key.",
+      403,
+    ),
+  }
+}
+
+async function runExtraction(
+  runtime: ExtractionRuntime,
+  content: unknown[],
+): Promise<{ output: string; inputTokens: number | null; outputTokens: number | null }> {
+  if (runtime.provider === "openrouter") return runOpenRouterExtraction(runtime, content)
+  return runAnthropicExtraction(runtime, content)
+}
+
+async function runAnthropicExtraction(
+  runtime: Extract<ExtractionRuntime, { provider: "anthropic" }>,
+  content: unknown[],
+): Promise<{ output: string; inputTokens: number | null; outputTokens: number | null }> {
+  const anthropic = new Anthropic({ apiKey: runtime.key })
   const response = await anthropic.messages.create({
-    model: "claude-haiku-4-5",
+    model: runtime.model,
     max_tokens: 1800,
     temperature: 0,
     messages: [{
       role: "user",
-      content: content.value as any,
+      content: content as any,
     }],
   })
 
-  const output = response.content
-    .filter(block => block.type === "text")
-    .map(block => block.text)
-    .join("\n")
+  return {
+    output: response.content
+      .filter(block => block.type === "text")
+      .map(block => block.text)
+      .join("\n"),
+    inputTokens: response.usage.input_tokens ?? null,
+    outputTokens: response.usage.output_tokens ?? null,
+  }
+}
 
-  const context = parseContextJson(output)
-  return json({ ok: true, context, source: fileName, sources })
-})
+async function runOpenRouterExtraction(
+  runtime: Extract<ExtractionRuntime, { provider: "openrouter" }>,
+  content: unknown[],
+): Promise<{ output: string; inputTokens: number | null; outputTokens: number | null }> {
+  const prompt = content
+    .map(block => block && typeof block === "object" && (block as { type?: unknown }).type === "text"
+      ? String((block as { text?: unknown }).text ?? "")
+      : "")
+    .join("\n\n")
+    .trim()
+  if (!prompt) throw new Error("OpenRouter extraction requires text content. For PDFs, add a client Anthropic key.")
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${runtime.key}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://vera.innovareai.com",
+      "X-Title": "VERA Business Context Extraction",
+    },
+    body: JSON.stringify({
+      model: runtime.model,
+      temperature: 0,
+      max_tokens: 1800,
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    }),
+    signal: AbortSignal.timeout(180_000),
+  })
+  if (!response.ok) throw new Error(`OpenRouter extraction failed with HTTP ${response.status}`)
+  const data = await response.json() as {
+    choices?: Array<{ message?: { content?: string | null } }>
+    usage?: { prompt_tokens?: number; completion_tokens?: number }
+  }
+  return {
+    output: data.choices?.[0]?.message?.content ?? "{}",
+    inputTokens: data.usage?.prompt_tokens ?? null,
+    outputTokens: data.usage?.completion_tokens ?? null,
+  }
+}
 
 async function pullSourceContent(
   supabase: SupabaseAdminClient,

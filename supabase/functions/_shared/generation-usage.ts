@@ -76,7 +76,7 @@ export type GenerationCostEstimate = {
 }
 
 export function estimateGenerationUsageCost(usage: GenerationUsageEstimateInput): GenerationCostEstimate | null {
-  if (usage.operation === "chat.message") return estimateTextCost(usage)
+  if (usage.operation === "chat.message" || usage.operation === "business_context.extract") return estimateTextCost(usage)
   if (usage.operation === "image.generate") return estimateImageCost(usage)
   if (usage.operation === "video.submit") return estimateVideoSubmitCost(usage)
   return null
