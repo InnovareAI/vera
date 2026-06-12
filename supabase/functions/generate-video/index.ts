@@ -14,7 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember, requireSignedInOrService } from "../_shared/auth.ts"
-import { isMasterOrg, loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -248,7 +248,7 @@ async function resolveFalKey(
   orgId: string,
 ): Promise<{ ok: true; key: string; source: 'platform' | 'client' } | { ok: false; response: Response }> {
   try {
-    if (await isMasterOrg(supabase, orgId)) {
+    if (await isPlatformMediaProject(supabase, projectId, orgId)) {
       if (!FAL_API_KEY) return { ok: false, response: jsonError('FAL_API_KEY not configured on the server.', 500) }
       return { ok: true, key: FAL_API_KEY, source: 'platform' }
     }

@@ -31,6 +31,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
+import { isPlatformMediaProject } from '../_shared/client-media-keys.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -2994,10 +2995,9 @@ Deno.serve(async (req) => {
   //     bring their own Anthropic key — the only provider key we offer/use)
   let effectiveModel = MODEL
   let effectiveApiKey = anthropicKey   // InnovareAI / platform key (default)
-  let isMasterOrg = false
   try {
     const { data: orgRow } = await supabase.from('organizations').select('is_master').eq('id', org_id).maybeSingle()
-    isMasterOrg = !!(orgRow as { is_master?: boolean } | null)?.is_master
+    const isMasterOrg = !!(orgRow as { is_master?: boolean } | null)?.is_master
     if (!isMasterOrg && project_id) {
       const { data: ownAnthropic } = await supabase.from('client_api_keys')
         .select('secret_ciphertext').eq('project_id', project_id).eq('provider', 'anthropic').eq('status', 'active')
@@ -3022,8 +3022,16 @@ Deno.serve(async (req) => {
       if (cipher) clientOpenRouterKey = await decryptClientSecret(cipher)
     } catch { /* fall back to the Anthropic path on any lookup/decrypt error */ }
   }
+  let allowPlatformMediaProject = false
+  if (project_id) {
+    try {
+      allowPlatformMediaProject = await isPlatformMediaProject(supabase, project_id, org_id)
+    } catch {
+      allowPlatformMediaProject = false
+    }
+  }
   let clientHasFalKey = false
-  if (project_id && !isMasterOrg) {
+  if (project_id && !allowPlatformMediaProject) {
     try {
       const { data: falRow } = await supabase.from('client_api_keys')
         .select('id').eq('project_id', project_id).in('provider', ['fal', 'fal_ai']).eq('status', 'active')
@@ -3033,10 +3041,11 @@ Deno.serve(async (req) => {
       clientHasFalKey = false
     }
   }
-  const enabledTools = (isMasterOrg || clientHasFalKey)
+  const allowVideoGeneration = allowPlatformMediaProject || clientHasFalKey
+  const enabledTools = allowVideoGeneration
     ? TOOLS
     : TOOLS.filter(tool => tool.name !== 'generate_video')
-  if (!isMasterOrg && !clientHasFalKey) {
+  if (!allowVideoGeneration) {
     systemBlocks.push({
       type: 'text' as const,
       text: [
@@ -3112,7 +3121,7 @@ Deno.serve(async (req) => {
               serviceKey,
               emit: send,
               userPrompt: lastUserText ?? null,
-              allowVideoGeneration: isMasterOrg || clientHasFalKey,
+              allowVideoGeneration,
             },
           })
           fullText = r.fullText
@@ -3219,7 +3228,7 @@ Deno.serve(async (req) => {
                 serviceKey,
                 emit: send,
                 userPrompt: lastUserText ?? null,
-                allowVideoGeneration: isMasterOrg || clientHasFalKey,
+                allowVideoGeneration,
               })
               if (exec.image_url) {
                 generatedImages.push(exec.image_url)

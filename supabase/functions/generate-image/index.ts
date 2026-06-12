@@ -14,7 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember } from "../_shared/auth.ts"
-import { isMasterOrg, loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -103,7 +103,7 @@ Deno.serve(async (req) => {
   let useOR = !useOpenAI && model in OR_MODELS
   if (mediaKeys.openRouterKey) { useOpenAI = false; useOR = true }
 
-  if (!mediaKeys.isMaster) {
+  if (!mediaKeys.isPlatformMediaProject) {
     const hasClientKeyForRoute =
       (useOR && !!mediaKeys.openRouterKey) ||
       (useOpenAI && !!mediaKeys.openAIKey) ||
@@ -118,9 +118,9 @@ Deno.serve(async (req) => {
     : useOR
       ? (OR_MODELS[model] ?? OR_NANO_BANANA)
       : (FAL_MODELS[model] ?? model)
-  const openRouterKey = mediaKeys.openRouterKey ?? (mediaKeys.isMaster ? OPENROUTER_API_KEY : null)
-  const openAIKey = mediaKeys.openAIKey ?? (mediaKeys.isMaster ? OPENAI_API_KEY : null)
-  const falKey = mediaKeys.falKey ?? (mediaKeys.isMaster ? FAL_API_KEY : null)
+  const openRouterKey = mediaKeys.openRouterKey ?? (mediaKeys.isPlatformMediaProject ? OPENROUTER_API_KEY : null)
+  const openAIKey = mediaKeys.openAIKey ?? (mediaKeys.isPlatformMediaProject ? OPENAI_API_KEY : null)
+  const falKey = mediaKeys.falKey ?? (mediaKeys.isPlatformMediaProject ? FAL_API_KEY : null)
 
   if (useOpenAI && !openAIKey) return jsonError('No OpenAI key available for this image request.', 500)
   if (useOR && !openRouterKey) return jsonError('No OpenRouter key available for this image request.', 500)
@@ -358,7 +358,7 @@ async function runOpenRouter(
 function delay(ms: number) { return new Promise(r => setTimeout(r, ms)) }
 
 type MediaKeys = {
-  isMaster: boolean
+  isPlatformMediaProject: boolean
   openRouterKey: string | null
   openAIKey: string | null
   falKey: string | null
@@ -370,15 +370,15 @@ async function resolveMediaKeys(
   orgId: string,
 ): Promise<{ ok: true } & MediaKeys | { ok: false; response: Response }> {
   try {
-    const [master, openRouter, openAI, fal] = await Promise.all([
-      isMasterOrg(supabase, orgId),
+    const [platformMediaProject, openRouter, openAI, fal] = await Promise.all([
+      isPlatformMediaProject(supabase, projectId, orgId),
       loadClientApiKey(supabase, projectId, ['openrouter']),
       loadClientApiKey(supabase, projectId, ['openai']),
       loadClientApiKey(supabase, projectId, ['fal', 'fal_ai']),
     ])
     return {
       ok: true,
-      isMaster: master,
+      isPlatformMediaProject: platformMediaProject,
       openRouterKey: openRouter?.key ?? null,
       openAIKey: openAI?.key ?? null,
       falKey: fal?.key ?? null,

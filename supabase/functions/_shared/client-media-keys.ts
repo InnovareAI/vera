@@ -1,6 +1,8 @@
 import type { AdminClient } from "./auth.ts"
 
 const CLIENT_KEY_ENC = Deno.env.get("CLIENT_API_KEY_ENCRYPTION_KEY") ?? Deno.env.get("VAULT_ENC_KEY") ?? ""
+const PLATFORM_MEDIA_PROJECT_IDS = parseList(Deno.env.get("PLATFORM_MEDIA_PROJECT_IDS") ?? "")
+const PLATFORM_MEDIA_PROJECT_SLUGS = parseList(Deno.env.get("PLATFORM_MEDIA_PROJECT_SLUGS") ?? "innovareai-brand")
 
 export async function decryptClientSecret(payload: string): Promise<string | null> {
   try {
@@ -25,6 +27,28 @@ export async function isMasterOrg(supabase: AdminClient, orgId: string): Promise
     .maybeSingle()
   if (error) throw new Error(error.message)
   return (data as { is_master?: boolean } | null)?.is_master === true
+}
+
+export async function isPlatformMediaProject(
+  supabase: AdminClient,
+  projectId: string,
+  orgId: string,
+): Promise<boolean> {
+  if (PLATFORM_MEDIA_PROJECT_IDS.has(projectId)) {
+    return await isMasterOrg(supabase, orgId)
+  }
+
+  const { data, error } = await supabase
+    .from("projects")
+    .select("slug, org_id")
+    .eq("id", projectId)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  const project = data as { slug?: string | null; org_id?: string | null } | null
+  if (!project || project.org_id !== orgId || !project.slug) return false
+  if (!PLATFORM_MEDIA_PROJECT_SLUGS.has(project.slug)) return false
+
+  return await isMasterOrg(supabase, orgId)
 }
 
 export async function loadClientApiKey(
@@ -56,4 +80,8 @@ export async function loadClientApiKey(
   }
 
   return { key, provider: row.provider }
+}
+
+function parseList(value: string): Set<string> {
+  return new Set(value.split(",").map(item => item.trim()).filter(Boolean))
 }
