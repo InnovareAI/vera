@@ -14,7 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember } from "../_shared/auth.ts"
-import { isPlatformFalEnabled, isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -24,7 +24,6 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-const FAL_API_KEY = Deno.env.get('FAL_API_KEY')
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
 const DEFAULT_IMAGE_MODEL = Deno.env.get('DEFAULT_IMAGE_MODEL') ?? 'nano-banana'
@@ -107,7 +106,6 @@ Deno.serve(async (req) => {
   if (!access.ok) return access.response
   const mediaKeys = await resolveMediaKeys(supabase, projectId, access.orgId)
   if (!mediaKeys.ok) return mediaKeys.response
-  const platformFalAvailable = mediaKeys.isPlatformMediaProject && isPlatformFalEnabled() && !!FAL_API_KEY
 
   // Route by alias: explicit OpenAI premium > supported OpenRouter image
   // models > FAL. A client OpenRouter key is used only for aliases we know
@@ -116,11 +114,11 @@ Deno.serve(async (req) => {
   const platformOpenRouterAvailable = mediaKeys.isPlatformMediaProject && !!OPENROUTER_API_KEY
   const wantsNanoBanana = model === 'nano-banana'
   const supportsOpenRouter = model in OR_MODELS || wantsNanoBanana
-  const falPreferredForModel = wantsNanoBanana && (!!mediaKeys.falKey || platformFalAvailable)
+  const falPreferredForModel = wantsNanoBanana && !!mediaKeys.falKey
   const useOpenAI = model in OPENAI_MODELS
   const useOR = !useOpenAI && (
     (!!mediaKeys.openRouterKey && supportsOpenRouter && !falPreferredForModel) ||
-    (!mediaKeys.falKey && !platformFalAvailable && platformOpenRouterAvailable && supportsOpenRouter)
+    (!mediaKeys.falKey && platformOpenRouterAvailable && supportsOpenRouter)
   )
 
   if (!mediaKeys.isPlatformMediaProject) {
@@ -140,7 +138,7 @@ Deno.serve(async (req) => {
       : (FAL_MODELS[model] ?? model)
   const openRouterKey = mediaKeys.openRouterKey ?? (mediaKeys.isPlatformMediaProject ? OPENROUTER_API_KEY : null)
   const openAIKey = mediaKeys.openAIKey ?? (mediaKeys.isPlatformMediaProject ? OPENAI_API_KEY : null)
-  const falKey = mediaKeys.falKey ?? (platformFalAvailable ? FAL_API_KEY : null)
+  const falKey = mediaKeys.falKey
 
   if (useOpenAI && !openAIKey) return jsonError('No OpenAI key available for this image request.', 500)
   if (useOR && !openRouterKey) return jsonError('No OpenRouter key available for this image request.', 500)

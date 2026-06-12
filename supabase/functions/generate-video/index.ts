@@ -14,7 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember, requireSignedInOrService } from "../_shared/auth.ts"
-import { isPlatformFalEnabled, isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { loadClientApiKey } from "../_shared/client-media-keys.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -24,7 +24,6 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-const FAL_API_KEY = Deno.env.get('FAL_API_KEY')
 
 type VideoTier = 'standard' | 'premium'
 type VideoKind = 'text' | 'image'
@@ -103,7 +102,7 @@ Deno.serve(async (req) => {
 
     const access = await requireProjectMember(req, supabase, SERVICE_KEY, jobProjectId, corsHeaders)
     if (!access.ok) return access.response
-    const fal = await resolveFalKey(supabase, jobProjectId, access.orgId)
+    const fal = await resolveFalKey(supabase, jobProjectId)
     if (!fal.ok) return fal.response
 
     const modelHint = modelSlugHint(model)
@@ -146,7 +145,7 @@ Deno.serve(async (req) => {
     )
   }
 
-  const fal = await resolveFalKey(supabase, projectId, access.orgId)
+  const fal = await resolveFalKey(supabase, projectId)
   if (!fal.ok) return fal.response
 
   // Build per-model payload. Different FAL video endpoints accept slightly
@@ -354,16 +353,10 @@ async function recordVideoJob(
 async function resolveFalKey(
   supabase: AdminClient,
   projectId: string,
-  orgId: string,
-): Promise<{ ok: true; key: string; source: 'platform' | 'client' } | { ok: false; response: Response }> {
+): Promise<{ ok: true; key: string; source: 'client' } | { ok: false; response: Response }> {
   try {
     const clientKey = await loadClientApiKey(supabase, projectId, ['fal', 'fal_ai'])
     if (clientKey) return { ok: true, key: clientKey.key, source: 'client' }
-
-    if (isPlatformFalEnabled() && await isPlatformMediaProject(supabase, projectId, orgId)) {
-      if (!FAL_API_KEY) return { ok: false, response: jsonError('FAL_API_KEY not configured on the server.', 500) }
-      return { ok: true, key: FAL_API_KEY, source: 'platform' }
-    }
 
     return {
       ok: false,

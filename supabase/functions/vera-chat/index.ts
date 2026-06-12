@@ -31,7 +31,6 @@ import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
-import { isPlatformFalEnabled, isPlatformMediaProject } from '../_shared/client-media-keys.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -3555,20 +3554,20 @@ function jsonError(message: string, status: number) {
   })
 }
 
+type MemberAccess =
+  | { ok: true; userId: string | null; email: string | null; service: boolean }
+  | { ok: false; response: Response }
+
 async function authorizeMemberRequest(
   req: Request,
   supabase: AdminClient,
   orgId: string,
   projectId: string | null,
-): Promise<{ ok: true; userId: string | null; email: string | null } | { ok: false; response: Response }> {
+): Promise<MemberAccess> {
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
-  if (bearer && bearer === serviceKey) return { ok: true, userId: null, email: null }
-  if (!bearer) return { ok: false, response: jsonError('Unauthorized', 401) }
-
-  const { data: auth, error: authError } = await supabase.auth.getUser(bearer)
-  if (authError || !auth.user) return { ok: false, response: jsonError('Unauthorized', 401) }
-  const email = auth.user.email?.trim().toLowerCase() ?? null
+  const isService = !!bearer && bearer === serviceKey
+  if (!isService && !bearer) return { ok: false, response: jsonError('Unauthorized', 401) }
 
   if (projectId) {
     const { data: project, error: projectError } = await supabase
@@ -3579,12 +3578,21 @@ async function authorizeMemberRequest(
     if (projectError) return { ok: false, response: jsonError(projectError.message, 500) }
     if (!project) return { ok: false, response: jsonError('Client not found', 404) }
     if ((project as { org_id: string }).org_id !== orgId) return { ok: false, response: jsonError('Forbidden', 403) }
+  }
 
-    const [{ data: orgMember }, { data: projectMember }] = await Promise.all([
-      supabase.from('org_members').select('role').eq('org_id', orgId).eq('user_id', auth.user.id).maybeSingle(),
-      supabase.from('project_members').select('role').eq('project_id', projectId).eq('user_id', auth.user.id).maybeSingle(),
-    ])
-    if (orgMember || projectMember) return { ok: true, userId: auth.user.id, email }
+  if (isService) return { ok: true, userId: null, email: null, service: true }
+
+  const { data: auth, error: authError } = await supabase.auth.getUser(bearer)
+  if (authError || !auth.user) return { ok: false, response: jsonError('Unauthorized', 401) }
+  const email = auth.user.email?.trim().toLowerCase() ?? null
+
+  if (projectId) {
+    try {
+      const allowed = await userHasScopeAccess(supabase, auth.user.id, orgId, projectId)
+      if (allowed) return { ok: true, userId: auth.user.id, email, service: false }
+    } catch (error) {
+      return { ok: false, response: jsonError(error instanceof Error ? error.message : 'Could not verify user scope', 500) }
+    }
     return { ok: false, response: jsonError('Forbidden', 403) }
   }
 
@@ -3596,7 +3604,93 @@ async function authorizeMemberRequest(
     .maybeSingle()
   if (orgError) return { ok: false, response: jsonError(orgError.message, 500) }
   if (!orgMember) return { ok: false, response: jsonError('Forbidden', 403) }
-  return { ok: true, userId: auth.user.id, email }
+  return { ok: true, userId: auth.user.id, email, service: false }
+}
+
+async function userHasScopeAccess(
+  supabase: AdminClient,
+  userId: string,
+  orgId: string,
+  projectId: string | null,
+): Promise<boolean> {
+  const queries = [
+    supabase.from('org_members').select('role').eq('org_id', orgId).eq('user_id', userId).maybeSingle(),
+  ]
+  if (projectId) {
+    queries.push(supabase.from('project_members').select('role').eq('project_id', projectId).eq('user_id', userId).maybeSingle())
+  }
+  const [orgMember, projectMember] = await Promise.all(queries)
+  if (orgMember.error) throw new Error(orgMember.error.message)
+  if (projectMember?.error) throw new Error(projectMember.error.message)
+  return !!orgMember.data || !!projectMember?.data
+}
+
+async function resolveEffectiveUserId(
+  supabase: AdminClient,
+  access: Extract<MemberAccess, { ok: true }>,
+  requestedUserId: string | null,
+  orgId: string,
+  projectId: string | null,
+): Promise<{ ok: true; userId: string | null } | { ok: false; response: Response }> {
+  if (access.userId) return { ok: true, userId: access.userId }
+  if (!access.service || !requestedUserId) return { ok: true, userId: null }
+  if (!isUuid(requestedUserId)) return { ok: false, response: jsonError('Invalid user_id', 400) }
+  try {
+    const allowed = await userHasScopeAccess(supabase, requestedUserId, orgId, projectId)
+    if (!allowed) return { ok: false, response: jsonError('Forbidden', 403) }
+    return { ok: true, userId: requestedUserId }
+  } catch (error) {
+    return { ok: false, response: jsonError(error instanceof Error ? error.message : 'Could not verify user scope', 500) }
+  }
+}
+
+async function assertChatMessageWritable(
+  supabase: AdminClient,
+  id: string | null,
+  scope: {
+    orgId: string
+    projectId: string | null
+    sessionId: string | null
+    userId: string | null
+    role: 'user' | 'assistant'
+  },
+): Promise<{ ok: true } | { ok: false; response: Response }> {
+  if (!id) return { ok: true }
+  if (!isUuid(id)) return { ok: false, response: jsonError('Invalid chat message id', 400) }
+
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .select('id, org_id, project_id, session_id, user_id, role')
+    .eq('id', id)
+    .maybeSingle()
+  if (error) return { ok: false, response: jsonError(error.message, 500) }
+  if (!data) return { ok: true }
+
+  const row = data as {
+    org_id?: string | null
+    project_id?: string | null
+    session_id?: string | null
+    user_id?: string | null
+    role?: string | null
+  }
+  const rowUserId = row.user_id ?? null
+  const sameScope =
+    row.org_id === scope.orgId &&
+    (row.project_id ?? null) === scope.projectId &&
+    (row.session_id ?? null) === scope.sessionId &&
+    row.role === scope.role
+  const compatibleUser = rowUserId === null || scope.userId === null || rowUserId === scope.userId
+  if (sameScope && compatibleUser) return { ok: true }
+
+  return { ok: false, response: jsonError('Forbidden', 403) }
+}
+
+function cleanString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
 const MAX_TOOL_ROUNDS = 5  // safety cap so a tool loop can't run forever
@@ -3724,12 +3818,18 @@ Deno.serve(async (req) => {
   }
 
   const { messages, org_id, user_id, project_id, session_id, user_message_id, assistant_message_id, route = '/' } = body
+  const orgId = cleanString(org_id)
+  const projectId = cleanString(project_id)
+  const sessionId = cleanString(session_id)
+  const requestedUserId = cleanString(user_id)
+  const userMessageId = cleanString(user_message_id)
+  const assistantMessageId = cleanString(assistant_message_id)
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return new Response(JSON.stringify({ error: 'messages required (non-empty array)' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
-  if (!org_id) {
+  if (!orgId) {
     return new Response(JSON.stringify({ error: 'org_id required' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
@@ -3746,9 +3846,11 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
-  const access = await authorizeMemberRequest(req, supabase, org_id, project_id ?? null)
+  const access = await authorizeMemberRequest(req, supabase, orgId, projectId)
   if (!access.ok) return access.response
-  const effectiveUserId = access.userId ?? user_id ?? null
+  const resolvedUser = await resolveEffectiveUserId(supabase, access, requestedUserId, orgId, projectId)
+  if (!resolvedUser.ok) return resolvedUser.response
+  const effectiveUserId = resolvedUser.userId
 
   // Resolve the last user turn's text for semantic KB retrieval. Multi-block
   // content (vision) just uses the text portion.
@@ -3759,11 +3861,29 @@ Deno.serve(async (req) => {
       ? lastUserBlock.content.filter((b): b is { type: 'text'; text: string } => b.type === 'text').map(b => b.text).join(' ')
       : ''
 
+  const userMessageGuard = await assertChatMessageWritable(supabase, userMessageId, {
+    orgId,
+    projectId,
+    sessionId,
+    userId: effectiveUserId,
+    role: 'user',
+  })
+  if (!userMessageGuard.ok) return userMessageGuard.response
+
+  const assistantMessageGuard = await assertChatMessageWritable(supabase, assistantMessageId, {
+    orgId,
+    projectId,
+    sessionId,
+    userId: effectiveUserId,
+    role: 'assistant',
+  })
+  if (!assistantMessageGuard.ok) return assistantMessageGuard.response
+
   // Fetch workspace context (including KB hits for this turn). Non-fatal —
   // if it fails we fall back to a minimal prompt so chat still works.
   let contextBlock: string
   try {
-    const ctx = await loadContext(supabase, org_id, effectiveUserId, lastUserText, project_id ?? null)
+    const ctx = await loadContext(supabase, orgId, effectiveUserId, lastUserText, projectId)
     contextBlock = renderContext(ctx, route)
   } catch (err) {
     console.error('vera-chat: context load failed', err)
@@ -3786,7 +3906,7 @@ Deno.serve(async (req) => {
           // Upload the uploaded image to Storage for permanence
           try {
             const dataUrl = `data:${block.source.media_type};base64,${block.source.data}`
-            const url = await uploadImageToStorage(supabase, org_id, dataUrl)
+            const url = await uploadImageToStorage(supabase, orgId, dataUrl)
             userAttachments.push({ kind: 'image', url })
           } catch (e) {
             console.warn('user image upload failed', e)
@@ -3795,10 +3915,10 @@ Deno.serve(async (req) => {
       }
     }
     await supabase.from('chat_messages').upsert({
-      ...(user_message_id ? { id: user_message_id } : {}),
-      org_id, user_id: effectiveUserId, role: 'user',
-      project_id: project_id ?? null,
-      session_id: session_id ?? null,
+      ...(userMessageId ? { id: userMessageId } : {}),
+      org_id: orgId, user_id: effectiveUserId, role: 'user',
+      project_id: projectId,
+      session_id: sessionId,
       content: userText, route,
       attachments: userAttachments,
     }, { onConflict: 'id' })
@@ -3831,11 +3951,11 @@ Deno.serve(async (req) => {
   let effectiveModel = MODEL
   let effectiveApiKey = anthropicKey   // InnovareAI / platform key (default)
   try {
-    const { data: orgRow } = await supabase.from('organizations').select('is_master').eq('id', org_id).maybeSingle()
+    const { data: orgRow } = await supabase.from('organizations').select('is_master').eq('id', orgId).maybeSingle()
     const isMasterOrg = !!(orgRow as { is_master?: boolean } | null)?.is_master
-    if (!isMasterOrg && project_id) {
+    if (!isMasterOrg && projectId) {
       const { data: ownAnthropic } = await supabase.from('client_api_keys')
-        .select('secret_ciphertext').eq('project_id', project_id).eq('provider', 'anthropic').eq('status', 'active')
+        .select('secret_ciphertext').eq('project_id', projectId).eq('provider', 'anthropic').eq('status', 'active')
         .order('updated_at', { ascending: false }).limit(1).maybeSingle()
       const cipher = (ownAnthropic as { secret_ciphertext?: string } | null)?.secret_ciphertext
       const clientKey = cipher ? await decryptClientSecret(cipher) : null
@@ -3848,35 +3968,27 @@ Deno.serve(async (req) => {
   // key runs its chat/LLM through OpenRouter on that key, off the platform key
   // (same trigger as its image routing). null = use the Anthropic path.
   let clientOpenRouterKey: string | null = null
-  if (project_id) {
+  if (projectId) {
     try {
       const { data: orRow } = await supabase.from('client_api_keys')
-        .select('secret_ciphertext').eq('project_id', project_id).eq('provider', 'openrouter').eq('status', 'active')
+        .select('secret_ciphertext').eq('project_id', projectId).eq('provider', 'openrouter').eq('status', 'active')
         .order('updated_at', { ascending: false }).limit(1).maybeSingle()
       const cipher = (orRow as { secret_ciphertext?: string } | null)?.secret_ciphertext
       if (cipher) clientOpenRouterKey = await decryptClientSecret(cipher)
     } catch { /* fall back to the Anthropic path on any lookup/decrypt error */ }
   }
-  let allowPlatformMediaProject = false
-  if (project_id) {
-    try {
-      allowPlatformMediaProject = isPlatformFalEnabled() && await isPlatformMediaProject(supabase, project_id, org_id)
-    } catch {
-      allowPlatformMediaProject = false
-    }
-  }
   let clientHasFalKey = false
-  if (project_id && !allowPlatformMediaProject) {
+  if (projectId) {
     try {
       const { data: falRow } = await supabase.from('client_api_keys')
-        .select('id').eq('project_id', project_id).in('provider', ['fal', 'fal_ai']).eq('status', 'active')
+        .select('id').eq('project_id', projectId).in('provider', ['fal', 'fal_ai']).eq('status', 'active')
         .order('updated_at', { ascending: false }).limit(1).maybeSingle()
       clientHasFalKey = !!falRow
     } catch {
       clientHasFalKey = false
     }
   }
-  const allowVideoGeneration = allowPlatformMediaProject || clientHasFalKey
+  const allowVideoGeneration = clientHasFalKey
   const enabledTools = allowVideoGeneration
     ? TOOLS
     : TOOLS.filter(tool => tool.name !== 'generate_video')
@@ -3948,9 +4060,9 @@ Deno.serve(async (req) => {
             tools: enabledTools as unknown as Array<{ name: string; description?: string; input_schema?: unknown }>,
             send,
             toolCtx: {
-              orgId: org_id,
+              orgId,
               userId: effectiveUserId,
-              projectId: project_id ?? null,
+              projectId,
               supabase,
               supabaseUrl,
               serviceKey,
@@ -4055,9 +4167,9 @@ Deno.serve(async (req) => {
             const toolResults: CBlock[] = []
             for (const tu of toolUses) {
               const exec = await executeTool(tu.name, tu.input, {
-                orgId: org_id,
+                orgId,
                 userId: effectiveUserId,
-                projectId: project_id ?? null,
+                projectId,
                 supabase,
                 supabaseUrl,
                 serviceKey,
@@ -4098,10 +4210,10 @@ Deno.serve(async (req) => {
           generated_by: 'tool',
         }))
         await supabase.from('chat_messages').upsert({
-          ...(assistant_message_id ? { id: assistant_message_id } : {}),
-          org_id, user_id: effectiveUserId, role: 'assistant',
-          project_id: project_id ?? null,
-          session_id: session_id ?? null,
+          ...(assistantMessageId ? { id: assistantMessageId } : {}),
+          org_id: orgId, user_id: effectiveUserId, role: 'assistant',
+          project_id: projectId,
+          session_id: sessionId,
           content: fullText, route,
           tokens_in: totalTokensIn, tokens_out: totalTokensOut,
           attachments,
