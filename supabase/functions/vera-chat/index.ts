@@ -3807,7 +3807,9 @@ async function assertChatMessageWritable(
     (row.project_id ?? null) === scope.projectId &&
     (row.session_id ?? null) === scope.sessionId &&
     row.role === scope.role
-  const compatibleUser = rowUserId === null || scope.userId === null || rowUserId === scope.userId
+  const compatibleUser = scope.userId
+    ? rowUserId === null || rowUserId === scope.userId
+    : rowUserId === null
   if (sameScope && compatibleUser) return { ok: true }
 
   return { ok: false, response: jsonError('Forbidden', 403) }
