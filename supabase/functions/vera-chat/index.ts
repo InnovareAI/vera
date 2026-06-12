@@ -31,7 +31,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
-import { isPlatformFalEnabled, isPlatformMediaProject } from '../_shared/client-media-keys.ts'
+import { isPlatformFalEnabled, isPlatformMediaProject, isPlatformVideoOperatorEmail } from '../_shared/client-media-keys.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1613,6 +1613,7 @@ async function executeTool(
     emit: (event: Record<string, unknown>) => void
     userPrompt?: string | null
     allowVideoGeneration?: boolean
+    platformVideoOperatorEmail?: string | null
   },
 ): Promise<{ result: string; image_url?: string; video_url?: string }> {
   try {
@@ -1865,7 +1866,13 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
             const fn = imgPrompt ? 'generate-image' : 'generate-video'
             const body = imgPrompt
               ? { prompt: imgPrompt, model: 'nano-banana', image_size: 'square_hd', project_id: ctx.projectId }
-              : { prompt: vidPrompt, model: 'hailuo', aspect_ratio: '16:9', project_id: ctx.projectId }
+              : {
+                  prompt: vidPrompt,
+                  model: 'hailuo',
+                  aspect_ratio: '16:9',
+                  project_id: ctx.projectId,
+                  platform_operator_email: ctx.platformVideoOperatorEmail ?? undefined,
+                }
             const res = await fetch(`${ctx.supabaseUrl}/functions/v1/${fn}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
@@ -2160,6 +2167,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           image_url: (input.image_url as string) ?? undefined,
           aspect_ratio: (input.aspect_ratio as string) ?? '16:9',
           project_id: ctx.projectId,
+          platform_operator_email: ctx.platformVideoOperatorEmail ?? undefined,
         }
         const res = await fetch(`${ctx.supabaseUrl}/functions/v1/generate-video`, {
           method: 'POST',
@@ -3550,14 +3558,15 @@ async function authorizeMemberRequest(
   supabase: AdminClient,
   orgId: string,
   projectId: string | null,
-): Promise<{ ok: true; userId: string | null } | { ok: false; response: Response }> {
+): Promise<{ ok: true; userId: string | null; email: string | null } | { ok: false; response: Response }> {
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
-  if (bearer && bearer === serviceKey) return { ok: true, userId: null }
+  if (bearer && bearer === serviceKey) return { ok: true, userId: null, email: null }
   if (!bearer) return { ok: false, response: jsonError('Unauthorized', 401) }
 
   const { data: auth, error: authError } = await supabase.auth.getUser(bearer)
   if (authError || !auth.user) return { ok: false, response: jsonError('Unauthorized', 401) }
+  const email = auth.user.email?.trim().toLowerCase() ?? null
 
   if (projectId) {
     const { data: project, error: projectError } = await supabase
@@ -3573,7 +3582,7 @@ async function authorizeMemberRequest(
       supabase.from('org_members').select('role').eq('org_id', orgId).eq('user_id', auth.user.id).maybeSingle(),
       supabase.from('project_members').select('role').eq('project_id', projectId).eq('user_id', auth.user.id).maybeSingle(),
     ])
-    if (orgMember || projectMember) return { ok: true, userId: auth.user.id }
+    if (orgMember || projectMember) return { ok: true, userId: auth.user.id, email }
     return { ok: false, response: jsonError('Forbidden', 403) }
   }
 
@@ -3585,7 +3594,7 @@ async function authorizeMemberRequest(
     .maybeSingle()
   if (orgError) return { ok: false, response: jsonError(orgError.message, 500) }
   if (!orgMember) return { ok: false, response: jsonError('Forbidden', 403) }
-  return { ok: true, userId: auth.user.id }
+  return { ok: true, userId: auth.user.id, email }
 }
 
 const MAX_TOOL_ROUNDS = 5  // safety cap so a tool loop can't run forever
@@ -3865,16 +3874,22 @@ Deno.serve(async (req) => {
       clientHasFalKey = false
     }
   }
-  const allowVideoGeneration = allowPlatformMediaProject || clientHasFalKey
+  const platformVideoOperatorAllowed = isPlatformVideoOperatorEmail(access.email)
+  const platformVideoOperatorAvailable = platformVideoOperatorAllowed && !!Deno.env.get('FAL_API_KEY')
+  const platformVideoOperatorEmail = platformVideoOperatorAvailable ? access.email : null
+  const allowVideoGeneration = allowPlatformMediaProject || clientHasFalKey || platformVideoOperatorAvailable
   const enabledTools = allowVideoGeneration
     ? TOOLS
     : TOOLS.filter(tool => tool.name !== 'generate_video')
   if (!allowVideoGeneration) {
+    const capabilityReason = platformVideoOperatorAllowed
+      ? 'Your account is allowlisted for platform video, but FAL_API_KEY is not configured on the server.'
+      : 'Real video generation is unavailable in this client space because no client-owned FAL key is configured.'
     systemBlocks.push({
       type: 'text' as const,
       text: [
         '<media_capabilities>',
-        'Real video generation is unavailable in this client space because no client-owned FAL key is configured.',
+        capabilityReason,
         'Do not offer, promise, or call generate_video. If the operator asks for video, create a written production brief with generate_video_brief instead.',
         '</media_capabilities>',
       ].join('\n'),
@@ -3946,6 +3961,7 @@ Deno.serve(async (req) => {
               emit: send,
               userPrompt: lastUserText ?? null,
               allowVideoGeneration,
+              platformVideoOperatorEmail,
             },
           })
           fullText = r.fullText
@@ -4053,6 +4069,7 @@ Deno.serve(async (req) => {
                 emit: send,
                 userPrompt: lastUserText ?? null,
                 allowVideoGeneration,
+                platformVideoOperatorEmail,
               })
               if (exec.image_url) {
                 generatedImages.push(exec.image_url)

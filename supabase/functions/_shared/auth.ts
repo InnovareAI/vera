@@ -19,14 +19,14 @@ export async function requireSignedInOrService(
   supabase: AdminClient,
   serviceKey: string,
   corsHeaders: Record<string, string>,
-): Promise<{ ok: true; userId: string | null; service: boolean } | { ok: false; response: Response }> {
+): Promise<{ ok: true; userId: string | null; email: string | null; service: boolean } | { ok: false; response: Response }> {
   const bearer = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "")
-  if (bearer && bearer === serviceKey) return { ok: true, userId: null, service: true }
+  if (bearer && bearer === serviceKey) return { ok: true, userId: null, email: null, service: true }
   if (!bearer) return { ok: false, response: jsonError("Unauthorized", 401, corsHeaders) }
 
   const { data: auth, error } = await supabase.auth.getUser(bearer)
   if (error || !auth.user) return { ok: false, response: jsonError("Unauthorized", 401, corsHeaders) }
-  return { ok: true, userId: auth.user.id, service: false }
+  return { ok: true, userId: auth.user.id, email: auth.user.email?.trim().toLowerCase() ?? null, service: false }
 }
 
 export async function requireOrgMember(
@@ -35,7 +35,7 @@ export async function requireOrgMember(
   serviceKey: string,
   orgId: string,
   corsHeaders: Record<string, string>,
-): Promise<{ ok: true; userId: string | null; service: boolean } | { ok: false; response: Response }> {
+): Promise<{ ok: true; userId: string | null; email: string | null; service: boolean } | { ok: false; response: Response }> {
   const auth = await requireSignedInOrService(req, supabase, serviceKey, corsHeaders)
   if (!auth.ok || auth.service) return auth
   if (!auth.userId) return { ok: false, response: jsonError("Unauthorized", 401, corsHeaders) }
@@ -49,7 +49,7 @@ export async function requireOrgMember(
     .maybeSingle()
   if (error) return { ok: false, response: jsonError(error.message, 500, corsHeaders) }
   if (!data) return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
-  return { ok: true, userId, service: false }
+  return { ok: true, userId, email: auth.email, service: false }
 }
 
 export async function requireProjectMember(
@@ -59,7 +59,7 @@ export async function requireProjectMember(
   projectId: string,
   corsHeaders: Record<string, string>,
   expectedOrgId?: string | null,
-): Promise<{ ok: true; userId: string | null; orgId: string; service: boolean } | { ok: false; response: Response }> {
+): Promise<{ ok: true; userId: string | null; email: string | null; orgId: string; service: boolean } | { ok: false; response: Response }> {
   const auth = await requireSignedInOrService(req, supabase, serviceKey, corsHeaders)
   if (!auth.ok) return auth
 
@@ -75,7 +75,7 @@ export async function requireProjectMember(
   if (expectedOrgId && expectedOrgId !== orgId) {
     return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
   }
-  if (auth.service) return { ok: true, userId: null, orgId, service: true }
+  if (auth.service) return { ok: true, userId: null, email: null, orgId, service: true }
   if (!auth.userId) return { ok: false, response: jsonError("Unauthorized", 401, corsHeaders) }
   const userId = auth.userId
 
@@ -83,7 +83,7 @@ export async function requireProjectMember(
     supabase.from("org_members").select("role").eq("org_id", orgId).eq("user_id", userId).maybeSingle(),
     supabase.from("project_members").select("role").eq("project_id", projectId).eq("user_id", userId).maybeSingle(),
   ])
-  if (orgMember || projectMember) return { ok: true, userId, orgId, service: false }
+  if (orgMember || projectMember) return { ok: true, userId, email: auth.email, orgId, service: false }
   return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
 }
 
