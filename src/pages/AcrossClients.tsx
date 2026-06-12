@@ -96,13 +96,10 @@ const roleOptions: Array<{ value: ProjectRole; label: string; help: string }> = 
 ]
 
 const providerOptions = [
-  // Anthropic (text) BYOK runs generation on the client's own key. OpenRouter is
-  // offered so a client can store its own image-routing key; VERA's built-in
-  // image generation still runs on the platform OpenRouter key until per-client
-  // image routing is wired, so a stored OpenRouter key is held for that and for
-  // per-client automation (n8n) use.
   { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai', label: 'OpenAI' },
   { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'fal', label: 'FAL' },
 ]
 
 const panelStyle: CSSProperties = {

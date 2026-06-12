@@ -446,7 +446,7 @@ Output the rewritten content only — no labels, no explanation.`,
                   'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
                   'apikey': Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
                 },
-                body: JSON.stringify({ prompt: strategy.image_prompt as string, model: 'nano-banana' }),
+                body: JSON.stringify({ prompt: strategy.image_prompt as string, model: 'nano-banana', project_id }),
                 signal: AbortSignal.timeout(180_000),
               })
               if (!r.body) return { url: null, error: 'no response body' }

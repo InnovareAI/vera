@@ -11,7 +11,10 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js"
-import { requireSignedInOrService } from "../_shared/auth.ts"
+import type { Database } from "../_shared/database.types.ts"
+import type { AdminClient } from "../_shared/auth.ts"
+import { requireProjectMember, requireSignedInOrService } from "../_shared/auth.ts"
+import { isMasterOrg, loadClientApiKey } from "../_shared/client-media-keys.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,7 +26,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const FAL_API_KEY = Deno.env.get('FAL_API_KEY')
 
-// Curated video model whitelist. Split by text-to-video vs image-to-video —
+// Curated video model whitelist. Split by text-to-video vs image-to-video.
 // the caller picks based on whether they're supplying image_url.
 const MODELS: Record<string, string> = {
   // ─── Text-to-video ───────────────────────────────────────────────────────
@@ -51,10 +54,7 @@ const MODELS: Record<string, string> = {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders })
   if (req.method !== 'POST') return jsonError('Method not allowed', 405)
-  if (!FAL_API_KEY) return jsonError('FAL_API_KEY not configured on the server.', 500)
-  const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
-  const auth = await requireSignedInOrService(req, supabase, SERVICE_KEY, corsHeaders)
-  if (!auth.ok) return auth.response
+  const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
 
   const {
     prompt,
@@ -62,9 +62,10 @@ Deno.serve(async (req) => {
     image_url,
     duration,
     aspect_ratio = '16:9',
+    project_id,
     action,                 // 'submit' | 'status' | undefined (legacy stream)
     request_id,             // for action: 'status'
-    slug: slugIn,           // for action: 'status'
+    slug: slugIn,           // legacy status hint; DB slug wins
   } = await req.json().catch(() => ({}))
 
   const json = (obj: unknown, status = 200) =>
@@ -74,18 +75,45 @@ Deno.serve(async (req) => {
   // nothing holds a 60-120s connection that a gateway would kill mid-render.
   if (action === 'status') {
     if (!request_id) return jsonError('request_id is required', 400)
-    const slug = slugIn || MODELS[model] || model
-    const sres = await fetch(`https://queue.fal.run/${slug}/requests/${request_id}/status`, { headers: { Authorization: `Key ${FAL_API_KEY}` } })
+    const auth = await requireSignedInOrService(req, supabase, SERVICE_KEY, corsHeaders)
+    if (!auth.ok) return auth.response
+    const { data: job, error: jobError } = await supabase
+      .from('video_jobs')
+      .select('project_id, slug')
+      .eq('request_id', String(request_id))
+      .maybeSingle()
+    if (jobError) return jsonError(jobError.message, 500)
+    const jobProjectId = (job as { project_id?: string | null } | null)?.project_id
+    if (!jobProjectId) return jsonError('Video job not found for this client space.', 404)
+
+    const access = await requireProjectMember(req, supabase, SERVICE_KEY, jobProjectId, corsHeaders)
+    if (!access.ok) return access.response
+    const fal = await resolveFalKey(supabase, jobProjectId, access.orgId)
+    if (!fal.ok) return fal.response
+
+    const slug = (job as { slug?: string | null } | null)?.slug || slugIn || MODELS[model] || model
+    const sres = await fetch(`https://queue.fal.run/${slug}/requests/${request_id}/status`, { headers: { Authorization: `Key ${fal.key}` } })
     if (!sres.ok) return json({ status: 'ERROR', message: `status ${sres.status}` })
     const sdata = await sres.json() as { status: string; queue_position?: number }
     if (sdata.status !== 'COMPLETED') return json({ status: sdata.status, queue_position: sdata.queue_position ?? null })
-    const rres = await fetch(`https://queue.fal.run/${slug}/requests/${request_id}`, { headers: { Authorization: `Key ${FAL_API_KEY}` } })
+    const rres = await fetch(`https://queue.fal.run/${slug}/requests/${request_id}`, { headers: { Authorization: `Key ${fal.key}` } })
     const result = await rres.json() as { video?: { url: string }; videos?: Array<{ url: string }>; url?: string }
     const url = result.video?.url ?? result.videos?.[0]?.url ?? result.url ?? null
+    await supabase
+      .from('video_jobs')
+      .update({ status: 'completed', video_url: url, updated_at: new Date().toISOString() })
+      .eq('request_id', String(request_id))
     return json({ status: 'COMPLETED', video_url: url })
   }
 
   if (!prompt) return jsonError('prompt is required', 400)
+  const projectId = typeof project_id === 'string' ? project_id.trim() : ''
+  if (!projectId) return jsonError('project_id is required for video generation', 400)
+
+  const access = await requireProjectMember(req, supabase, SERVICE_KEY, projectId, corsHeaders)
+  if (!access.ok) return access.response
+  const fal = await resolveFalKey(supabase, projectId, access.orgId)
+  if (!fal.ok) return fal.response
 
   const slug = MODELS[model] ?? model
 
@@ -102,11 +130,13 @@ Deno.serve(async (req) => {
   if (action === 'submit') {
     const submitRes = await fetch(`https://queue.fal.run/${slug}`, {
       method: 'POST',
-      headers: { Authorization: `Key ${FAL_API_KEY}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Key ${fal.key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
     if (!submitRes.ok) return jsonError(`FAL submit failed (${submitRes.status}): ${(await submitRes.text()).slice(0, 200)}`, 502)
     const submission = await submitRes.json() as { request_id: string }
+    const recordError = await recordVideoJob(supabase, projectId, submission.request_id, slug, prompt)
+    if (recordError) return jsonError(recordError, 500)
     return json({ request_id: submission.request_id, slug })
   }
 
@@ -122,7 +152,7 @@ Deno.serve(async (req) => {
       try {
         const submitRes = await fetch(`https://queue.fal.run/${slug}`, {
           method: 'POST',
-          headers: { 'Authorization': `Key ${FAL_API_KEY}`, 'Content-Type': 'application/json' },
+          headers: { 'Authorization': `Key ${fal.key}`, 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         })
         if (!submitRes.ok) {
@@ -135,6 +165,12 @@ Deno.serve(async (req) => {
         const requestId = submission.request_id
         const statusUrl = submission.status_url ?? `https://queue.fal.run/${slug}/requests/${requestId}/status`
         const resultUrl = submission.response_url ?? `https://queue.fal.run/${slug}/requests/${requestId}`
+        const recordError = await recordVideoJob(supabase, projectId, requestId, slug, prompt)
+        if (recordError) {
+          send('error', { message: recordError })
+          controller.close()
+          return
+        }
         send('started', { model_used: slug, request_id: requestId })
 
         // Video gen is slower than image — poll every 3s, cap at 600 attempts
@@ -142,7 +178,7 @@ Deno.serve(async (req) => {
         let completed = false
         for (let i = 0; i < 600; i++) {
           await delay(3000)
-          const statusRes = await fetch(statusUrl, { headers: { 'Authorization': `Key ${FAL_API_KEY}` } })
+          const statusRes = await fetch(statusUrl, { headers: { 'Authorization': `Key ${fal.key}` } })
           if (!statusRes.ok) { send('error', { message: `FAL status fetch failed (${statusRes.status})` }); controller.close(); return }
           const sdata = await statusRes.json() as { status: string; queue_position?: number }
           send('status', { status: sdata.status, queue_position: sdata.queue_position, elapsed_s: elapsed() })
@@ -153,7 +189,7 @@ Deno.serve(async (req) => {
         }
         if (!completed) { send('error', { message: 'Timed out after 30 minutes of polling' }); controller.close(); return }
 
-        const resultRes = await fetch(resultUrl, { headers: { 'Authorization': `Key ${FAL_API_KEY}` } })
+        const resultRes = await fetch(resultUrl, { headers: { 'Authorization': `Key ${fal.key}` } })
         if (!resultRes.ok) { send('error', { message: `FAL result fetch failed (${resultRes.status})` }); controller.close(); return }
         const result = await resultRes.json() as { video?: { url: string; content_type?: string }; videos?: Array<{ url: string }>; url?: string }
         // Normalise — different FAL video models use different result shapes.
@@ -161,6 +197,10 @@ Deno.serve(async (req) => {
           ?? (result.videos?.length ? { url: result.videos[0].url } : null)
           ?? (result.url ? { url: result.url } : null)
         if (!video?.url) { send('error', { message: 'FAL returned no video URL' }); controller.close(); return }
+        await supabase
+          .from('video_jobs')
+          .update({ status: 'completed', video_url: video.url, updated_at: new Date().toISOString() })
+          .eq('request_id', requestId)
         send('done', { video, model_used: slug, elapsed_s: elapsed() })
         controller.close()
       } catch (e) {
@@ -181,6 +221,53 @@ Deno.serve(async (req) => {
 })
 
 function delay(ms: number) { return new Promise(r => setTimeout(r, ms)) }
+
+async function recordVideoJob(
+  supabase: AdminClient,
+  projectId: string,
+  requestId: string,
+  slug: string,
+  prompt: unknown,
+): Promise<string | null> {
+  const { error } = await supabase
+    .from('video_jobs')
+    .upsert({
+      request_id: requestId,
+      slug,
+      project_id: projectId,
+      status: 'rendering',
+      prompt: typeof prompt === 'string' ? prompt.slice(0, 8000) : null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'request_id' })
+  return error?.message ?? null
+}
+
+async function resolveFalKey(
+  supabase: AdminClient,
+  projectId: string,
+  orgId: string,
+): Promise<{ ok: true; key: string; source: 'platform' | 'client' } | { ok: false; response: Response }> {
+  try {
+    if (await isMasterOrg(supabase, orgId)) {
+      if (!FAL_API_KEY) return { ok: false, response: jsonError('FAL_API_KEY not configured on the server.', 500) }
+      return { ok: true, key: FAL_API_KEY, source: 'platform' }
+    }
+
+    const clientKey = await loadClientApiKey(supabase, projectId, ['fal', 'fal_ai'])
+    if (!clientKey) {
+      return {
+        ok: false,
+        response: jsonError('Video generation requires this client space to use its own FAL key.', 403),
+      }
+    }
+    return { ok: true, key: clientKey.key, source: 'client' }
+  } catch (error) {
+    return {
+      ok: false,
+      response: jsonError(error instanceof Error ? error.message : 'Could not resolve client FAL key.', 500),
+    }
+  }
+}
 
 function jsonError(message: string, status: number): Response {
   return new Response(JSON.stringify({ event: 'error', message }), {

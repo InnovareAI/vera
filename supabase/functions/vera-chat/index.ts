@@ -1750,7 +1750,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
             const fn = imgPrompt ? 'generate-image' : 'generate-video'
             const body = imgPrompt
               ? { prompt: imgPrompt, model: 'nano-banana', image_size: 'square_hd', project_id: ctx.projectId }
-              : { prompt: vidPrompt, model: 'veo-3', aspect_ratio: '16:9' }
+              : { prompt: vidPrompt, model: 'veo-3', aspect_ratio: '16:9', project_id: ctx.projectId }
             const res = await fetch(`${ctx.supabaseUrl}/functions/v1/${fn}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
@@ -1915,7 +1915,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         // Bridge progress events so the operator sees the work happening.
         const target = name === 'generate_infographic' ? 'generate-infographic' : 'generate-image'
         const body = name === 'generate_infographic'
-          ? input
+          ? { ...input, project_id: ctx.projectId }
           : {
               prompt: input.prompt,
               model: 'nano-banana-pro',
@@ -2041,6 +2041,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           model: (input.model as string) ?? (input.image_url ? 'kling-3' : 'veo-3'),
           image_url: (input.image_url as string) ?? undefined,
           aspect_ratio: (input.aspect_ratio as string) ?? '16:9',
+          project_id: ctx.projectId,
         }
         const res = await fetch(`${ctx.supabaseUrl}/functions/v1/generate-video`, {
           method: 'POST',

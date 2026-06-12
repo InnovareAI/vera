@@ -23,6 +23,8 @@ type ClientApiKey = {
 const PROVIDERS = [
   { value: 'openrouter', label: 'OpenRouter (text + images)' },
   { value: 'anthropic', label: 'Anthropic (text)' },
+  { value: 'openai', label: 'OpenAI (images)' },
+  { value: 'fal', label: 'FAL (images + video)' },
 ]
 const providerLabel = (v: string) => PROVIDERS.find(p => p.value === v)?.label ?? v
 
@@ -106,7 +108,7 @@ export default function ClientKeys() {
       <PageHeader
         eyebrow={activeProject.name}
         title="API keys"
-        subtitle="Connect this space to its own AI provider keys. Keys are stored encrypted and used only for this client. With its own OpenRouter key, this space runs its text and images entirely on that key."
+        subtitle="Connect this space to its own AI provider keys. Keys are stored encrypted and used only for this client. OpenRouter covers text and supported image models. FAL is required for client-owned video generation."
       />
 
       <section style={{ marginBottom: space[8] }}>

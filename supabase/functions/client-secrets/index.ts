@@ -151,6 +151,14 @@ async function discoverProvider(provider: string, secret: string, config: Record
     if (provider === "google") return discoverGemini(secret)
     if (provider === "openrouter") return discoverOpenRouter(secret)
     if (provider === "azure_openai") return discoverAzureOpenAI(secret, config)
+    if (provider === "fal" || provider === "fal_ai") {
+      return {
+        ok: true,
+        models: [],
+        capabilities: { image: true, video: true },
+        warning: "Saved without live FAL validation. Use this key for client-owned image and video generation.",
+      }
+    }
 
     const capabilities = { chat: true }
     return {

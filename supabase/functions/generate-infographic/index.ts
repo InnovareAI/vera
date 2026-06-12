@@ -20,7 +20,8 @@
 
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
-import { requireSignedInOrService } from '../_shared/auth.ts'
+import type { Database } from '../_shared/database.types.ts'
+import { requireProjectMember } from '../_shared/auth.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -128,9 +129,7 @@ async function jsonError(message: string, status: number): Promise<Response> {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders })
   if (req.method !== 'POST') return jsonError('Method not allowed', 405)
-  const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
-  const auth = await requireSignedInOrService(req, supabase, SERVICE_KEY, corsHeaders)
-  if (!auth.ok) return auth.response
+  const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
 
   let body: {
     title?: string
@@ -140,6 +139,7 @@ Deno.serve(async (req) => {
     audience?: string
     style?: Style
     model?: string
+    project_id?: string
   }
   try {
     body = await req.json()
@@ -151,10 +151,15 @@ Deno.serve(async (req) => {
   // at complex multi-panel infographic layouts than the fast `nano-banana`
   // model. Operators can override with model='nano-banana' for speed/cost.
   const { title, subtitle, sections, stats, audience, style = 'editorial', model = 'nano-banana-pro' } = body
+  const projectId = typeof body.project_id === 'string' ? body.project_id.trim() : ''
 
   if (!title) return jsonError('title is required', 400)
   if (!sections?.length) return jsonError('sections (non-empty array) is required', 400)
   if (sections.length > 6) return jsonError('Up to 6 sections supported — split into multiple infographics if needed', 400)
+  if (!projectId) return jsonError('project_id is required for infographic generation', 400)
+
+  const access = await requireProjectMember(req, supabase, SERVICE_KEY, projectId, corsHeaders)
+  if (!access.ok) return access.response
 
   const prompt = buildPrompt({
     title,
@@ -181,6 +186,7 @@ Deno.serve(async (req) => {
       image_size: 'landscape_16_9',
       num_images: 1,
       quality: 'high',
+      project_id: projectId,
     }),
   })
 

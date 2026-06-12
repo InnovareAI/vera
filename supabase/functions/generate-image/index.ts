@@ -11,7 +11,10 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js"
-import { requireSignedInOrService } from "../_shared/auth.ts"
+import type { Database } from "../_shared/database.types.ts"
+import type { AdminClient } from "../_shared/auth.ts"
+import { requireProjectMember } from "../_shared/auth.ts"
+import { isMasterOrg, loadClientApiKey } from "../_shared/client-media-keys.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -24,22 +27,6 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const FAL_API_KEY = Deno.env.get('FAL_API_KEY')
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
-
-// Per-client OpenRouter BYOK. Decrypts a client's stored OpenRouter key
-// (client_api_keys.secret_ciphertext), same AES-GCM scheme as vera-chat.
-const CLIENT_KEY_ENC = Deno.env.get('CLIENT_API_KEY_ENCRYPTION_KEY') ?? Deno.env.get('VAULT_ENC_KEY') ?? ''
-async function decryptClientSecret(payload: string): Promise<string | null> {
-  try {
-    if (!CLIENT_KEY_ENC || !payload) return null
-    const parts = payload.split(':')
-    if (parts.length !== 4 || parts[0] !== 'aes-gcm') return null
-    const b64 = (s: string) => Uint8Array.from(atob(s), c => c.charCodeAt(0))
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(CLIENT_KEY_ENC))
-    const key = await crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['decrypt'])
-    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(parts[2]) }, key, b64(parts[3]))
-    return new TextDecoder().decode(plain)
-  } catch { return null }
-}
 
 // FAL-routed models. Default for everything except premium hero images.
 const FAL_MODELS: Record<string, string> = {
@@ -98,43 +85,46 @@ const OR_NANO_BANANA = 'google/gemini-2.5-flash-image'
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders })
   if (req.method !== 'POST') return jsonError('Method not allowed', 405)
-  const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
-  const auth = await requireSignedInOrService(req, supabase, SERVICE_KEY, corsHeaders)
-  if (!auth.ok) return auth.response
+  const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
 
   const { prompt, model = 'nano-banana-pro', image_size = 'square_hd', num_images = 1, quality = 'high', project_id } = await req.json().catch(() => ({}))
   if (!prompt) return jsonError('prompt is required', 400)
+  const projectId = typeof project_id === 'string' ? project_id.trim() : ''
+  if (!projectId) return jsonError('project_id is required for image generation', 400)
 
-  // Per-client OpenRouter BYOK. When a project has its own active OpenRouter
-  // key, ALL of its image generation runs through OpenRouter on that key — never
-  // the platform OpenRouter / FAL / OpenAI keys. A client can run entirely on
-  // its own key.
-  let clientOpenRouterKey: string | null = null
-  if (typeof project_id === 'string' && project_id) {
-    const { data: orRow } = await supabase.from('client_api_keys')
-      .select('secret_ciphertext').eq('project_id', project_id).eq('provider', 'openrouter').eq('status', 'active')
-      .order('updated_at', { ascending: false }).limit(1).maybeSingle()
-    const cipher = (orRow as { secret_ciphertext?: string } | null)?.secret_ciphertext
-    if (cipher) clientOpenRouterKey = await decryptClientSecret(cipher)
-  }
+  const access = await requireProjectMember(req, supabase, SERVICE_KEY, projectId, corsHeaders)
+  if (!access.ok) return access.response
+  const mediaKeys = await resolveMediaKeys(supabase, projectId, access.orgId)
+  if (!mediaKeys.ok) return mediaKeys.response
 
-  // Route by alias: OpenAI-direct > OpenRouter > FAL. Direct fal-ai/<slug>
-  // identifiers still flow through FAL as escape hatches. A client OpenRouter
-  // key forces the OpenRouter runner regardless of the requested alias.
+  // Route by alias: OpenAI-direct > OpenRouter > FAL. A client OpenRouter key
+  // forces OpenRouter for image generation, preserving BYOK isolation.
   let useOpenAI = model in OPENAI_MODELS
   let useOR = !useOpenAI && model in OR_MODELS
-  if (clientOpenRouterKey) { useOpenAI = false; useOR = true }
+  if (mediaKeys.openRouterKey) { useOpenAI = false; useOR = true }
+
+  if (!mediaKeys.isMaster) {
+    const hasClientKeyForRoute =
+      (useOR && !!mediaKeys.openRouterKey) ||
+      (useOpenAI && !!mediaKeys.openAIKey) ||
+      (!useOpenAI && !useOR && !!mediaKeys.falKey)
+    if (!hasClientKeyForRoute) {
+      return jsonError('Image generation requires this client space to use its own OpenRouter, OpenAI, or FAL key for the selected model.', 403)
+    }
+  }
+
   const slug = useOpenAI
     ? OPENAI_MODELS[model]
     : useOR
       ? (OR_MODELS[model] ?? OR_NANO_BANANA)
       : (FAL_MODELS[model] ?? model)
-  // A client's own key when present; otherwise the platform OpenRouter key.
-  const openRouterKey = clientOpenRouterKey ?? OPENROUTER_API_KEY
+  const openRouterKey = mediaKeys.openRouterKey ?? (mediaKeys.isMaster ? OPENROUTER_API_KEY : null)
+  const openAIKey = mediaKeys.openAIKey ?? (mediaKeys.isMaster ? OPENAI_API_KEY : null)
+  const falKey = mediaKeys.falKey ?? (mediaKeys.isMaster ? FAL_API_KEY : null)
 
-  if (useOpenAI && !OPENAI_API_KEY) return jsonError('OPENAI_API_KEY not configured on the server.', 500)
+  if (useOpenAI && !openAIKey) return jsonError('No OpenAI key available for this image request.', 500)
   if (useOR && !openRouterKey) return jsonError('No OpenRouter key available for this image request.', 500)
-  if (!useOpenAI && !useOR && !FAL_API_KEY) return jsonError('FAL_API_KEY not configured on the server.', 500)
+  if (!useOpenAI && !useOR && !falKey) return jsonError('No FAL key available for this image request.', 500)
 
   const encoder = new TextEncoder()
   const startTime = Date.now()
@@ -147,11 +137,11 @@ Deno.serve(async (req) => {
 
       try {
         if (useOpenAI) {
-          await runOpenAI(slug, prompt, quality, image_size, num_images, send, elapsed)
+          await runOpenAI(slug, prompt, quality, image_size, num_images, send, elapsed, openAIKey!)
         } else if (useOR) {
           await runOpenRouter(slug, prompt, quality, send, elapsed, openRouterKey!)
         } else {
-          await runFal(slug, prompt, image_size, num_images, send, elapsed)
+          await runFal(slug, prompt, image_size, num_images, send, elapsed, falKey!)
         }
         controller.close()
       } catch (e) {
@@ -182,13 +172,14 @@ async function runFal(
   num_images: number,
   send: (event: string, data: unknown) => void,
   elapsed: () => number,
+  apiKey: string,
 ): Promise<void> {
   const payload: Record<string, unknown> = { prompt, num_images }
   if (image_size) payload.image_size = image_size
 
   const submitRes = await fetch(`https://queue.fal.run/${slug}`, {
     method: 'POST',
-    headers: { 'Authorization': `Key ${FAL_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { 'Authorization': `Key ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
   if (!submitRes.ok) {
@@ -205,7 +196,7 @@ async function runFal(
   let completed = false
   for (let i = 0; i < 300; i++) {
     await delay(2000)
-    const statusRes = await fetch(statusUrl, { headers: { 'Authorization': `Key ${FAL_API_KEY}` } })
+    const statusRes = await fetch(statusUrl, { headers: { 'Authorization': `Key ${apiKey}` } })
     if (!statusRes.ok) { send('error', { message: `FAL status fetch failed (${statusRes.status})` }); return }
     const sdata = await statusRes.json() as { status: string; queue_position?: number }
     send('status', { status: sdata.status, queue_position: sdata.queue_position, elapsed_s: elapsed() })
@@ -216,7 +207,7 @@ async function runFal(
   }
   if (!completed) { send('error', { message: 'Timed out after 10 minutes of polling' }); return }
 
-  const resultRes = await fetch(resultUrl, { headers: { 'Authorization': `Key ${FAL_API_KEY}` } })
+  const resultRes = await fetch(resultUrl, { headers: { 'Authorization': `Key ${apiKey}` } })
   if (!resultRes.ok) { send('error', { message: `FAL result fetch failed (${resultRes.status})` }); return }
   const result = await resultRes.json() as { images?: Array<{ url: string }>; image?: { url: string } }
   const images = result.images ?? (result.image ? [result.image] : [])
@@ -236,6 +227,7 @@ async function runOpenAI(
   num_images: number,
   send: (event: string, data: unknown) => void,
   elapsed: () => number,
+  apiKey: string,
 ): Promise<void> {
   send('started', { provider: 'openai', model_used: slug })
   // OpenAI's images endpoint takes ~30–150s for gpt-image-2 at high quality.
@@ -263,7 +255,7 @@ async function runOpenAI(
     const res = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -364,6 +356,40 @@ async function runOpenRouter(
 }
 
 function delay(ms: number) { return new Promise(r => setTimeout(r, ms)) }
+
+type MediaKeys = {
+  isMaster: boolean
+  openRouterKey: string | null
+  openAIKey: string | null
+  falKey: string | null
+}
+
+async function resolveMediaKeys(
+  supabase: AdminClient,
+  projectId: string,
+  orgId: string,
+): Promise<{ ok: true } & MediaKeys | { ok: false; response: Response }> {
+  try {
+    const [master, openRouter, openAI, fal] = await Promise.all([
+      isMasterOrg(supabase, orgId),
+      loadClientApiKey(supabase, projectId, ['openrouter']),
+      loadClientApiKey(supabase, projectId, ['openai']),
+      loadClientApiKey(supabase, projectId, ['fal', 'fal_ai']),
+    ])
+    return {
+      ok: true,
+      isMaster: master,
+      openRouterKey: openRouter?.key ?? null,
+      openAIKey: openAI?.key ?? null,
+      falKey: fal?.key ?? null,
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      response: jsonError(error instanceof Error ? error.message : 'Could not resolve media generation keys.', 500),
+    }
+  }
+}
 
 function jsonError(message: string, status: number): Response {
   return new Response(JSON.stringify({ event: 'error', message }), {
