@@ -1,23 +1,25 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import type { BrandVoice, PlatformConfig } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
+import { useAuth } from '../lib/auth'
 import {
   Settings2, Users, Mic2, Plug, Building2, Save,
-  CheckCircle2, AlertCircle, Sun, Moon, Monitor
+  CheckCircle2, AlertCircle, Sun, Moon, Monitor, BarChart3, ShieldCheck, RefreshCw
 } from 'lucide-react'
 import { PublishersCard } from '../components/PublishersCard'
 import { ClientIntegrationsCard } from '../components/ClientIntegrationsCard'
 import { useTheme, type Theme } from '../lib/themeContext'
 
-type Tab = 'workspace' | 'team' | 'brand' | 'integrations'
+type Tab = 'workspace' | 'team' | 'brand' | 'integrations' | 'usage'
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'workspace',    label: 'Workspace',    icon: Building2 },
   { id: 'team',         label: 'Access',       icon: Users },
   { id: 'brand',        label: 'Brand Voice',  icon: Mic2 },
   { id: 'integrations', label: 'Integrations', icon: Plug },
+  { id: 'usage',        label: 'AI Usage',     icon: BarChart3 },
 ]
 
 function initialSettingsTab(): Tab {
@@ -259,14 +261,14 @@ function TeamTab() {
     <div className="max-w-xl space-y-5">
       <div>
         <h2 className="text-base font-semibold text-gray-900">Access Management</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Invite someone into a client space and set their role. Organisation-wide staff access is coming later — for now, access is scoped per client.</p>
+        <p className="text-sm text-gray-500 mt-0.5">Invite someone into a client space and set their role. Organisation-wide staff access is coming later. For now, access is scoped per client.</p>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
         <div className="space-y-1">
           <label className="text-sm font-medium text-gray-700">Client space</label>
           <select value={projectId} onChange={e => setProjectId(e.target.value)} className={input}>
-            {projects.length === 0 && <option value="">No client spaces yet — add a client first</option>}
+            {projects.length === 0 && <option value="">No client spaces yet: add a client first</option>}
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
@@ -277,10 +279,10 @@ function TeamTab() {
         <div className="space-y-1">
           <label className="text-sm font-medium text-gray-700">Role</label>
           <select value={role} onChange={e => setRole(e.target.value as typeof role)} className={input}>
-            <option value="viewer">Viewer — can view</option>
-            <option value="reviewer">Reviewer — can comment &amp; approve</option>
-            <option value="editor">Editor — can create &amp; edit</option>
-            <option value="owner">Owner — full access</option>
+            <option value="viewer">Viewer - can view</option>
+            <option value="reviewer">Reviewer - can comment &amp; approve</option>
+            <option value="editor">Editor - can create &amp; edit</option>
+            <option value="owner">Owner - full access</option>
           </select>
         </div>
         {msg && <p className={`text-sm ${msg.kind === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}>{msg.text}</p>}
@@ -574,6 +576,200 @@ function IntegrationsTab() {
   )
 }
 
+// ─── AI Usage Tab ────────────────────────────────────────────────────────────
+type GenerationUsageRow = {
+  id: string
+  project_id: string | null
+  provider: string | null
+  operation: string | null
+  model_used: string | null
+  input_tokens: number | null
+  output_tokens: number | null
+  cost_usd: number | null
+  usage_metadata: Record<string, unknown> | null
+  created_at: string
+}
+
+type AiEntitlementRow = {
+  id: string
+  user_id: string
+  capability: string
+  org_id: string | null
+  project_id: string | null
+  enabled: boolean
+  expires_at: string | null
+  note: string | null
+  created_at: string
+}
+
+function AiUsageTab() {
+  const { activeOrg } = useOrg()
+  const { projects } = useProject()
+  const { user } = useAuth()
+  const [usageRows, setUsageRows] = useState<GenerationUsageRow[]>([])
+  const [entitlements, setEntitlements] = useState<AiEntitlementRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const projectName = useMemo(() => {
+    const map = new Map(projects.map(project => [project.id, project.name]))
+    return (projectId: string | null) => projectId ? map.get(projectId) ?? 'Unknown client' : 'Workspace'
+  }, [projects])
+  const projectIds = useMemo(() => new Set(projects.map(project => project.id)), [projects])
+  const summary = useMemo(() => summarizeWorkspaceUsage(usageRows), [usageRows])
+  const providerRows = useMemo(() => summarizeByProvider(usageRows), [usageRows])
+
+  async function load() {
+    if (!activeOrg?.id) return
+    setLoading(true)
+    setError(null)
+    const since = usageWindowStartIso()
+    const [usageResult, entitlementResult] = await Promise.all([
+      supabase
+        .from('generation_log')
+        .select('id, project_id, provider, operation, model_used, input_tokens, output_tokens, cost_usd, usage_metadata, created_at')
+        .eq('org_id', activeOrg.id)
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(300),
+      supabase
+        .from('ai_user_entitlements')
+        .select('id, user_id, capability, org_id, project_id, enabled, expires_at, note, created_at')
+        .eq('enabled', true)
+        .order('created_at', { ascending: false }),
+    ])
+    if (usageResult.error || entitlementResult.error) {
+      setError(usageResult.error?.message ?? entitlementResult.error?.message ?? 'Could not load AI usage.')
+      setUsageRows([])
+      setEntitlements([])
+    } else {
+      setUsageRows((usageResult.data ?? []) as GenerationUsageRow[])
+      const visibleEntitlements = ((entitlementResult.data ?? []) as AiEntitlementRow[])
+        .filter(row => entitlementAppliesToWorkspace(row, activeOrg.id, projectIds))
+      setEntitlements(visibleEntitlements)
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => { void load() }, [activeOrg?.id, projects])
+
+  return (
+    <div className="max-w-5xl space-y-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">AI Usage</h2>
+          <p className="text-sm text-gray-500 mt-0.5">Current-month spend, provider usage, and platform media access.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={loading}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      )}
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <UsageMetric label="Month spend" value={formatUsageUsd(summary.monthCost)} detail={`${summary.monthEvents} events`} />
+        <UsageMetric label="Platform key events" value={String(summary.platformEvents)} detail={`${summary.clientEvents} client-key events`} tone={summary.platformEvents > 0 ? 'warn' : 'neutral'} />
+        <UsageMetric label="Images" value={String(summary.images)} detail={`${summary.imageEvents} image calls`} />
+        <UsageMetric label="Videos" value={String(summary.videos)} detail={`${summary.videoEvents} video calls`} tone={summary.videoEvents > 0 ? 'warn' : 'neutral'} />
+      </div>
+
+      <div className="grid lg:grid-cols-[1.2fr_0.8fr] gap-4">
+        <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100">
+            <p className="text-sm font-medium text-gray-800">Provider mix</p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {providerRows.length === 0 && <EmptyLine text={loading ? 'Loading usage...' : 'No usage recorded in this window.'} />}
+            {providerRows.map(row => (
+              <div key={row.provider} className="px-4 py-3 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium text-gray-800">{formatProviderName(row.provider)}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{row.events} events · {formatCompactTokens(row.tokens)} tokens</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-semibold text-gray-900">{formatUsageUsd(row.cost)}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{row.platformEvents} platform</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
+            <ShieldCheck size={15} className="text-gray-500" />
+            <p className="text-sm font-medium text-gray-800">Operator access</p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {entitlements.length === 0 && <EmptyLine text={loading ? 'Loading access...' : 'No active platform media entitlements visible.'} />}
+            {entitlements.map(row => (
+              <div key={row.id} className="px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">{formatCapability(row.capability)}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{row.user_id === user?.id ? user?.email ?? 'You' : shortId(row.user_id)}</p>
+                  </div>
+                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">Active</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">{formatEntitlementScope(row, projectName)}</p>
+                {row.expires_at && <p className="text-xs text-gray-400 mt-1">Expires {formatSettingsDate(row.expires_at)}</p>}
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <p className="text-sm font-medium text-gray-800">Recent generation events</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] border-collapse">
+            <thead>
+              <tr className="border-b border-gray-100">
+                {['When', 'Client', 'Operation', 'Provider', 'Model', 'Key', 'Cost'].map(label => (
+                  <th key={label} className="px-4 py-2 text-left text-[10px] uppercase tracking-[0.05em] font-semibold text-gray-400">{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {usageRows.length === 0 && (
+                <tr><td colSpan={7}><EmptyLine text={loading ? 'Loading usage...' : 'No generation events found.'} /></td></tr>
+              )}
+              {usageRows.slice(0, 40).map(row => {
+                const metadata = usageMetadata(row)
+                const keySource = typeof metadata.key_source === 'string' ? metadata.key_source : 'unknown'
+                return (
+                  <tr key={row.id} className="border-b border-gray-100">
+                    <td className="px-4 py-3 text-xs text-gray-500">{formatSettingsDate(row.created_at)}</td>
+                    <td className="px-4 py-3 text-xs text-gray-700">{projectName(row.project_id)}</td>
+                    <td className="px-4 py-3 text-xs text-gray-700">{formatUsageOperation(row.operation)}</td>
+                    <td className="px-4 py-3 text-xs text-gray-700">{formatProviderName(row.provider)}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500 font-mono max-w-[220px] truncate" title={row.model_used ?? ''}>{row.model_used ?? 'unknown'}</td>
+                    <td className="px-4 py-3 text-xs font-semibold">
+                      <span className={keySource === 'platform' ? 'text-amber-700' : keySource === 'client' ? 'text-emerald-700' : 'text-gray-400'}>{formatKeySourceLabel(keySource)}</span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-700">{typeof row.cost_usd === 'number' ? formatUsageUsd(row.cost_usd) : 'n/a'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 // ─── Shared UI components ─────────────────────────────────────────────────────
 function Field({ label, hint, children }: {
   label: string; hint?: string; children: React.ReactNode
@@ -627,6 +823,135 @@ function TagField({ label, hint, items, input, setInput, onAdd, onRemove, color 
   )
 }
 
+function UsageMetric({ label, value, detail, tone = 'neutral' }: { label: string; value: string; detail: string; tone?: 'neutral' | 'warn' }) {
+  return (
+    <div className={`rounded-xl border px-4 py-3 ${tone === 'warn' ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white'}`}>
+      <p className={`text-[11px] font-medium ${tone === 'warn' ? 'text-amber-700' : 'text-gray-500'}`}>{label}</p>
+      <p className="text-xl font-semibold text-gray-900 mt-1">{value}</p>
+      <p className={`text-xs mt-1 ${tone === 'warn' ? 'text-amber-700' : 'text-gray-400'}`}>{detail}</p>
+    </div>
+  )
+}
+
+function EmptyLine({ text }: { text: string }) {
+  return <div className="px-4 py-6 text-sm text-gray-400">{text}</div>
+}
+
+function summarizeWorkspaceUsage(rows: GenerationUsageRow[]) {
+  return rows.reduce((summary, row) => {
+    const metadata = usageMetadata(row)
+    const operation = row.operation ?? ''
+    const keySource = metadata.key_source
+    summary.monthEvents += 1
+    summary.monthCost += typeof row.cost_usd === 'number' ? row.cost_usd : 0
+    if (operation.startsWith('image.')) {
+      summary.imageEvents += 1
+      summary.images += numberFromUnknown(metadata.num_images, 1)
+    }
+    if (operation.startsWith('video.')) {
+      summary.videoEvents += 1
+      summary.videos += 1
+    }
+    if (keySource === 'platform') summary.platformEvents += 1
+    if (keySource === 'client') summary.clientEvents += 1
+    return summary
+  }, {
+    monthEvents: 0,
+    monthCost: 0,
+    imageEvents: 0,
+    images: 0,
+    videoEvents: 0,
+    videos: 0,
+    platformEvents: 0,
+    clientEvents: 0,
+  })
+}
+
+function summarizeByProvider(rows: GenerationUsageRow[]) {
+  const map = new Map<string, { provider: string; events: number; tokens: number; cost: number; platformEvents: number }>()
+  rows.forEach(row => {
+    const provider = row.provider ?? 'unknown'
+    const current = map.get(provider) ?? { provider, events: 0, tokens: 0, cost: 0, platformEvents: 0 }
+    current.events += 1
+    current.tokens += (row.input_tokens ?? 0) + (row.output_tokens ?? 0)
+    current.cost += typeof row.cost_usd === 'number' ? row.cost_usd : 0
+    if (usageMetadata(row).key_source === 'platform') current.platformEvents += 1
+    map.set(provider, current)
+  })
+  return [...map.values()].sort((a, b) => b.cost - a.cost || b.events - a.events)
+}
+
+function usageMetadata(row: GenerationUsageRow): Record<string, unknown> {
+  const value = row.usage_metadata
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function usageWindowStartIso() {
+  const now = new Date()
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0)).toISOString()
+}
+
+function numberFromUnknown(value: unknown, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function formatUsageUsd(value: number) {
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value)
+}
+
+function formatCompactTokens(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`
+  return String(value)
+}
+
+function formatProviderName(value: string | null) {
+  if (!value) return 'Unknown'
+  if (value === 'openrouter') return 'OpenRouter'
+  if (value === 'openai') return 'OpenAI'
+  if (value === 'fal') return 'FAL'
+  if (value === 'anthropic') return 'Anthropic'
+  return value
+}
+
+function formatUsageOperation(value: string | null) {
+  if (!value) return 'Unknown'
+  return value.split('.').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
+}
+
+function formatKeySourceLabel(value: string) {
+  if (value === 'platform') return 'Platform'
+  if (value === 'client') return 'Client'
+  return 'Unknown'
+}
+
+function formatCapability(value: string) {
+  if (value === 'platform_fal_video') return 'Platform FAL video'
+  if (value === 'platform_premium_video') return 'Platform premium video'
+  if (value === 'platform_fal_image') return 'Platform FAL image'
+  return value.replace(/_/g, ' ')
+}
+
+function formatEntitlementScope(row: AiEntitlementRow, projectName: (projectId: string | null) => string) {
+  if (row.project_id) return `Scope: ${projectName(row.project_id)}`
+  if (row.org_id) return 'Scope: workspace'
+  return 'Scope: all client spaces'
+}
+
+function entitlementAppliesToWorkspace(row: AiEntitlementRow, orgId: string, projectIds: Set<string>) {
+  if (row.project_id) return projectIds.has(row.project_id)
+  if (row.org_id) return row.org_id === orgId
+  return true
+}
+
+function shortId(value: string) {
+  return `${value.slice(0, 8)}...${value.slice(-4)}`
+}
+
+function formatSettingsDate(value: string) {
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+}
+
 // ─── Main Settings Page ───────────────────────────────────────────────────────
 export default function Settings() {
   const [tab, setTab] = useState<Tab>(() => initialSettingsTab())
@@ -676,6 +1001,7 @@ export default function Settings() {
           {tab === 'team'         && <TeamTab />}
           {tab === 'brand'        && <BrandVoiceTab />}
           {tab === 'integrations' && <IntegrationsTab />}
+          {tab === 'usage'        && <AiUsageTab />}
         </div>
       </div>
     </div>
