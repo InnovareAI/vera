@@ -616,6 +616,8 @@ type Draft = {
 }
 
 type SharedResearchProfile = {
+  id?: string | null
+  name?: string | null
   unipile_account_id: string | null
   unipile_health_status: string | null
   unipile_connected_at: string | null
@@ -694,6 +696,7 @@ export function ClientIntegrationsCard() {
   const [rows, setRows] = useState<ClientIntegration[]>([])
   const [loading, setLoading] = useState(false)
   const [researchProfile, setResearchProfile] = useState<SharedResearchProfile | null>(null)
+  const [platformResearchProfile, setPlatformResearchProfile] = useState<SharedResearchProfile | null>(null)
   const [loadingResearchProfile, setLoadingResearchProfile] = useState(false)
   const [saving, setSaving] = useState(false)
   const [connectingGoogle, setConnectingGoogle] = useState(false)
@@ -755,20 +758,37 @@ export function ClientIntegrationsCard() {
     async function loadResearchProfile() {
       if (!activeOrgId) {
         setResearchProfile(null)
+        setPlatformResearchProfile(null)
+        setLoadingResearchProfile(false)
         return
       }
       setLoadingResearchProfile(true)
-      const { data, error } = await supabase
-        .from('organizations')
-        .select('unipile_account_id, unipile_health_status, unipile_connected_at, unipile_last_health_check')
-        .eq('id', activeOrgId)
-        .maybeSingle()
+      const [workspaceResult, platformResult] = await Promise.all([
+        supabase
+          .from('organizations')
+          .select('id, name, unipile_account_id, unipile_health_status, unipile_connected_at, unipile_last_health_check')
+          .eq('id', activeOrgId)
+          .maybeSingle(),
+        supabase
+          .from('organizations')
+          .select('id, name, unipile_account_id, unipile_health_status, unipile_connected_at, unipile_last_health_check')
+          .eq('is_master', true)
+          .not('unipile_account_id', 'is', null)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ])
       if (cancelled) return
-      if (error) {
+      if (workspaceResult.error) {
         setResearchProfile(null)
       } else {
-        setResearchProfile((data ?? null) as SharedResearchProfile | null)
+        setResearchProfile((workspaceResult.data ?? null) as SharedResearchProfile | null)
       }
+      const workspace = (workspaceResult.data ?? null) as SharedResearchProfile | null
+      const platform = platformResult.error
+        ? null
+        : (platformResult.data ?? null) as SharedResearchProfile | null
+      setPlatformResearchProfile(platform?.id && platform.id !== workspace?.id ? platform : null)
       setLoadingResearchProfile(false)
     }
     loadResearchProfile()
@@ -870,6 +890,8 @@ export function ClientIntegrationsCard() {
         }
 
         setResearchProfile({
+          id: project.org_id,
+          name: project.name,
           unipile_account_id: accountId,
           unipile_connected_at: connectedAt,
           unipile_last_health_check: connectedAt,
@@ -1193,6 +1215,8 @@ export function ClientIntegrationsCard() {
     }
 
     setResearchProfile({
+      id: activeProject.org_id,
+      name: activeProject.name,
       unipile_account_id: null,
       unipile_connected_at: null,
       unipile_last_health_check: new Date().toISOString(),
@@ -1314,9 +1338,18 @@ export function ClientIntegrationsCard() {
   const SelectedIcon = selectedTemplate.icon
   const selectedLaunch = launchMeta(selectedTemplate)
   const selectedDemandPlatform = demandPlatformForProvider(selectedTemplate.provider)
-  const researchAccountId = researchProfile?.unipile_account_id ?? null
-  const researchConnected = !!researchAccountId
-  const researchHealth = researchProfile?.unipile_health_status ?? 'not connected'
+  const workspaceResearchAccountId = researchProfile?.unipile_account_id ?? null
+  const platformResearchAccountId = platformResearchProfile?.unipile_account_id ?? null
+  const workspaceResearchConnected = !!workspaceResearchAccountId
+  const platformResearchConnected = !!platformResearchAccountId
+  const researchConnected = workspaceResearchConnected || platformResearchConnected
+  const researchAccountId = workspaceResearchAccountId ?? platformResearchAccountId
+  const researchScope = workspaceResearchConnected ? 'Workspace' : platformResearchConnected ? 'InnovareAI shared' : 'Research'
+  const researchHealth = workspaceResearchConnected
+    ? researchProfile?.unipile_health_status ?? 'unknown'
+    : platformResearchConnected
+      ? platformResearchProfile?.unipile_health_status ?? 'unknown'
+      : 'not connected'
 
   return (
     <section style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', padding: 18 }}>
@@ -1359,7 +1392,7 @@ export function ClientIntegrationsCard() {
                 Shared LinkedIn research profile
               </p>
               <p style={{ color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.45, margin: '4px 0 0', maxWidth: 760 }}>
-                This profile is available to Vera for audits, LinkedIn research, business context extraction, and content intelligence across all client spaces in this workspace. It does not grant client publishing access.
+                Vera uses a workspace research profile first. If none is connected, InnovareAI operators can use the shared InnovareAI research profile for audits, source pulls, and content intelligence. Publishing still requires the client-space LinkedIn integration below.
               </p>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 <span style={{
@@ -1367,8 +1400,15 @@ export function ClientIntegrationsCard() {
                   color: researchConnected ? '#059669' : '#78716c',
                   background: researchConnected ? '#05966914' : 'var(--paper)',
                 }}>
-                  {loadingResearchProfile ? 'Checking profile' : researchConnected ? `Connected: ${maskAccountId(researchAccountId)}` : 'Not connected'}
+                  {loadingResearchProfile
+                    ? 'Checking profile'
+                    : researchConnected && researchAccountId
+                      ? `${researchScope}: ${maskAccountId(researchAccountId)}`
+                      : 'Not connected'}
                 </span>
+                {platformResearchConnected && !workspaceResearchConnected && (
+                  <span style={chipStyle}>Research only</span>
+                )}
                 <span style={chipStyle}>Health: {researchHealth}</span>
               </div>
             </div>
@@ -1387,9 +1427,9 @@ export function ClientIntegrationsCard() {
               }}
             >
               {connectingResearchProfile ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
-              {researchConnected ? 'Reconnect research profile' : 'Connect research profile'}
+              {workspaceResearchConnected ? 'Reconnect workspace profile' : 'Connect workspace profile'}
             </button>
-            {researchConnected && (
+            {workspaceResearchConnected && (
               <button
                 type="button"
                 onClick={removeResearchProfile}
