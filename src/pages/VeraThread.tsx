@@ -8,9 +8,9 @@
 // Regenerate. Images (generate_image) and videos (generate_video) attach
 // to the artifact. This matches SAM's chat+artifact model.
 
-import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, Copy, Pin, X } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, Copy, Pin, X, Target, Share2, Network } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -23,7 +23,7 @@ import { PlatformPostPreview } from '../components/PlatformPostPreview'
 import Markdown from '../components/Markdown'
 import { downloadMarkdown } from '../lib/exportDoc'
 import { markdownToText } from '../lib/mdToText'
-import { hasBusinessContext, parseProjectInstructions } from '../lib/businessContext'
+import { hasBusinessContext, parseProjectInstructions, type BusinessContext, type BusinessContextKey } from '../lib/businessContext'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -307,6 +307,66 @@ interface CampaignData {
   posts: CampaignPost[]
 }
 
+type DemandPlanSnapshot = {
+  completeness: number
+  objective: string
+  conversionPath: string
+  channels: string[]
+  formats: string[]
+  signals: string
+  handoff: string
+  missing: string[]
+}
+
+const DEMAND_PLAN_FIELDS: Array<{ key: BusinessContextKey; label: string }> = [
+  { key: 'demandObjective', label: 'Demand objective' },
+  { key: 'offer', label: 'Offer' },
+  { key: 'audience', label: 'ICP' },
+  { key: 'channelStrategy', label: 'Channel strategy' },
+  { key: 'contentFormats', label: 'Content formats' },
+  { key: 'approvalModel', label: 'Approval model' },
+  { key: 'engagementSignals', label: 'Engagement signals' },
+  { key: 'samHandoffRules', label: 'SAM handoff' },
+]
+
+function splitList(value: string, max = 5) {
+  return value
+    .split(/[\n,;]+/)
+    .map(item => item.trim())
+    .filter(Boolean)
+    .slice(0, max)
+}
+
+function buildDemandPlanSnapshot(context: BusinessContext): DemandPlanSnapshot {
+  const filled = DEMAND_PLAN_FIELDS.filter(field => context[field.key].trim()).length
+  const missing = DEMAND_PLAN_FIELDS
+    .filter(field => !context[field.key].trim())
+    .map(field => field.label)
+    .slice(0, 4)
+  const sourceChannels = [
+    context.linkedinCompany || context.linkedinProfile ? 'LinkedIn' : '',
+    context.youtube ? 'YouTube' : '',
+    context.medium ? 'Medium' : '',
+    context.quora ? 'Quora' : '',
+    context.reddit ? 'Reddit' : '',
+    context.instagram ? 'Instagram' : '',
+    context.facebook ? 'Facebook' : '',
+    context.x ? 'X' : '',
+  ].filter(Boolean)
+  const strategyChannels = splitList(context.channelStrategy, 6)
+  const formats = splitList(context.contentFormats, 5)
+  return {
+    completeness: Math.round((filled / DEMAND_PLAN_FIELDS.length) * 100),
+    objective: context.demandObjective.trim() || context.contentGoals.trim() || 'No demand objective set yet.',
+    conversionPath: context.conversionPath.trim() || 'Define where attention should go next.',
+    channels: sourceChannels.length ? sourceChannels.slice(0, 6) : strategyChannels.slice(0, 6),
+    formats: formats.length ? formats : ['Posts', 'Carousels', 'Video storyboards', 'Long form'],
+    signals: context.engagementSignals.trim() || 'Comments, shares, clicks, traffic, and objections.',
+    handoff: context.samHandoffRules.trim() || 'Define when engagement becomes SAM research.',
+    missing,
+  }
+}
+
 const TOOL_LABEL: Record<string, string> = {
   run_pipeline: 'Drafting with the team',
   generate_image: 'Generating image',
@@ -468,6 +528,11 @@ export default function VeraThread() {
   // non-master client space with no active Anthropic key — those run on the
   // shared Haiku fallback, so the welcome nudges them to bring their own.
   const [needsKey, setNeedsKey] = useState(false)
+  const demandPlan = useMemo(() => {
+    const parsed = parseProjectInstructions(activeProject?.instructions ?? '')
+    return buildDemandPlanSnapshot(parsed.businessContext)
+  }, [activeProject?.instructions])
+
   useEffect(() => {
     if (!activeOrg?.id || !activeProject?.id) { setNeedsKey(false); return }
     let cancelled = false
@@ -1392,6 +1457,7 @@ export default function VeraThread() {
             setup={setup} projectName={activeProject?.name ?? 'this client'}
             onOpenBrain={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/brain`) }}
             needsKey={needsKey} onAddKey={() => navigate('/clients')}
+            demandPlan={demandPlan}
             composer={renderComposer('idle')} />
         ) : (
           <div style={{ maxWidth: 680, margin: '0 auto', padding: `0 ${space[8]}`, display: 'flex', flexDirection: 'column', gap: space[7] }}>
@@ -1678,7 +1744,7 @@ function buildLaunchActions(stats: { pending: number; campaigns: number }): Laun
   return a.slice(0, 6)
 }
 
-function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain, needsKey, onAddKey, composer }: {
+function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain, needsKey, onAddKey, demandPlan, composer }: {
   onRun: (prompt: string) => void
   observations: { id: string; title: string; proposed_action: string | null }[]
   actions: LaunchAction[]
@@ -1688,6 +1754,7 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
   onOpenBrain: () => void
   needsKey?: boolean
   onAddKey?: () => void
+  demandPlan: DemandPlanSnapshot
   composer: ReactNode
 }) {
   const setupDone = !!setup && setup.business && setup.audience && setup.voice && setup.categories && setup.knowledge
@@ -1722,6 +1789,8 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
       )}
 
       {composer}
+
+      <DemandPlanPanel plan={demandPlan} projectName={projectName} onRun={onRun} onOpenBrain={onOpenBrain} />
 
       {/* "VERA wants to" — proactive observations (moved from the old Home). */}
       {observations.length > 0 && (
@@ -1764,6 +1833,85 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
             </button>
           )
         })}
+      </div>
+    </div>
+  )
+}
+
+function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {
+  plan: DemandPlanSnapshot
+  projectName: string
+  onRun: (prompt: string) => void
+  onOpenBrain: () => void
+}) {
+  const ready = plan.completeness >= 70
+  const actionStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 7,
+    padding: '7px 11px',
+    borderRadius: radius.pill,
+    border: `1px solid ${color.line}`,
+    background: color.surface,
+    color: color.ink,
+    fontSize: t.size.cap,
+    fontWeight: t.weight.medium,
+    cursor: 'pointer',
+  }
+  const planCampaignPrompt = `Use the saved Demand Brain and operating model for ${projectName} to plan the next B2B top-of-funnel demand campaign. Include ICP, pain, offer, conversion path, approval model, channel roles, content formats, success signals, SAM handoff rules, and the first content batch.`
+  const channelMatrixPrompt = `Build a channel-native distribution matrix for ${projectName}. Cover LinkedIn, YouTube, Medium, Quora, Reddit, and X where relevant. For each channel, define content angle, format, CTA, engagement signal, and what should be handed to SAM.`
+  const handoffPrompt = `Create a SAM handoff plan for ${projectName}. Define which comments, shares, clicks, objections, questions, accounts, and traffic signals should become sales research or follow-up, and how VERA should label them.`
+  return (
+    <section style={{ width: '100%', maxWidth: 760, marginTop: space[5], padding: space[5], background: color.surface, border: `1px solid ${ready ? 'var(--accent-line)' : color.line}`, borderRadius: radius.lg, textAlign: 'left', boxShadow: ready ? 'var(--shadow-pop)' : 'none' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: space[4], justifyContent: 'space-between', marginBottom: space[4] }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>
+            <Target size={13} />
+            Demand plan
+          </div>
+          <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, marginTop: space[2], lineHeight: 1.4 }}>{plan.objective}</div>
+          <div style={{ color: color.ghost, fontSize: t.size.cap, lineHeight: 1.5, marginTop: 3 }}>{plan.conversionPath}</div>
+        </div>
+        <button onClick={onOpenBrain} title="Open Demand Brain" style={{ flexShrink: 0, padding: '6px 10px', borderRadius: radius.pill, border: `1px solid ${ready ? 'var(--accent-line)' : color.line}`, background: ready ? 'var(--accent-tint)' : color.paper2, color: ready ? color.accent : color.ink2, fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
+          {plan.completeness}% ready
+        </button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: space[3], marginBottom: space[4] }}>
+        <PlanCluster icon={Network} label="Channels" items={plan.channels.length ? plan.channels : ['Add channels in Brain']} />
+        <PlanCluster icon={FileText} label="Formats" items={plan.formats} />
+        <PlanCluster icon={Share2} label="Signals" items={splitList(plan.signals, 4)} />
+      </div>
+
+      {plan.missing.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap', marginBottom: space[4] }}>
+          <span style={{ color: color.ghost, fontSize: t.size.cap }}>Missing:</span>
+          {plan.missing.map(item => (
+            <button key={item} onClick={onOpenBrain} style={{ padding: '4px 9px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.paper2, color: color.ink2, fontSize: t.size.micro, cursor: 'pointer' }}>{item}</button>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap' }}>
+        <button onClick={() => onRun(planCampaignPrompt)} style={actionStyle}><Megaphone size={13} /> Plan campaign</button>
+        <button onClick={() => onRun(channelMatrixPrompt)} style={actionStyle}><Zap size={13} /> Channel matrix</button>
+        <button onClick={() => onRun(handoffPrompt)} style={actionStyle}><Share2 size={13} /> SAM handoff</button>
+      </div>
+    </section>
+  )
+}
+
+function PlanCluster({ icon: Icon, label, items }: { icon: React.ElementType; label: string; items: string[] }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium, marginBottom: space[2] }}>
+        <Icon size={12} />
+        {label}
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {items.slice(0, 5).map(item => (
+          <span key={item} style={{ maxWidth: '100%', padding: '4px 8px', borderRadius: radius.pill, background: color.paper2, border: `1px solid ${color.line}`, color: color.ink2, fontSize: t.size.micro, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item}</span>
+        ))}
       </div>
     </div>
   )
