@@ -18,6 +18,7 @@ import { hasAiUserEntitlement, userCanAccessProject } from "../_shared/ai-entitl
 import { checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError } from "../_shared/ai-policy.ts"
 import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
+import { selectVideoModel } from "../_shared/model-recommendations.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -163,7 +164,13 @@ Deno.serve(async (req) => {
   const operatorUserId = access.service ? cleanString(operator_user_id) : access.userId
   const platformVideoProject = await isPlatformMediaProject(supabase, projectId, access.orgId)
   const aiPolicy = await loadProjectAiPolicy(supabase, projectId)
-  const requestedModel = cleanString(model) ?? (image_url ? aiPolicy.defaultImageVideoModel : aiPolicy.defaultVideoModel)
+  const modelSelection = selectVideoModel({
+    requestedModel: model,
+    defaultTextVideoModel: aiPolicy.defaultVideoModel ?? DEFAULT_TEXT_VIDEO_MODEL,
+    defaultImageVideoModel: aiPolicy.defaultImageVideoModel ?? DEFAULT_IMAGE_VIDEO_MODEL,
+    hasSourceImage: !!image_url,
+  })
+  const requestedModel = modelSelection.alias
 
   const resolved = resolveVideoModel(requestedModel, !!image_url)
   if (!resolved.ok) return resolved.response
@@ -254,6 +261,10 @@ Deno.serve(async (req) => {
     has_source_image: !!image_url,
     key_source: fal.source,
     operator_user_id: operatorUserId,
+    requested_model: cleanString(model),
+    policy_default_model: image_url ? aiPolicy.defaultImageVideoModel : aiPolicy.defaultVideoModel,
+    model_selection_source: modelSelection.source,
+    model_selection_reason: modelSelection.reason,
   }
   const budget = await checkProjectAiBudget(supabase, projectId, {
     orgId: access.orgId,

@@ -18,6 +18,7 @@ import { checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError } fr
 import { hasAiUserEntitlement, userCanAccessProject } from "../_shared/ai-entitlements.ts"
 import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
+import { selectImageModel } from "../_shared/model-recommendations.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -119,8 +120,21 @@ Deno.serve(async (req) => {
   if (!access.ok) return access.response
   const operatorUserId = access.service ? cleanString(operator_user_id) : access.userId
   const aiPolicy = await loadProjectAiPolicy(supabase, projectId)
-  const model = cleanModelAlias(requestedModel) ?? aiPolicy.defaultImageModel ?? DEFAULT_IMAGE_MODEL
   if (!aiPolicy.imagesEnabled) return jsonError('Image generation is disabled for this client space.', 403)
+  const mediaKeys = await resolveMediaKeys(supabase, projectId, access.orgId)
+  if (!mediaKeys.ok) return mediaKeys.response
+  const platformOpenRouterAvailable = mediaKeys.isPlatformMediaProject && !!OPENROUTER_API_KEY
+  const modelSelection = selectImageModel({
+    requestedModel,
+    defaultImageModel: aiPolicy.defaultImageModel ?? DEFAULT_IMAGE_MODEL,
+    availability: {
+      hasOpenRouter: !!mediaKeys.openRouterKey,
+      hasOpenAI: !!mediaKeys.openAIKey,
+      hasFal: !!mediaKeys.falKey,
+      platformOpenRouterAvailable,
+    },
+  })
+  const model = modelSelection.alias
   if (!isSupportedImageModel(model)) {
     return jsonError(
       `Unsupported image model "${model}". Use a curated alias such as nano-banana, seedream, qwen-image, z-image-turbo, ideogram, recraft, imagen-4, or gpt-image-2.`,
@@ -134,14 +148,11 @@ Deno.serve(async (req) => {
     const budgetCapError = paidMediaBudgetCapError(aiPolicy, 'premium_media')
     if (budgetCapError) return jsonError(budgetCapError, 402)
   }
-  const mediaKeys = await resolveMediaKeys(supabase, projectId, access.orgId)
-  if (!mediaKeys.ok) return mediaKeys.response
 
   // Route by alias: explicit OpenAI premium > supported OpenRouter image
   // models > FAL. A client OpenRouter key is used only for aliases we know
   // OpenRouter supports, so FAL-only aliases fail cleanly instead of silently
   // changing model.
-  const platformOpenRouterAvailable = mediaKeys.isPlatformMediaProject && !!OPENROUTER_API_KEY
   const wantsNanoBanana = model === 'nano-banana'
   const supportsOpenRouter = model in OR_MODELS || wantsNanoBanana
   const falPreferredForModel = wantsNanoBanana && !!mediaKeys.falKey
@@ -205,6 +216,10 @@ Deno.serve(async (req) => {
 
   const usageMetadata = {
     alias: model,
+    requested_model: cleanModelAlias(requestedModel),
+    policy_default_model: aiPolicy.defaultImageModel,
+    model_selection_source: modelSelection.source,
+    model_selection_reason: modelSelection.reason,
     image_size,
     num_images,
     quality,

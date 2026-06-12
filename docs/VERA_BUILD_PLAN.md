@@ -214,7 +214,11 @@ Current state:
 - Client API-key settings now show the recommended text, image, and video route with model, provider, estimate, reason, and escalation rule.
 - Command model routing now reuses the same recommendation rules, so chat guidance and API-key settings do not drift.
 - Image readiness now checks whether the selected default image model can actually run through the active client key type. For example, an OpenAI key does not make Nano Banana ready.
+- Image and video generation now resolve recommended defaults server-side when no explicit model is requested.
+- Server-side image defaults avoid premium policy defaults and choose a standard model that can run on the client's active key route.
+- Server-side video defaults stay on Hailuo or Hailuo I2V unless the operator explicitly requests and approves a premium model.
+- Media usage logs now include the requested model, policy default, model selection source, and selection reason for spend audits.
 
 Next step:
 
-- Move the recommendation decision into paid generation requests so Vera can resolve the cheapest good-enough model server-side before images or videos are submitted.
+- Extend the same recommendation and audit path to text generation, then expose selection-source filters in the AI Usage dashboard.
