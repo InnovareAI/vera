@@ -4,7 +4,7 @@
 // canManageProject — the space owner / org admins); listing + revoking are
 // direct, gated by client_api_keys RLS (can_project_manage).
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Activity, BookOpen, Bot, CheckCircle2, Clapperboard, Clock3, Crown, ImagePlus, KeyRound, Lock, RefreshCw, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react'
+import { Activity, AlertTriangle, BookOpen, Bot, CheckCircle2, Clapperboard, Clock3, Crown, ImagePlus, KeyRound, Lock, RefreshCw, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { useProject } from '../lib/projectContext'
@@ -76,6 +76,8 @@ const VIDEO_MODEL_OPTIONS = [
 const IMAGE_VIDEO_MODEL_OPTIONS = [
   { value: 'hailuo-i2v', label: 'Hailuo image-to-video, standard' },
 ]
+
+const PREMIUM_IMAGE_MODELS = new Set(['ideogram', 'recraft', 'imagen-4', 'gpt-image-2'])
 
 const PROVIDERS = [
   { value: 'openrouter', label: 'OpenRouter (text + images)' },
@@ -311,6 +313,8 @@ export default function ClientKeys() {
         : 'Locked. Real video rendering requires a client-owned FAL key. Vera will use storyboards and briefs instead.',
     },
   ]
+  const spendGuard = buildSpendGuard(aiPolicy, activeProviders, usageSummary)
+  const routingRows = buildRoutingRows(aiPolicy, activeProviders)
 
   const card: React.CSSProperties = { background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5] }
   const statusColor = (s: string) => s === 'active' ? color.success : s === 'invalid' ? color.danger : color.ghost
@@ -329,6 +333,25 @@ export default function ClientKeys() {
           {clientCapabilities.map(item => (
             <CapabilityCard key={item.title} {...item} />
           ))}
+        </div>
+      </section>
+
+      <section style={{ marginBottom: space[8] }}>
+        <SectionLabel style={{ marginBottom: space[3] }} action={spendGuard.action}>Spend guard</SectionLabel>
+        <div style={card}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: space[3], marginBottom: space[5] }}>
+            {spendGuard.metrics.map(item => (
+              <GuardMetric key={item.label} {...item} />
+            ))}
+          </div>
+          <div style={{ display: 'grid', gap: space[2] }}>
+            {routingRows.map(row => (
+              <RouteRow key={row.label} {...row} />
+            ))}
+          </div>
+          <p style={{ fontSize: t.size.micro, color: color.faint, margin: `${space[4]} 0 0`, lineHeight: 1.5 }}>
+            Vera should default to cheap and fast prototype paths. Premium media stays locked unless this client has a cap and an explicit policy toggle.
+          </p>
         </div>
       </section>
 
@@ -548,6 +571,166 @@ export default function ClientKeys() {
       </section>
     </div>
   )
+}
+
+type SpendGuardMetric = {
+  icon: LucideIcon
+  label: string
+  value: string
+  detail: string
+  tone: 'success' | 'warn' | 'danger' | 'info'
+}
+
+type RoutingRow = {
+  icon: LucideIcon
+  label: string
+  status: string
+  detail: string
+  tone: 'success' | 'warn' | 'danger' | 'info'
+}
+
+function GuardMetric({ icon: Icon, label, value, detail, tone }: SpendGuardMetric) {
+  const toneColor = tone === 'success' ? color.success : tone === 'warn' ? color.warn : tone === 'danger' ? color.danger : color.info
+  return (
+    <div style={{ minHeight: 92, padding: space[4], borderRadius: radius.md, border: `1px solid ${color.line}`, background: color.paper2 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], marginBottom: space[3] }}>
+        <span style={{ fontSize: t.size.micro, color: color.ghost, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: t.weight.semibold }}>{label}</span>
+        <Icon size={15} style={{ color: toneColor }} />
+      </div>
+      <div style={{ color: color.ink, fontSize: t.size.h3, fontWeight: 650, lineHeight: 1.1 }}>{value}</div>
+      <div style={{ color: color.faint, fontSize: t.size.micro, marginTop: space[2], lineHeight: 1.35 }}>{detail}</div>
+    </div>
+  )
+}
+
+function RouteRow({ icon: Icon, label, status, detail, tone }: RoutingRow) {
+  const toneColor = tone === 'success' ? color.success : tone === 'warn' ? color.warn : tone === 'danger' ? color.danger : color.info
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '32px minmax(0, 1fr) auto', alignItems: 'center', gap: space[3], padding: space[3], borderRadius: radius.md, border: `1px solid ${color.line}`, background: color.paper2 }}>
+      <span style={{ width: 32, height: 32, borderRadius: radius.pill, background: color.surface, color: toneColor, border: `1px solid ${color.line}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon size={15} />
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: 'block', color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>{label}</span>
+        <span style={{ display: 'block', color: color.ghost, fontSize: t.size.cap, lineHeight: 1.4, marginTop: 1 }}>{detail}</span>
+      </span>
+      <span style={{ color: toneColor, fontSize: t.size.micro, fontWeight: t.weight.semibold, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
+        {status}
+      </span>
+    </div>
+  )
+}
+
+function buildSpendGuard(aiPolicy: AiPolicy, activeProviders: Set<string>, usageSummary: ReturnType<typeof summarizeUsage>): {
+  action: string
+  metrics: SpendGuardMetric[]
+} {
+  const budget = aiPolicy.monthly_budget_usd
+  const used = usageSummary.currentMonthCost
+  const remaining = budget ? Math.max(0, budget - used) : null
+  const budgetPct = budget ? Math.min(100, Math.round((used / budget) * 100)) : null
+  const premiumDefault = PREMIUM_IMAGE_MODELS.has(aiPolicy.default_image_model)
+  const hasClientText = activeProviders.has('openrouter') || activeProviders.has('anthropic')
+  const hasClientMedia = activeProviders.has('openrouter') || activeProviders.has('openai') || activeProviders.has('fal') || activeProviders.has('fal_ai')
+  const hasClientVideo = activeProviders.has('fal') || activeProviders.has('fal_ai')
+  const alerts = [
+    !hasClientText ? 'text key missing' : '',
+    aiPolicy.images_enabled && !hasClientMedia ? 'image route locked' : '',
+    aiPolicy.standard_video_enabled && !hasClientVideo ? 'video key missing' : '',
+    premiumDefault && !aiPolicy.premium_media_enabled ? 'premium default locked' : '',
+    budgetPct !== null && budgetPct >= 90 ? 'budget near cap' : '',
+    usageSummary.platformKeyEvents > 0 ? 'platform usage seen' : '',
+  ].filter(Boolean)
+
+  return {
+    action: alerts.length ? `${alerts.length} watch item${alerts.length === 1 ? '' : 's'}` : 'Healthy',
+    metrics: [
+      {
+        icon: Clock3,
+        label: 'Budget',
+        value: budget ? `${budgetPct}%` : 'No cap',
+        detail: budget ? `${formatMoney(used)} used, ${formatMoney(remaining ?? 0)} left` : 'Set a cap before video or premium media.',
+        tone: !budget ? 'warn' : budgetPct !== null && budgetPct >= 90 ? 'danger' : budgetPct !== null && budgetPct >= 70 ? 'warn' : 'success',
+      },
+      {
+        icon: KeyRound,
+        label: 'Funding route',
+        value: usageSummary.platformKeyEvents > 0 ? 'Mixed' : usageSummary.clientKeyEvents > 0 ? 'Client' : 'Pending',
+        detail: `${formatNumber(usageSummary.clientKeyEvents)} client-backed, ${formatNumber(usageSummary.platformKeyEvents)} platform-backed events.`,
+        tone: usageSummary.platformKeyEvents > 0 ? 'warn' : usageSummary.clientKeyEvents > 0 ? 'success' : 'info',
+      },
+      {
+        icon: premiumDefault ? AlertTriangle : ShieldCheck,
+        label: 'Premium risk',
+        value: premiumDefault ? 'Review' : 'Low',
+        detail: premiumDefault ? `${modelLabel(aiPolicy.default_image_model)} is a premium image default.` : 'Default image path stays in the standard prototype tier.',
+        tone: premiumDefault ? 'warn' : 'success',
+      },
+      {
+        icon: Clapperboard,
+        label: 'Video path',
+        value: aiPolicy.standard_video_enabled ? 'Enabled' : 'Briefs',
+        detail: aiPolicy.standard_video_enabled
+          ? hasClientVideo ? 'Client FAL key is required and present.' : 'Enabled by policy, but no active client FAL key.'
+          : 'Storyboards and production briefs are the default.',
+        tone: aiPolicy.standard_video_enabled ? (hasClientVideo ? 'success' : 'danger') : 'info',
+      },
+    ],
+  }
+}
+
+function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>): RoutingRow[] {
+  const hasOpenRouter = activeProviders.has('openrouter')
+  const hasAnthropic = activeProviders.has('anthropic')
+  const hasOpenAI = activeProviders.has('openai')
+  const hasFal = activeProviders.has('fal') || activeProviders.has('fal_ai')
+  const imageIsPremium = PREMIUM_IMAGE_MODELS.has(aiPolicy.default_image_model)
+  return [
+    {
+      icon: Bot,
+      label: 'Text generation',
+      status: hasOpenRouter || hasAnthropic ? 'Client' : 'Missing',
+      detail: hasOpenRouter
+        ? `Runs through the client OpenRouter key${aiPolicy.default_text_model ? ` using ${aiPolicy.default_text_model}` : ' with provider default routing'}.`
+        : hasAnthropic
+          ? `Runs through the client Anthropic key${aiPolicy.default_text_model ? ` using ${aiPolicy.default_text_model}` : ''}.`
+          : 'Add OpenRouter or Anthropic so client chat does not depend on platform keys.',
+      tone: hasOpenRouter || hasAnthropic ? 'success' : 'danger',
+    },
+    {
+      icon: ImagePlus,
+      label: 'Image generation',
+      status: !aiPolicy.images_enabled ? 'Locked' : hasOpenRouter || hasOpenAI || hasFal ? 'Client' : 'Missing',
+      detail: !aiPolicy.images_enabled
+        ? 'Disabled by policy. Vera should provide prompts or briefs only.'
+        : hasOpenRouter
+          ? `${modelLabel(aiPolicy.default_image_model)} can use the client OpenRouter route when supported.`
+          : hasOpenAI
+            ? `${modelLabel(aiPolicy.default_image_model)} can use the client OpenAI route for premium image work.`
+            : hasFal
+              ? `${modelLabel(aiPolicy.default_image_model)} can use the client FAL route.`
+              : 'Add OpenRouter for the normal path, or OpenAI/FAL for provider-specific media.',
+      tone: !aiPolicy.images_enabled ? 'info' : hasOpenRouter || hasOpenAI || hasFal ? (imageIsPremium ? 'warn' : 'success') : 'danger',
+    },
+    {
+      icon: Crown,
+      label: 'Premium media',
+      status: aiPolicy.premium_media_enabled ? 'Enabled' : 'Locked',
+      detail: aiPolicy.premium_media_enabled
+        ? aiPolicy.monthly_budget_usd ? 'Premium models are allowed with a monthly cap. Use only for approved production work.' : 'Premium is enabled, but the budget cap is missing.'
+        : 'OpenAI Image Gen 2, Imagen 4, Recraft, Ideogram, Kling, Sora, Veo, and Seedance stay approval-gated.',
+      tone: aiPolicy.premium_media_enabled ? (aiPolicy.monthly_budget_usd ? 'warn' : 'danger') : 'success',
+    },
+    {
+      icon: Clapperboard,
+      label: 'Video rendering',
+      status: aiPolicy.standard_video_enabled && hasFal ? 'Client' : 'Storyboard',
+      detail: aiPolicy.standard_video_enabled
+        ? hasFal ? `${modelLabel(aiPolicy.default_video_model)} and ${modelLabel(aiPolicy.default_image_video_model)} run only through the client FAL key.` : 'Policy allows standard video, but Vera still needs a client FAL key.'
+        : 'Real clips are locked. Vera should create storyboards, prompts, and production briefs.',
+      tone: aiPolicy.standard_video_enabled ? (hasFal ? 'success' : 'danger') : 'info',
+    },
+  ]
 }
 
 function PolicyToggle({
@@ -783,6 +966,14 @@ function formatKeySource(value: string) {
   if (value === 'client') return 'Client'
   if (value === 'platform') return 'Platform'
   return 'Unknown'
+}
+
+function modelLabel(value: string) {
+  return [
+    ...IMAGE_MODEL_OPTIONS,
+    ...VIDEO_MODEL_OPTIONS,
+    ...IMAGE_VIDEO_MODEL_OPTIONS,
+  ].find(option => option.value === value)?.label.split(',')[0] ?? value
 }
 
 function formatNumber(value: number) {
