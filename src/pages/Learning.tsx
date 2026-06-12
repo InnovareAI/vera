@@ -3,6 +3,7 @@ import type { ElementType, ReactNode } from 'react'
 import { ArrowRight, BarChart3, Lightbulb, RefreshCw, Share2, Sparkles, Target, TrendingUp } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { ContentMetricSnapshot, Post } from '../lib/supabase'
+import { parseProjectInstructions, type BusinessContext, type BusinessContextKey } from '../lib/businessContext'
 import { useProject } from '../lib/projectContext'
 import { useRightRail } from '../lib/rightRailContext'
 import { Button, PageHeader, SectionLabel, color, radius, space, type as t } from '../design'
@@ -79,6 +80,10 @@ export default function Learning() {
   const insights = useMemo(() => buildInsights(posts, metrics), [posts, metrics])
   const experiments = useMemo(() => buildExperiments(posts, metrics), [posts, metrics])
   const topRows = useMemo(() => buildTopRows(posts, metrics), [posts, metrics])
+  const operatingRows = useMemo(() => {
+    const parsed = parseProjectInstructions(activeProject?.instructions ?? '')
+    return buildOperatingRows(parsed.businessContext)
+  }, [activeProject?.instructions])
 
   return (
     <div style={{ padding: `${space[8]} ${space[8]} 0`, maxWidth: 1180 }}>
@@ -125,6 +130,13 @@ export default function Learning() {
             <SignalRow label="Comments" value={summary.comments} body="High-intent replies and objections should become SAM research context." />
             <SignalRow label="Shares" value={summary.shares} body="Shares indicate message resonance and account expansion potential." />
             <SignalRow label="Clicks" value={summary.clicks} body="Traffic from content should trigger follow-up angles, not just reporting." />
+          </div>
+          <div style={{ display: 'grid', gap: space[2], marginTop: space[4] }}>
+            {operatingRows.length ? operatingRows.map(row => (
+              <OperatingRow key={row.label} label={row.label} value={row.value} />
+            )) : (
+              <LearningState>Add a demand operating model in the Demand Brain so VERA knows what traction, approval, and SAM handoff mean for this client.</LearningState>
+            )}
           </div>
         </Panel>
       </section>
@@ -216,12 +228,33 @@ function SignalRow({ label, value, body }: { label: string; value: number; body:
   )
 }
 
+function OperatingRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ padding: space[3], border: `1px solid ${color.line}`, borderRadius: radius.sm, background: color.surface }}>
+      <div style={{ color: color.ghost, fontSize: t.size.micro, fontWeight: t.weight.medium, textTransform: 'uppercase', letterSpacing: 0 }}>{label}</div>
+      <div style={{ color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5, marginTop: 3 }}>{value}</div>
+    </div>
+  )
+}
+
 function LearningState({ children }: { children: ReactNode }) {
   return (
     <div style={{ padding: space[5], color: color.ghost, fontSize: t.size.sm, lineHeight: 1.5, border: `1px dashed ${color.line}`, borderRadius: radius.md }}>
       {children}
     </div>
   )
+}
+
+function buildOperatingRows(context: BusinessContext) {
+  const fields: Array<{ key: BusinessContextKey; label: string }> = [
+    { key: 'demandObjective', label: 'Objective' },
+    { key: 'engagementSignals', label: 'Signals' },
+    { key: 'samHandoffRules', label: 'SAM handoff' },
+    { key: 'learningCadence', label: 'Learning cadence' },
+  ]
+  return fields
+    .map(field => ({ label: field.label, value: context[field.key].trim() }))
+    .filter(row => row.value.length > 0)
 }
 
 function buildMetrics(rows: ContentMetricSnapshot[]) {

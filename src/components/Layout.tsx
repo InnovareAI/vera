@@ -343,8 +343,17 @@ function NewClientModal({ onClose }: { onClose: () => void }) {
         <label style={labelStyle}>Instagram <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
         <input value={context.instagram} onChange={e => updateContext('instagram', e.target.value)} placeholder="https://instagram.com/brand"
           style={{ ...inputStyle, marginBottom: 12 }} />
+        <label style={labelStyle}>YouTube <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
+        <input value={context.youtube} onChange={e => updateContext('youtube', e.target.value)} placeholder="https://youtube.com/@brand"
+          style={{ ...inputStyle, marginBottom: 12 }} />
         <label style={labelStyle}>Medium <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
         <input value={context.medium} onChange={e => updateContext('medium', e.target.value)} placeholder="https://medium.com/@brand"
+          style={{ ...inputStyle, marginBottom: 12 }} />
+        <label style={labelStyle}>Quora <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
+        <input value={context.quora} onChange={e => updateContext('quora', e.target.value)} placeholder="https://quora.com/profile/person-or-brand"
+          style={{ ...inputStyle, marginBottom: 12 }} />
+        <label style={labelStyle}>Reddit <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
+        <input value={context.reddit} onChange={e => updateContext('reddit', e.target.value)} placeholder="https://reddit.com/r/community or https://reddit.com/user/name"
           style={{ ...inputStyle, marginBottom: 12 }} />
         <label style={labelStyle}>Facebook page <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
         <input value={context.facebook} onChange={e => updateContext('facebook', e.target.value)} placeholder="https://facebook.com/brand"
@@ -366,6 +375,12 @@ function NewClientModal({ onClose }: { onClose: () => void }) {
           style={{ ...textareaStyle, marginBottom: 12 }} />
         <label style={labelStyle}>Content goals <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
         <textarea value={context.contentGoals} onChange={e => updateContext('contentGoals', e.target.value)} placeholder="Awareness, leads, launches, trust, recruiting."
+          style={{ ...textareaStyle, marginBottom: 12 }} />
+        <label style={labelStyle}>Demand objective <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
+        <textarea value={context.demandObjective} onChange={e => updateContext('demandObjective', e.target.value)} placeholder="Top-of-funnel goal for this client."
+          style={{ ...textareaStyle, marginBottom: 12 }} />
+        <label style={labelStyle}>Approval model <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
+        <textarea value={context.approvalModel} onChange={e => updateContext('approvalModel', e.target.value)} placeholder="Operator-only, client lead, all stakeholders, or case-by-case."
           style={textareaStyle} />
         {err && <p style={{ fontSize: 12, color: 'var(--danger)', margin: '8px 0 0' }}>{err}</p>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>

@@ -54,7 +54,10 @@ const BUSINESS_SOURCE_KEYS: BusinessContextKey[] = [
   'linkedinEvents',
   'linkedinNewsletter',
   'instagram',
+  'youtube',
   'medium',
+  'quora',
+  'reddit',
   'facebook',
   'x',
 ]
@@ -382,8 +385,10 @@ export default function Brain() {
 
   const sourceCount = BUSINESS_SOURCE_KEYS
     .filter(key => business[key].trim()).length
+  const operatingKeys: BusinessContextKey[] = ['demandObjective', 'conversionPath', 'channelStrategy', 'contentFormats', 'approvalModel', 'engagementSignals', 'samHandoffRules', 'learningCadence']
   const factCount = (['offer', 'audience', 'customerProblems', 'differentiators', 'competitors', 'proofPoints', 'contentGoals', 'constraints'] as BusinessContextKey[])
     .filter(key => business[key].trim()).length
+  const operatingCount = operatingKeys.filter(key => business[key].trim()).length
 
   return (
     <div style={{ padding: `${space[8]} ${space[8]} 0`, maxWidth: 1040 }}>
@@ -411,7 +416,7 @@ export default function Brain() {
             </p>
           </div>
           <span style={{ fontSize: t.size.cap, color: color.ghost }}>
-            {sourceCount}/9 sources · {factCount}/8 context fields
+            {sourceCount}/{BUSINESS_SOURCE_KEYS.length} sources · {factCount}/8 context fields · {operatingCount}/{operatingKeys.length} operating fields
           </span>
         </div>
 
@@ -439,8 +444,17 @@ export default function Brain() {
               <Field label="Instagram">
                 <Input value={business.instagram} onChange={e => updateBusiness('instagram', e.target.value)} placeholder="https://instagram.com/brand" />
               </Field>
+              <Field label="YouTube">
+                <Input value={business.youtube} onChange={e => updateBusiness('youtube', e.target.value)} placeholder="https://youtube.com/@brand" />
+              </Field>
               <Field label="Medium">
                 <Input value={business.medium} onChange={e => updateBusiness('medium', e.target.value)} placeholder="https://medium.com/@brand" />
+              </Field>
+              <Field label="Quora">
+                <Input value={business.quora} onChange={e => updateBusiness('quora', e.target.value)} placeholder="https://quora.com/profile/person-or-brand" />
+              </Field>
+              <Field label="Reddit">
+                <Input value={business.reddit} onChange={e => updateBusiness('reddit', e.target.value)} placeholder="https://reddit.com/r/community or https://reddit.com/user/name" />
               </Field>
               <Field label="Facebook page">
                 <Input value={business.facebook} onChange={e => updateBusiness('facebook', e.target.value)} placeholder="https://facebook.com/brand" />
@@ -477,7 +491,7 @@ export default function Brain() {
                 Pull website and socials
               </div>
               <p style={{ margin: 0, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>
-                Pull the website, LinkedIn, Instagram, Medium, Facebook, X, events, and newsletters. Innovare handles public scraping; connected LinkedIn and Instagram use Unipile.
+                Pull the website, LinkedIn, Instagram, YouTube, Medium, Quora, Reddit, Facebook, X, events, and newsletters. Innovare handles public scraping; connected LinkedIn and Instagram use Unipile.
               </p>
             </div>
             {(extractStatus || extractError || sourceStatus || sourceError) && (
@@ -538,6 +552,48 @@ export default function Brain() {
           <div style={{ display: 'flex', alignItems: 'center', gap: space[3], marginTop: space[4] }}>
             <Button variant="primary" size="md" onClick={saveInstr} disabled={instrSaving} style={{ background: color.ink, color: color.surface }}>
               {instrSaving ? <Loader2 size={14} /> : <Check size={14} />} Save business context
+            </Button>
+            {instrSaved && <span style={{ fontSize: t.size.cap, color: color.success }}>VERA uses this from the next turn.</span>}
+          </div>
+        </div>
+
+        <div style={{ marginTop: space[4], padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], marginBottom: space[4] }}>
+            <div>
+              <div style={{ fontSize: t.size.sm, color: color.ink, fontWeight: t.weight.semibold }}>Demand operating model</div>
+              <div style={{ fontSize: t.size.cap, color: color.ghost, marginTop: 2 }}>The rules for what VERA creates, who approves it, what counts as traction, and what moves to SAM.</div>
+            </div>
+            {instrSaved && <span style={{ fontSize: t.size.cap, color: color.success }}>Saved.</span>}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: space[4] }}>
+            <Field label="Demand objective">
+              <Textarea value={business.demandObjective} onChange={e => updateBusiness('demandObjective', e.target.value)} rows={3} placeholder="Top-of-funnel goal, e.g. category awareness, founder trust, lead-gen for a specific offer, or market education." />
+            </Field>
+            <Field label="Conversion path">
+              <Textarea value={business.conversionPath} onChange={e => updateBusiness('conversionPath', e.target.value)} rows={3} placeholder="Where attention should go next: comments, DMs, landing page, newsletter, webinar, sales call, SAM research queue." />
+            </Field>
+            <Field label="Channel strategy">
+              <Textarea value={business.channelStrategy} onChange={e => updateBusiness('channelStrategy', e.target.value)} rows={3} placeholder="Role of each channel: LinkedIn for authority, YouTube for depth, Medium for SEO, Quora and Reddit for problem-aware demand, X for speed." />
+            </Field>
+            <Field label="Content formats">
+              <Textarea value={business.contentFormats} onChange={e => updateBusiness('contentFormats', e.target.value)} rows={3} placeholder="Posts, carousels, video storyboards, Shorts, long-form articles, answers, comments, founder POV, case breakdowns." />
+            </Field>
+            <Field label="Approval model">
+              <Textarea value={business.approvalModel} onChange={e => updateBusiness('approvalModel', e.target.value)} rows={3} placeholder="Who approves what: operator-only, client lead, legal, all stakeholders, or case-by-case based on topic, claim, or channel." />
+            </Field>
+            <Field label="Engagement signals">
+              <Textarea value={business.engagementSignals} onChange={e => updateBusiness('engagementSignals', e.target.value)} rows={3} placeholder="What counts: comments, shares, saves, clicks, traffic quality, objections, buying triggers, competitor mentions, meeting requests." />
+            </Field>
+            <Field label="SAM handoff rules">
+              <Textarea value={business.samHandoffRules} onChange={e => updateBusiness('samHandoffRules', e.target.value)} rows={3} placeholder="When engagement becomes sales research: named accounts, buying intent, objections, warm commenters, repeated topic demand, inbound questions." />
+            </Field>
+            <Field label="Learning cadence">
+              <Textarea value={business.learningCadence} onChange={e => updateBusiness('learningCadence', e.target.value)} rows={3} placeholder="How often VERA should review performance, refresh best practices, recommend experiments, and update channel-specific tone of voice." />
+            </Field>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[3], marginTop: space[4] }}>
+            <Button variant="primary" size="md" onClick={saveInstr} disabled={instrSaving} style={{ background: color.ink, color: color.surface }}>
+              {instrSaving ? <Loader2 size={14} /> : <Check size={14} />} Save operating model
             </Button>
             {instrSaved && <span style={{ fontSize: t.size.cap, color: color.success }}>VERA uses this from the next turn.</span>}
           </div>

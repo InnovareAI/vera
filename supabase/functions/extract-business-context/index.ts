@@ -28,7 +28,10 @@ type BusinessContext = {
   linkedinEvents: string
   linkedinNewsletter: string
   instagram: string
+  youtube: string
   medium: string
+  quora: string
+  reddit: string
   facebook: string
   x: string
   industry: string
@@ -39,6 +42,14 @@ type BusinessContext = {
   competitors: string
   proofPoints: string
   contentGoals: string
+  demandObjective: string
+  conversionPath: string
+  channelStrategy: string
+  contentFormats: string
+  approvalModel: string
+  engagementSignals: string
+  samHandoffRules: string
+  learningCadence: string
   constraints: string
 }
 
@@ -77,7 +88,10 @@ const FIELD_KEYS = [
   "linkedinEvents",
   "linkedinNewsletter",
   "instagram",
+  "youtube",
   "medium",
+  "quora",
+  "reddit",
   "facebook",
   "x",
   "companyName",
@@ -89,6 +103,14 @@ const FIELD_KEYS = [
   "competitors",
   "proofPoints",
   "contentGoals",
+  "demandObjective",
+  "conversionPath",
+  "channelStrategy",
+  "contentFormats",
+  "approvalModel",
+  "engagementSignals",
+  "samHandoffRules",
+  "learningCadence",
   "constraints",
 ] as const
 
@@ -205,7 +227,10 @@ async function pullSourceContent(
   await addSource("LinkedIn events", context.linkedinEvents, url => pullGenericPage("LinkedIn events", url))
   await addSource("LinkedIn newsletter", context.linkedinNewsletter, url => pullGenericPage("LinkedIn newsletter", url))
   await addSource("Instagram", context.instagram, url => pullConnectedSocial("Instagram", url, unipile, { isCompany: false }))
+  await addSource("YouTube", context.youtube, url => pullGenericPage("YouTube", url))
   await addSource("Medium", context.medium, url => pullGenericPage("Medium", url))
+  await addSource("Quora", context.quora, url => pullGenericPage("Quora", url))
+  await addSource("Reddit", context.reddit, url => pullGenericPage("Reddit", url))
   await addSource("Facebook page", context.facebook, url => pullFacebookPage("Facebook page", url))
   await addSource("X profile", context.x, url => pullXProfile("X profile", url))
 
@@ -577,7 +602,7 @@ Rules:
 - If the document is silent for a field, return an empty string for that field.
 - Do not invent facts.
 - Treat "website" as the primary company URL when present.
-- Extract LinkedIn company pages, LinkedIn personal profiles, LinkedIn events, LinkedIn newsletters, Instagram profiles, Medium pages, Facebook pages, and X profiles only when explicitly present.
+- Extract LinkedIn company pages, LinkedIn personal profiles, LinkedIn events, LinkedIn newsletters, Instagram profiles, YouTube channels, Medium pages, Quora profiles, Reddit profiles or communities, Facebook pages, and X profiles only when explicitly present.
 - Use source posts, events, and newsletters to infer positioning, recurring topics, proof points, and content goals, but keep URLs in their own fields.
 - "offer" should capture products, services, or core value proposition.
 - "audience" should capture target buyers, users, industries, or decision makers.
@@ -585,6 +610,14 @@ Rules:
 - "differentiators" should capture positioning and why the client is different.
 - "proofPoints" should capture facts, numbers, case studies, credentials, or named evidence.
 - "contentGoals" should capture messaging goals, campaign goals, themes, or calls to action.
+- "demandObjective" should capture the top-of-funnel demand goal.
+- "conversionPath" should capture where attention or engagement should go next.
+- "channelStrategy" should capture the role of each channel or medium.
+- "contentFormats" should capture the formats VERA should produce.
+- "approvalModel" should capture who approves what and when.
+- "engagementSignals" should capture comments, shares, clicks, traffic, objections, or other traction signals that matter.
+- "samHandoffRules" should capture when content engagement should become SAM research or sales follow-up.
+- "learningCadence" should capture how often VERA should review performance and update recommendations.
 - "constraints" should capture legal, compliance, wording, market, region, or brand restrictions.
 
 Document:

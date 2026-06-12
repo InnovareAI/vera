@@ -6,7 +6,10 @@ export type BusinessContextKey =
   | 'linkedinEvents'
   | 'linkedinNewsletter'
   | 'instagram'
+  | 'youtube'
   | 'medium'
+  | 'quora'
+  | 'reddit'
   | 'facebook'
   | 'x'
   | 'industry'
@@ -17,6 +20,14 @@ export type BusinessContextKey =
   | 'competitors'
   | 'proofPoints'
   | 'contentGoals'
+  | 'demandObjective'
+  | 'conversionPath'
+  | 'channelStrategy'
+  | 'contentFormats'
+  | 'approvalModel'
+  | 'engagementSignals'
+  | 'samHandoffRules'
+  | 'learningCadence'
   | 'constraints'
 
 export type BusinessContext = Record<BusinessContextKey, string>
@@ -29,7 +40,10 @@ export const EMPTY_BUSINESS_CONTEXT: BusinessContext = {
   linkedinEvents: '',
   linkedinNewsletter: '',
   instagram: '',
+  youtube: '',
   medium: '',
+  quora: '',
+  reddit: '',
   facebook: '',
   x: '',
   industry: '',
@@ -40,6 +54,14 @@ export const EMPTY_BUSINESS_CONTEXT: BusinessContext = {
   competitors: '',
   proofPoints: '',
   contentGoals: '',
+  demandObjective: '',
+  conversionPath: '',
+  channelStrategy: '',
+  contentFormats: '',
+  approvalModel: '',
+  engagementSignals: '',
+  samHandoffRules: '',
+  learningCadence: '',
   constraints: '',
 }
 
@@ -53,7 +75,10 @@ const BUSINESS_CONTEXT_FIELDS: Array<{ key: BusinessContextKey; label: string }>
   { key: 'linkedinEvents', label: 'LinkedIn events' },
   { key: 'linkedinNewsletter', label: 'LinkedIn newsletter' },
   { key: 'instagram', label: 'Instagram' },
+  { key: 'youtube', label: 'YouTube' },
   { key: 'medium', label: 'Medium' },
+  { key: 'quora', label: 'Quora' },
+  { key: 'reddit', label: 'Reddit' },
   { key: 'facebook', label: 'Facebook page' },
   { key: 'x', label: 'X profile' },
   { key: 'companyName', label: 'Company' },
@@ -65,6 +90,14 @@ const BUSINESS_CONTEXT_FIELDS: Array<{ key: BusinessContextKey; label: string }>
   { key: 'competitors', label: 'Competitors' },
   { key: 'proofPoints', label: 'Proof points' },
   { key: 'contentGoals', label: 'Content goals' },
+  { key: 'demandObjective', label: 'Demand objective' },
+  { key: 'conversionPath', label: 'Conversion path' },
+  { key: 'channelStrategy', label: 'Channel strategy' },
+  { key: 'contentFormats', label: 'Content formats' },
+  { key: 'approvalModel', label: 'Approval model' },
+  { key: 'engagementSignals', label: 'Engagement signals' },
+  { key: 'samHandoffRules', label: 'SAM handoff rules' },
+  { key: 'learningCadence', label: 'Learning cadence' },
   { key: 'constraints', label: 'Constraints' },
 ]
 
