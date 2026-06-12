@@ -110,6 +110,12 @@ Deno.serve(async (req) => {
   const aiPolicy = await loadProjectAiPolicy(supabase, projectId)
   const model = cleanModelAlias(requestedModel) ?? aiPolicy.defaultImageModel ?? DEFAULT_IMAGE_MODEL
   if (!aiPolicy.imagesEnabled) return jsonError('Image generation is disabled for this client space.', 403)
+  if (!isSupportedImageModel(model)) {
+    return jsonError(
+      `Unsupported image model "${model}". Use a curated alias such as nano-banana, seedream, qwen-image, z-image-turbo, ideogram, recraft, imagen-4, or gpt-image-2.`,
+      400,
+    )
+  }
   if (isPremiumImageModel(model) && !aiPolicy.premiumMediaEnabled) {
     return jsonError('Premium image models are disabled for this client space. Use nano-banana, Seedream, Qwen, or another standard model.', 402)
   }
@@ -447,8 +453,12 @@ function isPremiumImageModel(value: unknown): boolean {
   return normalized.includes('gpt-image-2') || normalized.includes('/gpt-image-2')
 }
 
+function isSupportedImageModel(value: string): boolean {
+  return value in FAL_MODELS || value in OPENAI_MODELS || value in OR_MODELS || value === 'nano-banana'
+}
+
 function cleanModelAlias(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
+  return typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : null
 }
 
 type MediaKeys = {
