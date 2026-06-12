@@ -19,6 +19,11 @@ import type { Database } from '../_shared/database.types.ts'
 import { requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
 import { slugify } from '../_shared/markdown.ts'
 import { acquirePublishLockForOpenPost, releasePublishLock } from '../_shared/publish-guard.ts'
+import {
+  claimPublish,
+  completePublishClaim,
+  releasePublishClaim,
+} from '../_shared/publish-claims.ts'
 import type {
   HealthCheckResult, DryRunResult, PublishResult, VerifyResult, UnpublishResult,
   PostInput, PublisherError,
@@ -181,6 +186,15 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
       error: typed('validation_failed', publishLock.message, publishLock.recoveryAction) }
   }
 
+  const publishClaim = await claimPublish(supabase, publishLock.post, 'sanity', `sanity-publish:${publisher_id}`)
+  if (!publishClaim.ok) {
+    await releasePublishLock(supabase, post_id, publisher_id)
+    return { ok: false, attempt_id: '', latency_ms: Date.now() - t0, error: typed('validation_failed',
+      publishClaim.message,
+      'Refresh the post detail page before retrying.') }
+  }
+  let publishClaimCompleted = false
+
   try {
     const { config, creds, org_id } = await loadPublisher(supabase, publisher_id)
     const project_id = config.project_id as string
@@ -234,12 +248,18 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
       return { ok: false, attempt_id, latency_ms: Date.now() - t0, error: typed('validation_failed', msg, 'Check schema requirements.') }
     }
 
+    await completePublishClaim(supabase, publishLock.post, targetId)
+    publishClaimCompleted = true
+
     await markAttempt(supabase, attempt_id, 'success', null, null, null, {
       remote_id: targetId,
       response_body: { document_id: targetId, status: post.status, is_draft: !isPublished },
     })
     return { ok: true, remote_id: targetId, verified: isPublished, attempt_id, latency_ms: Date.now() - t0 }
   } finally {
+    if (!publishClaimCompleted) {
+      await releasePublishClaim(supabase, post_id, 'sanity publish did not complete')
+    }
     await releasePublishLock(supabase, post_id, publisher_id)
   }
 }

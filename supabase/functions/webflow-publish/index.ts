@@ -19,6 +19,11 @@ import type { Database } from '../_shared/database.types.ts'
 import { requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
 import { renderMarkdown, slugify } from '../_shared/markdown.ts'
 import { acquirePublishLockForOpenPost, releasePublishLock } from '../_shared/publish-guard.ts'
+import {
+  claimPublish,
+  completePublishClaim,
+  releasePublishClaim,
+} from '../_shared/publish-claims.ts'
 import type {
   HealthCheckResult, DryRunResult, PublishResult, VerifyResult, UnpublishResult,
   PostInput, PublisherError,
@@ -205,6 +210,15 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
       error: typed('validation_failed', publishLock.message, publishLock.recoveryAction) }
   }
 
+  const publishClaim = await claimPublish(supabase, publishLock.post, 'webflow', `webflow-publish:${publisher_id}`)
+  if (!publishClaim.ok) {
+    await releasePublishLock(supabase, post_id, publisher_id)
+    return { ok: false, attempt_id: '', latency_ms: Date.now() - t0, error: typed('validation_failed',
+      publishClaim.message,
+      'Refresh the post detail page before retrying.') }
+  }
+  let publishClaimCompleted = false
+
   try {
     const { config, creds, org_id } = await loadPublisher(supabase, publisher_id)
     const site_id = config.site_id as string
@@ -256,6 +270,8 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
       })
       if (pubRes.status < 200 || pubRes.status >= 300) {
         // Item created but site publish failed — surface as warning, not full failure
+        await completePublishClaim(supabase, publishLock.post, item.id)
+        publishClaimCompleted = true
         await markAttempt(supabase, attempt_id, 'success', null, null, null, {
           remote_id: item.id,
           response_body: { item_id: item.id, slug: item.fieldData?.slug, site_publish_status: pubRes.status, warning: 'item created but site publish endpoint failed' },
@@ -273,8 +289,13 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
       remote_id: item.id, remote_url: live_url ?? null,
       response_body: { item_id: item.id, slug: item.fieldData?.slug, is_draft: isDraft },
     })
+    await completePublishClaim(supabase, publishLock.post, item.id, live_url)
+    publishClaimCompleted = true
     return { ok: true, remote_id: item.id, remote_url: live_url, verified: !isDraft, attempt_id, latency_ms: Date.now() - t0 }
   } finally {
+    if (!publishClaimCompleted) {
+      await releasePublishClaim(supabase, post_id, 'webflow publish did not complete')
+    }
     await releasePublishLock(supabase, post_id, publisher_id)
   }
 }

@@ -29,6 +29,11 @@ import type { Database } from '../_shared/database.types.ts'
 import { requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
 import { renderMarkdown, slugify } from '../_shared/markdown.ts'
 import { acquirePublishLockForOpenPost, releasePublishLock } from '../_shared/publish-guard.ts'
+import {
+  claimPublish,
+  completePublishClaim,
+  releasePublishClaim,
+} from '../_shared/publish-claims.ts'
 import type {
   HealthCheckResult, DryRunResult, PublishResult, VerifyResult, UnpublishResult,
   PostInput, PublisherError,
@@ -319,6 +324,15 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
       publishLock.recoveryAction) }
   }
 
+  const publishClaim = await claimPublish(supabase, publishLock.post, 'wordpress', `wordpress-publish:${publisher_id}`)
+  if (!publishClaim.ok) {
+    await releasePublishLock(supabase, post_id, publisher_id)
+    return { ok: false, attempt_id: '', latency_ms: Date.now() - t0, error: typed('validation_failed',
+      publishClaim.message,
+      'Refresh the post detail page before retrying.') }
+  }
+  let publishClaimCompleted = false
+
   try {
     const { config, creds } = await loadPublisher(supabase, publisher_id)
     const base_url = config.base_url as string
@@ -484,6 +498,8 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
 
     // Verify
     const verified = wpPost.status === wpPayload.status || (status_target === 'draft' && wpPost.status === 'draft')
+    await completePublishClaim(supabase, publishLock.post, String(wpPost.id), wpPost.link)
+    publishClaimCompleted = true
 
     await markAttempt(supabase, attempt_id, 'success', null, null, null, {
       remote_id: String(wpPost.id),
@@ -500,6 +516,9 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
       latency_ms: Date.now() - t0,
     }
   } finally {
+    if (!publishClaimCompleted) {
+      await releasePublishClaim(supabase, post_id, 'wordpress publish did not complete')
+    }
     await releasePublishLock(supabase, post_id, publisher_id)
   }
 }

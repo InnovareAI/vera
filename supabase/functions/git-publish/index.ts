@@ -21,6 +21,11 @@ import type { Database } from '../_shared/database.types.ts'
 import { requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
 import { slugify } from '../_shared/markdown.ts'
 import { acquirePublishLockForOpenPost, releasePublishLock } from '../_shared/publish-guard.ts'
+import {
+  claimPublish,
+  completePublishClaim,
+  releasePublishClaim,
+} from '../_shared/publish-claims.ts'
 import type {
   HealthCheckResult, DryRunResult, PublishResult, VerifyResult, UnpublishResult,
   PostInput, PublisherError,
@@ -258,6 +263,15 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
       publishLock.message, publishLock.recoveryAction) }
   }
 
+  const publishClaim = await claimPublish(supabase, publishLock.post, 'git', `git-publish:${publisher_id}`)
+  if (!publishClaim.ok) {
+    await releasePublishLock(supabase, post_id, publisher_id)
+    return { ok: false, attempt_id: '', latency_ms: Date.now() - t0, error: typed('validation_failed',
+      publishClaim.message,
+      'Refresh the post detail page before retrying.') }
+  }
+  let publishClaimCompleted = false
+
   try {
     const { config, creds, org_id } = await loadPublisher(supabase, publisher_id)
     const repo = config.repo as string
@@ -371,6 +385,9 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
       fetch(webhook_url, { method: 'POST', signal: AbortSignal.timeout(5_000) }).catch(() => {})
     }
 
+    await completePublishClaim(supabase, publishLock.post, remote_id, remote_url)
+    publishClaimCompleted = true
+
     await markAttempt(supabase, attempt_id, 'success', null, null, null, {
       remote_id, remote_url: remote_url ?? null,
       response_body: { path, branch: target_branch, sha: created.content?.sha },
@@ -378,6 +395,9 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
 
     return { ok: true, remote_id, remote_url, verified: true, attempt_id, latency_ms: Date.now() - t0 }
   } finally {
+    if (!publishClaimCompleted) {
+      await releasePublishClaim(supabase, post_id, 'git publish did not complete')
+    }
     await releasePublishLock(supabase, post_id, publisher_id)
   }
 }

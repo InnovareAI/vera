@@ -22,6 +22,11 @@ import type { Database } from '../_shared/database.types.ts'
 import { requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
 import { slugify } from '../_shared/markdown.ts'
 import { acquirePublishLockForOpenPost, releasePublishLock } from '../_shared/publish-guard.ts'
+import {
+  claimPublish,
+  completePublishClaim,
+  releasePublishClaim,
+} from '../_shared/publish-claims.ts'
 import type {
   HealthCheckResult, DryRunResult, PublishResult, VerifyResult, UnpublishResult,
   PostInput, PublisherError,
@@ -194,6 +199,15 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
       error: typed('validation_failed', publishLock.message, publishLock.recoveryAction) }
   }
 
+  const publishClaim = await claimPublish(supabase, publishLock.post, 'contentful', `contentful-publish:${publisher_id}`)
+  if (!publishClaim.ok) {
+    await releasePublishLock(supabase, post_id, publisher_id)
+    return { ok: false, attempt_id: '', latency_ms: Date.now() - t0, error: typed('validation_failed',
+      publishClaim.message,
+      'Refresh the post detail page before retrying.') }
+  }
+  let publishClaimCompleted = false
+
   try {
     const { config, creds, org_id } = await loadPublisher(supabase, publisher_id)
     const { space_id, environment_id, content_type_id, default_locale } = config as Record<string, string>
@@ -251,6 +265,8 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
         verified = true
       } else {
         // Entry created as draft. Note in audit and return with warning.
+        await completePublishClaim(supabase, publishLock.post, entryId)
+        publishClaimCompleted = true
         await markAttempt(supabase, attempt_id, 'success', null, null, null, {
           remote_id: entryId,
           response_body: { entry_id: entryId, status: 'draft', publish_failed_status: pubRes.status },
@@ -262,12 +278,18 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
       }
     }
 
+    await completePublishClaim(supabase, publishLock.post, entryId)
+    publishClaimCompleted = true
+
     await markAttempt(supabase, attempt_id, 'success', null, null, null, {
       remote_id: entryId,
       response_body: { entry_id: entryId, status: post.status, version: entry.sys.version },
     })
     return { ok: true, remote_id: entryId, verified, attempt_id, latency_ms: Date.now() - t0 }
   } finally {
+    if (!publishClaimCompleted) {
+      await releasePublishClaim(supabase, post_id, 'contentful publish did not complete')
+    }
     await releasePublishLock(supabase, post_id, publisher_id)
   }
 }

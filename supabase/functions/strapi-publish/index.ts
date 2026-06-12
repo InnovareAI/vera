@@ -18,6 +18,11 @@ import type { Database } from '../_shared/database.types.ts'
 import { requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
 import { slugify } from '../_shared/markdown.ts'
 import { acquirePublishLockForOpenPost, releasePublishLock } from '../_shared/publish-guard.ts'
+import {
+  claimPublish,
+  completePublishClaim,
+  releasePublishClaim,
+} from '../_shared/publish-claims.ts'
 import type {
   HealthCheckResult, DryRunResult, PublishResult, VerifyResult, UnpublishResult,
   PostInput, PublisherError,
@@ -181,6 +186,15 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
     return { ok: false, attempt_id: '', latency_ms: Date.now() - t0,
       error: typed('validation_failed', publishLock.message, publishLock.recoveryAction) }
   }
+  const publishClaim = await claimPublish(supabase, publishLock.post, 'strapi', `strapi-publish:${publisher_id}`)
+  if (!publishClaim.ok) {
+    await releasePublishLock(supabase, post_id, publisher_id)
+    return { ok: false, attempt_id: '', latency_ms: Date.now() - t0, error: typed('validation_failed',
+      publishClaim.message,
+      'Refresh the post detail page before retrying.') }
+  }
+  let publishClaimCompleted = false
+
   try {
     const { config, creds, org_id } = await loadPublisher(supabase, publisher_id)
     const base_url = config.base_url as string
@@ -230,12 +244,18 @@ async function publish(supabase: AdminClient, input: Record<string, unknown>): P
     const remoteId = entity?.id != null ? String(entity.id) : null
     const verified = !!entity?.attributes?.publishedAt
 
+    await completePublishClaim(supabase, publishLock.post, remoteId ?? undefined)
+    publishClaimCompleted = true
+
     await markAttempt(supabase, attempt_id, 'success', null, null, null, {
       remote_id: remoteId,
       response_body: { id: remoteId, published_at: entity?.attributes?.publishedAt ?? null },
     })
     return { ok: true, remote_id: remoteId ?? undefined, verified, attempt_id, latency_ms: Date.now() - t0 }
   } finally {
+    if (!publishClaimCompleted) {
+      await releasePublishClaim(supabase, post_id, 'strapi publish did not complete')
+    }
     await releasePublishLock(supabase, post_id, publisher_id)
   }
 }

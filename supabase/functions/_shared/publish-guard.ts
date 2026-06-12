@@ -1,7 +1,15 @@
 import type { AdminClient } from "./auth.ts"
 
+export type PublishLockPost = {
+  id: string
+  org_id?: string | null
+  project_id?: string | null
+  channel?: string | null
+  posted_at?: string | null
+}
+
 export type PublishLockGuard =
-  | { ok: true }
+  | { ok: true; post: PublishLockPost }
   | { ok: false; message: string; recoveryAction: string }
 
 export async function acquirePublishLockForOpenPost(
@@ -26,7 +34,7 @@ export async function acquirePublishLockForOpenPost(
 
   const { data: post, error: postError } = await supabase
     .from("content_posts")
-    .select("id, posted_at")
+    .select("id, org_id, project_id, channel, posted_at")
     .eq("id", postId)
     .maybeSingle()
 
@@ -48,7 +56,7 @@ export async function acquirePublishLockForOpenPost(
     }
   }
 
-  return { ok: true }
+  return { ok: true, post: post as PublishLockPost }
 }
 
 export async function releasePublishLock(
