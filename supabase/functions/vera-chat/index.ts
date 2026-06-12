@@ -4057,6 +4057,15 @@ Deno.serve(async (req) => {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
+  if (!isUuid(orgId)) {
+    return jsonError('Invalid org_id', 400)
+  }
+  if (projectId && !isUuid(projectId)) {
+    return jsonError('Invalid project_id', 400)
+  }
+  if (sessionId && !isUuid(sessionId)) {
+    return jsonError('Invalid session_id', 400)
+  }
 
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
 
