@@ -20,11 +20,14 @@ export type BusinessContextKey =
   | 'competitors'
   | 'proofPoints'
   | 'contentGoals'
+  | 'speakerStrategy'
+  | 'platformToneOfVoice'
   | 'demandObjective'
   | 'conversionPath'
   | 'channelStrategy'
   | 'contentFormats'
   | 'approvalModel'
+  | 'approvalStakeholders'
   | 'engagementSignals'
   | 'samHandoffRules'
   | 'learningCadence'
@@ -54,11 +57,14 @@ export const EMPTY_BUSINESS_CONTEXT: BusinessContext = {
   competitors: '',
   proofPoints: '',
   contentGoals: '',
+  speakerStrategy: '',
+  platformToneOfVoice: '',
   demandObjective: '',
   conversionPath: '',
   channelStrategy: '',
   contentFormats: '',
   approvalModel: '',
+  approvalStakeholders: '',
   engagementSignals: '',
   samHandoffRules: '',
   learningCadence: '',
@@ -90,11 +96,14 @@ const BUSINESS_CONTEXT_FIELDS: Array<{ key: BusinessContextKey; label: string }>
   { key: 'competitors', label: 'Competitors' },
   { key: 'proofPoints', label: 'Proof points' },
   { key: 'contentGoals', label: 'Content goals' },
+  { key: 'speakerStrategy', label: 'Speaker strategy' },
+  { key: 'platformToneOfVoice', label: 'Platform tone of voice' },
   { key: 'demandObjective', label: 'Demand objective' },
   { key: 'conversionPath', label: 'Conversion path' },
   { key: 'channelStrategy', label: 'Channel strategy' },
   { key: 'contentFormats', label: 'Content formats' },
   { key: 'approvalModel', label: 'Approval model' },
+  { key: 'approvalStakeholders', label: 'Approval stakeholders' },
   { key: 'engagementSignals', label: 'Engagement signals' },
   { key: 'samHandoffRules', label: 'SAM handoff rules' },
   { key: 'learningCadence', label: 'Learning cadence' },

@@ -47,11 +47,14 @@ type BusinessContext = {
   competitors: string
   proofPoints: string
   contentGoals: string
+  speakerStrategy: string
+  platformToneOfVoice: string
   demandObjective: string
   conversionPath: string
   channelStrategy: string
   contentFormats: string
   approvalModel: string
+  approvalStakeholders: string
   engagementSignals: string
   samHandoffRules: string
   learningCadence: string
@@ -112,11 +115,14 @@ const FIELD_KEYS = [
   "competitors",
   "proofPoints",
   "contentGoals",
+  "speakerStrategy",
+  "platformToneOfVoice",
   "demandObjective",
   "conversionPath",
   "channelStrategy",
   "contentFormats",
   "approvalModel",
+  "approvalStakeholders",
   "engagementSignals",
   "samHandoffRules",
   "learningCadence",
@@ -764,11 +770,14 @@ Rules:
 - "differentiators" should capture positioning and why the client is different.
 - "proofPoints" should capture facts, numbers, case studies, credentials, or named evidence.
 - "contentGoals" should capture messaging goals, campaign goals, themes, or calls to action.
+- "speakerStrategy" should capture who VERA may write as, including brand account, founder, named person, internal expert, or team voice, and when each should be used.
+- "platformToneOfVoice" should capture whether tone differs by medium or platform. Keep a shared brand core, but note channel-specific tone and structure when evidence supports it.
 - "demandObjective" should capture the top-of-funnel demand goal.
 - "conversionPath" should capture where attention or engagement should go next.
 - "channelStrategy" should capture the role of each channel or medium.
 - "contentFormats" should capture the formats VERA should produce.
 - "approvalModel" should capture who approves what and when.
+- "approvalStakeholders" should capture named approvers, required stakeholder groups, and when one person versus all required stakeholders should approve.
 - "engagementSignals" should capture comments, shares, clicks, traffic, objections, or other traction signals that matter.
 - "samHandoffRules" should capture when content engagement should become SAM research or sales follow-up.
 - "learningCadence" should capture how often VERA should review performance and update recommendations.

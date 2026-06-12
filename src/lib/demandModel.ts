@@ -259,18 +259,24 @@ export const DEFAULT_DEMAND_OPERATING_MODEL: Pick<
   BusinessContext,
   | 'demandObjective'
   | 'conversionPath'
+  | 'speakerStrategy'
+  | 'platformToneOfVoice'
   | 'channelStrategy'
   | 'contentFormats'
   | 'approvalModel'
+  | 'approvalStakeholders'
   | 'engagementSignals'
   | 'samHandoffRules'
   | 'learningCadence'
 > = {
   demandObjective: 'Create B2B top-of-funnel demand that produces useful conversations, comments, shares, qualified traffic, and sales research signals.',
   conversionPath: 'Move attention into comments, shares, qualified site traffic, newsletter or event opt-ins, direct messages, and SAM follow-up queues.',
+  speakerStrategy: 'Choose the speaker case by case: company account for official POV, named founder or expert when lived experience matters, and team voice only when source material supports it.',
+  platformToneOfVoice: 'Keep one shared brand core, then adapt by medium: LinkedIn authoritative, YouTube explanatory, Medium article-led, Quora useful, Reddit community-native, Meta visual and conversational, X concise.',
   channelStrategy: 'Use LinkedIn for authority and founder voice, YouTube for depth and Shorts, Medium and blog for long-form demand capture, Quora for buyer questions, Reddit for listening and language mining, Instagram and Facebook for visual proof and community trust, and X when speed or conversation entry matters.',
   contentFormats: DEMAND_CONTENT_JOBS.join(', '),
   approvalModel: 'Case based. Some posts can be approved by one named owner, sensitive claims, named-person content, or high-risk channels need all required stakeholders.',
+  approvalStakeholders: 'Low-risk drafts can go to one named owner. Named-person posts, sensitive claims, regulated topics, and client-visible publishing need all required stakeholders.',
   engagementSignals: DEMAND_OUTCOME_SIGNALS.join(', '),
   samHandoffRules: 'Hand off named accounts, repeated objections, buying-trigger comments, competitor mentions, high-intent clicks, inbound questions, and people asking for examples or pricing.',
   learningCadence: 'Review performance weekly, update what works and what does not from every useful signal, refresh channel-specific tone and platform best practices monthly, and turn repeatable wins into skills.',
@@ -281,9 +287,12 @@ export function applyDemandDefaults(context: BusinessContext): BusinessContext {
     ...context,
     demandObjective: context.demandObjective || DEFAULT_DEMAND_OPERATING_MODEL.demandObjective,
     conversionPath: context.conversionPath || DEFAULT_DEMAND_OPERATING_MODEL.conversionPath,
+    speakerStrategy: context.speakerStrategy || DEFAULT_DEMAND_OPERATING_MODEL.speakerStrategy,
+    platformToneOfVoice: context.platformToneOfVoice || DEFAULT_DEMAND_OPERATING_MODEL.platformToneOfVoice,
     channelStrategy: context.channelStrategy || DEFAULT_DEMAND_OPERATING_MODEL.channelStrategy,
     contentFormats: context.contentFormats || DEFAULT_DEMAND_OPERATING_MODEL.contentFormats,
     approvalModel: context.approvalModel || DEFAULT_DEMAND_OPERATING_MODEL.approvalModel,
+    approvalStakeholders: context.approvalStakeholders || DEFAULT_DEMAND_OPERATING_MODEL.approvalStakeholders,
     engagementSignals: context.engagementSignals || DEFAULT_DEMAND_OPERATING_MODEL.engagementSignals,
     samHandoffRules: context.samHandoffRules || DEFAULT_DEMAND_OPERATING_MODEL.samHandoffRules,
     learningCadence: context.learningCadence || DEFAULT_DEMAND_OPERATING_MODEL.learningCadence,

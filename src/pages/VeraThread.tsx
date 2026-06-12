@@ -353,6 +353,8 @@ type DemandPlanSnapshot = {
   formats: string[]
   signals: string
   handoff: string
+  speakers: string[]
+  tone: string[]
   approvals: string[]
   learning: string[]
   missing: string[]
@@ -362,9 +364,12 @@ const DEMAND_PLAN_FIELDS: Array<{ key: BusinessContextKey; label: string }> = [
   { key: 'demandObjective', label: 'Demand objective' },
   { key: 'offer', label: 'Offer' },
   { key: 'audience', label: 'ICP' },
+  { key: 'speakerStrategy', label: 'Speaker strategy' },
+  { key: 'platformToneOfVoice', label: 'Platform TOV' },
   { key: 'channelStrategy', label: 'Channel strategy' },
   { key: 'contentFormats', label: 'Content formats' },
   { key: 'approvalModel', label: 'Approval model' },
+  { key: 'approvalStakeholders', label: 'Approval stakeholders' },
   { key: 'engagementSignals', label: 'Engagement signals' },
   { key: 'samHandoffRules', label: 'SAM handoff' },
 ]
@@ -378,6 +383,8 @@ function splitList(value: string, max = 5) {
 }
 
 const DEFAULT_FIRST_WAVE_CHANNELS = DEMAND_PLATFORM_DEFINITIONS.map(platform => platform.label)
+const DEFAULT_SPEAKER_ITEMS = ['Brand account', 'Named founder or expert', 'Team voice when sourced']
+const DEFAULT_TONE_ITEMS = ['Shared brand core', 'Channel-native TOV', 'Medium-specific structure']
 const DEFAULT_APPROVAL_ITEMS = ['Case based', 'One named owner', 'All stakeholders for high-risk work']
 const DEFAULT_LEARNING_ITEMS = ['Weekly performance review', 'Refresh platform best practices', 'Turn wins into reusable skills']
 
@@ -391,7 +398,9 @@ function buildDemandPlanSnapshot(context: BusinessContext): DemandPlanSnapshot {
   const sourceChannels = demandChannelsFromContext(context, 8)
   const strategyChannels = splitList(context.channelStrategy, 6)
   const formats = splitList(context.contentFormats, 5)
-  const approvalItems = splitList(context.approvalModel, 3)
+  const speakerItems = splitList(context.speakerStrategy, 3)
+  const toneItems = splitList(context.platformToneOfVoice, 3)
+  const approvalItems = splitList(context.approvalStakeholders || context.approvalModel, 3)
   const learningItems = splitList(context.learningCadence, 3)
   return {
     completeness: Math.round((filled / DEMAND_PLAN_FIELDS.length) * 100),
@@ -403,6 +412,8 @@ function buildDemandPlanSnapshot(context: BusinessContext): DemandPlanSnapshot {
     formats: formats.length ? formats : ['Posts', 'Carousels', 'Video storyboards', 'Long form'],
     signals: context.engagementSignals.trim() || DEFAULT_DEMAND_OPERATING_MODEL.engagementSignals,
     handoff: context.samHandoffRules.trim() || DEFAULT_DEMAND_OPERATING_MODEL.samHandoffRules,
+    speakers: speakerItems.length ? speakerItems : DEFAULT_SPEAKER_ITEMS,
+    tone: toneItems.length ? toneItems : DEFAULT_TONE_ITEMS,
     approvals: approvalItems.length ? approvalItems : DEFAULT_APPROVAL_ITEMS,
     learning: learningItems.length ? learningItems : DEFAULT_LEARNING_ITEMS,
     missing,
@@ -2056,6 +2067,8 @@ function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: space[3], marginBottom: space[4] }}>
         <PlanCluster icon={Network} label="Channels" items={plan.channels.length ? plan.channels : ['Add channels in Brain']} max={8} />
+        <PlanCluster icon={PenLine} label="Speakers" items={plan.speakers} />
+        <PlanCluster icon={Sparkles} label="Tone by medium" items={plan.tone} />
         <PlanCluster icon={FileText} label="Formats" items={plan.formats} />
         <PlanCluster icon={Share2} label="Signals" items={splitList(plan.signals, 4)} />
         <PlanCluster icon={Check} label="Approvals" items={plan.approvals} />

@@ -404,7 +404,7 @@ export default function Brain() {
   const sourceCount = DEMAND_SOURCE_KEYS
     .filter(key => business[key].trim()).length
   const operatingKeys = Object.keys(DEFAULT_DEMAND_OPERATING_MODEL) as BusinessContextKey[]
-  const factCount = (['offer', 'audience', 'customerProblems', 'differentiators', 'competitors', 'proofPoints', 'contentGoals', 'constraints'] as BusinessContextKey[])
+  const factCount = (['offer', 'audience', 'customerProblems', 'differentiators', 'competitors', 'proofPoints', 'contentGoals', 'speakerStrategy', 'platformToneOfVoice', 'approvalStakeholders', 'constraints'] as BusinessContextKey[])
     .filter(key => business[key].trim()).length
   const operatingCount = operatingKeys.filter(key => business[key].trim()).length
   const applyLeadGenDefaults = () => {
@@ -438,7 +438,7 @@ export default function Brain() {
             </p>
           </div>
           <span style={{ fontSize: t.size.cap, color: color.ghost }}>
-            {sourceCount}/{DEMAND_SOURCE_KEYS.length} sources · {factCount}/8 context fields · {operatingCount}/{operatingKeys.length} operating fields
+            {sourceCount}/{DEMAND_SOURCE_KEYS.length} sources · {factCount}/11 context fields · {operatingCount}/{operatingKeys.length} operating fields
           </span>
         </div>
 
@@ -579,6 +579,15 @@ export default function Brain() {
             </Field>
             <Field label="Content goals">
               <Textarea value={business.contentGoals} onChange={e => updateBusiness('contentGoals', e.target.value)} rows={3} placeholder="Awareness, lead generation, recruiting, trust, launches, events, campaign themes." />
+            </Field>
+            <Field label="Speaker strategy">
+              <Textarea value={business.speakerStrategy} onChange={e => updateBusiness('speakerStrategy', e.target.value)} rows={3} placeholder="Who VERA can write as: brand, founder, sales lead, product expert, client team, or a named person. Define when each voice should be used." />
+            </Field>
+            <Field label="Platform tone of voice">
+              <Textarea value={business.platformToneOfVoice} onChange={e => updateBusiness('platformToneOfVoice', e.target.value)} rows={3} placeholder="What changes by medium: LinkedIn authority, YouTube explainer, Medium essay, Quora answer, Reddit community-safe, Instagram visual proof, X concise POV." />
+            </Field>
+            <Field label="Approval stakeholders">
+              <Textarea value={business.approvalStakeholders} onChange={e => updateBusiness('approvalStakeholders', e.target.value)} rows={3} placeholder="Named approvers and routing: one owner for low-risk drafts, all stakeholders for named-person posts, sensitive claims, compliance topics, or publishing." />
             </Field>
             <Field label="Constraints">
               <Textarea value={business.constraints} onChange={e => updateBusiness('constraints', e.target.value)} rows={2} placeholder="Legal, compliance, forbidden claims, regions, tone limits, approval rules." />
