@@ -15,6 +15,7 @@ import type { Database } from "../_shared/database.types.ts"
 import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember } from "../_shared/auth.ts"
 import { checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError } from "../_shared/ai-policy.ts"
+import { hasAiUserEntitlement, userCanAccessProject } from "../_shared/ai-entitlements.ts"
 import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
 
@@ -99,7 +100,16 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return jsonError('Method not allowed', 405)
   const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY)
 
-  const { prompt, model: requestedModel, image_size = 'square_hd', num_images = 1, quality = 'high', project_id, post_id } = await req.json().catch(() => ({}))
+  const {
+    prompt,
+    model: requestedModel,
+    image_size = 'square_hd',
+    num_images = 1,
+    quality = 'high',
+    project_id,
+    post_id,
+    operator_user_id,
+  } = await req.json().catch(() => ({}))
   if (!prompt) return jsonError('prompt is required', 400)
   const projectId = typeof project_id === 'string' ? project_id.trim() : ''
   const postId = typeof post_id === 'string' && post_id.trim() ? post_id.trim() : null
@@ -107,6 +117,7 @@ Deno.serve(async (req) => {
 
   const access = await requireProjectMember(req, supabase, SERVICE_KEY, projectId, corsHeaders)
   if (!access.ok) return access.response
+  const operatorUserId = access.service ? cleanString(operator_user_id) : access.userId
   const aiPolicy = await loadProjectAiPolicy(supabase, projectId)
   const model = cleanModelAlias(requestedModel) ?? aiPolicy.defaultImageModel ?? DEFAULT_IMAGE_MODEL
   if (!aiPolicy.imagesEnabled) return jsonError('Image generation is disabled for this client space.', 403)
@@ -155,25 +166,50 @@ Deno.serve(async (req) => {
     : useOR
       ? (OR_MODELS[model] ?? OR_NANO_BANANA)
       : (FAL_MODELS[model] ?? model)
-  const openRouterKey = mediaKeys.openRouterKey ?? (mediaKeys.isPlatformMediaProject ? OPENROUTER_API_KEY : null)
-  const openAIKey = mediaKeys.openAIKey ?? (mediaKeys.isPlatformMediaProject ? OPENAI_API_KEY : null)
+  const selectedProvider = useOpenAI ? 'openai' : useOR ? 'openrouter' : 'fal'
+  const selectedKeySource = selectedProvider === 'openrouter'
+    ? (mediaKeys.openRouterKey ? 'client' : 'platform')
+    : selectedProvider === 'openai'
+      ? (mediaKeys.openAIKey ? 'client' : 'platform')
+      : 'client'
+
+  if (selectedKeySource === 'platform') {
+    if (!mediaKeys.isPlatformMediaProject) {
+      return jsonError('Platform image generation is only available inside approved platform media projects.', 403)
+    }
+    if (!operatorUserId) {
+      return jsonError('Platform image generation requires an entitled operator.', 403)
+    }
+    try {
+      const canAccess = await userCanAccessProject(supabase, operatorUserId, access.orgId, projectId)
+      if (!canAccess) return jsonError('Forbidden', 403)
+      const entitled = await hasAiUserEntitlement(supabase, {
+        userId: operatorUserId,
+        orgId: access.orgId,
+        projectId,
+        capability: 'platform_fal_image',
+      })
+      if (!entitled) return jsonError('Platform image entitlement is not active for this operator.', 403)
+    } catch (error) {
+      return jsonError(error instanceof Error ? error.message : 'Could not verify platform image entitlement.', 500)
+    }
+  }
+
+  const openRouterKey = mediaKeys.openRouterKey ?? (selectedKeySource === 'platform' ? OPENROUTER_API_KEY : null)
+  const openAIKey = mediaKeys.openAIKey ?? (selectedKeySource === 'platform' ? OPENAI_API_KEY : null)
   const falKey = mediaKeys.falKey
 
   if (useOpenAI && !openAIKey) return jsonError('No OpenAI key available for this image request.', 500)
   if (useOR && !openRouterKey) return jsonError('No OpenRouter key available for this image request.', 500)
   if (!useOpenAI && !useOR && !falKey) return jsonError('No FAL key available for this image request.', 500)
 
-  const selectedProvider = useOpenAI ? 'openai' : useOR ? 'openrouter' : 'fal'
   const usageMetadata = {
     alias: model,
     image_size,
     num_images,
     quality,
-    key_source: selectedProvider === 'openrouter'
-      ? (mediaKeys.openRouterKey ? 'client' : 'platform')
-      : selectedProvider === 'openai'
-        ? (mediaKeys.openAIKey ? 'client' : 'platform')
-        : 'client',
+    key_source: selectedKeySource,
+    operator_user_id: operatorUserId,
   }
   const budget = await checkProjectAiBudget(supabase, projectId, {
     orgId: access.orgId,
@@ -459,6 +495,10 @@ function isSupportedImageModel(value: string): boolean {
 
 function cleanModelAlias(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : null
+}
+
+function cleanString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 type MediaKeys = {

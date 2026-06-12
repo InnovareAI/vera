@@ -86,6 +86,7 @@ type ProviderCapabilities = {
   imagesEnabled: boolean
   standardVideoEnabled: boolean
   premiumMediaEnabled: boolean
+  hasPlatformImageEntitlement: boolean
   hasPlatformVideoEntitlement: boolean
   textReady: boolean
   imageReady: boolean
@@ -597,6 +598,7 @@ export default function VeraThread() {
     imagesEnabled: true,
     standardVideoEnabled: false,
     premiumMediaEnabled: false,
+    hasPlatformImageEntitlement: false,
     hasPlatformVideoEntitlement: false,
     textReady: false,
     imageReady: false,
@@ -620,6 +622,7 @@ export default function VeraThread() {
         imagesEnabled: true,
         standardVideoEnabled: false,
         premiumMediaEnabled: false,
+        hasPlatformImageEntitlement: false,
         hasPlatformVideoEntitlement: false,
         textReady: false,
         imageReady: false,
@@ -638,7 +641,7 @@ export default function VeraThread() {
           ? supabase.from('ai_user_entitlements')
             .select('org_id, project_id, capability, expires_at')
             .eq('user_id', user.id)
-            .eq('capability', 'platform_fal_video')
+            .in('capability', ['platform_fal_video', 'platform_fal_image'])
             .eq('enabled', true)
           : Promise.resolve({ data: [] }),
       ])
@@ -651,14 +654,16 @@ export default function VeraThread() {
       const hasOpenRouter = providers.has('openrouter')
       const hasOpenAI = providers.has('openai')
       const hasFal = providers.has('fal') || providers.has('fal_ai')
-      const hasPlatformVideoEntitlement = ((entitlements ?? []) as Array<{ org_id?: string | null; project_id?: string | null; expires_at?: string | null }>)
-        .some(row => {
+      const entitlementRows = (entitlements ?? []) as Array<{ org_id?: string | null; project_id?: string | null; capability?: string | null; expires_at?: string | null }>
+      const entitlementApplies = (row: { org_id?: string | null; project_id?: string | null; expires_at?: string | null }) => {
           if (!platformMediaProject) return false
           if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) return false
           if (row.project_id) return row.project_id === activeProject.id
           if (row.org_id) return row.org_id === activeOrg.id
           return true
-        })
+      }
+      const hasPlatformImageEntitlement = entitlementRows.some(row => row.capability === 'platform_fal_image' && entitlementApplies(row))
+      const hasPlatformVideoEntitlement = entitlementRows.some(row => row.capability === 'platform_fal_video' && entitlementApplies(row))
       setProviderCapabilities({
         loaded: true,
         isMaster,
@@ -669,9 +674,10 @@ export default function VeraThread() {
         imagesEnabled: aiPolicy.imagesEnabled,
         standardVideoEnabled: aiPolicy.standardVideoEnabled,
         premiumMediaEnabled: aiPolicy.premiumMediaEnabled,
+        hasPlatformImageEntitlement,
         hasPlatformVideoEntitlement,
         textReady: platformMediaProject || hasAnthropic || hasOpenRouter,
-        imageReady: aiPolicy.imagesEnabled && (platformMediaProject || hasOpenRouter || hasOpenAI || hasFal),
+        imageReady: aiPolicy.imagesEnabled && ((platformMediaProject && hasPlatformImageEntitlement) || hasOpenRouter || hasOpenAI || hasFal),
         videoReady: (hasFal && (aiPolicy.standardVideoEnabled || aiPolicy.premiumMediaEnabled)) || hasPlatformVideoEntitlement,
         needsTextKey: !platformMediaProject && !hasAnthropic && !hasOpenRouter,
       })
@@ -1890,7 +1896,7 @@ function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: Pr
   if (needsText) notes.push('Add OpenRouter or Anthropic before Vera can run client text generation in this space.')
   if (imageLocked) {
     notes.push(capabilities.imagesEnabled
-      ? 'Image and carousel rendering needs a client OpenRouter, OpenAI, or FAL key, unless this is an approved platform media project.'
+      ? 'Image and carousel rendering needs a client OpenRouter, OpenAI, or FAL key, or an operator platform image entitlement inside an approved InnovareAI media project.'
       : 'Image and carousel rendering is disabled in this client AI policy.')
   }
   if (videoLocked) {

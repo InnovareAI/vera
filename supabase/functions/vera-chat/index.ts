@@ -1839,7 +1839,14 @@ async function executeTool(
             const imgRes = await fetch(`${ctx.supabaseUrl}/functions/v1/generate-image`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
-              body: JSON.stringify({ prompt: imagePrompt, model: ctx.aiPolicy.defaultImageModel, image_size: 'square_hd', project_id: ctx.projectId, post_id: post.id }),
+              body: JSON.stringify({
+                prompt: imagePrompt,
+                model: ctx.aiPolicy.defaultImageModel,
+                image_size: 'square_hd',
+                project_id: ctx.projectId,
+                post_id: post.id,
+                operator_user_id: ctx.userId,
+              }),
               signal: AbortSignal.timeout(28000),
             })
             if (imgRes.ok && imgRes.body) {
@@ -2243,13 +2250,14 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         // Bridge progress events so the operator sees the work happening.
         const target = name === 'generate_infographic' ? 'generate-infographic' : 'generate-image'
         const body = name === 'generate_infographic'
-          ? { ...input, model: imageModelForTool(ctx, input), project_id: ctx.projectId }
+          ? { ...input, model: imageModelForTool(ctx, input), project_id: ctx.projectId, operator_user_id: ctx.userId }
           : {
               prompt: input.prompt,
               model: imageModelForTool(ctx, input),
               image_size: (input.aspect_ratio as string) ?? 'square_hd',
               quality: 'high',
               project_id: ctx.projectId,
+              operator_user_id: ctx.userId,
             }
 
         const res = await fetch(`${ctx.supabaseUrl}/functions/v1/${target}`, {
@@ -2351,6 +2359,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
               frames,
               aspect,
               model: imageModelForTool(ctx, input),
+              operator_user_id: ctx.userId,
             }),
             signal: AbortSignal.timeout(15000),
           })
@@ -4265,22 +4274,34 @@ Deno.serve(async (req) => {
       clientHasOpenAIKey = false
     }
   }
+  let operatorHasPlatformImage = false
   let operatorHasPlatformVideo = false
   if (projectId && platformKeyProject && effectiveUserId) {
     try {
-      operatorHasPlatformVideo = await hasAiUserEntitlement(supabase, {
-        userId: effectiveUserId,
-        orgId,
-        projectId,
-        capability: 'platform_fal_video',
-      })
+      const [imageEntitlement, videoEntitlement] = await Promise.all([
+        hasAiUserEntitlement(supabase, {
+          userId: effectiveUserId,
+          orgId,
+          projectId,
+          capability: 'platform_fal_image',
+        }),
+        hasAiUserEntitlement(supabase, {
+          userId: effectiveUserId,
+          orgId,
+          projectId,
+          capability: 'platform_fal_video',
+        }),
+      ])
+      operatorHasPlatformImage = imageEntitlement
+      operatorHasPlatformVideo = videoEntitlement
     } catch {
+      operatorHasPlatformImage = false
       operatorHasPlatformVideo = false
     }
   }
   const platformMediaProject = platformKeyProject
   const allowImageGeneration = !!projectId && aiPolicy.imagesEnabled && (
-    platformMediaProject ||
+    (platformMediaProject && operatorHasPlatformImage) ||
     !!clientOpenRouterKey ||
     clientHasOpenAIKey ||
     clientHasFalKey
@@ -4305,7 +4326,7 @@ Deno.serve(async (req) => {
       text: [
         '<image_capabilities>',
         aiPolicy.imagesEnabled
-          ? 'Image and carousel generation is unavailable in this client space because no approved client OpenRouter, OpenAI, or FAL key is configured for media, and this is not an approved platform media project.'
+          ? 'Image and carousel generation is unavailable in this client space because no approved client OpenRouter, OpenAI, or FAL key is configured for media, or the operator lacks platform image entitlement inside an approved InnovareAI media project.'
           : 'Image and carousel generation is unavailable in this client space because the client AI usage policy disables image generation.',
         'Do not offer, promise, or call generate_image, generate_infographic, or generate_carousel. If the operator asks for images, write a production brief or image prompt for manual use instead.',
         '</image_capabilities>',

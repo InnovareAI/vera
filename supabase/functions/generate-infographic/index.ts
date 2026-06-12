@@ -140,6 +140,7 @@ Deno.serve(async (req) => {
     style?: Style
     model?: string
     project_id?: string
+    operator_user_id?: string
   }
   try {
     body = await req.json()
@@ -187,6 +188,7 @@ Deno.serve(async (req) => {
       num_images: 1,
       quality: 'high',
       project_id: projectId,
+      ...(body.operator_user_id ? { operator_user_id: body.operator_user_id } : {}),
     }),
   })
 

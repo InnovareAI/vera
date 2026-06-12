@@ -34,6 +34,7 @@ type CarouselScope = {
   orgId: string
   projectId: string
   postId: string | null
+  operatorUserId: string | null
 }
 
 function jsonError(message: string, status: number): Response {
@@ -74,6 +75,7 @@ async function renderFrame(
   aspect: string,
   projectId: string,
   model: string | null,
+  operatorUserId: string | null,
 ): Promise<string> {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-image`, {
     method: 'POST',
@@ -84,6 +86,7 @@ async function renderFrame(
       image_size: aspect,
       quality: 'high',
       project_id: projectId,
+      ...(operatorUserId ? { operator_user_id: operatorUserId } : {}),
     }),
   })
   if (!res.ok || !res.body) throw new Error(`generate-image HTTP ${res.status}`)
@@ -119,6 +122,7 @@ async function processJob(
   frames: Frame[],
   aspect: string,
   model: string | null,
+  operatorUserId: string | null,
 ) {
   // Render ALL frames in parallel. This is a background task (the HTTP response
   // already returned), so there's no foreground SSE to hold open — and finishing
@@ -145,7 +149,7 @@ async function processJob(
   await Promise.all(frames.map(async (f, i) => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const url = await renderFrame(supabase, scope.orgId, f.image_prompt ?? '', aspect, scope.projectId, model)
+        const url = await renderFrame(supabase, scope.orgId, f.image_prompt ?? '', aspect, scope.projectId, model, operatorUserId)
         slots[i] = { url, text: f.text ?? null }
         break
       } catch (e) {
@@ -168,7 +172,7 @@ async function processJob(
 async function resolveCarouselScope(
   req: Request,
   supabase: AdminClient,
-  body: { post_id?: string; project_id?: string },
+  body: { post_id?: string; project_id?: string; operator_user_id?: string },
 ): Promise<{ ok: true; scope: CarouselScope } | { ok: false; response: Response }> {
   const requestedProjectId = typeof body.project_id === 'string' && body.project_id.trim()
     ? body.project_id.trim()
@@ -196,7 +200,8 @@ async function resolveCarouselScope(
 
     const access = await requirePostMember(req, supabase, SERVICE_KEY, postId, corsHeaders)
     if (!access.ok) return access
-    return { ok: true, scope: { orgId: row.org_id, projectId: row.project_id, postId } }
+    const operatorUserId = access.service ? cleanString(body.operator_user_id) : access.userId
+    return { ok: true, scope: { orgId: row.org_id, projectId: row.project_id, postId, operatorUserId } }
   }
 
   if (!requestedProjectId) {
@@ -205,14 +210,19 @@ async function resolveCarouselScope(
 
   const access = await requireProjectMember(req, supabase, SERVICE_KEY, requestedProjectId, corsHeaders)
   if (!access.ok) return access
-  return { ok: true, scope: { orgId: access.orgId, projectId: requestedProjectId, postId: null } }
+  const operatorUserId = access.service ? cleanString(body.operator_user_id) : access.userId
+  return { ok: true, scope: { orgId: access.orgId, projectId: requestedProjectId, postId: null, operatorUserId } }
+}
+
+function cleanString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   try {
     const body = await req.json().catch(() => ({})) as {
-      post_id?: string; frames?: Frame[]; aspect_ratio?: string; aspect?: string; session_id?: string; project_id?: string; model?: string
+      post_id?: string; frames?: Frame[]; aspect_ratio?: string; aspect?: string; session_id?: string; project_id?: string; model?: string; operator_user_id?: string
     }
     const frames = Array.isArray(body.frames) ? body.frames : []
     if (!frames.length) return new Response(JSON.stringify({ error: 'no frames' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
@@ -246,6 +256,7 @@ Deno.serve(async (req) => {
       frames,
       aspect,
       requestedModel,
+      scope.operatorUserId,
     ))
 
     return new Response(JSON.stringify({ job_id: jobId, status: 'processing', total: frames.length }), {
