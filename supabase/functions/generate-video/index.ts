@@ -251,7 +251,7 @@ Deno.serve(async (req) => {
   if (safeDuration) payload.duration = safeDuration
   if (aspect_ratio && selectedModel.tier === 'premium') payload.aspect_ratio = aspect_ratio
 
-  const baseUsageMetadata = {
+  const baseUsageMetadata: Record<string, unknown> = {
     alias,
     tier: selectedModel.tier,
     kind: selectedModel.kind,
@@ -275,6 +275,7 @@ Deno.serve(async (req) => {
     metadata: baseUsageMetadata,
   })
   if (!budget.ok) return jsonError(budget.message, 402)
+  if (budget.warning) baseUsageMetadata.budget_warning = budget.warning
 
   // ── ASYNC submit ── fire the fal job and return the request_id immediately;
   // the frontend then polls action:'status'. No long-held connection.
@@ -300,7 +301,14 @@ Deno.serve(async (req) => {
         action: 'submit',
       },
     })
-    return json({ request_id: submission.request_id, slug: queueSlug, model: alias, tier: selectedModel.tier, estimated_cost: selectedModel.estimate })
+    return json({
+      request_id: submission.request_id,
+      slug: queueSlug,
+      model: alias,
+      tier: selectedModel.tier,
+      estimated_cost: selectedModel.estimate,
+      budget_warning: budget.warning,
+    })
   }
 
   const encoder = new TextEncoder()
@@ -313,6 +321,7 @@ Deno.serve(async (req) => {
       const elapsed = () => Math.round((Date.now() - startTime) / 100) / 10
 
       try {
+        if (budget.warning) send('budget_warning', { warning: budget.warning })
         const submitRes = await fetch(`https://queue.fal.run/${slug}`, {
           method: 'POST',
           headers: { 'Authorization': `Key ${fal.key}`, 'Content-Type': 'application/json' },

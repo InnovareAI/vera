@@ -1777,6 +1777,15 @@ function videoModelForTool(ctx: ToolExecutionContext, input: Record<string, unkn
   return requestedModelOrDefault(input.model, fallback)
 }
 
+function emitBudgetWarning(ctx: ToolExecutionContext, tool: string, warning: unknown) {
+  if (!warning || typeof warning !== 'object') return
+  const payload = warning as Record<string, unknown>
+  const message = typeof payload.message === 'string' ? payload.message : ''
+  if (!message) return
+  ctx.emit({ type: 'budget_warning', tool, warning: payload })
+  ctx.emit({ type: 'tool_progress', tool, status: message })
+}
+
 // Tool execution. Each tool returns { result: string for the model, image_url?: string for the UI }.
 async function executeTool(
   name: string,
@@ -1866,6 +1875,7 @@ async function executeTool(
                   if (!ln) continue
                   try {
                     const e = JSON.parse(ln.slice(6)) as Record<string, unknown>
+                    if (e.event === 'budget_warning') emitBudgetWarning(ctx, 'save_draft', e.warning)
                     if (e.event === 'done') imageUrl = (e.images as Array<{ url: string }> | undefined)?.[0]?.url
                   } catch { /* skip */ }
                 }
@@ -2100,6 +2110,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
                   const ln = fr.split('\n').find(l => l.startsWith('data: ')); if (!ln) continue
                   try {
                     const e = JSON.parse(ln.slice(6)) as Record<string, unknown>
+                    if (e.event === 'budget_warning') emitBudgetWarning(ctx, 'refine_post', e.warning)
                     if (e.event === 'done') url = imgPrompt ? (e.images as Array<{ url: string }> | undefined)?.[0]?.url : (e.video as { url?: string } | undefined)?.url
                   } catch { /* skip */ }
                 }
@@ -2294,7 +2305,9 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
             if (!line) continue
             try {
               const event = JSON.parse(line.slice(6)) as Record<string, unknown>
-              if (event.event === 'status') {
+              if (event.event === 'budget_warning') {
+                emitBudgetWarning(ctx, name, event.warning)
+              } else if (event.event === 'status') {
                 const elapsed = (event.elapsed_s as number) ?? 0
                 lastStatus = `rendering… ${elapsed.toFixed(1)}s`
                 ctx.emit({ type: 'tool_progress', tool: name, status: lastStatus })
@@ -2408,10 +2421,11 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           const errText = await res.text().catch(() => '')
           return { result: `Video submission failed: HTTP ${res.status} ${errText.slice(0, 150)}` }
         }
-        const data = await res.json().catch(() => ({})) as { request_id?: string; slug?: string }
+        const data = await res.json().catch(() => ({})) as { request_id?: string; slug?: string; budget_warning?: unknown }
         if (!data.request_id) {
           return { result: 'Video submission failed: fal did not return a request id.' }
         }
+        if (data.budget_warning) emitBudgetWarning(ctx, 'generate_video', data.budget_warning)
         ctx.emit({
           type: 'video_pending',
           request_id: data.request_id,

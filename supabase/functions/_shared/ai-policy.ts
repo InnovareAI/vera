@@ -59,9 +59,22 @@ export function paidMediaBudgetCapError(policy: ProjectAiPolicy, mediaKind: "vid
     : "Set a monthly AI budget cap before enabling premium media models."
 }
 
+export type ProjectAiBudgetWarning = {
+  level: "warn"
+  code: "missing_budget_cap" | "unknown_request_cost" | "near_budget_cap" | "request_nears_budget_cap"
+  message: string
+  budgetUsd: number | null
+  usedUsd: number
+  requestedUsd: number | null
+  remainingUsd: number | null
+  threshold: number
+}
+
 export type ProjectAiBudgetCheck =
-  | { ok: true; budgetUsd: number | null; usedUsd: number; requestedUsd: number | null; remainingUsd: number | null }
+  | { ok: true; budgetUsd: number | null; usedUsd: number; requestedUsd: number | null; remainingUsd: number | null; warning: ProjectAiBudgetWarning | null }
   | { ok: false; budgetUsd: number; usedUsd: number; requestedUsd: number | null; remainingUsd: number; message: string }
+
+const BUDGET_WARNING_THRESHOLD = 0.8
 
 export async function checkProjectAiBudget(
   supabase: AdminClient,
@@ -71,7 +84,27 @@ export async function checkProjectAiBudget(
   const policy = await loadProjectAiPolicy(supabase, projectId)
   const budgetUsd = policy.monthlyBudgetUsd
   const requestedUsd = usage ? (await estimateGenerationUsageCostWithCatalog(supabase, usage))?.costUsd ?? null : null
-  if (!budgetUsd || budgetUsd <= 0) return { ok: true, budgetUsd: null, usedUsd: 0, requestedUsd, remainingUsd: null }
+  if (!budgetUsd || budgetUsd <= 0) {
+    return {
+      ok: true,
+      budgetUsd: null,
+      usedUsd: 0,
+      requestedUsd,
+      remainingUsd: null,
+      warning: {
+        level: "warn",
+        code: "missing_budget_cap",
+        message: requestedUsd !== null
+          ? `No monthly AI budget cap is set for this client space. This request is estimated at ${formatUsd(requestedUsd)}.`
+          : "No monthly AI budget cap is set for this client space, and this request cost cannot be estimated before submission.",
+        budgetUsd: null,
+        usedUsd: 0,
+        requestedUsd,
+        remainingUsd: null,
+        threshold: BUDGET_WARNING_THRESHOLD,
+      },
+    }
+  }
 
   const usedUsd = await currentMonthSpendUsd(supabase, projectId)
   const remainingUsd = Math.max(0, budgetUsd - usedUsd)
@@ -93,7 +126,56 @@ export async function checkProjectAiBudget(
     }
   }
 
-  return { ok: true, budgetUsd, usedUsd, requestedUsd, remainingUsd }
+  return {
+    ok: true,
+    budgetUsd,
+    usedUsd,
+    requestedUsd,
+    remainingUsd,
+    warning: budgetWarning(budgetUsd, usedUsd, requestedUsd, remainingUsd),
+  }
+}
+
+function budgetWarning(
+  budgetUsd: number,
+  usedUsd: number,
+  requestedUsd: number | null,
+  remainingUsd: number,
+): ProjectAiBudgetWarning | null {
+  const afterRequestUsd = usedUsd + (requestedUsd ?? 0)
+  const usedRatio = budgetUsd > 0 ? usedUsd / budgetUsd : 0
+  const afterRatio = budgetUsd > 0 ? afterRequestUsd / budgetUsd : 0
+  const base = {
+    level: "warn" as const,
+    budgetUsd,
+    usedUsd,
+    requestedUsd,
+    remainingUsd,
+    threshold: BUDGET_WARNING_THRESHOLD,
+  }
+
+  if (requestedUsd === null) {
+    return {
+      ...base,
+      code: "unknown_request_cost",
+      message: `Could not estimate this request before submission. Current AI spend is ${formatUsd(usedUsd)} of ${formatUsd(budgetUsd)}.`,
+    }
+  }
+  if (usedRatio >= BUDGET_WARNING_THRESHOLD) {
+    return {
+      ...base,
+      code: "near_budget_cap",
+      message: `This client space has used ${formatUsd(usedUsd)} of its ${formatUsd(budgetUsd)} monthly AI cap. Remaining: ${formatUsd(remainingUsd)}.`,
+    }
+  }
+  if (afterRatio >= BUDGET_WARNING_THRESHOLD) {
+    return {
+      ...base,
+      code: "request_nears_budget_cap",
+      message: `This request is estimated at ${formatUsd(requestedUsd)} and will bring monthly AI spend near the ${formatUsd(budgetUsd)} cap.`,
+    }
+  }
+  return null
 }
 
 async function currentMonthSpendUsd(supabase: AdminClient, projectId: string): Promise<number> {

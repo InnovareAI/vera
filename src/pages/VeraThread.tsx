@@ -1015,6 +1015,15 @@ export default function VeraThread() {
           } else if (ev.type === 'tool_end') {
             setMessages(prev => prev.map(m => m.id === assistantId
               ? { ...m, tools: (m.tools ?? []).map(tl => tl.id === ev.id ? { ...tl, status: 'done' } : tl) } : m))
+          } else if (ev.type === 'budget_warning') {
+            const warning = ev.warning as Record<string, unknown> | undefined
+            const message = typeof warning?.message === 'string' ? warning.message : 'This generation request needs an AI budget review.'
+            push({
+              kind: 'warn',
+              title: 'AI budget warning',
+              body: message,
+              duration: 9000,
+            })
           } else if (ev.type === 'image' && typeof ev.url === 'string') {
             const url = ev.url as string
             assistantImages.push(url)
@@ -1119,7 +1128,7 @@ export default function VeraThread() {
     // pollVideo and watchCarousel are long-running stream helpers. Keep send bound
     // to route, session, and message state so active streams do not churn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, streaming, activeOrg?.id, activeProject?.id, user?.id, messages, location.pathname, sessionId, draft, attachments, persistChatMessage])
+  }, [input, streaming, activeOrg?.id, activeProject?.id, user?.id, messages, location.pathname, sessionId, draft, attachments, push, persistChatMessage])
 
   // Poll a backgrounded fal video job (submitted by vera-chat) until the MP4
   // is ready, then drop it into the chat and the open draft. Short polling

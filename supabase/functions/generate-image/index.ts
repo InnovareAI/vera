@@ -214,7 +214,7 @@ Deno.serve(async (req) => {
   if (useOR && !openRouterKey) return jsonError('No OpenRouter key available for this image request.', 500)
   if (!useOpenAI && !useOR && !falKey) return jsonError('No FAL key available for this image request.', 500)
 
-  const usageMetadata = {
+  const usageMetadata: Record<string, unknown> = {
     alias: model,
     requested_model: cleanModelAlias(requestedModel),
     policy_default_model: aiPolicy.defaultImageModel,
@@ -236,6 +236,7 @@ Deno.serve(async (req) => {
     metadata: usageMetadata,
   })
   if (!budget.ok) return jsonError(budget.message, 402)
+  if (budget.warning) usageMetadata.budget_warning = budget.warning
 
   const encoder = new TextEncoder()
   const startTime = Date.now()
@@ -247,6 +248,7 @@ Deno.serve(async (req) => {
       const elapsed = () => Math.round((Date.now() - startTime) / 100) / 10
 
       try {
+        if (budget.warning) send('budget_warning', { warning: budget.warning })
         let success = false
         if (useOpenAI) {
           success = await runOpenAI(slug, prompt, quality, image_size, num_images, send, elapsed, openAIKey!)
