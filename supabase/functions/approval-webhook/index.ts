@@ -47,6 +47,7 @@ Deno.serve(async (req) => {
   const authHeader = req.headers.get("authorization") ?? ""
   const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : ""
   const isServiceRole = bearer === SUPABASE_SERVICE_ROLE_KEY
+  let authUserId: string | null = null
 
   let post: PostRow
 
@@ -70,6 +71,7 @@ Deno.serve(async (req) => {
     if (!isServiceRole) {
       const user = await authenticatedUser(supabase, bearer)
       if (!user) return jsonError("Authentication required", 401)
+      authUserId = user.id
       const allowed = await userCanAccessPost(supabase, user.id, post)
       if (!allowed) return jsonError("Not allowed for this post", 403)
     }
@@ -96,6 +98,14 @@ Deno.serve(async (req) => {
     if (result.error) return jsonError(result.error.message, 500)
     if (!result.data) return jsonError("Post is already marked posted.", 409)
     updated = result.data
+    await recordPostOutcome(supabase, post.id, action, {
+      feedback,
+      recordedBy: authUserId,
+      reviewedBy: reviewed_by,
+      previousStatus: post.status,
+      postedUrl: posted_url,
+      providerPostId: provider_post_id,
+    })
   } else {
     updates.status = action
     updates.reviewed_at = now
@@ -111,6 +121,12 @@ Deno.serve(async (req) => {
 
     if (result.error) return jsonError(result.error.message, 500)
     updated = result.data
+    await recordPostOutcome(supabase, post.id, action, {
+      feedback,
+      recordedBy: authUserId,
+      reviewedBy: reviewed_by,
+      previousStatus: post.status,
+    })
   }
 
   if (N8N_WEBHOOK_URL && action !== "posted") {
@@ -134,6 +150,7 @@ interface PostRow {
   id: string
   org_id?: string | null
   project_id?: string | null
+  status?: string | null
   title?: string | null
   channel?: string | null
   copy?: string | null
@@ -186,6 +203,39 @@ async function userCanAccessPost(supabase: Supabase, userId: string, post: PostR
   const [orgResult, projectResult] = await Promise.all(checks)
   if (orgResult.error || projectResult?.error) return false
   return !!orgResult.data || !!projectResult?.data
+}
+
+async function recordPostOutcome(
+  supabase: Supabase,
+  postId: string,
+  outcome: string,
+  detail: {
+    feedback?: string | null
+    recordedBy?: string | null
+    reviewedBy?: string | null
+    previousStatus?: string | null
+    postedUrl?: string | null
+    providerPostId?: string | null
+  },
+): Promise<void> {
+  const edit_summary: Record<string, unknown> = {
+    source: "approval-webhook",
+    previous_status: detail.previousStatus ?? null,
+  }
+  if (detail.reviewedBy) edit_summary.reviewed_by_label = detail.reviewedBy
+  if (detail.postedUrl) edit_summary.posted_url = detail.postedUrl
+  if (detail.providerPostId) edit_summary.provider_post_id = detail.providerPostId
+
+  const { error } = await supabase.from("post_outcomes").insert({
+    post_id: postId,
+    outcome,
+    feedback: detail.feedback ?? null,
+    recorded_by: detail.recordedBy ?? null,
+    edit_summary,
+  })
+  if (error) {
+    console.error("post_outcome insert failed", { post_id: postId, outcome, error: error.message })
+  }
 }
 
 async function notifySlack(post: PostRow, action: "approved" | "posted"): Promise<void> {

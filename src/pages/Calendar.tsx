@@ -73,6 +73,8 @@ const DAILY_REVIEW_CAPACITY = 3
 const DRAG_POST_MIME = 'application/x-vera-post-id'
 const DANGER_TINT = 'color-mix(in srgb, var(--danger) 10%, var(--surface))'
 const DANGER_LINE = 'color-mix(in srgb, var(--danger) 42%, var(--line))'
+const APPROVAL_WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approval-webhook`
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 const DEFAULT_FILTERS: FilterState = {
   platform: 'all',
   status: 'all',
@@ -314,13 +316,30 @@ export default function Calendar() {
     setSavingPostId(postId)
     setScheduleError(null)
     try {
+      if (status === 'approved' || status === 'rejected' || status === 'changes_requested') {
+        const { data: { session } } = await supabase.auth.getSession()
+        const res = await fetch(APPROVAL_WEBHOOK_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ post_id: postId, action: status }),
+        })
+        const payload = await res.json().catch(() => null) as { post?: Post; error?: string } | null
+        if (!res.ok) throw new Error(payload?.error ?? `HTTP ${res.status}`)
+        if (!payload?.post) throw new Error('No post was updated. Check access for this client space.')
+        setPosts(prev => prev.map(post => post.id === postId ? payload.post as Post : post))
+        return
+      }
+
       const { data, error } = await supabase
         .from('content_posts')
         .update({ status })
         .eq('id', postId)
         .select()
         .single()
-
       if (error) throw error
       if (!data) throw new Error('No post was updated. Check access for this client space.')
 
