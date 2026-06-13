@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, BarChart3, CalendarDays, CalendarPlus, ChartGantt, Check, ChevronLeft, ChevronRight, Clock, Columns3, Filter, Inbox, KanbanSquare, ListChecks, MapPin, Plus, RotateCcw, Share2, Target, X } from 'lucide-react'
+import { AlertTriangle, BarChart3, CalendarDays, CalendarPlus, ChartGantt, Check, ChevronLeft, ChevronRight, Clock, Columns3, Filter, Inbox, KanbanSquare, ListChecks, Plus, RotateCcw, Share2, Target, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Campaign, Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -20,18 +20,6 @@ type FilterState = {
   owner: string
 }
 type DatedPost = { post: Post; date: Date }
-type CalendarOpsSummary = {
-  datedThisMonth: number
-  visible: number
-  total: number
-  unscheduled: number
-  readyToSchedule: number
-  reviewQueue: number
-  overCapacityDays: number
-  selectedDayCapacity: number
-  policyChecks: number
-  highCarePolicyChecks: number
-}
 type GanttRow = {
   id: string
   name: string
@@ -111,7 +99,6 @@ export default function Calendar() {
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
   const [savingPostId, setSavingPostId] = useState<string | null>(null)
   const [scheduleError, setScheduleError] = useState<string | null>(null)
-  const [dayDrawerOpen, setDayDrawerOpen] = useState(true)
   const calendarPreferenceKey = `vera-calendar-view:${activeProject?.id ?? activeOrg?.id ?? 'global'}`
   const businessContext = useMemo(
     () => parseProjectInstructions(activeProject?.instructions).businessContext,
@@ -202,30 +189,12 @@ export default function Calendar() {
     postsByDay.get(key)!.push(item.post)
   }
 
-  const monthPostCount = datedPosts.filter(item => item.date.getFullYear() === year && item.date.getMonth() === month).length
-  const unscheduledPosts = filteredPosts.filter(post => !targetDate(post))
-  const readyToSchedule = unscheduledPosts.filter(post => isApproved(post))
   const selectedPosts = postsByDay.get(selectedDate) ?? []
-  const selectedDayCapacity = selectedPosts.length
   const overCapacityDays = Array.from(postsByDay.entries()).filter(([day, dayPosts]) => {
     const date = parseIsoDay(day)
     return date.getFullYear() === year && date.getMonth() === month && dayPosts.length > DAILY_POST_CAPACITY
   })
-  const reviewQueueCount = filteredPosts.filter(post => postStatusBucket(post) === 'review').length
-  const policySummary = policySummaryForPosts(filteredPosts, businessContext)
   const activeFilterCount = Object.values(filters).filter(value => value !== 'all').length
-  const calendarOpsSummary: CalendarOpsSummary = {
-    datedThisMonth: monthPostCount,
-    visible: filteredPosts.length,
-    total: posts.length,
-    unscheduled: unscheduledPosts.length,
-    readyToSchedule: readyToSchedule.length,
-    reviewQueue: reviewQueueCount,
-    overCapacityDays: overCapacityDays.length,
-    selectedDayCapacity,
-    policyChecks: policySummary.guarded,
-    highCarePolicyChecks: policySummary.highCare,
-  }
   const selectedDateObject = parseIsoDay(selectedDate)
   const weekStart = mondayOf(selectedDateObject)
   const weekDays = Array.from({ length: 7 }, (_, index) => {
@@ -278,39 +247,10 @@ export default function Calendar() {
 
   function selectDate(date: string) {
     setSelectedDate(date)
-    setDayDrawerOpen(true)
   }
 
   function resetFilters() {
     setFilters(DEFAULT_FILTERS)
-  }
-
-  function focusReadyToSchedule() {
-    setFilters(prev => ({ ...prev, status: 'approved' }))
-    setViewMode('calendar')
-    setCalendarGridMode('month')
-    setDayDrawerOpen(true)
-  }
-
-  function focusReviewQueue() {
-    setFilters(prev => ({ ...prev, status: 'review' }))
-    setViewMode('kanban')
-  }
-
-  function focusCapacity() {
-    setViewMode('workload')
-    const firstHeavyDay = overCapacityDays[0]?.[0]
-    if (firstHeavyDay) {
-      setSelectedDate(firstHeavyDay)
-      const heavyDate = parseIsoDay(firstHeavyDay)
-      setViewDate(new Date(heavyDate.getFullYear(), heavyDate.getMonth(), 1))
-      setDayDrawerOpen(true)
-    }
-  }
-
-  function openReviewQueue() {
-    if (activeProject?.slug) navigate(`/p/${activeProject.slug}/review`)
-    else navigate('/review')
   }
 
   function draggedPostId(event: React.DragEvent) {
@@ -334,7 +274,6 @@ export default function Calendar() {
 
       setPosts(prev => prev.map(post => post.id === postId ? data as Post : post))
       setSelectedDate(day)
-      setDayDrawerOpen(true)
     } catch (error) {
       setScheduleError(`Could not schedule post: ${errorMessage(error, 'Unknown scheduling error')}`)
     } finally {
@@ -434,20 +373,6 @@ export default function Calendar() {
           <h1 className="text-[28px] leading-tight tracking-tight font-semibold" style={{ color: color.ink }}>
             Content calendar
           </h1>
-          <div className="flex flex-wrap items-center gap-2 mt-1 text-[13px]" style={{ color: color.ghost }}>
-            <span>{monthPostCount} dated posts this month</span>
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 font-medium" style={{ color: color.danger, background: DANGER_TINT, border: `1px solid ${DANGER_LINE}`, borderRadius: radius.pill }}>
-              <AlertTriangle size={12} />
-              {unscheduledPosts.length} unscheduled
-            </span>
-            {policySummary.guarded > 0 && (
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 font-medium" style={{ color: policySummary.highCare > 0 ? color.danger : color.warn, background: policySummary.highCare > 0 ? DANGER_TINT : color.paper2, border: `1px solid ${policySummary.highCare > 0 ? DANGER_LINE : color.line}`, borderRadius: radius.pill }}>
-                <AlertTriangle size={12} />
-                {policySummary.guarded} policy checks
-              </span>
-            )}
-            <span>{filteredPosts.length} visible</span>
-          </div>
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-2">
@@ -468,17 +393,6 @@ export default function Calendar() {
         </div>
       </div>
 
-      <CalendarOperationsStrip
-        summary={calendarOpsSummary}
-        periodLabel={periodLabel}
-        onToday={jumpToday}
-        onCreate={createNewPost}
-        onReadyToSchedule={focusReadyToSchedule}
-        onReviewQueue={focusReviewQueue}
-        onOpenReview={openReviewQueue}
-        onCapacity={focusCapacity}
-      />
-
       <CalendarFilters
         filters={filters}
         campaigns={campaigns}
@@ -492,12 +406,9 @@ export default function Calendar() {
       <CalendarWarnings
         scheduleError={scheduleError}
         overCapacityDays={overCapacityDays}
-        reviewQueueCount={reviewQueueCount}
-        filteredTotal={filteredPosts.length}
-        total={posts.length}
       />
 
-      <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-5 min-h-0 flex-1">
+      <div className="grid grid-cols-1 min-h-0 flex-1">
         <section className="min-h-0 flex flex-col" style={panelStyle}>
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${color.line}` }}>
             <div className="inline-flex items-center gap-2 min-w-0">
@@ -640,148 +551,8 @@ export default function Calendar() {
             />
           )}
         </section>
-
-        <aside className="min-h-0 flex flex-col gap-4">
-          {dayDrawerOpen && (
-            <DayDrawer
-              date={selectedDateObject}
-              posts={selectedPosts}
-              campaignsById={campaignsById}
-              capacity={selectedDayCapacity}
-              businessContext={businessContext}
-              onClose={() => setDayDrawerOpen(false)}
-              onOpen={openPost}
-              onDropPost={handleDropOnDay}
-              renderActions={postCardActions}
-            />
-          )}
-
-          <UnscheduledTray
-            posts={unscheduledPosts}
-            readyCount={readyToSchedule.length}
-            campaignsById={campaignsById}
-            businessContext={businessContext}
-            onOpen={openPost}
-            onDragStart={(event, post) => {
-              event.dataTransfer.setData(DRAG_POST_MIME, post.id)
-              event.dataTransfer.setData('text/plain', post.id)
-              event.dataTransfer.effectAllowed = 'move'
-            }}
-            renderActions={postCardActions}
-            onCreate={createNewPost}
-          />
-
-          <CampaignLegend campaigns={campaigns} />
-        </aside>
       </div>
     </div>
-  )
-}
-
-function CalendarOperationsStrip({
-  summary,
-  periodLabel,
-  onToday,
-  onCreate,
-  onReadyToSchedule,
-  onReviewQueue,
-  onOpenReview,
-  onCapacity,
-}: {
-  summary: CalendarOpsSummary
-  periodLabel: string
-  onToday: () => void
-  onCreate: () => void
-  onReadyToSchedule: () => void
-  onReviewQueue: () => void
-  onOpenReview: () => void
-  onCapacity: () => void
-}) {
-  const scheduleBlocked = summary.readyToSchedule > 0 || summary.overCapacityDays > 0
-  const reviewBlocked = summary.reviewQueue > DAILY_REVIEW_CAPACITY
-  const policyBlocked = summary.highCarePolicyChecks > 0
-  const recommendation = scheduleBlocked
-    ? `${summary.readyToSchedule} approved post${summary.readyToSchedule === 1 ? '' : 's'} need a publishing slot before more content is generated.`
-    : reviewBlocked
-      ? `${summary.reviewQueue} posts are waiting for review. Clear decisions before scheduling the next batch.`
-      : policyBlocked
-        ? `${summary.highCarePolicyChecks} high-care policy check${summary.highCarePolicyChecks === 1 ? '' : 's'} need attention before publishing.`
-        : 'Planner is healthy. Keep the cadence balanced and publish into the strongest learning windows.'
-
-  return (
-    <section
-      className="mb-4 grid grid-cols-[minmax(0,1fr)_auto] gap-4 p-4"
-      style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg }}
-    >
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2 mb-3">
-          <span className="inline-flex items-center gap-2 text-[12px] font-semibold uppercase" style={{ color: color.ghost, letterSpacing: 0 }}>
-            <Target size={14} />
-            Scheduling cockpit
-          </span>
-          <span className="text-[12px]" style={{ color: color.faint }}>{periodLabel}</span>
-        </div>
-        <div className="grid grid-cols-2 xl:grid-cols-6 gap-2">
-          <CalendarOpsMetric icon={<CalendarDays size={15} />} label="Dated" value={String(summary.datedThisMonth)} detail="this month" tone={summary.datedThisMonth > 0 ? color.accent : color.ghost} />
-          <CalendarOpsMetric icon={<AlertTriangle size={15} />} label="Unscheduled" value={String(summary.unscheduled)} detail={`${summary.readyToSchedule} approved`} tone={summary.readyToSchedule > 0 ? color.danger : color.ghost} />
-          <CalendarOpsMetric icon={<Check size={15} />} label="Review" value={String(summary.reviewQueue)} detail={`capacity ${DAILY_REVIEW_CAPACITY}`} tone={summary.reviewQueue > DAILY_REVIEW_CAPACITY ? color.warn : color.ghost} />
-          <CalendarOpsMetric icon={<Columns3 size={15} />} label="Heavy days" value={String(summary.overCapacityDays)} detail={`limit ${DAILY_POST_CAPACITY}`} tone={summary.overCapacityDays > 0 ? color.warn : color.ghost} />
-          <CalendarOpsMetric icon={<MapPin size={15} />} label="Selected day" value={String(summary.selectedDayCapacity)} detail="posts" tone={summary.selectedDayCapacity > DAILY_POST_CAPACITY ? color.danger : color.ghost} />
-          <CalendarOpsMetric icon={<Filter size={15} />} label="Visible" value={`${summary.visible}/${summary.total}`} detail="posts" tone={summary.visible < summary.total ? color.warn : color.ghost} />
-        </div>
-        <div className="mt-3 flex items-start gap-2 text-[12px] leading-relaxed" style={{ color: scheduleBlocked || reviewBlocked || policyBlocked ? color.ink : color.ghost }}>
-          <AlertTriangle size={14} style={{ color: scheduleBlocked || policyBlocked ? color.danger : reviewBlocked ? color.warn : color.ghost, marginTop: 2, flexShrink: 0 }} />
-          <span>{recommendation}</span>
-        </div>
-      </div>
-      <div className="flex flex-col justify-between gap-3 min-w-[220px]">
-        <div className="grid grid-cols-2 gap-2">
-          <CalendarOpsButton icon={<CalendarPlus size={14} />} label="Schedule ready" onClick={onReadyToSchedule} disabled={summary.readyToSchedule === 0} />
-          <CalendarOpsButton icon={<Check size={14} />} label="Review queue" onClick={onReviewQueue} disabled={summary.reviewQueue === 0} />
-          <CalendarOpsButton icon={<Columns3 size={14} />} label="Capacity" onClick={onCapacity} disabled={summary.overCapacityDays === 0 && summary.selectedDayCapacity <= DAILY_POST_CAPACITY} />
-          <CalendarOpsButton icon={<Clock size={14} />} label="Today" onClick={onToday} />
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <button onClick={onOpenReview} className="h-9 px-3 text-[12px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors hover:bg-[var(--fog)]" style={buttonStyle}>
-            <ListChecks size={14} />
-            Open review
-          </button>
-          <button onClick={onCreate} className="h-9 px-3 text-[12px] font-semibold inline-flex items-center justify-center gap-1.5" style={{ ...buttonStyle, background: color.ink, color: color.surface, borderColor: color.ink }}>
-            <Plus size={14} />
-            New post
-          </button>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function CalendarOpsMetric({ icon, label, value, detail, tone }: { icon: React.ReactNode; label: string; value: string; detail: string; tone: string }) {
-  return (
-    <div className="min-w-0 p-3" style={{ background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
-      <div className="flex items-center gap-1.5 min-w-0" style={{ color: tone }}>
-        {icon}
-        <span className="text-[11px] uppercase font-semibold truncate" style={{ letterSpacing: 0 }}>{label}</span>
-      </div>
-      <div className="mt-1 flex items-baseline gap-1.5 min-w-0">
-        <span className="text-[22px] leading-none font-semibold" style={{ color: color.ink }}>{value}</span>
-        <span className="text-[11px] truncate" style={{ color: color.ghost }}>{detail}</span>
-      </div>
-    </div>
-  )
-}
-
-function CalendarOpsButton({ icon, label, onClick, disabled }: { icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className="h-9 px-2.5 text-[12px] font-medium inline-flex items-center justify-center gap-1.5 transition-colors hover:bg-[var(--fog)] disabled:opacity-45 disabled:cursor-not-allowed"
-      style={buttonStyle}
-    >
-      {icon}
-      <span className="truncate">{label}</span>
-    </button>
   )
 }
 
@@ -1753,21 +1524,13 @@ function FilterSelect({ label, value, onChange, children }: { label: string; val
 function CalendarWarnings({
   scheduleError,
   overCapacityDays,
-  reviewQueueCount,
-  filteredTotal,
-  total,
 }: {
   scheduleError: string | null
   overCapacityDays: Array<[string, Post[]]>
-  reviewQueueCount: number
-  filteredTotal: number
-  total: number
 }) {
   const warnings: string[] = []
   if (scheduleError) warnings.push(scheduleError)
   if (overCapacityDays.length > 0) warnings.push(`${overCapacityDays.length} heavy days exceed ${DAILY_POST_CAPACITY} posts`)
-  if (reviewQueueCount > DAILY_REVIEW_CAPACITY) warnings.push(`${reviewQueueCount} posts are waiting for review`)
-  if (filteredTotal < total) warnings.push(`${filteredTotal} of ${total} posts visible`)
   if (warnings.length === 0) return null
 
   const hasError = !!scheduleError
@@ -1786,171 +1549,6 @@ function CalendarWarnings({
         <span key={warning} className="text-[12px]">{warning}</span>
       ))}
     </div>
-  )
-}
-
-function DayDrawer({
-  date,
-  posts,
-  campaignsById,
-  capacity,
-  businessContext,
-  onClose,
-  onOpen,
-  onDropPost,
-  renderActions,
-}: {
-  date: Date
-  posts: Post[]
-  campaignsById: Map<string, Campaign>
-  capacity: number
-  businessContext: BusinessContext
-  onClose: () => void
-  onOpen: (post: Post) => void
-  onDropPost: (event: React.DragEvent, day: string) => void
-  renderActions: (post: Post) => React.ReactNode
-}) {
-  const key = isoDay(date)
-  const isHeavy = capacity > DAILY_POST_CAPACITY
-  const policySummary = policySummaryForPosts(posts, businessContext)
-
-  return (
-    <section
-      onDragOver={event => {
-        event.preventDefault()
-        event.dataTransfer.dropEffect = 'move'
-      }}
-      onDrop={event => onDropPost(event, key)}
-      style={panelStyle}
-    >
-      <div className="px-4 py-3 flex items-start justify-between gap-3" style={{ borderBottom: `1px solid ${color.line}` }}>
-        <div>
-          <div className="text-[12px] uppercase font-semibold" style={{ color: color.ghost, letterSpacing: t.letterSpacing.wide }}>Day drawer</div>
-          <h3 className="text-[18px] font-semibold mt-1" style={{ color: color.ink }}>
-            {date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
-          </h3>
-          <p className="text-[12px] mt-1" style={{ color: isHeavy ? color.warn : color.ghost }}>
-            {capacity} posts scheduled · capacity {DAILY_POST_CAPACITY}{policySummary.guarded > 0 ? ` · ${policySummary.guarded} policy checks` : ''}
-          </p>
-        </div>
-        <button onClick={onClose} title="Close day drawer" className="w-8 h-8 inline-flex items-center justify-center transition-colors hover:bg-[var(--fog)]" style={iconButtonStyle}>
-          <X size={14} />
-        </button>
-      </div>
-      <div className="p-3 max-h-[420px] overflow-auto">
-        {posts.length === 0 ? (
-          <div className="py-8 text-center" style={{ color: color.ghost }}>
-            <MapPin size={18} style={{ margin: '0 auto 8px' }} />
-            <p className="text-[12px] m-0">Drop an unscheduled post here.</p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {posts.map(post => (
-              <CalendarPostCard
-                key={post.id}
-                post={post}
-                campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
-                businessContext={businessContext}
-                onOpen={() => onOpen(post)}
-                actions={renderActions(post)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
-  )
-}
-
-function UnscheduledTray({
-  posts,
-  readyCount,
-  campaignsById,
-  businessContext,
-  onOpen,
-  onDragStart,
-  renderActions,
-  onCreate,
-}: {
-  posts: Post[]
-  readyCount: number
-  campaignsById: Map<string, Campaign>
-  businessContext: BusinessContext
-  onOpen: (post: Post) => void
-  onDragStart: (event: React.DragEvent, post: Post) => void
-  renderActions: (post: Post) => React.ReactNode
-  onCreate: () => void
-}) {
-  const warningCount = posts.filter(post => postStatusBucket(post) !== 'approved').length
-  const policySummary = policySummaryForPosts(posts, businessContext)
-  const hasUnscheduledWarning = warningCount > 0
-
-  return (
-    <section style={{ ...panelStyle, borderColor: hasUnscheduledWarning ? DANGER_LINE : color.line }}>
-      <div className="px-4 py-3" style={{ borderBottom: `1px solid ${hasUnscheduledWarning ? DANGER_LINE : color.line}`, background: hasUnscheduledWarning ? DANGER_TINT : color.surface }}>
-        <div className="flex items-center justify-between gap-3">
-          <div className="inline-flex items-center gap-2 min-w-0">
-            <AlertTriangle size={14} style={{ color: hasUnscheduledWarning ? color.danger : color.ghost }} />
-            <div className="text-[12px] uppercase font-semibold" style={{ color: hasUnscheduledWarning ? color.danger : color.ghost, letterSpacing: t.letterSpacing.wide }}>
-              Unscheduled
-            </div>
-          </div>
-          <span className="text-[12px] font-semibold" style={{ color: hasUnscheduledWarning ? color.danger : color.ghost }}>
-            {posts.length}
-          </span>
-        </div>
-        <p className="text-[12px] mt-1" style={{ color: hasUnscheduledWarning ? color.danger : color.ghost }}>
-          {readyCount} approved · {warningCount} need review{policySummary.guarded > 0 ? ` · ${policySummary.guarded} policy checks` : ''} · drag cards onto the calendar.
-        </p>
-      </div>
-      <div className="p-3 max-h-[360px] overflow-auto">
-        {posts.length === 0 ? (
-          <div className="py-8 text-center" style={{ color: color.ghost }}>
-            <Inbox size={18} style={{ margin: '0 auto 8px' }} />
-            <p className="text-[12px] m-0 mb-3">No unscheduled posts match the current filters.</p>
-            <button onClick={onCreate} className="h-8 px-3 inline-flex items-center gap-2 text-[12px] font-medium transition-colors hover:bg-[var(--fog)]" style={buttonStyle}>
-              <Plus size={13} />
-              Create post
-            </button>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {posts.map(post => (
-              <CalendarPostCard
-                key={post.id}
-                post={post}
-                campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
-                businessContext={businessContext}
-                onOpen={() => onOpen(post)}
-                draggable
-                onDragStart={event => onDragStart(event, post)}
-                actions={renderActions(post)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
-  )
-}
-
-function CampaignLegend({ campaigns }: { campaigns: Campaign[] }) {
-  if (campaigns.length === 0) return null
-  return (
-    <section style={panelStyle}>
-      <div className="px-4 py-3" style={{ borderBottom: `1px solid ${color.line}` }}>
-        <div className="text-[12px] uppercase font-semibold" style={{ color: color.ghost, letterSpacing: t.letterSpacing.wide }}>Campaign legend</div>
-      </div>
-      <div className="p-3 flex flex-col gap-2 max-h-[220px] overflow-auto">
-        {campaigns.map(campaign => (
-          <div key={campaign.id} className="flex items-center gap-2 min-w-0 text-[12px]" style={{ color: color.ink2 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: campaignAccent(campaign.color), flexShrink: 0 }} />
-            <span className="truncate">{campaign.name}</span>
-            <span className="ml-auto capitalize" style={{ color: color.ghost }}>{campaign.status}</span>
-          </div>
-        ))}
-      </div>
-    </section>
   )
 }
 
@@ -2136,10 +1734,6 @@ function displayStatus(post: Post) {
   if (bucket === 'approved') return 'Approved'
   if (bucket === 'review') return 'Pending Review'
   return 'Draft'
-}
-
-function isApproved(post: Post) {
-  return displayStatus(post) === 'Approved'
 }
 
 function errorMessage(error: unknown, fallback: string) {
