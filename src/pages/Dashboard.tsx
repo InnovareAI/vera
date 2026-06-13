@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, Sparkles, FolderOpen } from 'lucide-react'
+import { ArrowRight, BarChart3, CheckCircle2, FolderOpen, Lightbulb, Send, Sparkles, TrendingUp, Zap } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { StatusChip } from '../components/Chip'
@@ -32,6 +32,52 @@ interface Observation {
   action_payload: Record<string, unknown> | null
   status: string
   created_at: string
+}
+
+interface WeeklyLearningSummary {
+  measuredPosts?: number
+  comments?: number
+  shares?: number
+  clicks?: number
+  qualifiedTraffic?: number
+  buyerQuestions?: number
+  meetingRequests?: number
+  demandSignals?: number
+  buyerIntent?: number
+}
+
+interface WeeklyLearningAsset {
+  post_id?: string
+  title?: string
+  channel?: string
+  score?: number
+  evidence?: string
+}
+
+interface WeeklyLearningSkill {
+  id?: string
+  name?: string
+  confidence?: string | null
+  created_at?: string
+}
+
+interface WeeklyLearningHandoff {
+  post_id?: string
+  title?: string
+  channel?: string
+  score?: number
+  triggers?: string[]
+}
+
+interface WeeklyLearningPayload {
+  route?: string
+  week_key?: string
+  current?: WeeklyLearningSummary
+  previous?: WeeklyLearningSummary
+  top_assets?: WeeklyLearningAsset[]
+  skill_proposals?: WeeklyLearningSkill[]
+  sam_handoff_candidates?: WeeklyLearningHandoff[]
+  approved_without_slot?: number
 }
 
 export default function Dashboard() {
@@ -85,6 +131,11 @@ export default function Dashboard() {
   useEffect(() => { loadObservations() }, [loadObservations])
 
   async function actOn(obs: Observation) {
+    if (obs.action_kind === 'review_weekly_learning') {
+      navigate(weeklyLearningRoute(obs) ?? path('learning'))
+      return
+    }
+
     setActingId(obs.id)
     try {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
@@ -116,12 +167,42 @@ export default function Dashboard() {
     loadObservations()
   }
 
+  async function markObservationActioned(obs: Observation) {
+    await supabase.from('agent_observations')
+      .update({ status: 'actioned', actioned_at: new Date().toISOString(), acted_result: { stage: 'opened_from_dashboard' } })
+      .eq('id', obs.id)
+    loadObservations()
+  }
+
+  function openLearning(obs: Observation) {
+    navigate(weeklyLearningRoute(obs) ?? path('learning'))
+  }
+
+  function openLearningSkills() {
+    navigate('/skills?view=skills&scope=client&q=learning-proposal')
+  }
+
+  function briefWeeklyLearning(obs: Observation, mode: 'next-brief' | 'sam-handoff') {
+    if (!activeProject?.id) {
+      navigate(path('vera'))
+      return
+    }
+    const payload = parseWeeklyLearningPayload(obs.action_payload)
+    const prompt = mode === 'sam-handoff'
+      ? buildSamHandoffPrompt(activeProject.name, payload, obs.detail)
+      : buildNextBriefPrompt(activeProject.name, payload, obs.detail)
+    sessionStorage.setItem(`vera-command-prefill:${activeProject.id}`, prompt)
+    navigate(path('vera'))
+  }
+
   useRightRail(
     <DashboardRightRail pendingCount={pendingPosts.length} projSlug={projSlug ?? null} />,
     [pendingPosts.length, projSlug],
   )
 
   const isEmpty = !loading && pendingPosts.length === 0 && observations.length === 0
+  const weeklyLearning = observations.filter(obs => obs.kind === 'weekly_learning')
+  const otherObservations = observations.filter(obs => obs.kind !== 'weekly_learning')
 
   return (
     <div style={{ padding: space[8], maxWidth: 980 }}>
@@ -132,8 +213,27 @@ export default function Dashboard() {
           <SectionLabel tone="accent" count={observations.length} style={{ marginBottom: space[5] }}>
             VERA wants to
           </SectionLabel>
+
+          {weeklyLearning.length > 0 && (
+            <div style={{ display: 'grid', gap: space[4], marginBottom: otherObservations.length ? space[6] : 0 }}>
+              {weeklyLearning.map(obs => (
+                <WeeklyLearningNotice
+                  key={obs.id}
+                  observation={obs}
+                  onOpenLearning={() => openLearning(obs)}
+                  onOpenSkills={openLearningSkills}
+                  onBrief={() => briefWeeklyLearning(obs, 'next-brief')}
+                  onHandoff={() => briefWeeklyLearning(obs, 'sam-handoff')}
+                  onMarkReviewed={() => void markObservationActioned(obs)}
+                  onDismiss={() => dismiss(obs)}
+                />
+              ))}
+            </div>
+          )}
+
+          {otherObservations.length > 0 && (
           <div style={{ borderTop: `1px solid ${color.line}` }}>
-            {observations.map(obs => (
+            {otherObservations.map(obs => (
               <div
                 key={obs.id}
                 style={{
@@ -172,6 +272,7 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
+          )}
         </section>
       )}
 
@@ -249,6 +350,136 @@ export default function Dashboard() {
   )
 }
 
+function WeeklyLearningNotice({
+  observation,
+  onOpenLearning,
+  onOpenSkills,
+  onBrief,
+  onHandoff,
+  onMarkReviewed,
+  onDismiss,
+}: {
+  observation: Observation
+  onOpenLearning: () => void
+  onOpenSkills: () => void
+  onBrief: () => void
+  onHandoff: () => void
+  onMarkReviewed: () => void
+  onDismiss: () => void
+}) {
+  const payload = parseWeeklyLearningPayload(observation.action_payload)
+  const current = payload.current ?? {}
+  const previousSignals = payload.previous?.demandSignals ?? 0
+  const currentSignals = current.demandSignals ?? 0
+  const signalDelta = currentSignals - previousSignals
+  const topAssets = (payload.top_assets ?? []).slice(0, 3)
+  const skills = payload.skill_proposals ?? []
+  const handoffs = payload.sam_handoff_candidates ?? []
+  const hasHandoffs = handoffs.length > 0
+
+  return (
+    <article style={{ border: `1px solid ${color.line}`, borderRadius: 8, background: color.surface, overflow: 'hidden' }}>
+      <div style={{ padding: space[5], borderBottom: `1px solid ${color.line}`, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: space[4], alignItems: 'start' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], marginBottom: space[2], flexWrap: 'wrap' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 8px', borderRadius: 999, background: 'var(--accent-tint)', color: color.accent, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>
+              <TrendingUp size={12} />
+              Weekly Learning
+            </span>
+            {payload.week_key && (
+              <span style={{ color: color.ghost, fontSize: t.size.micro }}>{payload.week_key}</span>
+            )}
+          </div>
+          <h2 style={{ margin: 0, color: color.ink, fontSize: t.size.h4, fontWeight: t.weight.semibold, lineHeight: 1.25 }}>
+            {observation.title}
+          </h2>
+          {observation.detail && (
+            <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>
+              {observation.detail}
+            </p>
+          )}
+        </div>
+        <button onClick={onMarkReviewed} title="Mark reviewed" style={{ border: `1px solid ${color.line}`, background: color.paper2, color: color.success, width: 30, height: 30, borderRadius: 8, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+          <CheckCircle2 size={15} />
+        </button>
+      </div>
+
+      <div style={{ padding: space[5], display: 'grid', gap: space[4] }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(138px, 1fr))', gap: space[3] }}>
+          <LearningMiniStat icon={BarChart3} label="Measured" value={current.measuredPosts ?? 0} detail="assets this week" />
+          <LearningMiniStat icon={Sparkles} label="Demand signals" value={currentSignals} detail={formatDelta(signalDelta)} />
+          <LearningMiniStat icon={Lightbulb} label="Buyer intent" value={current.buyerIntent ?? 0} detail={`${current.buyerQuestions ?? 0} questions, ${current.meetingRequests ?? 0} meetings`} />
+          <LearningMiniStat icon={Zap} label="Skill proposals" value={skills.length} detail="need review" />
+        </div>
+
+        {(topAssets.length > 0 || hasHandoffs) && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: space[4] }}>
+            {topAssets.length > 0 && (
+              <LearningList title="Top assets" items={topAssets.map(asset => ({
+                key: asset.post_id ?? asset.title ?? 'asset',
+                title: asset.title ?? 'Untitled asset',
+                meta: `${asset.channel ?? 'Unassigned'} · score ${asset.score ?? 0}`,
+              }))} />
+            )}
+            {hasHandoffs && (
+              <LearningList title="SAM handoffs" items={handoffs.slice(0, 3).map(item => ({
+                key: item.post_id ?? item.title ?? 'handoff',
+                title: item.title ?? 'Untitled handoff',
+                meta: `${item.channel ?? 'Unassigned'} · ${(item.triggers ?? []).slice(0, 2).join(', ') || `score ${item.score ?? 0}`}`,
+              }))} />
+            )}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: space[3], flexWrap: 'wrap' }}>
+          <Button size="sm" variant="primary" leading={<TrendingUp size={12} />} onClick={onOpenLearning}>
+            Review Learning
+          </Button>
+          <Button size="sm" variant="secondary" leading={<Zap size={12} />} onClick={onOpenSkills}>
+            Review skills
+          </Button>
+          <Button size="sm" variant="secondary" leading={<Send size={12} />} onClick={onBrief}>
+            Brief next move
+          </Button>
+          <Button size="sm" variant="secondary" leading={<Sparkles size={12} />} disabled={!hasHandoffs} onClick={onHandoff}>
+            Queue SAM handoff
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onDismiss}>Dismiss</Button>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function LearningMiniStat({ icon: Icon, label, value, detail }: { icon: typeof BarChart3; label: string; value: number; detail: string }) {
+  return (
+    <div style={{ padding: space[3], border: `1px solid ${color.line}`, borderRadius: 8, background: color.paper2 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[2] }}>
+        <span style={{ color: color.ghost, fontSize: t.size.micro, fontWeight: t.weight.medium }}>{label}</span>
+        <Icon size={13} style={{ color: color.accent }} />
+      </div>
+      <div style={{ color: color.ink, fontSize: t.size.h4, fontWeight: t.weight.semibold, marginTop: space[2], lineHeight: 1 }}>{value}</div>
+      <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: 3 }}>{detail}</div>
+    </div>
+  )
+}
+
+function LearningList({ title, items }: { title: string; items: Array<{ key: string; title: string; meta: string }> }) {
+  return (
+    <div style={{ border: `1px solid ${color.line}`, borderRadius: 8, background: color.paper2, padding: space[3] }}>
+      <div style={{ color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold, marginBottom: space[2] }}>{title}</div>
+      <div style={{ display: 'grid', gap: space[2] }}>
+        {items.map(item => (
+          <div key={item.key} style={{ minWidth: 0 }}>
+            <div style={{ color: color.ink2, fontSize: t.size.cap, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</div>
+            <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: 1 }}>{item.meta}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ─── Right rail — pending only, no audit scores ─────────────────────
 function DashboardRightRail({ pendingCount, projSlug }: { pendingCount: number; projSlug: string | null }) {
   const reviewHref = projSlug ? `/p/${projSlug}/review` : '/review'
@@ -274,4 +505,69 @@ function DashboardRightRail({ pendingCount, projSlug }: { pendingCount: number; 
       </section>
     </div>
   )
+}
+
+function parseWeeklyLearningPayload(value: Record<string, unknown> | null): WeeklyLearningPayload {
+  if (!value || typeof value !== 'object') return {}
+  return value as WeeklyLearningPayload
+}
+
+function weeklyLearningRoute(obs: Observation) {
+  const payload = parseWeeklyLearningPayload(obs.action_payload)
+  return typeof payload.route === 'string' && payload.route.startsWith('/') ? payload.route : null
+}
+
+function formatDelta(value: number) {
+  if (value > 0) return `+${value} vs last week`
+  if (value < 0) return `${value} vs last week`
+  return 'flat vs last week'
+}
+
+function buildNextBriefPrompt(projectName: string, payload: WeeklyLearningPayload, detail: string | null) {
+  const topAssets = (payload.top_assets ?? [])
+    .slice(0, 3)
+    .map(asset => `- ${asset.title ?? 'Untitled'} (${asset.channel ?? 'unassigned'}, score ${asset.score ?? 0}): ${asset.evidence ?? 'measured signal'}`)
+    .join('\n')
+  const skills = (payload.skill_proposals ?? [])
+    .slice(0, 5)
+    .map(skill => `- ${skill.name ?? 'Learning proposal'} (${skill.confidence ?? 'medium'})`)
+    .join('\n')
+  return [
+    `Use the weekly VERA learning review to brief the next demand move for ${projectName}.`,
+    ``,
+    detail ? `Weekly summary: ${detail}` : '',
+    payload.week_key ? `Week: ${payload.week_key}` : '',
+    ``,
+    topAssets ? `Top assets:\n${topAssets}` : '',
+    skills ? `Pending learning skill proposals:\n${skills}` : '',
+    ``,
+    `Return:`,
+    `1. what changed`,
+    `2. the next content brief`,
+    `3. the platform mix`,
+    `4. the approval route`,
+    `5. what VERA should measure next`,
+  ].filter(Boolean).join('\n')
+}
+
+function buildSamHandoffPrompt(projectName: string, payload: WeeklyLearningPayload, detail: string | null) {
+  const handoffs = (payload.sam_handoff_candidates ?? [])
+    .slice(0, 6)
+    .map(item => `- ${item.title ?? 'Untitled'} (${item.channel ?? 'unassigned'}, score ${item.score ?? 0}): ${(item.triggers ?? []).join(', ')}`)
+    .join('\n')
+  return [
+    `Create SAM handoff actions from the weekly VERA learning review for ${projectName}.`,
+    ``,
+    detail ? `Weekly summary: ${detail}` : '',
+    payload.week_key ? `Week: ${payload.week_key}` : '',
+    ``,
+    handoffs ? `Handoff candidates:\n${handoffs}` : 'No handoff candidates are listed yet. Explain what signal is missing before SAM should act.',
+    ``,
+    `Return:`,
+    `1. the best handoff candidate`,
+    `2. likely buyer pain or intent`,
+    `3. accounts or people SAM should research`,
+    `4. outreach angle and objection to prepare for`,
+    `5. the next VERA content asset to create more of this signal`,
+  ].filter(Boolean).join('\n')
 }

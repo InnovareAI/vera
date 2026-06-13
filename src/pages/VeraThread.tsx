@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, Copy, Pin, X, Target, Share2, Network, KeyRound, Lock } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, Copy, Pin, X, Target, Share2, Network, KeyRound, Lock, TrendingUp, BarChart3 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -80,6 +80,39 @@ type DocumentBlock = {
     | { type: 'text'; media_type: 'text/plain'; data: string }
   title: string
   context?: string
+}
+
+type ObservationNotice = {
+  id: string
+  title: string
+  proposed_action: string | null
+  kind: string
+  severity: 'low' | 'medium' | 'high'
+  detail: string | null
+  action_kind: string | null
+  action_payload: Record<string, unknown> | null
+}
+
+type WeeklyLearningSummary = {
+  measuredPosts?: number
+  comments?: number
+  shares?: number
+  clicks?: number
+  qualifiedTraffic?: number
+  buyerQuestions?: number
+  meetingRequests?: number
+  demandSignals?: number
+  buyerIntent?: number
+}
+
+type WeeklyLearningPayload = {
+  route?: string
+  week_key?: string
+  current?: WeeklyLearningSummary
+  previous?: WeeklyLearningSummary
+  top_assets?: Array<{ post_id?: string; title?: string; channel?: string; score?: number; evidence?: string }>
+  skill_proposals?: Array<{ id?: string; name?: string; confidence?: string | null; created_at?: string }>
+  sam_handoff_candidates?: Array<{ post_id?: string; title?: string; channel?: string; score?: number; triggers?: string[] }>
 }
 type DocumentAttachment = { kind: 'document'; document: DocumentBlock; name: string; mime: string; size: number; truncated?: boolean }
 type ComposerAttachment = ImageAttachment | DocumentAttachment
@@ -500,7 +533,7 @@ export default function VeraThread() {
   const [draftHistory, setDraftHistory] = useState<Post[]>([])
   const [campaign, setCampaign] = useState<CampaignData | null>(null)
   const [approving, setApproving] = useState(false)
-  const [observations, setObservations] = useState<{ id: string; title: string; proposed_action: string | null }[]>([])
+  const [observations, setObservations] = useState<ObservationNotice[]>([])
   const [stats, setStats] = useState<{ pending: number; campaigns: number }>({ pending: 0, campaigns: 0 })
   const [sessionId, setSessionId] = useState<string>('')
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
@@ -774,7 +807,7 @@ export default function VeraThread() {
   useEffect(() => {
     if (!activeOrg?.id) { setObservations([]); return }
     let q = supabase.from('agent_observations')
-      .select('id, title, proposed_action')
+      .select('id, title, proposed_action, kind, severity, detail, action_kind, action_payload')
       .eq('org_id', activeOrg.id)
       .eq('status', 'open')
       .neq('kind', 'stale_audit')
@@ -785,7 +818,7 @@ export default function VeraThread() {
       // Dedupe by title — duplicate/same-named campaigns can fire the same
       // nudge more than once; show each only once.
       const seen = new Set<string>()
-      const deduped = ((data ?? []) as { id: string; title: string; proposed_action: string | null }[])
+      const deduped = ((data ?? []) as ObservationNotice[])
         .filter(o => (seen.has(o.title) ? false : (seen.add(o.title), true)))
       setObservations(deduped)
     })
@@ -1633,6 +1666,8 @@ export default function VeraThread() {
           <Idle onRun={pr => send(pr)} observations={observations} actions={buildLaunchActions(stats)} onDismiss={dismissObservation}
             setup={setup} projectName={activeProject?.name ?? 'this client'}
             onOpenBrain={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/brain`) }}
+            onOpenLearning={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/learning`) }}
+            onOpenSkills={() => navigate('/skills?view=skills&scope=client&q=learning-proposal')}
             providerCapabilities={providerCapabilities}
             onAddKey={() => activeProject?.slug ? navigate(`/p/${activeProject.slug}/keys`) : navigate('/clients')}
             pricingCatalog={pricingCatalog}
@@ -2109,14 +2144,16 @@ function ModelRoutingPanel({ capabilities, onAddKey, pricingCatalog, pricingSour
   )
 }
 
-function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain, providerCapabilities, onAddKey, pricingCatalog, pricingSource, pricingRowCount, demandPlan, composer }: {
+function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain, onOpenLearning, onOpenSkills, providerCapabilities, onAddKey, pricingCatalog, pricingSource, pricingRowCount, demandPlan, composer }: {
   onRun: (prompt: string) => void
-  observations: { id: string; title: string; proposed_action: string | null }[]
+  observations: ObservationNotice[]
   actions: LaunchAction[]
   onDismiss: (o: { title: string }) => void
   setup: { business: boolean; audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null
   projectName: string
   onOpenBrain: () => void
+  onOpenLearning: () => void
+  onOpenSkills: () => void
   providerCapabilities: ProviderCapabilities
   onAddKey?: () => void
   pricingCatalog?: ModelPricingGuide[]
@@ -2130,6 +2167,8 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
   // the client" (routes to Brain). No separate checklist block.
   const setupCard: LaunchAction = { icon: Sparkles, title: `Set up ${projectName}`, sub: 'URL, ICP, offer, proof', prompt: '', action: 'brain' }
   const grid = (setup && !setupDone ? [setupCard, ...actions] : actions).slice(0, 6)
+  const weeklyObservations = observations.filter(o => o.kind === 'weekly_learning')
+  const otherObservations = observations.filter(o => o.kind !== 'weekly_learning')
   return (
     <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: space[8] }}>
       <span style={{ marginBottom: space[5], display: 'inline-flex' }}><VeraAvatar size={56} hero /></span>
@@ -2156,8 +2195,19 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
       {observations.length > 0 && (
         <div style={{ width: '100%', maxWidth: 760, marginTop: space[6], marginBottom: space[5] }}>
           <div style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.accent, marginBottom: space[3] }}>VERA wants to</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
-            {observations.map(o => (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: space[3] }}>
+            {weeklyObservations.map(o => (
+              <WeeklyLearningNoticeCard
+                key={o.id}
+                observation={o}
+                projectName={projectName}
+                onRun={onRun}
+                onOpenLearning={onOpenLearning}
+                onOpenSkills={onOpenSkills}
+                onDismiss={() => onDismiss(o)}
+              />
+            ))}
+            {otherObservations.map(o => (
               <div key={o.id} style={{ display: 'flex', alignItems: 'stretch', background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.md, overflow: 'hidden' }}>
                 <button onClick={() => onRun(o.proposed_action || o.title)} title="Ask VERA to handle this"
                   style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: space[3], textAlign: 'left', padding: `${space[3]} ${space[4]}`, background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: t.family.sans, color: color.ink, fontSize: t.size.sm }}>
@@ -2196,6 +2246,173 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
       </div>
     </div>
   )
+}
+
+function WeeklyLearningNoticeCard({
+  observation,
+  projectName,
+  onRun,
+  onOpenLearning,
+  onOpenSkills,
+  onDismiss,
+}: {
+  observation: ObservationNotice
+  projectName: string
+  onRun: (prompt: string) => void
+  onOpenLearning: () => void
+  onOpenSkills: () => void
+  onDismiss: () => void
+}) {
+  const payload = parseWeeklyLearningPayload(observation.action_payload)
+  const current = payload.current ?? {}
+  const previousSignals = payload.previous?.demandSignals ?? 0
+  const currentSignals = current.demandSignals ?? 0
+  const delta = currentSignals - previousSignals
+  const topAssets = (payload.top_assets ?? []).slice(0, 2)
+  const skills = payload.skill_proposals ?? []
+  const handoffs = payload.sam_handoff_candidates ?? []
+  const actionStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '7px 10px',
+    borderRadius: radius.pill,
+    border: `1px solid var(--accent-line)`,
+    background: color.surface,
+    color: color.ink,
+    fontSize: t.size.cap,
+    fontWeight: t.weight.medium,
+    cursor: 'pointer',
+  }
+
+  return (
+    <article style={{ background: color.surface, border: `1px solid var(--accent-line)`, borderRadius: radius.lg, overflow: 'hidden', boxShadow: 'var(--shadow-pop)' }}>
+      <div style={{ padding: space[4], borderBottom: `1px solid ${color.line}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap', marginBottom: space[2] }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>
+            <TrendingUp size={13} />
+            Weekly Learning
+          </span>
+          {payload.week_key && <span style={{ color: color.ghost, fontSize: t.size.micro }}>{payload.week_key}</span>}
+        </div>
+        <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.35 }}>{observation.title}</div>
+        {observation.detail && (
+          <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.45 }}>{observation.detail}</p>
+        )}
+      </div>
+
+      <div style={{ padding: space[4], display: 'grid', gap: space[3] }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(116px, 1fr))', gap: space[2] }}>
+          <WeeklyLearningStat icon={BarChart3} label="Measured" value={current.measuredPosts ?? 0} detail="assets" />
+          <WeeklyLearningStat icon={Sparkles} label="Signals" value={currentSignals} detail={formatLearningDelta(delta)} />
+          <WeeklyLearningStat icon={Lightbulb} label="Buyer intent" value={current.buyerIntent ?? 0} detail={`${current.buyerQuestions ?? 0} q, ${current.meetingRequests ?? 0} mtg`} />
+          <WeeklyLearningStat icon={Zap} label="Skills" value={skills.length} detail="proposals" />
+        </div>
+
+        {topAssets.length > 0 && (
+          <div style={{ display: 'grid', gap: 5 }}>
+            {topAssets.map(asset => (
+              <div key={asset.post_id ?? asset.title ?? 'asset'} style={{ color: color.ghost, fontSize: t.size.micro, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <b style={{ color: color.ink2 }}>{asset.title ?? 'Untitled asset'}</b> · {asset.channel ?? 'Unassigned'} · score {asset.score ?? 0}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap' }}>
+          <button onClick={onOpenLearning} style={{ ...actionStyle, background: color.accent, color: '#fff', borderColor: color.accent }}>
+            <TrendingUp size={13} /> Review Learning
+          </button>
+          <button onClick={onOpenSkills} style={actionStyle}>
+            <Zap size={13} /> Review skills
+          </button>
+          <button onClick={() => onRun(buildWeeklyNextBriefPrompt(projectName, payload, observation.detail))} style={actionStyle}>
+            <Send size={13} /> Brief next move
+          </button>
+          <button onClick={() => onRun(buildWeeklySamPrompt(projectName, payload, observation.detail))} disabled={handoffs.length === 0}
+            style={{ ...actionStyle, opacity: handoffs.length === 0 ? 0.5 : 1, cursor: handoffs.length === 0 ? 'not-allowed' : 'pointer' }}>
+            <Sparkles size={13} /> Queue SAM handoff
+          </button>
+          <button onClick={onDismiss} title="Dismiss" style={{ ...actionStyle, color: color.ghost, borderColor: color.line }}>
+            <X size={13} /> Dismiss
+          </button>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function WeeklyLearningStat({ icon: Icon, label, value, detail }: { icon: typeof BarChart3; label: string; value: number; detail: string }) {
+  return (
+    <div style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2, padding: space[3] }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+        <span style={{ color: color.ghost, fontSize: t.size.micro }}>{label}</span>
+        <Icon size={12} style={{ color: color.accent }} />
+      </div>
+      <div style={{ marginTop: 5, color: color.ink, fontSize: t.size.h4, fontWeight: t.weight.semibold, lineHeight: 1 }}>{value}</div>
+      <div style={{ marginTop: 2, color: color.ghost, fontSize: t.size.micro }}>{detail}</div>
+    </div>
+  )
+}
+
+function parseWeeklyLearningPayload(value: Record<string, unknown> | null): WeeklyLearningPayload {
+  if (!value || typeof value !== 'object') return {}
+  return value as WeeklyLearningPayload
+}
+
+function formatLearningDelta(value: number) {
+  if (value > 0) return `+${value} vs last week`
+  if (value < 0) return `${value} vs last week`
+  return 'flat vs last week'
+}
+
+function buildWeeklyNextBriefPrompt(projectName: string, payload: WeeklyLearningPayload, detail: string | null) {
+  const topAssets = (payload.top_assets ?? [])
+    .slice(0, 3)
+    .map(asset => `- ${asset.title ?? 'Untitled'} (${asset.channel ?? 'unassigned'}, score ${asset.score ?? 0}): ${asset.evidence ?? 'measured signal'}`)
+    .join('\n')
+  const skills = (payload.skill_proposals ?? [])
+    .slice(0, 5)
+    .map(skill => `- ${skill.name ?? 'Learning proposal'} (${skill.confidence ?? 'medium'})`)
+    .join('\n')
+  return [
+    `Use the weekly VERA learning review to brief the next demand move for ${projectName}.`,
+    ``,
+    detail ? `Weekly summary: ${detail}` : '',
+    payload.week_key ? `Week: ${payload.week_key}` : '',
+    ``,
+    topAssets ? `Top assets:\n${topAssets}` : '',
+    skills ? `Pending learning skill proposals:\n${skills}` : '',
+    ``,
+    `Return:`,
+    `1. what changed`,
+    `2. the next content brief`,
+    `3. the platform mix`,
+    `4. the approval route`,
+    `5. what VERA should measure next`,
+  ].filter(Boolean).join('\n')
+}
+
+function buildWeeklySamPrompt(projectName: string, payload: WeeklyLearningPayload, detail: string | null) {
+  const handoffs = (payload.sam_handoff_candidates ?? [])
+    .slice(0, 6)
+    .map(item => `- ${item.title ?? 'Untitled'} (${item.channel ?? 'unassigned'}, score ${item.score ?? 0}): ${(item.triggers ?? []).join(', ')}`)
+    .join('\n')
+  return [
+    `Create SAM handoff actions from the weekly VERA learning review for ${projectName}.`,
+    ``,
+    detail ? `Weekly summary: ${detail}` : '',
+    payload.week_key ? `Week: ${payload.week_key}` : '',
+    ``,
+    handoffs ? `Handoff candidates:\n${handoffs}` : 'No handoff candidates are listed yet. Explain what signal is missing before SAM should act.',
+    ``,
+    `Return:`,
+    `1. the best handoff candidate`,
+    `2. likely buyer pain or intent`,
+    `3. accounts or people SAM should research`,
+    `4. outreach angle and objection to prepare for`,
+    `5. the next VERA content asset to create more of this signal`,
+  ].filter(Boolean).join('\n')
 }
 
 function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {

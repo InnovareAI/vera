@@ -230,7 +230,8 @@ Current state:
 - AI Settings now supports deep links into the Skills view so Learning can send operators straight to review and enable proposed client skills.
 - The `vera-notice` worker now creates a weekly learning observation per client when there are fresh demand signals, pending learning skill proposals, approved unscheduled posts, or SAM handoff candidates.
 - Weekly learning observations include current-week metrics, previous-week comparison, top assets, pending skill proposals, SAM handoff candidates, and a route back to the client Learning page.
+- The VERA launcher now renders weekly learning observations as action cards with metrics, top assets, skill proposals, SAM handoff counts, and direct actions to Learning, AI Settings, and prefilled VERA briefs.
 
 Next step:
 
-- Surface weekly learning notices more directly in the client desk UI so operators can review, enable skills, brief VERA, or queue SAM handoffs without opening chat first.
+- Add a durable weekly review workflow so operators can mark learning reviews complete, keep chosen skill proposals active, and turn SAM handoff candidates into tracked sales actions.
