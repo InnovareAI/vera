@@ -135,14 +135,22 @@ export default function Dashboard() {
       navigate(weeklyLearningRoute(obs) ?? path('learning'))
       return
     }
+    if (obs.action_kind === 'open_integrations') {
+      await markObservationActioned(obs, 'opened_integrations')
+      navigate(integrationsRoute(obs, activeProject?.id ?? null))
+      return
+    }
 
     setActingId(obs.id)
     try {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
       const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
+      if (!token) return
       await fetch(`${supabaseUrl}/functions/v1/vera-act`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}` },
+        headers: { 'Content-Type': 'application/json', 'apikey': anonKey, 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ observation_id: obs.id }),
       }).catch(() => {})
 
@@ -167,9 +175,9 @@ export default function Dashboard() {
     loadObservations()
   }
 
-  async function markObservationActioned(obs: Observation) {
+  async function markObservationActioned(obs: Observation, stage = 'opened_from_dashboard') {
     await supabase.from('agent_observations')
-      .update({ status: 'actioned', actioned_at: new Date().toISOString(), acted_result: { stage: 'opened_from_dashboard' } })
+      .update({ status: 'actioned', actioned_at: new Date().toISOString(), acted_result: { stage } })
       .eq('id', obs.id)
     loadObservations()
   }
@@ -515,6 +523,16 @@ function parseWeeklyLearningPayload(value: Record<string, unknown> | null): Week
 function weeklyLearningRoute(obs: Observation) {
   const payload = parseWeeklyLearningPayload(obs.action_payload)
   return typeof payload.route === 'string' && payload.route.startsWith('/') ? payload.route : null
+}
+
+function integrationsRoute(obs: Observation, activeProjectId: string | null) {
+  const payload = obs.action_payload ?? {}
+  const provider = typeof payload.provider === 'string' ? payload.provider : null
+  const projectId = typeof payload.project_id === 'string' ? payload.project_id : activeProjectId
+  const params = new URLSearchParams({ tab: 'integrations' })
+  if (provider) params.set('provider', provider)
+  if (projectId) params.set('project_id', projectId)
+  return `/settings?${params.toString()}`
 }
 
 function formatDelta(value: number) {

@@ -1490,6 +1490,18 @@ export default function VeraThread() {
     await q
   }
 
+  async function openIntegrationObservation(o: ObservationNotice) {
+    setObservations(prev => prev.filter(x => x.id !== o.id))
+    await supabase.from('agent_observations')
+      .update({
+        status: 'actioned',
+        actioned_at: new Date().toISOString(),
+        acted_result: { stage: 'opened_integrations' },
+      })
+      .eq('id', o.id)
+    navigate(integrationsRouteFromNotice(o, activeProject?.id ?? null))
+  }
+
   async function runWeeklyLearningAction(o: ObservationNotice, action: 'skills' | 'handoff' | 'complete') {
     const payload = parseWeeklyLearningPayload(o.action_payload)
     const body: Record<string, unknown> = { observation_id: o.id }
@@ -1794,6 +1806,7 @@ export default function VeraThread() {
           <Centered>Loading thread…</Centered>
         ) : messages.length === 0 ? (
           <Idle onRun={pr => send(pr)} observations={observations} actions={buildLaunchActions(stats)} onDismiss={dismissObservation}
+            onOpenIntegrations={openIntegrationObservation}
             onWeeklyReviewAction={runWeeklyLearningAction}
             weeklyActionKey={weeklyActionKey}
             setup={setup} projectName={activeProject?.name ?? 'this client'}
@@ -2276,11 +2289,12 @@ function ModelRoutingPanel({ capabilities, onAddKey, pricingCatalog, pricingSour
   )
 }
 
-function Idle({ onRun, observations, actions, onDismiss, onWeeklyReviewAction, weeklyActionKey, setup, projectName, onOpenBrain, onOpenLearning, onOpenSkills, providerCapabilities, onAddKey, pricingCatalog, pricingSource, pricingRowCount, demandPlan, composer }: {
+function Idle({ onRun, observations, actions, onDismiss, onOpenIntegrations, onWeeklyReviewAction, weeklyActionKey, setup, projectName, onOpenBrain, onOpenLearning, onOpenSkills, providerCapabilities, onAddKey, pricingCatalog, pricingSource, pricingRowCount, demandPlan, composer }: {
   onRun: (prompt: string) => void
   observations: ObservationNotice[]
   actions: LaunchAction[]
   onDismiss: (o: { title: string }) => void
+  onOpenIntegrations: (o: ObservationNotice) => void
   onWeeklyReviewAction: (o: ObservationNotice, action: 'skills' | 'handoff' | 'complete') => void
   weeklyActionKey: string | null
   setup: { business: boolean; audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null
@@ -2345,7 +2359,7 @@ function Idle({ onRun, observations, actions, onDismiss, onWeeklyReviewAction, w
             ))}
             {otherObservations.map(o => (
               <div key={o.id} style={{ display: 'flex', alignItems: 'stretch', background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.md, overflow: 'hidden' }}>
-                <button onClick={() => onRun(o.proposed_action || o.title)} title="Ask VERA to handle this"
+                <button onClick={() => o.action_kind === 'open_integrations' ? onOpenIntegrations(o) : onRun(o.proposed_action || o.title)} title={o.action_kind === 'open_integrations' ? 'Open integrations' : 'Ask VERA to handle this'}
                   style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: space[3], textAlign: 'left', padding: `${space[3]} ${space[4]}`, background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: t.family.sans, color: color.ink, fontSize: t.size.sm }}>
                   <Sparkles size={15} style={{ color: color.accent, flexShrink: 0 }} />
                   <span style={{ flex: 1, minWidth: 0 }}>{o.title}</span>
@@ -2512,6 +2526,16 @@ function WeeklyLearningStat({ icon: Icon, label, value, detail }: { icon: typeof
 function parseWeeklyLearningPayload(value: Record<string, unknown> | null): WeeklyLearningPayload {
   if (!value || typeof value !== 'object') return {}
   return value as WeeklyLearningPayload
+}
+
+function integrationsRouteFromNotice(observation: ObservationNotice, activeProjectId: string | null) {
+  const payload = observation.action_payload ?? {}
+  const provider = typeof payload.provider === 'string' ? payload.provider : null
+  const projectId = typeof payload.project_id === 'string' ? payload.project_id : activeProjectId
+  const params = new URLSearchParams({ tab: 'integrations' })
+  if (provider) params.set('provider', provider)
+  if (projectId) params.set('project_id', projectId)
+  return `/settings?${params.toString()}`
 }
 
 function formatLearningDelta(value: number) {
