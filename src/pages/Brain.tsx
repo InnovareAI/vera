@@ -13,7 +13,7 @@ import type { ElementType } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Brain as BrainIcon, BookOpen, Check, Link2, Plus, ShieldCheck, Target, X, Loader2, Trash2, Sparkles, Upload, FileText, RefreshCw } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import type { BrandVoice, Audience } from '../lib/supabase'
+import type { BrandVoice, Audience, ContentMetricSnapshot, Post } from '../lib/supabase'
 import { useProject } from '../lib/projectContext'
 import { useOrg } from '../lib/orgContext'
 import { useAuth } from '../lib/auth'
@@ -85,6 +85,46 @@ const DEMAND_FACT_KEYS: BusinessContextKey[] = [
   'approvalStakeholders',
   'constraints',
 ]
+
+type BrainLearningMetric = {
+  postId: string
+  provider: string
+  views: number
+  engagements: number
+  comments: number
+  shares: number
+  clicks: number
+  saves: number
+  qualifiedTraffic: number
+  buyerQuestions: number
+  meetingRequests: number
+  pulledAt: string | null
+}
+
+type BrainChannelEvidence = {
+  key: DemandPlatformKey
+  posts: number
+  measured: number
+  score: number
+  lastSignalAt: string | null
+  demandSignals: string[]
+}
+
+const BRAIN_DEMAND_METRICS = new Set([
+  'views',
+  'impressions',
+  'reach',
+  'engagements',
+  'likes',
+  'reactions',
+  'comments',
+  'shares',
+  'clicks',
+  'saves',
+  'qualified_traffic',
+  'buyer_questions',
+  'meeting_requests',
+])
 
 function fileExtension(name: string) {
   const dot = name.lastIndexOf('.')
@@ -229,24 +269,189 @@ function sourceGapPlatforms(context: BusinessContext) {
     .slice(0, 6)
 }
 
+function brainPlatformKeyForPost(post: Post, metric?: BrainLearningMetric): DemandPlatformKey | null {
+  const value = [post.channel, post.provider, metric?.provider]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+  if (!value) return null
+  if (value.includes('linkedin') || value.includes('unipile')) return 'linkedin'
+  if (value.includes('youtube') || value.includes('youtu.be')) return 'youtube'
+  if (value.includes('medium')) return 'medium'
+  if (value.includes('quora')) return 'quora'
+  if (value.includes('reddit')) return 'reddit'
+  if (value === 'x' || value.includes('twitter') || value.includes('x.com')) return 'x'
+  if (value.includes('instagram') || value.includes('meta_instagram')) return 'instagram'
+  if (value.includes('facebook') || value.includes('meta_facebook')) return 'facebook'
+  if (value.includes('blog') || value.includes('wordpress') || value.includes('cms')) return 'blog'
+  if (value.includes('email') || value.includes('newsletter')) return 'email'
+  return null
+}
+
+function buildBrainMetrics(rows: ContentMetricSnapshot[]) {
+  const latestRows = new Map<string, ContentMetricSnapshot>()
+  for (const row of rows) {
+    if (!row.post_id) continue
+    const name = row.metric_name.toLowerCase()
+    const key = `${row.post_id}:${name}`
+    const current = latestRows.get(key)
+    if (!current || new Date(row.pulled_at).getTime() > new Date(current.pulled_at).getTime()) {
+      latestRows.set(key, row)
+    }
+  }
+
+  const byPost = new Map<string, BrainLearningMetric>()
+  for (const row of latestRows.values()) {
+    if (!row.post_id) continue
+    const metric = byPost.get(row.post_id) ?? {
+      postId: row.post_id,
+      provider: String(row.provider ?? ''),
+      views: 0,
+      engagements: 0,
+      comments: 0,
+      shares: 0,
+      clicks: 0,
+      saves: 0,
+      qualifiedTraffic: 0,
+      buyerQuestions: 0,
+      meetingRequests: 0,
+      pulledAt: row.pulled_at ?? null,
+    }
+    const value = Number(row.metric_value ?? 0)
+    const name = row.metric_name.toLowerCase()
+    if (name === 'views' || name === 'impressions' || name === 'reach') metric.views = Math.max(metric.views, value)
+    else if (name === 'engagements' || name === 'likes' || name === 'reactions') metric.engagements += value
+    else if (name === 'comments') metric.comments += value
+    else if (name === 'shares') metric.shares += value
+    else if (name === 'clicks') metric.clicks += value
+    else if (name === 'saves') metric.saves += value
+    else if (name === 'qualified_traffic') metric.qualifiedTraffic += value
+    else if (name === 'buyer_questions') metric.buyerQuestions += value
+    else if (name === 'meeting_requests') metric.meetingRequests += value
+    if (!metric.pulledAt || row.pulled_at > metric.pulledAt) metric.pulledAt = row.pulled_at
+    byPost.set(row.post_id, metric)
+  }
+  return byPost
+}
+
+function brainHasLearningSignal(metric: BrainLearningMetric) {
+  return !!(
+    metric.views ||
+    metric.engagements ||
+    metric.comments ||
+    metric.shares ||
+    metric.clicks ||
+    metric.saves ||
+    metric.qualifiedTraffic ||
+    metric.buyerQuestions ||
+    metric.meetingRequests
+  )
+}
+
+function brainDemandScore(metric: BrainLearningMetric) {
+  return Math.round(
+    metric.meetingRequests * 20 +
+    metric.buyerQuestions * 12 +
+    metric.qualifiedTraffic * 7 +
+    metric.comments * 6 +
+    metric.shares * 5 +
+    metric.clicks * 4 +
+    metric.saves * 3 +
+    metric.engagements +
+    metric.views * 0.01,
+  )
+}
+
+function brainMetricSignals(metric: BrainLearningMetric) {
+  const signals: string[] = []
+  if (metric.comments || metric.shares || metric.engagements) signals.push('engagement')
+  if (metric.clicks || metric.qualifiedTraffic) signals.push('traffic')
+  if (metric.buyerQuestions || metric.meetingRequests) signals.push('lead intent')
+  if (metric.saves) signals.push('saved')
+  if (metric.views) signals.push('reach')
+  return signals
+}
+
+function buildBrainChannelEvidence(posts: Post[], metrics: Map<string, BrainLearningMetric>) {
+  const byChannel = new Map<DemandPlatformKey, BrainChannelEvidence>()
+  for (const post of posts) {
+    const metric = metrics.get(post.id)
+    const key = brainPlatformKeyForPost(post, metric)
+    if (!key) continue
+    const current = byChannel.get(key) ?? {
+      key,
+      posts: 0,
+      measured: 0,
+      score: 0,
+      lastSignalAt: null,
+      demandSignals: [],
+    }
+    current.posts += 1
+    if (metric && brainHasLearningSignal(metric)) {
+      current.measured += 1
+      current.score += brainDemandScore(metric)
+      if (metric.pulledAt && (!current.lastSignalAt || metric.pulledAt > current.lastSignalAt)) {
+        current.lastSignalAt = metric.pulledAt
+      }
+      current.demandSignals = Array.from(new Set([...current.demandSignals, ...brainMetricSignals(metric)]))
+    }
+    byChannel.set(key, current)
+  }
+  return byChannel
+}
+
+function formatLearningDate(value: string | null) {
+  if (!value) return 'No metric pull yet'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Metric pull recorded'
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)
+}
+
 function BrainReadinessPanel({
   context,
   policies,
   sourceCount,
   factCount,
   operatingCount,
+  channelEvidence,
+  learningLoading,
+  learningError,
 }: {
   context: BusinessContext
   policies: Record<DemandPlatformKey, DemandChannelOperatingPolicy>
   sourceCount: number
   factCount: number
   operatingCount: number
+  channelEvidence: Map<DemandPlatformKey, BrainChannelEvidence>
+  learningLoading: boolean
+  learningError: string | null
 }) {
-  const activePlatforms = activeDemandPlatforms(context)
+  const evidenceValues = Array.from(channelEvidence.values())
+  const activeEvidenceKeys = new Set(evidenceValues.filter(item => item.posts > 0).map(item => item.key))
+  const activePlatforms = DEMAND_PLATFORM_DEFINITIONS.filter(platform => (
+    activeEvidenceKeys.has(platform.key) || activeDemandPlatforms(context).some(activePlatform => activePlatform.key === platform.key)
+  ))
   const plannedChannels = activePlatforms.filter(platform => !platformSourceValue(platform, context) && platformIsMentioned(platform, context)).length
   const highCareChannels = activePlatforms.filter(platform => (policies[platform.key] ?? DEMAND_CHANNEL_OPERATING_POLICIES[platform.key]).risk === 'high').length
   const customPolicies = demandChannelPolicyOverrideCount(policies)
   const gaps = sourceGapPlatforms(context)
+  const totalPosts = evidenceValues.reduce((sum, item) => sum + item.posts, 0)
+  const measuredPosts = evidenceValues.reduce((sum, item) => sum + item.measured, 0)
+  const measuredChannels = evidenceValues.filter(item => item.measured > 0).length
+  const signalScore = evidenceValues.reduce((sum, item) => sum + item.score, 0)
+  const strongestEvidence = [...evidenceValues].sort((a, b) => b.score - a.score)[0]
+  const strongestPlatform = strongestEvidence ? DEMAND_PLATFORM_DEFINITIONS.find(platform => platform.key === strongestEvidence.key) : null
+  const evidenceRows = DEMAND_PLATFORM_DEFINITIONS
+    .map(platform => ({ platform, evidence: channelEvidence.get(platform.key) }))
+    .filter(row => row.evidence?.posts || platformSourceValue(row.platform, context) || platformIsMentioned(row.platform, context))
+    .sort((a, b) => {
+      const aEvidence = a.evidence
+      const bEvidence = b.evidence
+      return (bEvidence?.score ?? 0) - (aEvidence?.score ?? 0) ||
+        (bEvidence?.measured ?? 0) - (aEvidence?.measured ?? 0) ||
+        (bEvidence?.posts ?? 0) - (aEvidence?.posts ?? 0)
+    })
+    .slice(0, 6)
   const totalFields = DEMAND_FACT_KEYS.length + Object.keys(DEFAULT_DEMAND_OPERATING_MODEL).length + DEMAND_SOURCE_KEYS.length
   const filledFields = factCount + operatingCount + sourceCount
   const readiness = Math.round((filledFields / totalFields) * 100)
@@ -273,6 +478,10 @@ function BrainReadinessPanel({
         <ReadinessTile icon={ShieldCheck} label="Custom policies" value={customPolicies} detail="Channel rules beyond defaults" tone={customPolicies ? color.accent : color.ghost} />
         <ReadinessTile icon={AlertTriangle} label="High-care channels" value={highCareChannels} detail="Approval-sensitive surfaces" tone={highCareChannels ? color.danger : color.success} />
         <ReadinessTile icon={Target} label="Planned channels" value={plannedChannels} detail="Mentioned but no source URL yet" tone={plannedChannels ? color.info : color.ghost} />
+        <ReadinessTile icon={BookOpen} label="Content assets" value={totalPosts} detail="Posts available for learning" tone={totalPosts ? color.success : color.ghost} />
+        <ReadinessTile icon={RefreshCw} label="Measured assets" value={`${measuredPosts}/${totalPosts || 0}`} detail="Posts with metric signals" tone={measuredPosts ? color.success : color.warn} />
+        <ReadinessTile icon={Target} label="Learning channels" value={measuredChannels} detail={strongestPlatform ? `Strongest: ${strongestPlatform.label}` : 'No channel has measured traction'} tone={measuredChannels ? color.accent : color.ghost} />
+        <ReadinessTile icon={Sparkles} label="Signal score" value={signalScore} detail="Weighted demand signal total" tone={signalScore ? color.accent : color.ghost} />
       </div>
 
       <div style={{ marginTop: space[4], display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
@@ -280,6 +489,48 @@ function BrainReadinessPanel({
         {gaps.length ? gaps.map(platform => (
           <Chip key={platform.key} dot={platformIsMentioned(platform, context) ? color.info : color.ghost}>{platform.label}</Chip>
         )) : <Chip dot={color.success}>All demand sources configured</Chip>}
+      </div>
+
+      <div style={{ marginTop: space[4], padding: space[4], background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], flexWrap: 'wrap', marginBottom: space[3] }}>
+          <div>
+            <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>Learning evidence</div>
+            <p style={{ margin: `${space[1]} 0 0`, color: color.ghost, fontSize: t.size.micro, lineHeight: 1.4 }}>
+              Posts and metrics VERA can use to improve channel strategy and decide what should move to SAM.
+            </p>
+          </div>
+          <Chip dot={measuredPosts ? color.success : color.warn}>{measuredPosts} measured</Chip>
+        </div>
+        {learningLoading ? (
+          <p style={{ margin: 0, color: color.ink2, fontSize: t.size.cap }}>Loading learning evidence...</p>
+        ) : learningError ? (
+          <p style={{ margin: 0, color: color.danger, fontSize: t.size.cap }}>{learningError}</p>
+        ) : totalPosts === 0 ? (
+          <p style={{ margin: 0, color: color.ink2, fontSize: t.size.cap }}>
+            No channel posts found yet. Once content is created or imported, this panel will show where VERA has evidence.
+          </p>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))', gap: space[3] }}>
+            {evidenceRows.map(({ platform, evidence }) => (
+              <div key={platform.key} style={{ padding: space[3], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.sm }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: space[2], marginBottom: space[2] }}>
+                  <span style={{ width: 24, height: 24, borderRadius: radius.xs, background: evidence?.measured ? color.accentSoft : color.paper2, color: evidence?.measured ? color.accent : color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: t.size.micro, fontWeight: t.weight.semibold }}>
+                    {platform.initials}
+                  </span>
+                  <span style={{ color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold }}>{platform.label}</span>
+                </div>
+                <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', marginBottom: space[2] }}>
+                  <Chip>{evidence?.posts ?? 0} posts</Chip>
+                  <Chip dot={evidence?.measured ? color.success : color.warn}>{evidence?.measured ?? 0} measured</Chip>
+                  <Chip dot={evidence?.score ? color.accent : color.ghost}>score {evidence?.score ?? 0}</Chip>
+                </div>
+                <div style={{ color: color.ghost, fontSize: t.size.micro, lineHeight: 1.4 }}>
+                  {evidence?.demandSignals.length ? evidence.demandSignals.slice(0, 3).join(', ') : formatLearningDate(evidence?.lastSignalAt ?? null)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   )
@@ -313,14 +564,17 @@ function ReadinessTile({
 function DemandChannelMatrix({
   context,
   policies,
+  channelEvidence,
   onEditPolicy,
 }: {
   context: BusinessContext
   policies: Record<DemandPlatformKey, DemandChannelOperatingPolicy>
+  channelEvidence: Map<DemandPlatformKey, BrainChannelEvidence>
   onEditPolicy: (key: DemandPlatformKey) => void
 }) {
   const platforms = orderedDemandPlatforms(context)
   const configured = platforms.filter(platform => platformSourceValue(platform, context)).length
+  const measured = platforms.filter(platform => (channelEvidence.get(platform.key)?.measured ?? 0) > 0).length
 
   return (
     <div style={{ marginTop: space[4], padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
@@ -331,13 +585,18 @@ function DemandChannelMatrix({
             VERA uses this map to decide what each channel is for, how content should be handled, what signals matter, and when work stays manual.
           </p>
         </div>
-        <Chip tone="accent">{configured}/{platforms.length} sources configured</Chip>
+        <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
+          <Chip tone="accent">{configured}/{platforms.length} sources configured</Chip>
+          <Chip dot={measured ? color.success : color.ghost}>{measured} measured channels</Chip>
+        </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: space[3] }}>
         {platforms.map(platform => {
           const source = platformSourceValue(platform, context)
           const mentioned = platformIsMentioned(platform, context)
-          const active = !!source || mentioned
+          const evidence = channelEvidence.get(platform.key)
+          const hasEvidence = (evidence?.posts ?? 0) > 0
+          const active = !!source || mentioned || hasEvidence
           const policy = policies[platform.key] ?? DEMAND_CHANNEL_OPERATING_POLICIES[platform.key]
           const customized = demandChannelPolicyHasOverride(platform.key, policy)
           return (
@@ -354,14 +613,16 @@ function DemandChannelMatrix({
                 </span>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platform.label}</div>
-                  <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: 2 }}>{source ? 'Source configured' : active ? 'In channel strategy' : 'Available'}</div>
+                  <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: 2 }}>{source ? 'Source configured' : evidence?.measured ? 'Learning from metrics' : hasEvidence ? 'Content tracked' : active ? 'In channel strategy' : 'Available'}</div>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', marginBottom: space[3] }}>
                 <Chip dot={publishingTone(platform.publishing)}>{publishingLabel(platform.publishing)}</Chip>
                 <Chip dot={riskTone(policy.risk)}>{riskLabel(policy.risk)}</Chip>
                 {source && <Chip dot={color.success}>Source</Chip>}
-                {!source && active && <Chip dot={color.info}>Planned</Chip>}
+                {!source && mentioned && <Chip dot={color.info}>Planned</Chip>}
+                {hasEvidence && <Chip dot={evidence?.measured ? color.success : color.warn}>{evidence?.posts ?? 0} posts</Chip>}
+                {evidence?.measured ? <Chip dot={color.accent}>{evidence.measured} measured</Chip> : null}
                 {customized && <Chip dot={color.accent}>Custom</Chip>}
               </div>
               {source && (
@@ -552,6 +813,10 @@ export default function Brain() {
   const [sourceStatus, setSourceStatus] = useState('')
   const [sourceError, setSourceError] = useState<string | null>(null)
   const [selectedPolicyKey, setSelectedPolicyKey] = useState<DemandPlatformKey>('linkedin')
+  const [learningPosts, setLearningPosts] = useState<Post[]>([])
+  const [learningSnapshots, setLearningSnapshots] = useState<ContentMetricSnapshot[]>([])
+  const [learningLoading, setLearningLoading] = useState(false)
+  const [learningError, setLearningError] = useState<string | null>(null)
 
   useEffect(() => {
     const parsed = parseProjectInstructions(activeProject?.instructions ?? '')
@@ -568,6 +833,58 @@ export default function Brain() {
     () => demandChannelPoliciesFromText(business.channelOperatingPolicies),
     [business.channelOperatingPolicies],
   )
+  const brainMetrics = useMemo(() => buildBrainMetrics(learningSnapshots), [learningSnapshots])
+  const channelEvidence = useMemo(() => buildBrainChannelEvidence(learningPosts, brainMetrics), [learningPosts, brainMetrics])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!activeProject?.id) {
+      setLearningPosts([])
+      setLearningSnapshots([])
+      setLearningLoading(false)
+      setLearningError(null)
+      return () => { cancelled = true }
+    }
+
+    setLearningLoading(true)
+    setLearningError(null)
+    ;(async () => {
+      const [postRes, metricRes] = await Promise.all([
+        supabase
+          .from('content_posts')
+          .select('*')
+          .eq('project_id', activeProject.id)
+          .order('created_at', { ascending: false })
+          .limit(250),
+        supabase
+          .from('content_metric_snapshots')
+          .select('id, org_id, project_id, post_id, provider, provider_account_id, provider_object_id, object_type, metric_name, metric_value, metric_period, metric_time, pulled_at, raw, created_at')
+          .eq('project_id', activeProject.id)
+          .in('metric_name', Array.from(BRAIN_DEMAND_METRICS))
+          .order('pulled_at', { ascending: false })
+          .limit(1500),
+      ])
+      if (cancelled) return
+      const firstError = postRes.error ?? metricRes.error
+      if (firstError) {
+        setLearningError(firstError.message)
+        setLearningPosts([])
+        setLearningSnapshots([])
+      } else {
+        setLearningPosts((postRes.data ?? []) as Post[])
+        setLearningSnapshots((metricRes.data ?? []) as ContentMetricSnapshot[])
+      }
+      setLearningLoading(false)
+    })().catch(error => {
+      if (cancelled) return
+      setLearningError(error instanceof Error ? error.message : 'Could not load learning evidence.')
+      setLearningPosts([])
+      setLearningSnapshots([])
+      setLearningLoading(false)
+    })
+
+    return () => { cancelled = true }
+  }, [activeProject?.id])
 
   async function saveInstr() {
     if (!activeProject?.id) return
@@ -854,6 +1171,9 @@ export default function Brain() {
         sourceCount={sourceCount}
         factCount={factCount}
         operatingCount={operatingCount}
+        channelEvidence={channelEvidence}
+        learningLoading={learningLoading}
+        learningError={learningError}
       />
 
       {/* Agentic-first: let Vera draft the brain from the client's content
@@ -992,6 +1312,7 @@ export default function Brain() {
         <DemandChannelMatrix
           context={business}
           policies={channelPolicies}
+          channelEvidence={channelEvidence}
           onEditPolicy={key => setSelectedPolicyKey(key)}
         />
 
