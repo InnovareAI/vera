@@ -28,8 +28,12 @@ import {
   DEFAULT_DEMAND_OPERATING_MODEL,
   DEMAND_PLATFORM_DEFINITIONS,
   DEMAND_SOURCE_KEYS,
+  demandChannelPoliciesFromText,
+  demandChannelPolicyOverrideCount,
   demandChannelMatrixPrompt,
   demandChannelsFromContext,
+  type DemandChannelOperatingPolicy,
+  type DemandPlatformDefinition,
 } from '../lib/demandModel'
 import {
   buildModelRecommendations,
@@ -443,6 +447,11 @@ type DemandPlanSnapshot = {
   tone: string[]
   approvals: string[]
   learning: string[]
+  policySummary: string[]
+  publishGuards: string[]
+  samTriggers: string[]
+  customPolicyCount: number
+  highCareCount: number
   missing: string[]
 }
 
@@ -474,6 +483,59 @@ const DEFAULT_TONE_ITEMS = ['Shared brand core', 'Channel-native TOV', 'Medium-s
 const DEFAULT_APPROVAL_ITEMS = ['Case based', 'One named owner', 'All stakeholders for high-risk work']
 const DEFAULT_LEARNING_ITEMS = ['Weekly performance review', 'Refresh platform best practices', 'Turn wins into reusable skills']
 
+function demandPolicyRiskLabel(risk: DemandChannelOperatingPolicy['risk']) {
+  if (risk === 'high') return 'high approval care'
+  if (risk === 'medium') return 'approval aware'
+  return 'standard review'
+}
+
+function platformMentionedInStrategy(platform: DemandPlatformDefinition, context: BusinessContext) {
+  const haystack = [
+    context.channelStrategy,
+    context.contentFormats,
+    context.platformToneOfVoice,
+    context.demandObjective,
+  ].join(' ').toLowerCase()
+  const needles = [
+    platform.key,
+    platform.label.toLowerCase(),
+    ...(platform.key === 'x' ? ['twitter'] : []),
+    ...(platform.key === 'email' ? ['newsletter', 'nurture'] : []),
+    ...(platform.key === 'blog' ? ['website', 'seo', 'article'] : []),
+  ]
+  return needles.some(needle => haystack.includes(needle))
+}
+
+function activeDemandPolicyPlatforms(context: BusinessContext) {
+  const active = DEMAND_PLATFORM_DEFINITIONS.filter(platform => (
+    (platform.sourceKey && context[platform.sourceKey]?.trim()) || platformMentionedInStrategy(platform, context)
+  ))
+  return active.length ? active : DEMAND_PLATFORM_DEFINITIONS
+}
+
+function buildDemandPolicySummary(context: BusinessContext) {
+  const policies = demandChannelPoliciesFromText(context.channelOperatingPolicies)
+  const platforms = activeDemandPolicyPlatforms(context)
+  const ordered = [...platforms].sort((a, b) => {
+    const aPolicy = policies[a.key]
+    const bPolicy = policies[b.key]
+    const riskRank = { high: 3, medium: 2, low: 1 }
+    const riskDelta = riskRank[bPolicy.risk] - riskRank[aPolicy.risk]
+    if (riskDelta !== 0) return riskDelta
+    return a.label.localeCompare(b.label)
+  })
+  const policySummary = ordered.map(platform => `${platform.label}: ${demandPolicyRiskLabel(policies[platform.key].risk)}`)
+  const publishGuards = ordered.map(platform => `${platform.label}: ${policies[platform.key].publishGuard}`)
+  const samTriggers = ordered.map(platform => `${platform.label}: ${policies[platform.key].samTrigger}`)
+  return {
+    policySummary,
+    publishGuards,
+    samTriggers,
+    customPolicyCount: demandChannelPolicyOverrideCount(policies),
+    highCareCount: ordered.filter(platform => policies[platform.key].risk === 'high').length,
+  }
+}
+
 function buildDemandPlanSnapshot(context: BusinessContext): DemandPlanSnapshot {
   const filled = DEMAND_PLAN_FIELDS.filter(field => context[field.key].trim()).length
   const sourceCount = DEMAND_SOURCE_KEYS.filter(key => context[key].trim()).length
@@ -488,6 +550,7 @@ function buildDemandPlanSnapshot(context: BusinessContext): DemandPlanSnapshot {
   const toneItems = splitList(context.platformToneOfVoice, 3)
   const approvalItems = splitList(context.approvalStakeholders || context.approvalModel, 3)
   const learningItems = splitList(context.learningCadence, 3)
+  const policy = buildDemandPolicySummary(context)
   return {
     completeness: Math.round((filled / DEMAND_PLAN_FIELDS.length) * 100),
     sourceCount,
@@ -502,6 +565,11 @@ function buildDemandPlanSnapshot(context: BusinessContext): DemandPlanSnapshot {
     tone: toneItems.length ? toneItems : DEFAULT_TONE_ITEMS,
     approvals: approvalItems.length ? approvalItems : DEFAULT_APPROVAL_ITEMS,
     learning: learningItems.length ? learningItems : DEFAULT_LEARNING_ITEMS,
+    policySummary: policy.policySummary,
+    publishGuards: policy.publishGuards,
+    samTriggers: policy.samTriggers,
+    customPolicyCount: policy.customPolicyCount,
+    highCareCount: policy.highCareCount,
     missing,
   }
 }
@@ -2520,9 +2588,14 @@ function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {
     fontWeight: t.weight.medium,
     cursor: 'pointer',
   }
-  const planCampaignPrompt = `Use the saved Demand Brain and operating model for ${projectName} to plan the next B2B top-of-funnel demand campaign. Include ICP, pain, offer, conversion path, approval model, channel roles, content formats, success signals, SAM handoff rules, and the first content batch.`
-  const channelMatrixPrompt = demandChannelMatrixPrompt(projectName)
-  const handoffPrompt = `Create a SAM handoff plan for ${projectName}. Define which comments, shares, clicks, objections, questions, accounts, and traffic signals should become sales research or follow-up, and how VERA should label them.`
+  const policyContext = [
+    `Channel policy summary: ${plan.policySummary.join('; ')}`,
+    `Publishing guards: ${plan.publishGuards.slice(0, 8).join('; ')}`,
+    `SAM triggers: ${plan.samTriggers.slice(0, 8).join('; ')}`,
+  ].join('\n')
+  const planCampaignPrompt = `Use the saved Demand Brain and operating model for ${projectName} to plan the next B2B top-of-funnel demand campaign. Include ICP, pain, offer, conversion path, approval model, channel roles, content formats, success signals, SAM handoff rules, and the first content batch. Respect these saved channel policies:\n${policyContext}`
+  const channelMatrixPrompt = `${demandChannelMatrixPrompt(projectName)} Respect these saved channel policies:\n${policyContext}`
+  const handoffPrompt = `Create a SAM handoff plan for ${projectName}. Define which comments, shares, clicks, objections, questions, accounts, and traffic signals should become sales research or follow-up, and how VERA should label them. Use these saved SAM triggers:\n${plan.samTriggers.join('; ')}`
   return (
     <section style={{ width: '100%', maxWidth: 760, marginTop: space[5], padding: space[5], background: color.surface, border: `1px solid ${ready ? 'var(--accent-line)' : color.line}`, borderRadius: radius.lg, textAlign: 'left', boxShadow: ready ? 'var(--shadow-pop)' : 'none' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: space[4], justifyContent: 'space-between', marginBottom: space[4] }}>
@@ -2536,6 +2609,8 @@ function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: space[3] }}>
             <PlanPill tone={ready ? 'accent' : 'neutral'}>{ready ? 'Client model active' : 'Demand baseline active'}</PlanPill>
             <PlanPill>{plan.sourceCount}/{plan.sourceTotal} sources connected</PlanPill>
+            <PlanPill>{plan.customPolicyCount} custom channel policies</PlanPill>
+            {plan.highCareCount > 0 && <PlanPill tone="accent">{plan.highCareCount} high-care channels</PlanPill>}
             <PlanPill>Sellable workspace model</PlanPill>
           </div>
         </div>
@@ -2551,6 +2626,7 @@ function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {
         <PlanCluster icon={FileText} label="Formats" items={plan.formats} />
         <PlanCluster icon={Share2} label="Signals" items={splitList(plan.signals, 4)} />
         <PlanCluster icon={Check} label="Approvals" items={plan.approvals} />
+        <PlanCluster icon={Lock} label="Channel policy" items={plan.policySummary} />
         <PlanCluster icon={RefreshCw} label="Learning" items={plan.learning} />
       </div>
 
