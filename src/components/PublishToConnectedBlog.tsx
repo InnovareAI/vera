@@ -109,6 +109,7 @@ function PublishModal({ publisher, post, onClose }: {
   const [dryRun, setDryRun] = useState<DryRunResult | null>(null)
   const [result, setResult] = useState<PublishResult | null>(null)
   const [error, setError] = useState<{ message: string; recovery: string } | null>(null)
+  const statusTarget = cmsStatusTarget(post)
 
   useEffect(() => {
     void runDryRun()
@@ -144,7 +145,7 @@ function PublishModal({ publisher, post, onClose }: {
       setDryRun(data)
       setStage('confirm')
     } catch (e) {
-      setError({ message: e instanceof Error ? e.message : String(e), recovery: 'Network — try again.' })
+      setError({ message: e instanceof Error ? e.message : String(e), recovery: 'Network issue. Try again.' })
       setStage('failed')
     }
   }
@@ -187,7 +188,7 @@ function PublishModal({ publisher, post, onClose }: {
         }).catch(() => {})
       }
     } catch (e) {
-      setError({ message: e instanceof Error ? e.message : String(e), recovery: 'Network — try again.' })
+      setError({ message: e instanceof Error ? e.message : String(e), recovery: 'Network issue. Try again.' })
       setStage('failed')
     }
   }
@@ -218,7 +219,7 @@ function PublishModal({ publisher, post, onClose }: {
           {stage === 'confirm' && dryRun && (
             <div className="space-y-4">
               <Field label="Final slug" value={dryRun.preview.final_slug} mono />
-              <Field label="Status target" value={post.status === 'Approved' ? 'published' : 'draft'} />
+              <Field label="Status target" value={statusTarget} />
               {dryRun.preview.target_categories.length > 0 &&
                 <Field label="Categories" value={dryRun.preview.target_categories.join(' · ')} />}
               {dryRun.preview.target_tags.length > 0 &&
@@ -260,7 +261,7 @@ function PublishModal({ publisher, post, onClose }: {
                 </a>
               )}
               {result.verified === false && (
-                <p className="text-xs text-amber-700 mt-2">⚠ Post created but verify didn\'t confirm published status — check on the site.</p>
+                <p className="text-xs text-amber-700 mt-2">Post created, but verify did not confirm published status. Check on the site.</p>
               )}
             </div>
           )}
@@ -356,6 +357,13 @@ function toPostInput(post: Post): Record<string, unknown> {
     tags: post.hashtags?.map(h => h.replace(/^#/, '')) ?? [],
     categories: [],   // populate from post metadata once we add a categories field
     featured_image_url: post.media_url ?? undefined,
-    status: post.status === 'Approved' ? 'published' : 'draft',
+    status: cmsStatusTarget(post),
+    scheduled_at: post.scheduled_at ?? undefined,
   }
+}
+
+function cmsStatusTarget(post: Post): 'draft' | 'published' | 'scheduled' {
+  const status = (post.status ?? '').trim().toLowerCase().replace(/\s+/g, '_')
+  if (status !== 'approved') return 'draft'
+  return post.scheduled_at ? 'scheduled' : 'published'
 }
