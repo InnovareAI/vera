@@ -771,6 +771,7 @@ interface WorkspaceContext {
     description: string
     project_id?: string | null
     trigger_description?: string | null
+    prompt_module?: string | null
     gotchas?: string[] | null
     confidence?: string | null
   }>
@@ -891,7 +892,7 @@ async function loadContext(
   embeddingRuntime?: EmbeddingRuntime | null,
 ): Promise<WorkspaceContext> {
   const skillsQuery = supabase.from('skills')
-    .select('org_id, name, type, description, project_id, trigger_description, gotchas, confidence, sort_order')
+    .select('org_id, name, type, description, project_id, trigger_description, prompt_module, gotchas, confidence, sort_order')
     .or(`org_id.is.null,org_id.eq.${orgId}`)
     .eq('is_active', true)
     .order('type')
@@ -1268,6 +1269,14 @@ function formatIntegrationCapabilities(capabilities: Record<string, unknown> | n
   return active.length ? active.join(', ') : 'none'
 }
 
+function xmlAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 function renderContext(ctx: WorkspaceContext, route: string): string {
   const lines: string[] = []
   lines.push(`<workspace_context>`)
@@ -1404,6 +1413,20 @@ function renderContext(ctx: WorkspaceContext, route: string): string {
         if (Array.isArray(s.gotchas) && s.gotchas.length) {
           lines.push(`      Gotchas: ${s.gotchas.slice(0, 4).join('; ')}`)
         }
+      }
+    }
+    const clientRecipes = ctx.skills
+      .filter(s => s.project_id && s.prompt_module?.trim())
+      .slice(0, 4)
+    if (clientRecipes.length) {
+      lines.push(`Active client skill recipes (${clientRecipes.length}):`)
+      for (const s of clientRecipes) {
+        const recipe = (s.prompt_module ?? '').trim()
+        lines.push(`  <client_skill name="${xmlAttr(s.name)}" type="${xmlAttr(s.type)}">`)
+        lines.push(`  Trigger: ${s.trigger_description ?? 'when relevant'}`)
+        lines.push(recipe.slice(0, 1400))
+        if (recipe.length > 1400) lines.push(`  [truncated, use search_skills for the full recipe]`)
+        lines.push(`  </client_skill>`)
       }
     }
   }
