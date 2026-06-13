@@ -5,7 +5,8 @@ TARGET_HOST="${TARGET_HOST:-root@157.90.255.28}"
 TARGET_STACK="${TARGET_STACK:-/srv/supabase-content}"
 TARGET_SSH_KEY="${TARGET_SSH_KEY:-}"
 PROJECT_SLUG="${PROJECT_SLUG:-rdf-style}"
-MODEL="${MODEL:-seedream}"
+IMAGE_MODEL="${IMAGE_MODEL:-${MODEL:-seedream}}"
+VIDEO_MODEL="${VIDEO_MODEL:-hailuo}"
 SUPABASE_PUBLIC_URL="${SUPABASE_PUBLIC_URL:-https://supabase-content-eu.innovareai.com}"
 
 if [[ -z "$TARGET_SSH_KEY" && -f "$HOME/.ssh/vera_hetzner_ed25519" ]]; then
@@ -21,7 +22,7 @@ log() {
   printf '%s [media-scope] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
 }
 
-log "checking $PROJECT_SLUG with FAL-only model '$MODEL'"
+log "checking $PROJECT_SLUG with FAL-only image model '$IMAGE_MODEL' and video model '$VIDEO_MODEL'"
 
 marker_line="$(awk '/^__REMOTE_SCRIPT__$/{print NR + 1; exit}' "$0")"
 if [[ -z "$marker_line" ]]; then
@@ -29,7 +30,7 @@ if [[ -z "$marker_line" ]]; then
   exit 1
 fi
 
-remote_env="TARGET_STACK='$TARGET_STACK' PROJECT_SLUG='$PROJECT_SLUG' MODEL='$MODEL' SUPABASE_PUBLIC_URL='$SUPABASE_PUBLIC_URL'"
+remote_env="TARGET_STACK='$TARGET_STACK' PROJECT_SLUG='$PROJECT_SLUG' IMAGE_MODEL='$IMAGE_MODEL' VIDEO_MODEL='$VIDEO_MODEL' SUPABASE_PUBLIC_URL='$SUPABASE_PUBLIC_URL'"
 tail -n +"$marker_line" "$0" | ssh "${SSH_ARGS[@]}" "$TARGET_HOST" "$remote_env bash -s"
 exit $?
 
@@ -65,21 +66,49 @@ fi
 response_file="$(mktemp)"
 trap 'rm -f "$response_file"' EXIT
 
-status="$(curl -sS -o "$response_file" -w '%{http_code}' --max-time 20 \
+image_status="$(curl -sS -o "$response_file" -w '%{http_code}' --max-time 20 \
   -H "Authorization: Bearer $service_key" \
   -H "apikey: $service_key" \
   -H "Content-Type: application/json" \
-  -d "{\"project_id\":\"$project_id\",\"model\":\"$MODEL\",\"prompt\":\"media key scope smoke\"}" \
+  -d "{\"project_id\":\"$project_id\",\"model\":\"$IMAGE_MODEL\",\"prompt\":\"media key scope smoke\"}" \
   "$SUPABASE_PUBLIC_URL/functions/v1/generate-image")"
 
 body="$(cat "$response_file")"
-if [[ "$status" != "403" ]]; then
-  printf 'Expected HTTP 403, got HTTP %s\n%s\n' "$status" "$body" >&2
+if [[ "$image_status" != "403" ]]; then
+  printf 'Expected image HTTP 403, got HTTP %s\n%s\n' "$image_status" "$body" >&2
   exit 1
 fi
 if [[ "$body" != *"requires this client space to use its own OpenRouter, OpenAI, or FAL key"* ]]; then
-  printf 'Unexpected response body:\n%s\n' "$body" >&2
+  printf 'Unexpected image response body:\n%s\n' "$body" >&2
   exit 1
 fi
 
-printf 'PASS project=%s model=%s status=%s\n' "$PROJECT_SLUG" "$MODEL" "$status"
+request_id="media-scope-smoke-$(date +%s)-$$"
+docker exec content-supabase-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 -Atc \
+  "insert into public.video_jobs (request_id, project_id, slug, status, prompt, key_source)
+   values ('$request_id', '$project_id', 'fal-ai/minimax', 'rendering', 'media key scope smoke', 'client');" >/dev/null
+
+cleanup_video_job() {
+  docker exec content-supabase-db psql -U supabase_admin -d postgres -Atc \
+    "delete from public.video_jobs where request_id = '$request_id';" >/dev/null || true
+}
+trap 'rm -f "$response_file"; cleanup_video_job' EXIT
+
+video_status="$(curl -sS -o "$response_file" -w '%{http_code}' --max-time 20 \
+  -H "Authorization: Bearer $service_key" \
+  -H "apikey: $service_key" \
+  -H "Content-Type: application/json" \
+  -d "{\"project_id\":\"$project_id\",\"model\":\"$VIDEO_MODEL\",\"action\":\"status\",\"request_id\":\"$request_id\"}" \
+  "$SUPABASE_PUBLIC_URL/functions/v1/generate-video")"
+
+video_body="$(cat "$response_file")"
+if [[ "$video_status" != "403" ]]; then
+  printf 'Expected video HTTP 403, got HTTP %s\n%s\n' "$video_status" "$video_body" >&2
+  exit 1
+fi
+if [[ "$video_body" != *"Video generation requires this client space to use its own FAL key"* ]]; then
+  printf 'Unexpected video response body:\n%s\n' "$video_body" >&2
+  exit 1
+fi
+
+printf 'PASS project=%s image_model=%s image_status=%s video_model=%s video_status=%s\n' "$PROJECT_SLUG" "$IMAGE_MODEL" "$image_status" "$VIDEO_MODEL" "$video_status"
