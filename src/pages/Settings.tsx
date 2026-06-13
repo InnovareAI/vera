@@ -1542,13 +1542,13 @@ function formatCapability(value: string) {
 function formatEntitlementScope(row: AiEntitlementRow, projectName: (projectId: string | null) => string) {
   if (row.project_id) return `Scope: ${projectName(row.project_id)}`
   if (row.org_id) return 'Scope: workspace'
-  return 'Scope: all client spaces'
+  return 'Scope: unscoped, inactive'
 }
 
 function entitlementAppliesToWorkspace(row: AiEntitlementRow, orgId: string, projectIds: Set<string>) {
   if (row.project_id) return projectIds.has(row.project_id)
   if (row.org_id) return row.org_id === orgId
-  return true
+  return false
 }
 
 function shortId(value: string) {

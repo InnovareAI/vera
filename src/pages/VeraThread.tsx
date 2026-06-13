@@ -788,7 +788,7 @@ export default function VeraThread() {
           if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) return false
           if (row.project_id) return row.project_id === activeProject.id
           if (row.org_id) return row.org_id === activeOrg.id
-          return true
+          return false
       }
       const hasPlatformImageEntitlement = entitlementRows.some(row => row.capability === 'platform_fal_image' && entitlementApplies(row))
       const hasPlatformVideoEntitlement = entitlementRows.some(row => row.capability === 'platform_fal_video' && entitlementApplies(row))

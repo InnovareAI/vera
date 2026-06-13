@@ -63,6 +63,17 @@ if [[ "$fal_key_count" != "0" ]]; then
   exit 1
 fi
 
+global_media_entitlements="$(docker exec content-supabase-db psql -U supabase_admin -d postgres -Atc \
+  "select count(*) from public.ai_user_entitlements
+   where enabled = true
+     and capability in ('platform_fal_image','platform_fal_video','platform_premium_video')
+     and org_id is null
+     and project_id is null;")"
+if [[ "$global_media_entitlements" != "0" ]]; then
+  printf 'Expected zero unscoped active platform media entitlements, found %s\n' "$global_media_entitlements" >&2
+  exit 1
+fi
+
 response_file="$(mktemp)"
 trap 'rm -f "$response_file"' EXIT
 
@@ -80,6 +91,24 @@ if [[ "$image_status" != "403" ]]; then
 fi
 if [[ "$body" != *"requires this client space to use its own OpenRouter, OpenAI, or FAL key"* ]]; then
   printf 'Unexpected image response body:\n%s\n' "$body" >&2
+  exit 1
+fi
+
+video_submit_status="$(curl -sS -o "$response_file" -w '%{http_code}' --max-time 20 \
+  -H "Authorization: Bearer $service_key" \
+  -H "apikey: $service_key" \
+  -H "Content-Type: application/json" \
+  -d "{\"project_id\":\"$project_id\",\"model\":\"$VIDEO_MODEL\",\"action\":\"submit\",\"prompt\":\"media key scope smoke\"}" \
+  "$SUPABASE_PUBLIC_URL/functions/v1/generate-video")"
+
+video_submit_body="$(cat "$response_file")"
+if [[ "$video_submit_status" != "403" ]]; then
+  printf 'Expected video submit HTTP 403, got HTTP %s\n%s\n' "$video_submit_status" "$video_submit_body" >&2
+  exit 1
+fi
+if [[ "$video_submit_body" != *"Video generation requires this client space to use its own FAL key"* \
+   && "$video_submit_body" != *"Video generation is disabled for this client space"* ]]; then
+  printf 'Unexpected video submit response body:\n%s\n' "$video_submit_body" >&2
   exit 1
 fi
 
@@ -111,4 +140,4 @@ if [[ "$video_body" != *"Video generation requires this client space to use its 
   exit 1
 fi
 
-printf 'PASS project=%s image_model=%s image_status=%s video_model=%s video_status=%s\n' "$PROJECT_SLUG" "$IMAGE_MODEL" "$image_status" "$VIDEO_MODEL" "$video_status"
+printf 'PASS project=%s image_model=%s image_status=%s video_model=%s video_submit_status=%s video_status=%s\n' "$PROJECT_SLUG" "$IMAGE_MODEL" "$image_status" "$VIDEO_MODEL" "$video_submit_status" "$video_status"

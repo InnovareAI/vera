@@ -34,7 +34,7 @@ export async function hasAiUserEntitlement(
       if (row.expires_at && new Date(row.expires_at).getTime() <= now) return false
       if (row.project_id) return row.project_id === check.projectId
       if (row.org_id) return row.org_id === check.orgId
-      return true
+      return false
     })
 }
 
