@@ -242,12 +242,20 @@ Deno.serve(async (req) => {
 
         // Fetch the audience (and its parent ICP if it's a buyer persona) so
         // the Strategist writes for a specific reader, not a generic one.
-        const audienceQuery = audience_id
-          ? supabase.from('audiences').select('kind, name, pain_points, goals, attributes, notes, parent_id').eq('id', audience_id).maybeSingle()
+        let audienceQuery = audience_id
+          ? supabase.from('audiences').select('org_id, project_id, kind, name, pain_points, goals, attributes, notes, parent_id').eq('id', audience_id).eq('org_id', org_id)
+          : null
+        if (audienceQuery) {
+          audienceQuery = project_id
+            ? audienceQuery.eq('project_id', project_id)
+            : audienceQuery.is('project_id', null)
+        }
+        const audiencePromise = audienceQuery
+          ? audienceQuery.maybeSingle()
           : Promise.resolve({ data: null, error: null })
 
         const [{ data: skillRows }, { data: campaign }, { data: audience }] = await Promise.all([
-          skillsQuery, campaignQuery, audienceQuery,
+          skillsQuery, campaignQuery, audiencePromise,
         ])
         const skills = ((skillRows ?? []) as SkillRow[]).filter(s =>
           (s.org_id === null || s.org_id === org_id) &&
@@ -255,9 +263,16 @@ Deno.serve(async (req) => {
         )
 
         // If the audience is a buyer_persona, fetch the parent ICP for full context
-        const parentIcp = (audience?.parent_id)
-          ? (await supabase.from('audiences').select('name, attributes, pain_points').eq('id', audience.parent_id).maybeSingle()).data
-          : null
+        let parentIcp = null
+        if (audience?.parent_id) {
+          let parentQuery = supabase.from('audiences').select('name, attributes, pain_points')
+            .eq('id', audience.parent_id)
+            .eq('org_id', org_id)
+          parentQuery = project_id
+            ? parentQuery.eq('project_id', project_id)
+            : parentQuery.is('project_id', null)
+          parentIcp = (await parentQuery.maybeSingle()).data
+        }
 
         // ── STEP 2: STRATEGIST ────────────────────────────────────────────────
         const strategistSkills = skills?.filter(s => s.injected_into === 'strategist') ?? []

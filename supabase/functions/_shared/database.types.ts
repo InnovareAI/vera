@@ -205,6 +205,7 @@ export type Database = {
           org_id: string
           pain_points: Json
           parent_id: string | null
+          project_id: string | null
           updated_at: string
         }
         Insert: {
@@ -219,6 +220,7 @@ export type Database = {
           org_id: string
           pain_points?: Json
           parent_id?: string | null
+          project_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -233,6 +235,7 @@ export type Database = {
           org_id?: string
           pain_points?: Json
           parent_id?: string | null
+          project_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -248,6 +251,13 @@ export type Database = {
             columns: ["parent_id"]
             isOneToOne: false
             referencedRelation: "audiences"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "audiences_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
             referencedColumns: ["id"]
           },
         ]

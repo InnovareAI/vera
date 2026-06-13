@@ -81,6 +81,7 @@ export interface Post {
 export interface Audience {
   id: string
   org_id: string
+  project_id?: string | null
   kind: 'icp' | 'buyer_persona' | 'consumer_persona' | 'audience'
   name: string
   is_primary: boolean

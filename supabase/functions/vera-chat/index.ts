@@ -923,6 +923,15 @@ async function loadContext(
     .eq('status', 'pending')
   if (projectId) pendingQuery = pendingQuery.eq('project_id', projectId)
 
+  let audiencesQuery = supabase.from('audiences')
+    .select('kind, name, is_primary')
+    .eq('org_id', orgId)
+    .order('is_primary', { ascending: false })
+    .limit(10)
+  audiencesQuery = projectId
+    ? audiencesQuery.eq('project_id', projectId)
+    : audiencesQuery.is('project_id', null)
+
   // Parallel fetch — each query is small, no need to serialise.
   const [
     orgRes, brandRes, campRes, audRes, auditRes, pendingRes, memRes, skillsRes, perfRes, integrationsRes,
@@ -930,7 +939,7 @@ async function loadContext(
     supabase.from('organizations').select('name, unipile_account_id, unipile_health_status, unipile_connected_at').eq('id', orgId).maybeSingle(),
     loadBrandVoice(supabase, orgId, projectId),
     supabase.from('campaigns').select('name, theme, status').eq('org_id', orgId).eq('status', 'active').limit(10),
-    supabase.from('audiences').select('kind, name, is_primary').eq('org_id', orgId).limit(10),
+    audiencesQuery,
     supabase.from('linkedin_audits').select('kind, result, created_at').eq('org_id', orgId).order('created_at', { ascending: false }).limit(2),
     pendingQuery,
     // Workspace-wide memories (user_id null) + this user's personal memories.

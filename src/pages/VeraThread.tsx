@@ -920,7 +920,7 @@ export default function VeraThread() {
     const pid = activeProject.id, oid = activeOrg.id
     const instr = (activeProject.instructions ?? '').trim()
     Promise.all([
-      supabase.from('audiences').select('id', { count: 'exact', head: true }).eq('org_id', oid),
+      supabase.from('audiences').select('id', { count: 'exact', head: true }).eq('project_id', pid),
       supabase.from('brand_voice').select('tone, system_prompt, sample_posts').or(`project_id.eq.${pid},and(project_id.is.null,org_id.eq.${oid})`).limit(6),
       supabase.from('content_categories').select('id', { count: 'exact', head: true }).eq('project_id', pid),
       supabase.from('project_knowledge').select('id', { count: 'exact', head: true }).eq('project_id', pid),

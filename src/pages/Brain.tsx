@@ -2,9 +2,9 @@
 //
 // · Custom instructions — per project; vera-chat reads them EVERY turn. The
 //   single highest-leverage per-client lever.
-// · Brand voice — tone, rules, forbidden phrases, persona (workspace-level for
-//   now; shared across the client's projects, same row vera-chat reads).
-// · Audiences — who VERA writes toward (read view for now).
+// · Brand voice — tone, rules, forbidden phrases, persona (client-scoped, with
+//   a workspace fallback only as a starter draft).
+// · Audiences — who VERA writes toward for this client.
 // · Knowledge — link to the client's searchable sources (managed in Knowledge;
 //   brand-kit files live in Artifacts).
 
@@ -1414,9 +1414,9 @@ export default function Brain() {
   const [audiences, setAudiences] = useState<Audience[]>([])
   const [addingAudience, setAddingAudience] = useState(false)
   const reloadAudiences = useCallback(() => {
-    if (!activeOrg?.id) return
-    supabase.from('audiences').select('*').eq('org_id', activeOrg.id).order('created_at').then(({ data }) => setAudiences((data ?? []) as Audience[]))
-  }, [activeOrg?.id])
+    if (!activeProject?.id) { setAudiences([]); return }
+    supabase.from('audiences').select('*').eq('project_id', activeProject.id).order('created_at').then(({ data }) => setAudiences((data ?? []) as Audience[]))
+  }, [activeProject?.id])
   useEffect(() => { reloadAudiences() }, [reloadAudiences])
 
   // ── content categories (per-client buckets — Vera tags posts, Calendar/Artifacts filter) ──
@@ -1803,7 +1803,7 @@ export default function Brain() {
       <section style={{ marginBottom: space[9] }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: space[2] }}>
           <SectionLabel>Audiences</SectionLabel>
-          {activeOrg?.id && !addingAudience && (
+          {activeOrg?.id && activeProject?.id && !addingAudience && (
             <Button variant="secondary" size="sm" onClick={() => setAddingAudience(true)}><Plus size={13} /> Add audience</Button>
           )}
         </div>
@@ -1811,10 +1811,10 @@ export default function Brain() {
           Who VERA writes toward, driving register, proof points, and which pains to hit.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: space[3] }}>
-          {addingAudience && activeOrg?.id && (
-            <AudienceEditor initial={{}} orgId={activeOrg.id} onSaved={() => { setAddingAudience(false); reloadAudiences() }} onCancel={() => setAddingAudience(false)} />
+          {addingAudience && activeOrg?.id && activeProject?.id && (
+            <AudienceEditor initial={{}} orgId={activeOrg.id} projectId={activeProject.id} onSaved={() => { setAddingAudience(false); reloadAudiences() }} onCancel={() => setAddingAudience(false)} />
           )}
-          {audiences.map(a => <AudienceEditor key={a.id} initial={a} orgId={activeOrg?.id ?? ''} onSaved={reloadAudiences} />)}
+          {audiences.map(a => <AudienceEditor key={a.id} initial={a} orgId={activeOrg?.id ?? ''} projectId={activeProject?.id ?? ''} onSaved={reloadAudiences} />)}
           {audiences.length === 0 && !addingAudience && (
             <p style={{ fontSize: t.size.cap, color: color.ghost }}>No audiences yet. Add one so VERA writes toward a specific reader.</p>
           )}
@@ -1896,25 +1896,25 @@ function TagInput({ label, placeholder, items, onAdd, onRemove, danger }: {
 }
 
 // Inline editor for one audience — name, primary flag, pain points, goals.
-function AudienceEditor({ initial, orgId, onSaved, onCancel }: {
-  initial: Partial<Audience>; orgId: string; onSaved: () => void; onCancel?: () => void
+function AudienceEditor({ initial, orgId, projectId, onSaved, onCancel }: {
+  initial: Partial<Audience>; orgId: string; projectId: string; onSaved: () => void; onCancel?: () => void
 }) {
   const [a, setA] = useState<Partial<Audience>>(initial)
   const [saving, setSaving] = useState(false)
   const addArr = (key: 'pain_points' | 'goals', v: string) => { if (v.trim()) setA(p => ({ ...p, [key]: [...((p[key] as string[]) || []), v.trim()] })) }
   const rmArr = (key: 'pain_points' | 'goals', i: number) => setA(p => ({ ...p, [key]: ((p[key] as string[]) || []).filter((_, x) => x !== i) }))
   async function save() {
-    if (!a.name?.trim() || !orgId) return
+    if (!a.name?.trim() || !orgId || !projectId) return
     setSaving(true)
-    const payload = { org_id: orgId, name: a.name.trim(), kind: a.kind || 'audience', is_primary: !!a.is_primary, pain_points: a.pain_points ?? [], goals: a.goals ?? [] }
-    if (a.id) await supabase.from('audiences').update(payload).eq('id', a.id)
+    const payload = { org_id: orgId, project_id: projectId, name: a.name.trim(), kind: a.kind || 'audience', is_primary: !!a.is_primary, pain_points: a.pain_points ?? [], goals: a.goals ?? [] }
+    if (a.id) await supabase.from('audiences').update(payload).eq('id', a.id).eq('project_id', projectId)
     else await supabase.from('audiences').insert(payload)
     setSaving(false); onSaved()
   }
   async function del() {
     if (!a.id) { onCancel?.(); return }
     if (!confirm(`Delete audience "${a.name}"?`)) return
-    await supabase.from('audiences').delete().eq('id', a.id); onSaved()
+    await supabase.from('audiences').delete().eq('id', a.id).eq('project_id', projectId); onSaved()
   }
   return (
     <div style={{ padding: space[4], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, display: 'flex', flexDirection: 'column', gap: space[3] }}>
