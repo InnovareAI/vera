@@ -93,7 +93,7 @@ export default function ReviewLink() {
       const res = await fetch(`${SUPA}/functions/v1/review-link`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: `Bearer ${ANON}` },
-        body: JSON.stringify({ token: reviewToken, copy: editedCopy }),
+        body: JSON.stringify({ token: reviewToken, copy: editedCopy, reviewer: reviewer.trim() || undefined }),
       })
       const data = await res.json().catch(() => null)
       if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`)

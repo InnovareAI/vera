@@ -2033,6 +2033,40 @@ async function recordSkillInvocations(
   return skills
 }
 
+async function recordPostEditOutcome(
+  ctx: ToolExecutionContext,
+  postId: string,
+  detail: {
+    changedFields: string[]
+    previousCopy?: string | null
+    nextCopy?: string | null
+    feedback?: string | null
+  },
+) {
+  if (!isUuid(postId) || detail.changedFields.length === 0) return
+  const editSummary: Record<string, unknown> = {
+    source: 'vera-chat.refine_post',
+    changed_fields: detail.changedFields,
+  }
+  if (typeof detail.previousCopy === 'string' || typeof detail.nextCopy === 'string') {
+    const previous = detail.previousCopy ?? ''
+    const next = detail.nextCopy ?? ''
+    editSummary.previous_copy_length = previous.length
+    editSummary.next_copy_length = next.length
+    editSummary.delta_length = next.length - previous.length
+  }
+  const { error } = await ctx.supabase.from('post_outcomes').insert({
+    post_id: postId,
+    outcome: 'edited',
+    feedback: detail.feedback ?? 'VERA refined this post from operator feedback.',
+    recorded_by: ctx.userId,
+    edit_summary: editSummary,
+  } as Database['public']['Tables']['post_outcomes']['Insert'])
+  if (error) {
+    console.warn('post edit outcome insert failed', error.message)
+  }
+}
+
 // Tool execution. Each tool returns { result: string for the model, image_url?: string for the UI }.
 async function executeTool(
   name: string,
@@ -2325,7 +2359,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         const postId = String(input.post_id ?? '')
         if (!postId) return { result: 'No post_id was provided.' }
         let existingQuery = ctx.supabase.from('content_posts')
-          .select('id, title')
+          .select('id, title, copy, media_url')
           .eq('id', postId)
           .eq('org_id', ctx.orgId)
         if (ctx.projectId) existingQuery = existingQuery.eq('project_id', ctx.projectId)
@@ -2396,7 +2430,18 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         if (ctx.projectId) updateQuery = updateQuery.eq('project_id', ctx.projectId)
         const { data: updated, error: upErr } = await updateQuery.select('*').single()
         if (upErr) return { result: `Couldn't save the change: ${upErr.message}` }
-        if (updated) ctx.emit({ type: 'draft', post: updated })
+        if (updated) {
+          const changedFields: string[] = []
+          if (newCopy) changedFields.push('copy')
+          if (updates.media_url) changedFields.push(changed === 'video' ? 'video' : 'image')
+          await recordPostEditOutcome(ctx, postId, {
+            changedFields,
+            previousCopy: (existing as Record<string, unknown>).copy as string | null | undefined,
+            nextCopy: (updated as Record<string, unknown>).copy as string | null | undefined,
+            feedback: ctx.userPrompt?.slice(0, 1000) ?? null,
+          })
+          ctx.emit({ type: 'draft', post: updated })
+        }
         return { result: `Updated the ${changed || 'post'} on "${(updated as Record<string, unknown>)?.title ?? 'the post'}". Reply in ONE short line telling the operator what you changed.` }
       }
 
