@@ -37,8 +37,11 @@ import {
   DEMAND_OUTCOME_SIGNALS,
   DEMAND_PLATFORM_DEFINITIONS,
   DEMAND_SOURCE_KEYS,
+  DEMAND_SOURCE_PULL_DEPTHS,
   DEFAULT_DEMAND_OPERATING_MODEL,
   applyDemandDefaults,
+  demandSourcePullDepthItems,
+  normalizeDemandSourcePullDepth,
   defaultDemandChannelPolicies,
   demandChannelPoliciesFromText,
   demandChannelPolicyHasOverride,
@@ -70,7 +73,7 @@ const BUSINESS_DOC_ACCEPT = [
   '.htm',
 ].join(',')
 const MAX_BUSINESS_DOC_BYTES = 20 * 1024 * 1024
-type SourcePullReport = { label?: string; ok?: boolean; items?: number; error?: string }
+type SourcePullReport = { label?: string; ok?: boolean; items?: number; requestedItems?: number; depth?: string; error?: string }
 
 const DEMAND_FACT_KEYS: BusinessContextKey[] = [
   'offer',
@@ -1019,7 +1022,14 @@ export default function Brain() {
       const reports = data.sources ?? []
       const okCount = reports.filter(item => item.ok).length
       const total = reports.length || DEMAND_SOURCE_KEYS.filter(key => business[key].trim()).length
-      setSourceStatus(`Pulled ${okCount}/${total} sources. Review and save.`)
+      const pulledItems = reports.filter(item => item.ok).reduce((sum, item) => sum + (item.items ?? 0), 0)
+      const requestedItems = reports.filter(item => item.ok).reduce((sum, item) => sum + (item.requestedItems ?? 0), 0)
+      const depth = normalizeDemandSourcePullDepth(business.sourcePullDepth)
+      const depthLabel = DEMAND_SOURCE_PULL_DEPTHS.find(item => item.value === depth)?.label ?? 'Standard'
+      const itemPart = requestedItems > 0
+        ? `${pulledItems}/${requestedItems} items`
+        : `${pulledItems} items`
+      setSourceStatus(`${depthLabel} pull: ${okCount}/${total} sources, ${itemPart}. Review and save.`)
     } catch (error) {
       setSourceError(error instanceof Error ? error.message : 'Could not pull these sources.')
     } finally {
@@ -1152,6 +1162,8 @@ export default function Brain() {
 
   const sourceCount = DEMAND_SOURCE_KEYS
     .filter(key => business[key].trim()).length
+  const sourcePullDepth = normalizeDemandSourcePullDepth(business.sourcePullDepth)
+  const sourcePullItems = demandSourcePullDepthItems(sourcePullDepth)
   const operatingKeys = Object.keys(DEFAULT_DEMAND_OPERATING_MODEL) as BusinessContextKey[]
   const factCount = DEMAND_FACT_KEYS.filter(key => business[key].trim()).length
   const operatingCount = operatingKeys.filter(key => business[key].trim()).length
@@ -1275,6 +1287,18 @@ export default function Brain() {
                 Pull the website, LinkedIn, Instagram, YouTube, Medium, Quora, Reddit, Facebook, X, events, and newsletters. Innovare handles public scraping; connected LinkedIn and Instagram use Unipile.
               </p>
             </div>
+            <Field
+              label="Source pull depth"
+              helper={`${sourcePullItems} posts or items per social network where the connector supports it.`}
+            >
+              <Select value={sourcePullDepth} onChange={e => updateBusiness('sourcePullDepth', e.target.value)}>
+                {DEMAND_SOURCE_PULL_DEPTHS.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}: {option.itemsPerNetwork} per network
+                  </option>
+                ))}
+              </Select>
+            </Field>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
               {DEMAND_PLATFORM_DEFINITIONS.map(platform => (
                 <div key={platform.key} title={platform.role} style={{ padding: '7px 8px', borderRadius: radius.sm, border: `1px solid ${color.line}`, background: color.surface }}>

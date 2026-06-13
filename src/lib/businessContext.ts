@@ -12,6 +12,7 @@ export type BusinessContextKey =
   | 'reddit'
   | 'facebook'
   | 'x'
+  | 'sourcePullDepth'
   | 'industry'
   | 'offer'
   | 'audience'
@@ -50,6 +51,7 @@ export const EMPTY_BUSINESS_CONTEXT: BusinessContext = {
   reddit: '',
   facebook: '',
   x: '',
+  sourcePullDepth: '',
   industry: '',
   offer: '',
   audience: '',
@@ -89,6 +91,7 @@ const BUSINESS_CONTEXT_FIELDS: Array<{ key: BusinessContextKey; label: string }>
   { key: 'reddit', label: 'Reddit' },
   { key: 'facebook', label: 'Facebook page' },
   { key: 'x', label: 'X profile' },
+  { key: 'sourcePullDepth', label: 'Source pull depth' },
   { key: 'companyName', label: 'Company' },
   { key: 'industry', label: 'Industry' },
   { key: 'offer', label: 'Offer' },

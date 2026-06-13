@@ -24,6 +24,7 @@ export type DemandPlatformDefinition = {
 }
 
 export type DemandChannelRisk = 'low' | 'medium' | 'high'
+export type DemandSourcePullDepth = 'light' | 'standard' | 'deep'
 
 export type DemandChannelOperatingPolicy = {
   speakerMode: string
@@ -226,6 +227,42 @@ export const DEMAND_CHANNEL_OPERATING_POLICIES: Record<DemandPlatformKey, Demand
     samTrigger: 'Replies, warm clicks, meeting requests, objections, or high-fit account engagement.',
     risk: 'medium',
   },
+}
+
+export const DEMAND_SOURCE_PULL_DEPTHS: Array<{
+  value: DemandSourcePullDepth
+  label: string
+  itemsPerNetwork: number
+  detail: string
+}> = [
+  {
+    value: 'light',
+    label: 'Light',
+    itemsPerNetwork: 10,
+    detail: 'Quick source refresh before a small content task.',
+  },
+  {
+    value: 'standard',
+    label: 'Standard',
+    itemsPerNetwork: 25,
+    detail: 'Default onboarding depth for tone, themes, and demand signals.',
+  },
+  {
+    value: 'deep',
+    label: 'Deep',
+    itemsPerNetwork: 50,
+    detail: 'Use for full onboarding, audits, or strategy refreshes.',
+  },
+]
+
+export function normalizeDemandSourcePullDepth(value: string | null | undefined): DemandSourcePullDepth {
+  if (value === 'light' || value === 'deep' || value === 'standard') return value
+  return 'standard'
+}
+
+export function demandSourcePullDepthItems(value: string | null | undefined): number {
+  const depth = normalizeDemandSourcePullDepth(value)
+  return DEMAND_SOURCE_PULL_DEPTHS.find(item => item.value === depth)?.itemsPerNetwork ?? 25
 }
 
 function isDemandChannelRisk(value: unknown): value is DemandChannelRisk {

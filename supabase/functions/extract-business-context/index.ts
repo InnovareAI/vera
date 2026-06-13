@@ -42,6 +42,7 @@ type BusinessContext = {
   reddit: string
   facebook: string
   x: string
+  sourcePullDepth: string
   industry: string
   offer: string
   audience: string
@@ -81,6 +82,8 @@ type SourceReport = {
   url?: string
   ok: boolean
   items: number
+  requestedItems?: number
+  depth?: SourcePullDepth
   source?: "direct" | "apify" | "unipile"
   error?: string
 }
@@ -91,7 +94,10 @@ type SourceDocument = {
   source: "direct" | "apify" | "unipile"
   text: string
   items: number
+  requestedItems?: number
 }
+
+type SourcePullDepth = "light" | "standard" | "deep"
 
 type ExtractionRuntime =
   | ({ provider: "anthropic"; key: string; model: string; keySource: "platform" | "client" } & ExtractionRuntimeAudit)
@@ -117,6 +123,7 @@ const FIELD_KEYS = [
   "reddit",
   "facebook",
   "x",
+  "sourcePullDepth",
   "companyName",
   "industry",
   "offer",
@@ -410,6 +417,8 @@ async function pullSourceContent(
   const docs: SourceDocument[] = []
   const sources: SourceReport[] = []
   const unipile = await resolveUnipileConnection(supabase, orgId, requesterUserId)
+  const depth = normalizeSourcePullDepth(context.sourcePullDepth)
+  const limits = sourcePullLimits(depth)
 
   async function addSource(
     label: string,
@@ -421,24 +430,24 @@ async function pullSourceContent(
     try {
       const doc = await loader(url)
       docs.push(doc)
-      sources.push({ label, url, ok: true, items: doc.items, source: doc.source })
+      sources.push({ label, url, ok: true, items: doc.items, requestedItems: doc.requestedItems, depth, source: doc.source })
     } catch (error) {
-      sources.push({ label, url, ok: false, items: 0, error: errorMessage(error) })
+      sources.push({ label, url, ok: false, items: 0, depth, error: errorMessage(error) })
     }
   }
 
-  await addSource("Website", context.website, url => pullGenericPage("Website", url))
-  await addSource("LinkedIn company page", context.linkedinCompany, url => pullConnectedSocial("LinkedIn company page", url, unipile, { isCompany: true }))
-  await addSource("LinkedIn profile", context.linkedinProfile, url => pullConnectedSocial("LinkedIn profile", url, unipile, { isCompany: false }))
-  await addSource("LinkedIn events", context.linkedinEvents, url => pullGenericPage("LinkedIn events", url))
-  await addSource("LinkedIn newsletter", context.linkedinNewsletter, url => pullGenericPage("LinkedIn newsletter", url))
-  await addSource("Instagram", context.instagram, url => pullConnectedSocial("Instagram", url, unipile, { isCompany: false }))
-  await addSource("YouTube", context.youtube, url => pullGenericPage("YouTube", url))
-  await addSource("Medium", context.medium, url => pullGenericPage("Medium", url))
-  await addSource("Quora", context.quora, url => pullGenericPage("Quora", url))
-  await addSource("Reddit", context.reddit, url => pullGenericPage("Reddit", url))
-  await addSource("Facebook page", context.facebook, url => pullFacebookPage("Facebook page", url))
-  await addSource("X profile", context.x, url => pullXProfile("X profile", url))
+  await addSource("Website", context.website, url => pullGenericPage("Website", url, { maxResults: limits.publicPages }))
+  await addSource("LinkedIn company page", context.linkedinCompany, url => pullConnectedSocial("LinkedIn company page", url, unipile, { isCompany: true, limit: limits.socialItems }))
+  await addSource("LinkedIn profile", context.linkedinProfile, url => pullConnectedSocial("LinkedIn profile", url, unipile, { isCompany: false, limit: limits.socialItems }))
+  await addSource("LinkedIn events", context.linkedinEvents, url => pullGenericPage("LinkedIn events", url, { maxResults: limits.publicPages }))
+  await addSource("LinkedIn newsletter", context.linkedinNewsletter, url => pullGenericPage("LinkedIn newsletter", url, { maxResults: limits.publicPages }))
+  await addSource("Instagram", context.instagram, url => pullConnectedSocial("Instagram", url, unipile, { isCompany: false, limit: limits.socialItems }))
+  await addSource("YouTube", context.youtube, url => pullGenericPage("YouTube", url, { maxResults: limits.publicPages }))
+  await addSource("Medium", context.medium, url => pullGenericPage("Medium", url, { maxResults: limits.publicPages }))
+  await addSource("Quora", context.quora, url => pullGenericPage("Quora", url, { maxResults: limits.publicPages }))
+  await addSource("Reddit", context.reddit, url => pullGenericPage("Reddit", url, { maxResults: limits.publicPages }))
+  await addSource("Facebook page", context.facebook, url => pullFacebookPage("Facebook page", url, limits.socialItems))
+  await addSource("X profile", context.x, url => pullXProfile("X profile", url, limits.socialItems))
 
   return {
     sources,
@@ -454,6 +463,16 @@ async function pullSourceContent(
   }
 }
 
+function normalizeSourcePullDepth(value: unknown): SourcePullDepth {
+  return value === "light" || value === "deep" || value === "standard" ? value : "standard"
+}
+
+function sourcePullLimits(depth: SourcePullDepth) {
+  if (depth === "light") return { socialItems: 10, publicPages: 1 }
+  if (depth === "deep") return { socialItems: 50, publicPages: 3 }
+  return { socialItems: 25, publicPages: 2 }
+}
+
 async function resolveUnipileConnection(supabase: SupabaseAdminClient, orgId: string, requesterUserId: string) {
   if (!UNIPILE_API_KEY || !UNIPILE_BASE_URL) return { accountId: null, error: "Unipile is not configured" }
 
@@ -466,11 +485,11 @@ async function pullConnectedSocial(
   label: string,
   url: string,
   unipile: { accountId: string | null; error: string | null },
-  options: { isCompany: boolean },
+  options: { isCompany: boolean; limit: number },
 ) {
   return withFallback(
     () => pullUnipileProfileAndPosts(label, url, unipile, options),
-    () => pullGenericPage(label, url),
+    () => pullGenericPage(label, url, { maxResults: 1 }),
   )
 }
 
@@ -478,7 +497,7 @@ async function pullUnipileProfileAndPosts(
   label: string,
   url: string,
   unipile: { accountId: string | null; error: string | null },
-  options: { isCompany: boolean },
+  options: { isCompany: boolean; limit: number },
 ): Promise<SourceDocument> {
   if (!unipile.accountId) throw new Error(unipile.error ?? "Unipile is not connected")
   const identifier = publicIdentifierFromUrl(url)
@@ -486,7 +505,7 @@ async function pullUnipileProfileAndPosts(
 
   const query: Record<string, string> = {
     account_id: unipile.accountId,
-    limit: "20",
+    limit: String(options.limit),
   }
   if (/linkedin\.com/i.test(url)) query.is_company = options.isCompany ? "true" : "false"
 
@@ -507,7 +526,7 @@ async function pullUnipileProfileAndPosts(
     throw new Error(errors || "Unipile returned no readable content")
   }
 
-  return { label, url, source: "unipile", text, items: countItems(payloads) }
+  return { label, url, source: "unipile", text, items: countItems(payloads), requestedItems: options.limit }
 }
 
 async function unipileGet(path: string, query: Record<string, string>) {
@@ -523,33 +542,33 @@ async function unipileGet(path: string, query: Record<string, string>) {
   return response.json()
 }
 
-async function pullFacebookPage(label: string, url: string) {
+async function pullFacebookPage(label: string, url: string, limit: number) {
   return withFallback(
     () => pullApifyActor(label, url, "apify/facebook-posts-scraper", {
       startUrls: [{ url }],
-      resultsLimit: 20,
+      resultsLimit: limit,
       captionText: true,
-    }),
-    () => pullGenericPage(label, url),
+    }, limit),
+    () => pullGenericPage(label, url, { maxResults: 1 }),
   )
 }
 
-async function pullXProfile(label: string, url: string) {
+async function pullXProfile(label: string, url: string, limit: number) {
   return withFallback(
     () => pullApifyActor(label, url, "scraper_one/x-profile-posts-scraper", {
       profileUrls: [url],
-      resultsLimit: 30,
+      resultsLimit: limit,
       skipPinnedPosts: true,
-    }),
-    () => pullGenericPage(label, url),
+    }, limit),
+    () => pullGenericPage(label, url, { maxResults: 1 }),
   )
 }
 
-async function pullGenericPage(label: string, url: string) {
+async function pullGenericPage(label: string, url: string, options: { maxResults: number }) {
   return withFallback(
     () => pullApifyActor(label, url, "apify/rag-web-browser", {
       query: url,
-      maxResults: 1,
+      maxResults: options.maxResults,
       outputFormats: ["markdown"],
       requestTimeoutSecs: 28,
       scrapingTool: "browser-playwright",
@@ -557,12 +576,12 @@ async function pullGenericPage(label: string, url: string) {
       dynamicContentWaitSecs: 4,
       maxRequestRetries: 1,
       proxyConfiguration: { useApifyProxy: true },
-    }),
+    }, options.maxResults),
     () => fetchUrlSource(label, url),
   )
 }
 
-async function pullApifyActor(label: string, url: string, actor: string, input: Record<string, unknown>): Promise<SourceDocument> {
+async function pullApifyActor(label: string, url: string, actor: string, input: Record<string, unknown>, requestedItems?: number): Promise<SourceDocument> {
   if (!APIFY_TOKEN) throw new Error("Innovare Apify is not configured")
   const actorPath = actor.replace("/", "~")
   const response = await fetch(`https://api.apify.com/v2/acts/${actorPath}/run-sync-get-dataset-items?format=json&clean=true&token=${encodeURIComponent(APIFY_TOKEN)}`, {
@@ -575,7 +594,7 @@ async function pullApifyActor(label: string, url: string, actor: string, input: 
   const items = Array.isArray(data) ? data : [data]
   const text = itemsToText(label, items)
   if (text.length < 80) throw new Error(`Apify ${actor} returned no readable content`)
-  return { label, url, source: "apify", text, items: items.length }
+  return { label, url, source: "apify", text, items: items.length, requestedItems }
 }
 
 async function fetchUrlSource(label: string, url: string): Promise<SourceDocument> {
@@ -802,6 +821,7 @@ Rules:
 - Do not invent facts.
 - Treat "website" as the primary company URL when present.
 - Extract LinkedIn company pages, LinkedIn personal profiles, LinkedIn events, LinkedIn newsletters, Instagram profiles, YouTube channels, Medium pages, Quora profiles, Reddit profiles or communities, Facebook pages, and X profiles only when explicitly present.
+- "sourcePullDepth" should be "light", "standard", or "deep" only when the source explicitly says how much source history to inspect. Otherwise return an empty string.
 - Use source posts, events, and newsletters to infer positioning, recurring topics, proof points, and content goals, but keep URLs in their own fields.
 - "offer" should capture products, services, or core value proposition.
 - "audience" should capture target buyers, users, industries, or decision makers.
