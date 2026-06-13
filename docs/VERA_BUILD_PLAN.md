@@ -128,6 +128,8 @@ The model selector should eventually become a recommendation engine: task type, 
 
 ## UX Shape
 
+The current UX redesign contract lives in [VERA_UX_REDESIGN_BRIEF.md](./VERA_UX_REDESIGN_BRIEF.md). That brief is allowed to walk away from the current alpha shell if a stronger operating-desk solution emerges.
+
 Two altitudes:
 
 - Shelf: across clients, all open work, risk, and opportunities.
@@ -274,4 +276,4 @@ Current state:
 
 Next step:
 
-- Keep tightening connector scope and demand-channel behavior: research can use approved operator profiles, while publishing, media generation, provider spend, and credentials stay client-scoped and entitlement-gated.
+- Confirm the UX redesign brief, generate three mockup directions, then implement the first slice on Command: Brain readiness, active channels, VERA agenda, model route, spend class, and draft card actions above the composer.

@@ -78,6 +78,8 @@ Browser calls use the user session or anon key where allowed. Server-to-server f
 
 The current execution plan lives in [docs/VERA_BUILD_PLAN.md](./docs/VERA_BUILD_PLAN.md).
 
+The current UX redesign contract lives in [docs/VERA_UX_REDESIGN_BRIEF.md](./docs/VERA_UX_REDESIGN_BRIEF.md).
+
 The working UX blueprint lives in [docs/UX_BLUEPRINT.md](./docs/UX_BLUEPRINT.md).
 
 ## Architecture Notes
