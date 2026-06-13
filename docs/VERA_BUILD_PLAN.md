@@ -268,6 +268,7 @@ Current state:
 - The legacy `platform_configs` table is retired through migration: RLS is forced, all old policies are dropped, Data API role grants are revoked, and `ops/verify-platform-configs-retired.sh` proves it has zero policies and zero anon, authenticated, or service-role grants in production.
 - Settings no longer exposes a separate workspace Brand Voice editor. Brand voice editing stays in each client Demand Brain, where Vera can inherit a workspace default but saving creates a client-specific voice.
 - `vera-chat` now uses a shared, tested auth gate that rejects service-role browser calls, verifies the JWT user, proves org or project membership, checks project-to-org ownership, rejects mismatched `user_id`, and blocks cross-project chat message reuse.
+- `ops/verify-saleability-guardrails.sh` now runs the production-safe release guardrail suite in one command: chat auth, media key scope, Unipile client publishing scope, shared research profile scope, publish locking, idempotent posted marking, content post schema, audience scoping, and retired platform config access.
 
 Next step:
 
