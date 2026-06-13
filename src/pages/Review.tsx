@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, Calendar as CalendarIcon, CalendarPlus, Check, ExternalLink, Filter, LayoutGrid, LayoutList, Layers, MessageSquare, Search, Send, Sparkles, Target, X } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { AlertTriangle, Calendar as CalendarIcon, CalendarPlus, Check, ExternalLink, MessageSquare, Plus, Send, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
@@ -21,8 +21,7 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 const STATUS_TABS = ['Draft', 'Pending Review', 'Changes Requested', 'Approved', 'Scheduled', 'Posted', 'Rejected'] as const
 type StatusTab = typeof STATUS_TABS[number]
-const REVIEW_VIEWS = ['list', 'board', 'calendar'] as const
-type View = typeof REVIEW_VIEWS[number]
+type View = 'list' | 'board' | 'calendar'
 const DEFAULT_REVIEW_VIEW: View = 'board'
 type MediaFrame = { url: string; text?: string | null }
 type ReviewFilters = {
@@ -32,18 +31,6 @@ type ReviewFilters = {
   owner: string
   date: string
 }
-type ReviewMetricSummary = {
-  total: number
-  drafts: number
-  pending: number
-  changes: number
-  approved: number
-  scheduled: number
-  needsDate: number
-  posted: number
-  rejected: number
-}
-
 const DEFAULT_REVIEW_FILTERS: ReviewFilters = {
   search: '',
   platform: 'all',
@@ -84,10 +71,6 @@ function tabFor(post: Post): StatusTab {
 
 function lifecycleLabel(post: Post): string {
   return tabFor(post)
-}
-
-function uniqueValues(values: string[]) {
-  return Array.from(new Set(values.map(value => value.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
 }
 
 function platformValue(post: Post) {
@@ -179,12 +162,6 @@ function postMeta(post: Post, campaign: Campaign | null) {
   return campaign ? `Campaign: ${campaign.name}` : 'Ready for review'
 }
 
-function storedView(value: string | null, allowCalendar: boolean): View | null {
-  if (!value || !REVIEW_VIEWS.includes(value as View)) return null
-  if (value === 'calendar' && !allowCalendar) return null
-  return value as View
-}
-
 function storedTab(value: string | null): StatusTab | null {
   if (!value || !STATUS_TABS.includes(value as StatusTab)) return null
   return value as StatusTab
@@ -212,7 +189,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
   const [activeTab, setActiveTab] = useState<StatusTab>('Pending Review')
   const [selected, setSelected] = useState<Post | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
-  const [view, setView] = useState<View>(initialView ?? DEFAULT_REVIEW_VIEW)
+  const view: View = initialView ?? DEFAULT_REVIEW_VIEW
   const [dragOverTab, setDragOverTab] = useState<StatusTab | null>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [filters, setFilters] = useState<ReviewFilters>(DEFAULT_REVIEW_FILTERS)
@@ -229,27 +206,12 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
     }
     setSearchParams(nextParams, { replace: true })
   }
-  const navigate = useNavigate()
   const preferenceScope = activeProject?.id ?? activeOrg?.id ?? 'global'
-  const reviewViewPreferenceKey = `vera-review-view:v2:${preferenceScope}`
   const reviewTabPreferenceKey = `vera-review-tab:${preferenceScope}`
   const businessContext = useMemo(
     () => parseProjectInstructions(activeProject?.instructions).businessContext,
     [activeProject?.instructions],
   )
-
-  useEffect(() => {
-    if (initialView) {
-      setView(initialView)
-      return
-    }
-    setView(storedView(localStorage.getItem(reviewViewPreferenceKey), false) ?? DEFAULT_REVIEW_VIEW)
-  }, [initialView, reviewViewPreferenceKey])
-
-  useEffect(() => {
-    if (initialView === 'calendar' && view === 'calendar') return
-    localStorage.setItem(reviewViewPreferenceKey, view)
-  }, [initialView, reviewViewPreferenceKey, view])
 
   useEffect(() => {
     setActiveTab(storedTab(localStorage.getItem(reviewTabPreferenceKey)) ?? 'Pending Review')
@@ -368,20 +330,6 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
     acc[tab] = scoped.filter(p => tabFor(p) === tab).length
     return acc
   }, {} as Record<StatusTab, number>)
-  const reviewMetrics = useMemo(() => ({
-    total: scoped.length,
-    drafts: scoped.filter(p => tabFor(p) === 'Draft').length,
-    pending: scoped.filter(p => tabFor(p) === 'Pending Review').length,
-    changes: scoped.filter(p => tabFor(p) === 'Changes Requested').length,
-    approved: scoped.filter(p => tabFor(p) === 'Approved').length,
-    scheduled: scoped.filter(p => tabFor(p) === 'Scheduled').length,
-    needsDate: scoped.filter(p => tabFor(p) === 'Approved' && !targetDate(p)).length,
-    posted: scoped.filter(p => tabFor(p) === 'Posted').length,
-    rejected: scoped.filter(p => tabFor(p) === 'Rejected').length,
-  }), [scoped])
-  const platformOptions = useMemo(() => uniqueValues(posts.map(platformValue)), [posts])
-  const ownerOptions = useMemo(() => uniqueValues(posts.map(postOwner)), [posts])
-  const mediaOptions = useMemo(() => uniqueValues(posts.map(mediaKind)), [posts])
   const activeFilterCount = useMemo(() => (
     Object.values(filters).filter(value => value !== 'all' && value !== '').length + (campaignFilter !== 'all' ? 1 : 0)
   ), [filters, campaignFilter])
@@ -418,10 +366,6 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
       return changed ? next : prev
     })
   }, [scoped])
-
-  function updateFilter(key: keyof ReviewFilters, value: string) {
-    setFilters(prev => ({ ...prev, [key]: value }))
-  }
 
   function resetFilters() {
     setFilters(DEFAULT_REVIEW_FILTERS)
@@ -479,40 +423,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
   }
 
   return (
-    <div className="p-6 h-full min-h-0 min-w-0 overflow-hidden flex flex-col">
-      {/* Page header */}
-      <div className="flex items-end justify-between mb-5 gap-4 flex-shrink-0">
-        <div>
-          <h1 className="text-[28px] leading-tight tracking-tight font-semibold" style={{ color: 'var(--ink)' }}>
-            Review queue
-          </h1>
-          <p className="text-[13px] mt-1" style={{ color: 'var(--ghost)' }}>
-            {scoped.length} of {posts.length} posts, {tabCounts['Pending Review']} pending review, {tabCounts['Changes Requested']} changes requested
-          </p>
-        </div>
-      </div>
-
-      <ProductionCockpit
-        metrics={reviewMetrics}
-        projectName={activeProject?.name ?? 'this space'}
-        currentView={view}
-        onViewChange={setView}
-        allowCalendar={initialView === 'calendar'}
-        onOpenCalendar={() => navigate(calendarPath)}
-      />
-      <ReviewMetrics metrics={reviewMetrics} />
-      <ReviewToolbar
-        filters={filters}
-        campaigns={campaigns}
-        campaignFilter={campaignFilter}
-        platformOptions={platformOptions}
-        ownerOptions={ownerOptions}
-        mediaOptions={mediaOptions}
-        activeFilterCount={activeFilterCount}
-        onCampaignChange={setCampaignFilter}
-        onFilterChange={updateFilter}
-        onReset={resetFilters}
-      />
+    <div className="h-full min-h-0 min-w-0 overflow-hidden flex flex-col" style={{ background: '#f5f6f5' }}>
       <BulkActionBar
         selectedCount={selectedCount}
         bulkSaving={bulkSaving}
@@ -572,365 +483,6 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
         />
       )}
     </div>
-  )
-}
-
-function ProductionCockpit({
-  metrics,
-  projectName,
-  currentView,
-  allowCalendar,
-  onViewChange,
-  onOpenCalendar,
-}: {
-  metrics: ReviewMetricSummary
-  projectName: string
-  currentView: View
-  allowCalendar: boolean
-  onViewChange: (view: View) => void
-  onOpenCalendar: () => void
-}) {
-  const blockers = metrics.changes + metrics.needsDate + metrics.rejected
-  const readyToPublish = metrics.scheduled + metrics.approved
-  const recommendation = metrics.changes > 0
-    ? {
-      label: 'Resolve feedback',
-      title: `${metrics.changes} post${metrics.changes === 1 ? '' : 's'} need edits before they can move forward.`,
-      body: 'Start with requested changes, then return approved work to the calendar.',
-      tone: 'warning' as const,
-    }
-    : metrics.pending > 0
-      ? {
-        label: 'Review next',
-        title: `${metrics.pending} post${metrics.pending === 1 ? '' : 's'} are waiting for a decision.`,
-        body: 'Approve, request changes, or reject before the production queue expands.',
-        tone: 'info' as const,
-      }
-      : metrics.needsDate > 0
-        ? {
-          label: 'Schedule approved work',
-          title: `${metrics.needsDate} approved post${metrics.needsDate === 1 ? '' : 's'} need a publish date.`,
-          body: 'Use Calendar to place them into the channel plan.',
-          tone: 'danger' as const,
-        }
-        : {
-          label: 'Queue healthy',
-          title: metrics.total ? 'Production is moving without obvious blockers.' : 'No production items are visible yet.',
-          body: metrics.total ? 'Keep an eye on scheduled work and learning signals after posts go live.' : 'Ask VERA to draft a campaign or import existing posts to start the loop.',
-          tone: 'success' as const,
-        }
-  const toneColor = recommendation.tone === 'warning'
-    ? 'var(--warn)'
-    : recommendation.tone === 'danger'
-      ? 'var(--danger)'
-      : recommendation.tone === 'success'
-        ? 'var(--success)'
-        : 'var(--info)'
-  return (
-    <section
-      className="mb-3 p-4 flex-shrink-0"
-      style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}
-    >
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.65fr)]">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 mb-2" style={{ color: 'var(--accent)' }}>
-            <Target size={14} />
-            <span className="text-[11px] uppercase font-semibold">Publishing workflow</span>
-          </div>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h2 className="text-[18px] leading-snug font-semibold" style={{ color: 'var(--ink)' }}>
-                {projectName}
-              </h2>
-            </div>
-            <div className="inline-flex p-0.5" style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '8px' }}>
-              <PipelineViewButton active={currentView === 'list'} icon={<LayoutList size={13} />} label="List" onClick={() => onViewChange('list')} />
-              <PipelineViewButton active={currentView === 'board'} icon={<LayoutGrid size={13} />} label="Board" onClick={() => onViewChange('board')} />
-              {allowCalendar && (
-                <PipelineViewButton active={currentView === 'calendar'} icon={<CalendarIcon size={13} />} label="Calendar" onClick={() => onViewChange('calendar')} />
-              )}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4">
-            <PipelineStage label="Draft" value={metrics.drafts} detail="creation" tone="neutral" />
-            <PipelineStage label="Review" value={metrics.pending + metrics.changes} detail={`${metrics.changes} changes`} tone={metrics.changes ? 'warning' : 'info'} />
-            <PipelineStage label="Ready" value={readyToPublish} detail={`${metrics.needsDate} need date`} tone={metrics.needsDate ? 'danger' : 'success'} />
-            <PipelineStage label="Live" value={metrics.posted} detail={`${metrics.scheduled} scheduled`} tone="success" />
-          </div>
-        </div>
-
-        <aside style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-md)', padding: '12px' }}>
-          <div className="flex items-center gap-2 text-[11px] uppercase font-semibold mb-2" style={{ color: toneColor }}>
-            <Sparkles size={13} />
-            {recommendation.label}
-          </div>
-          <div className="text-[13px] leading-snug font-semibold" style={{ color: 'var(--ink)' }}>
-            {recommendation.title}
-          </div>
-          <p className="text-[12px] leading-relaxed mt-2" style={{ color: 'var(--ink-quiet)' }}>
-            {recommendation.body}
-          </p>
-          <div className="flex flex-wrap gap-2 mt-3">
-            <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color: blockers ? 'var(--warn)' : 'var(--success)' }}>
-              <span style={{ width: 7, height: 7, borderRadius: 999, background: blockers ? 'var(--warn)' : 'var(--success)' }} />
-              {blockers} blockers
-            </span>
-            <button
-              type="button"
-              onClick={onOpenCalendar}
-              className="inline-flex items-center gap-1.5 ml-auto text-[12px] font-medium"
-              style={{ color: 'var(--ink)', background: 'transparent', border: 'none', cursor: 'pointer' }}
-            >
-              <CalendarPlus size={13} />
-              Calendar
-            </button>
-          </div>
-        </aside>
-      </div>
-    </section>
-  )
-}
-
-function PipelineViewButton({
-  active,
-  icon,
-  label,
-  onClick,
-}: {
-  active: boolean
-  icon: React.ReactNode
-  label: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12px]"
-      style={{
-        background: active ? 'var(--paper-warm)' : 'transparent',
-        color: active ? 'var(--ink)' : 'var(--ghost)',
-        border: 'none',
-        borderRadius: '7px',
-        fontWeight: active ? 600 : 450,
-        cursor: 'pointer',
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  )
-}
-
-function PipelineStage({
-  label,
-  value,
-  detail,
-  tone,
-}: {
-  label: string
-  value: number
-  detail: string
-  tone: 'neutral' | 'warning' | 'success' | 'info' | 'danger'
-}) {
-  const dot =
-    tone === 'warning' ? 'var(--warn)'
-    : tone === 'success' ? 'var(--success)'
-    : tone === 'info' ? 'var(--info)'
-    : tone === 'danger' ? 'var(--danger)'
-    : 'var(--ghost)'
-  return (
-    <div style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-md)', padding: '10px' }}>
-      <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--ghost)' }}>
-        <span style={{ width: 7, height: 7, borderRadius: 999, background: dot, flexShrink: 0 }} />
-        {label}
-      </div>
-      <div className="text-[20px] leading-tight font-semibold mt-1" style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>
-        {value}
-      </div>
-      <div className="text-[11px] mt-0.5" style={{ color: 'var(--ghost)' }}>{detail}</div>
-    </div>
-  )
-}
-
-function ReviewMetrics({ metrics }: { metrics: ReviewMetricSummary }) {
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 mb-3 flex-shrink-0">
-      <MetricPill label="Visible" value={metrics.total} tone="neutral" />
-      <MetricPill label="Review" value={metrics.pending} tone="warning" />
-      <MetricPill label="Changes" value={metrics.changes} tone="warning" />
-      <MetricPill label="Approved" value={metrics.approved} tone="success" />
-      <MetricPill label="Scheduled" value={metrics.scheduled} tone="info" />
-      <MetricPill label="Needs date" value={metrics.needsDate} tone="danger" icon={<AlertTriangle size={13} />} />
-      <MetricPill label="Posted" value={metrics.posted} tone="success" />
-      <MetricPill label="Parked" value={metrics.rejected} tone="muted" />
-    </div>
-  )
-}
-
-function MetricPill({
-  label, value, tone, icon,
-}: {
-  label: string
-  value: number
-  tone: 'neutral' | 'warning' | 'success' | 'info' | 'danger' | 'muted'
-  icon?: React.ReactNode
-}) {
-  const color =
-    tone === 'warning' ? 'var(--warn)'
-    : tone === 'success' ? 'var(--success)'
-    : tone === 'info' ? 'var(--info)'
-    : tone === 'danger' ? 'var(--danger)'
-    : tone === 'muted' ? 'var(--ghost)'
-    : 'var(--ink)'
-  return (
-    <div
-      className="min-w-0 px-3 py-2"
-      style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-md)' }}
-    >
-      <div className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color }}>
-        {icon}
-        <span className="truncate">{label}</span>
-      </div>
-      <div className="text-[20px] leading-tight font-semibold mt-1" style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>
-        {value}
-      </div>
-    </div>
-  )
-}
-
-function ReviewToolbar({
-  filters,
-  campaigns,
-  campaignFilter,
-  platformOptions,
-  ownerOptions,
-  mediaOptions,
-  activeFilterCount,
-  onCampaignChange,
-  onFilterChange,
-  onReset,
-}: {
-  filters: ReviewFilters
-  campaigns: Campaign[]
-  campaignFilter: string
-  platformOptions: string[]
-  ownerOptions: string[]
-  mediaOptions: string[]
-  activeFilterCount: number
-  onCampaignChange: (value: string) => void
-  onFilterChange: (key: keyof ReviewFilters, value: string) => void
-  onReset: () => void
-}) {
-  return (
-    <div
-      className="flex flex-wrap items-center gap-2 mb-3 p-2 flex-shrink-0"
-      style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-md)' }}
-    >
-      <div
-        className="flex items-center gap-2 min-w-[220px] flex-1 px-3 py-2"
-        style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '8px' }}
-      >
-        <Search size={14} style={{ color: 'var(--ghost)' }} />
-        <input
-          value={filters.search}
-          onChange={e => onFilterChange('search', e.target.value)}
-          placeholder="Search posts, copy, feedback"
-          className="w-full text-[13px] outline-none"
-          style={{ background: 'transparent', color: 'var(--ink)' }}
-        />
-      </div>
-      <FilterSelect
-        icon={<Layers size={13} />}
-        label="Campaign"
-        value={campaignFilter}
-        onChange={onCampaignChange}
-        options={[
-          { value: 'all', label: 'All campaigns' },
-          { value: 'adhoc', label: 'Ad-hoc only' },
-          ...campaigns.map(campaign => ({
-            value: campaign.id,
-            label: `${campaign.is_pinned ? '★ ' : ''}${campaign.name}${campaign.status !== 'active' ? `, ${campaign.status}` : ''}`,
-          })),
-        ]}
-      />
-      <FilterSelect
-        icon={<Filter size={13} />}
-        label="Platform"
-        value={filters.platform}
-        onChange={value => onFilterChange('platform', value)}
-        options={[{ value: 'all', label: 'All platforms' }, ...platformOptions.map(option => ({ value: option, label: option }))]}
-      />
-      <FilterSelect
-        label="Media"
-        value={filters.media}
-        onChange={value => onFilterChange('media', value)}
-        options={[{ value: 'all', label: 'All media' }, ...mediaOptions.map(option => ({ value: option, label: mediaKindLabel(option) }))]}
-      />
-      <FilterSelect
-        label="Owner"
-        value={filters.owner}
-        onChange={value => onFilterChange('owner', value)}
-        options={[{ value: 'all', label: 'All owners' }, ...ownerOptions.map(option => ({ value: option, label: option }))]}
-      />
-      <FilterSelect
-        label="Date"
-        value={filters.date}
-        onChange={value => onFilterChange('date', value)}
-        options={[
-          { value: 'all', label: 'Any date' },
-          { value: 'this_week', label: 'This week' },
-          { value: 'unscheduled', label: 'Unscheduled' },
-          { value: 'scheduled', label: 'Scheduled' },
-          { value: 'posted', label: 'Posted' },
-        ]}
-      />
-      {activeFilterCount > 0 && (
-        <button
-          type="button"
-          onClick={onReset}
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-[12px] transition-colors"
-          style={{ color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '8px', background: 'var(--paper)' }}
-        >
-          <X size={13} /> Clear {activeFilterCount}
-        </button>
-      )}
-    </div>
-  )
-}
-
-function FilterSelect({
-  icon,
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  icon?: React.ReactNode
-  label: string
-  value: string
-  onChange: (value: string) => void
-  options: Array<{ value: string; label: string }>
-}) {
-  return (
-    <label
-      className="inline-flex items-center gap-1.5 px-2.5 py-2 text-[12px]"
-      style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '8px', color: 'var(--ghost)' }}
-    >
-      {icon}
-      <span className="sr-only">{label}</span>
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="outline-none cursor-pointer max-w-[180px]"
-        style={{ background: 'transparent', color: 'var(--ink)', border: 'none', fontFamily: 'var(--font-body)' }}
-        aria-label={label}
-      >
-        {options.map(option => (
-          <option key={option.value} value={option.value}>{option.label}</option>
-        ))}
-      </select>
-    </label>
   )
 }
 
@@ -1197,7 +749,7 @@ function PostMediaThumb({ post, className = '' }: { post: Post; className?: stri
   return (
     <div
       className={`relative overflow-hidden ${className}`}
-      style={{ borderRadius: 'var(--radius-sm)', border: '1px solid var(--paper-edge)', background: 'var(--fog)' }}
+      style={{ borderRadius: 8, border: '1px solid #dfe4e1', background: '#eef1ef' }}
     >
       {post.media_type === 'video' && post.media_url ? (
         <video src={post.media_url} muted playsInline preload="metadata" className="w-full h-full object-cover block" />
@@ -1207,7 +759,7 @@ function PostMediaThumb({ post, className = '' }: { post: Post; className?: stri
       {label && (
         <span
           className="absolute right-1.5 top-1.5 text-[10px] font-medium"
-          style={{ background: 'rgba(14,14,15,0.72)', color: '#fff', padding: '2px 6px', borderRadius: '2px' }}
+          style={{ background: 'rgba(14,20,17,0.72)', color: '#fff', padding: '2px 6px', borderRadius: 999 }}
         >
           {label}
         </span>
@@ -1247,8 +799,11 @@ function BoardView({
   }
 
   return (
-    <div className="flex-1 min-h-0 min-w-0 overflow-x-auto overflow-y-hidden pb-2">
-      <div className="grid grid-cols-7 gap-3 h-full min-w-[1540px]">
+    <div className="flex-1 min-h-0 min-w-0 overflow-x-auto overflow-y-hidden">
+      <div
+        className="grid grid-cols-7 h-full min-w-[1540px]"
+        style={{ background: '#fff', borderTop: '1px solid #dfe4e1' }}
+      >
         {STATUS_TABS.map(tab => {
           const columnPosts = posts.filter(p => tabFor(p) === tab)
           const isDragTarget = dragOverTab === tab
@@ -1265,39 +820,50 @@ function BoardView({
               onDrop={(e) => handleDrop(e, tab)}
               className="flex flex-col min-w-0 min-h-0"
               style={{
-                background: isDragTarget ? 'var(--oxblood-tint)' : 'var(--paper-warm)',
-                border: `1px dashed ${isDragTarget ? 'var(--oxblood)' : 'var(--paper-edge)'}`,
-                borderRadius: 'var(--radius-lg)',
+                background: isDragTarget ? '#f3f0ff' : '#fff',
+                borderRight: '1px solid #dfe4e1',
+                boxShadow: isDragTarget ? 'inset 0 0 0 2px #2864d8' : 'none',
                 transition: 'background 0.15s, border-color 0.15s',
               }}
             >
               {/* Column header */}
-              <div className="px-3 pt-3 pb-2 flex items-center justify-between"
-                style={{ borderBottom: '1px solid var(--paper-edge)' }}>
+              <div className="px-4 h-14 flex items-center justify-between"
+                style={{ borderBottom: '1px solid #dfe4e1', background: '#f7f8f7' }}>
                 <div className="flex items-center gap-2">
-                  <span className="font-display text-[14px]" style={{ color: 'var(--ink)', fontVariationSettings: '"opsz" 24, "wght" 500' }}>
+                  <span className="font-display text-[15px] font-semibold" style={{ color: '#25302c', fontVariationSettings: '"opsz" 24, "wght" 620' }}>
                     {tab}
                   </span>
-                  <span className="text-[10px] font-mono"
+                  <span className="text-[11px] font-semibold"
                     style={{
-                      background: 'var(--paper)',
-                      color: 'var(--ink-quiet)',
-                      padding: '0 5px',
-                      borderRadius: '2px',
-                      border: '1px solid var(--paper-edge)',
+                      background: '#fff',
+                      color: '#66706b',
+                      padding: '2px 7px',
+                      borderRadius: 999,
+                      border: '1px solid #dfe4e1',
                     }}>
                     {tabCounts[tab]}
                   </span>
                 </div>
                 {isForbidden && (
-                  <span className="text-[9px] uppercase tracking-wider font-mono" style={{ color: 'var(--mist)' }}>
+                  <span className="text-[10px] uppercase font-semibold" style={{ color: '#8b9690', letterSpacing: 0 }}>
                     no drop
                   </span>
+                )}
+                {!isForbidden && (
+                  <button
+                    type="button"
+                    title={`Add to ${tab}`}
+                    aria-label={`Add to ${tab}`}
+                    className="inline-flex items-center justify-center"
+                    style={{ width: 26, height: 26, color: '#25302c', background: 'transparent', border: 'none', cursor: 'pointer' }}
+                  >
+                    <Plus size={20} />
+                  </button>
                 )}
               </div>
 
               {/* Cards */}
-              <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
+              <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
                 {columnPosts.length === 0 ? (
                   <EmptyLaneState tab={tab} compact />
                 ) : columnPosts.map(post => (
@@ -1363,54 +929,54 @@ function BoardCard({
       }}
       onDragEnd={() => setIsDragging(false)}
       onClick={onOpen}
-      className="p-3 cursor-pointer group transition-all relative"
+      className="p-3 cursor-pointer group transition-all relative overflow-hidden"
       style={{
-        background: 'var(--paper)',
-        border: `1px solid ${selected ? 'var(--oxblood)' : 'var(--paper-edge)'}`,
-        borderRadius: '3px',
+        background: '#fff',
+        border: `1px solid ${selected ? '#2864d8' : '#dfe4e1'}`,
+        borderRadius: 9,
         opacity: isDragging ? 0.4 : 1,
         cursor: draggable ? 'grab' : 'pointer',
-        boxShadow: selected ? '0 1px 3px rgba(37,99,235,0.14)' : 'none',
+        boxShadow: selected ? '0 0 0 2px rgba(40,100,216,0.12)' : '0 1px 2px rgba(17,24,20,0.04)',
       }}
     >
       {/* Campaign tint, left edge bar */}
       {campaign && (
         <span
-          className="absolute left-0 top-1.5 bottom-1.5 w-[2px]"
-          style={{ background: 'var(--ink)', opacity: 0.6, borderRadius: '0 1px 1px 0' }}
+          className="absolute left-0 top-3 bottom-3 w-[3px]"
+          style={{ background: campaign.color?.startsWith('#') ? campaign.color : '#8b5cf6', opacity: 0.85, borderRadius: '0 2px 2px 0' }}
           title={`Campaign: ${campaign.name}`}
         />
       )}
-      <div className="flex items-start gap-2 mb-2">
+      <div className="flex items-center gap-2 mb-2">
         <input
           type="checkbox"
           checked={selected}
           aria-label={`Select ${post.title || 'post'}`}
           onClick={e => e.stopPropagation()}
           onChange={onToggleSelected}
-          className="mt-0.5 h-4 w-4 flex-shrink-0"
-          style={{ accentColor: 'var(--accent)' }}
+          className="h-3.5 w-3.5 flex-shrink-0"
+          style={{ accentColor: '#2864d8' }}
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 min-w-0">
             <PlatformChip channel={post.channel} size="sm" />
             {campaign && (
-              <span className="text-[11px] truncate max-w-[120px]" style={{ color: 'var(--ghost)' }} title={campaign.name}>
+              <span className="text-[11px] truncate max-w-[110px]" style={{ color: '#66706b' }} title={campaign.name}>
                 {campaign.name.replace(/^[A-Z][a-z]+ \d+ - /, '')}
               </span>
             )}
-            <span className="text-[11px] ml-auto" style={{ color: 'var(--mist)' }}>{relativeTime(post.created_at)}</span>
+            <span className="text-[11px] ml-auto font-semibold" style={{ color: '#4c5a55' }}>{relativeTime(post.created_at)}</span>
           </div>
         </div>
       </div>
-      <PostMediaThumb post={post} className="w-full h-24 mb-2" />
-      <p className="text-[14px] font-medium leading-snug line-clamp-2 mb-1" style={{ color: 'var(--ink)' }}>
-        {post.title || 'Untitled post'}
-      </p>
-      <p className="text-[13px] line-clamp-2" style={{ color: 'var(--ink-quiet)' }}>
+      <p className="text-[14px] leading-snug line-clamp-2 mb-2" style={{ color: '#4c5a55' }}>
         {post.copy?.replace(/^Subject:.+\n+/, '')}
       </p>
-      <div className="mt-2 flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--ghost)' }}>
+      <PostMediaThumb post={post} className="w-full h-36 mb-2" />
+      <p className="text-[13px] font-semibold leading-snug line-clamp-2 mb-1" style={{ color: '#17201c' }}>
+        {post.title || 'Untitled post'}
+      </p>
+      <div className="mt-2 flex items-center gap-1.5 text-[11px]" style={{ color: '#66706b' }}>
         {currentTab === 'Approved' && !targetDate(post) && <AlertTriangle size={12} style={{ color: 'var(--danger)' }} />}
         <span className="line-clamp-2">{postMeta(post, campaign)}</span>
       </div>
