@@ -3088,6 +3088,9 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         const format = input.format as string
         const topic = input.topic as string
         const audience = input.audience as string | undefined
+        const renderGuidance = ctx.allowVideoGeneration
+          ? 'Next: review the storyboard and brief with the operator. Only call generate_video after they explicitly approve a paid render.'
+          : 'Next: keep this as a production brief or storyboard. Real video rendering is locked until this client has its own FAL key, or an approved platform operator entitlement is active for this exact project.'
         const skillNameMap: Record<string, string> = {
           youtube_long: 'YouTube long-form video script',
           short_form_vertical: 'Short-form vertical video script',
@@ -3099,7 +3102,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           .select('prompt_module').eq('name', skillName).is('org_id', null).maybeSingle()
         const recipe = (skill?.prompt_module as string) ?? '(recipe not found — improvise)'
         return {
-          result: `Video brief template for "${topic}" (format: ${format}${audience ? `, audience: ${audience}` : ''}):\n\n${recipe.slice(0, 600)}…\n\nNext: feed this into the generate-video edge function, or expand inline if you want a draft script.`,
+          result: `Video brief template for "${topic}" (format: ${format}${audience ? `, audience: ${audience}` : ''}):\n\n${recipe.slice(0, 600)}...\n\n${renderGuidance}`,
         }
       }
 
