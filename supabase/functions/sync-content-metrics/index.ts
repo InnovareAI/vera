@@ -88,6 +88,16 @@ type PostSyncResult = {
   detail: string
 }
 
+type ObservationSyncResult = "opened" | "already_open" | "resolved"
+
+type IntegrationMetricHealthResult = {
+  integration_id: string
+  provider: string
+  status: "healthy" | "stale" | "error" | "unchanged"
+  detail?: string
+  observation?: ObservationSyncResult
+}
+
 type MetaSecret = {
   user_access_token?: string
   access_token?: string
@@ -214,11 +224,12 @@ Deno.serve(async (req) => {
 
   const synced = results.filter(result => result.status === "synced").length
   const metricCount = results.reduce((sum, result) => sum + result.metrics, 0)
-  await supabase
-    .from("client_integrations")
-    .update({ last_sync_at: new Date().toISOString() })
-    .eq("project_id", project.id)
-    .in("provider", Array.from(new Set(results.map(result => result.provider))))
+  const integrationHealth = await syncIntegrationMetricHealth(
+    supabase,
+    integrationRows,
+    results,
+    new Date().toISOString(),
+  )
 
   return json({
     ok: true,
@@ -226,6 +237,7 @@ Deno.serve(async (req) => {
     checked_posts: candidatePosts.length,
     synced_posts: synced,
     metric_count: metricCount,
+    integration_health: integrationHealth,
     results,
   })
 })
@@ -553,6 +565,170 @@ async function canManageProject(
 
   if (["owner", "admin", "agency_admin"].includes((orgMember as { role?: string } | null)?.role ?? "")) return true
   return ["owner", "admin", "editor"].includes((projectMember as { role?: string } | null)?.role ?? "")
+}
+
+async function syncIntegrationMetricHealth(
+  supabase: SupabaseAdminClient,
+  integrations: IntegrationRow[],
+  results: PostSyncResult[],
+  syncedAt: string,
+): Promise<IntegrationMetricHealthResult[]> {
+  const resultsByProvider = new Map<string, PostSyncResult[]>()
+  for (const result of results) {
+    const list = resultsByProvider.get(result.provider) ?? []
+    list.push(result)
+    resultsByProvider.set(result.provider, list)
+  }
+
+  const updates: IntegrationMetricHealthResult[] = []
+  for (const integration of integrations) {
+    const providerResults = resultsByProvider.get(integration.provider) ?? []
+    if (providerResults.length === 0) continue
+
+    const issue = firstConnectorMetricIssue(providerResults)
+    const hasSynced = providerResults.some(result => result.status === "synced")
+
+    if (issue && !hasSynced) {
+      const status = isStaleMetricIssue(issue.detail) ? "stale" : "error"
+      const detail = issue.detail.slice(0, 500)
+      await supabase
+        .from("client_integrations")
+        .update({
+          last_sync_at: syncedAt,
+          health_status: status,
+          health_detail: detail,
+        })
+        .eq("id", integration.id)
+      const observation = await syncConnectorHealthObservation(supabase, integration, status, detail)
+      updates.push({ integration_id: integration.id, provider: integration.provider, status, detail, observation })
+      continue
+    }
+
+    if (hasSynced) {
+      await supabase
+        .from("client_integrations")
+        .update({
+          last_sync_at: syncedAt,
+          health_status: "healthy",
+          health_detail: null,
+        })
+        .eq("id", integration.id)
+      const observation = await syncConnectorHealthObservation(supabase, integration, "healthy")
+      updates.push({ integration_id: integration.id, provider: integration.provider, status: "healthy", observation })
+      continue
+    }
+
+    await supabase
+      .from("client_integrations")
+      .update({ last_sync_at: syncedAt })
+      .eq("id", integration.id)
+    updates.push({
+      integration_id: integration.id,
+      provider: integration.provider,
+      status: "unchanged",
+      detail: providerResults[0]?.detail,
+    })
+  }
+
+  return updates
+}
+
+function firstConnectorMetricIssue(results: PostSyncResult[]): PostSyncResult | null {
+  for (const result of results) {
+    if (isPostReferenceMetricIssue(result.detail)) continue
+    if (result.status === "error") return result
+    if (isConnectorMetricIssue(result.detail)) return result
+  }
+  return null
+}
+
+function isConnectorMetricIssue(detail: string) {
+  return /(credential|oauth|access token|account id|encryption key|unipile is not configured|secret|permission|unauthorized|forbidden|revoked)/i.test(detail)
+}
+
+function isStaleMetricIssue(detail: string) {
+  return /(401|403|auth|oauth|access token|credential|permission|unauthorized|forbidden|revoked)/i.test(detail)
+}
+
+function isPostReferenceMetricIssue(detail: string) {
+  return /(provider post id|activity url|facebook page post id|instagram media id|returned the post but no counters|returned the media but no counters|adapter is not built|provider is not connected)/i.test(detail)
+}
+
+async function syncConnectorHealthObservation(
+  supabase: SupabaseAdminClient,
+  integration: IntegrationRow,
+  status: "healthy" | "stale" | "error",
+  detail?: string,
+): Promise<ObservationSyncResult | undefined> {
+  const dedupKey = `connector_health:client_integration:${integration.id}`
+
+  if (status === "healthy") {
+    const { data } = await supabase
+      .from("agent_observations")
+      .update({
+        status: "actioned",
+        actioned_at: new Date().toISOString(),
+        acted_result: {
+          stage: "resolved",
+          source: "metric_sync",
+          integration_id: integration.id,
+          provider: integration.provider,
+          resolved_at: new Date().toISOString(),
+        },
+      })
+      .eq("dedup_key", dedupKey)
+      .eq("status", "open")
+      .select("id")
+    return data && data.length > 0 ? "resolved" : undefined
+  }
+
+  const { error } = await supabase
+    .from("agent_observations")
+    .insert({
+      org_id: integration.org_id,
+      project_id: integration.project_id,
+      kind: "connector_health",
+      severity: status === "stale" ? "high" : "medium",
+      title: `${providerLabel(integration.provider)} metric sync needs attention`,
+      detail: metricHealthObservationDetail(integration.provider, status, detail),
+      proposed_action: "Open integrations",
+      action_kind: "open_integrations",
+      action_payload: {
+        scope: "client_integration",
+        source: "metric_sync",
+        integration_id: integration.id,
+        provider: integration.provider,
+        project_id: integration.project_id,
+        status,
+        detail: detail ?? null,
+      },
+      dedup_key: dedupKey,
+      surface_until: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+
+  if (!error) return "opened"
+  if (error.code === "23505") return "already_open"
+  console.warn(`metric connector_health observation failed for ${integration.id}: ${error.message}`)
+  return undefined
+}
+
+function metricHealthObservationDetail(provider: string, status: "stale" | "error", detail?: string) {
+  const label = providerLabel(provider)
+  if (status === "stale") {
+    return `${label} rejected metric access. Reconnect the integration before VERA relies on its performance data. ${detail ?? ""}`.trim()
+  }
+  return `${label} could not provide metrics during sync. Inspect the integration before using this data for the next brief. ${detail ?? ""}`.trim()
+}
+
+function providerLabel(provider: string) {
+  return ({
+    linkedin: "LinkedIn",
+    meta_facebook_pages: "Facebook Pages",
+    meta_instagram: "Instagram",
+    google_search_console: "Google Search Console",
+    google_analytics_4: "Google Analytics 4",
+    youtube: "YouTube",
+  } as Record<string, string>)[provider] ?? provider.replace(/_/g, " ")
 }
 
 function detectProvider(post: ContentPostRow): string | null {

@@ -110,6 +110,13 @@ type SyncReport = {
   checked_posts?: number
   synced_posts?: number
   metric_count?: number
+  integration_health?: Array<{
+    integration_id: string
+    provider: string
+    status: 'healthy' | 'stale' | 'error' | 'unchanged'
+    detail?: string
+    observation?: 'opened' | 'already_open' | 'resolved'
+  }>
   error?: string
 }
 
@@ -318,7 +325,14 @@ export default function Measure() {
       if (!response.ok || report.error) {
         setError(report.error ?? `Metric sync failed with HTTP ${response.status}`)
       } else {
-        setSyncMessage(`Synced ${report.synced_posts ?? 0} posts and ${report.metric_count ?? 0} metrics from ${report.checked_posts ?? 0} checked posts.`)
+        const issueCount = (report.integration_health ?? []).filter(item => item.status === 'stale' || item.status === 'error').length
+        const resolvedCount = (report.integration_health ?? []).filter(item => item.observation === 'resolved').length
+        const healthSuffix = issueCount > 0
+          ? ` ${issueCount} integration issue${issueCount === 1 ? '' : 's'} surfaced.`
+          : resolvedCount > 0
+            ? ` ${resolvedCount} integration warning${resolvedCount === 1 ? '' : 's'} resolved.`
+            : ''
+        setSyncMessage(`Synced ${report.synced_posts ?? 0} posts and ${report.metric_count ?? 0} metrics from ${report.checked_posts ?? 0} checked posts.${healthSuffix}`)
         await loadData(activeProject.id)
       }
     } catch (syncError) {
