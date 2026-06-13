@@ -1,13 +1,14 @@
 // LinkedIn Profile Scorer
 //
-// Scores a LinkedIn profile (the connected account by default, or any vanity
-// slug passed in) against LinkedIn profile best practices. Returns a per-
-// section breakdown with completeness + quality scores and concrete fixes.
+// Scores a LinkedIn profile against LinkedIn profile best practices. For client
+// projects, the target comes from the active Demand Brain LinkedIn profile URL.
+// The connected Unipile account is research access, not the profile target.
+// Returns a per-section breakdown with completeness + quality scores and fixes.
 //
 // POST { org_id, vanity?: string }  →  { success, profile, score, sections, fixes }
 //
-// When `vanity` is provided, scores that profile via the org's Unipile session.
-// Otherwise scores the connected account's own profile.
+// When `vanity` is provided, scores that profile via the workspace research
+// session. The default workspace can still fall back to /me for legacy use.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from 'npm:@supabase/supabase-js'
@@ -15,6 +16,7 @@ import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
 import { completeText, resolveProjectTextRuntime, type TextRuntime } from '../_shared/text-runtime.ts'
 import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
+import { linkedInPersonalUrl, resolveProjectAuditChannels } from '../_shared/project-sources.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -87,32 +89,33 @@ Deno.serve(async (req) => {
   }
   const accountId = unipile.accountId
   const headers = { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' }
+  const sourceResolution = await resolveProjectAuditChannels(supabase, org_id, project_id)
 
   // Resolve target. Priority order:
   //   1. Explicit `vanity` param passed by the caller
-  //   2. Org's `linkedin_personal` channel URL slug from channel_profiles
-  //      (source of truth for "which profile to audit" — Unipile session
-  //      is just the auth token)
-  //   3. `/me` — the connected account, fallback for orgs with no channel set
+  //   2. Active project's LinkedIn profile URL from Demand Brain
+  //   3. `/me`, but only for the default workspace project
   let resolvedTarget: string = (vanity ?? '').trim()
-  let resolvedSource: 'param' | 'channel' | 'me' = resolvedTarget ? 'param' : 'me'
+  let resolvedSource: 'param' | 'project' | 'legacy_channel' | 'me' = resolvedTarget ? 'param' : 'me'
   let resolvedUrl: string | null = null
 
   if (!resolvedTarget) {
-    const { data: channels } = await supabase
-      .from('channel_profiles')
-      .select('channel, url')
-      .eq('org_id', org_id)
-      .eq('is_active', true)
-    const personalCh = (channels ?? []).find(c => c.channel === 'linkedin_personal')
-    if (personalCh?.url) {
-      const m = (personalCh.url as string).match(/linkedin\.com\/in\/([^/?#]+)/i)
+    const personalUrl = linkedInPersonalUrl(sourceResolution.channels)
+    if (personalUrl) {
+      const m = personalUrl.match(/linkedin\.com\/in\/([^/?#]+)/i)
       if (m) {
         resolvedTarget = decodeURIComponent(m[1]).replace(/\/+$/, '')
-        resolvedSource = 'channel'
-        resolvedUrl = personalCh.url as string
+        resolvedSource = sourceResolution.source === 'project_brain' ? 'project' : 'legacy_channel'
+        resolvedUrl = personalUrl
       }
     }
+  }
+
+  if (!resolvedTarget && !sourceResolution.project.is_default) {
+    return json({
+      success: false,
+      error: 'Add this client LinkedIn profile URL to the Demand Brain before scoring a profile. Shared research profiles cannot be scored as the client.',
+    }, 400)
   }
 
   const target = resolvedTarget || 'me'
@@ -237,7 +240,7 @@ ${(profile.summary ?? '').slice(0, 1500) || '(empty)'}${intentBlock}`,
     fixes,
   }
 
-  // Persist when scoring the connected account's own profile (skip for ad-hoc lookups by vanity).
+  // Persist normal project scoring runs, but skip ad-hoc vanity lookups.
   if (!vanity || vanity === 'me') {
     await supabase.from('linkedin_audits').insert({ org_id, project_id, kind: 'profile', result: payload as unknown as Json })
   }

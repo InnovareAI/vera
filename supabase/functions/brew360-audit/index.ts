@@ -5,8 +5,9 @@
 // model). Returns a structured JSON audit with per-principle scores, profile
 // optimisation suggestions, content strategy, and quick wins.
 //
-// Reads the connected LinkedIn account from organizations.unipile_account_id.
-// Optional: pulls brand_voice for the org to give the auditor context.
+// Uses the active project's Demand Brain LinkedIn profile URL as the audit
+// target. The connected Unipile account is read-only research access, not proof
+// that the connected account itself is the client profile.
 //
 // POST { org_id }  →  { success, audit, profile_summary, posts_analyzed }
 
@@ -17,6 +18,7 @@ import type { Json } from '../_shared/database.types.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { resolveProjectTextRuntime, streamText, textRuntimeUsageMetadata } from '../_shared/text-runtime.ts'
 import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
+import { linkedInPersonalUrl, resolveProjectAuditChannels } from '../_shared/project-sources.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -58,10 +60,9 @@ Deno.serve(async (req) => {
   })
   if (!runtime.ok) return jsonResponse({ success: false, error: runtime.message }, runtime.status)
 
-  // 1) Get connected LinkedIn account + the org's channel URLs (channel_profiles
-  //    is the source of truth for "which profile to audit"; the Unipile session
-  //    is just the auth token — the operator who connected Unipile may not be
-  //    the same person as the brand's primary LinkedIn identity).
+  // 1) Get read-only LinkedIn research access + the project's source URLs.
+  //    The Unipile account is just a research token. The target to audit must
+  //    come from the client Demand Brain for client projects.
   const { data: org } = await supabase
     .from('organizations')
     .select('name, settings')
@@ -74,26 +75,30 @@ Deno.serve(async (req) => {
   }
   const accountId = unipile.accountId
   const headers = { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' }
+  const sourceResolution = await resolveProjectAuditChannels(supabase, org_id, project_id)
 
-  // Resolve audit target: prefer the org's linkedin_personal channel URL slug.
-  // Fall back to /me (the connected account) only if no channel URL exists.
+  // Resolve audit target: prefer the project's LinkedIn profile URL. Fall back
+  // to /me only for the default workspace project, preserving legacy internal
+  // behavior without letting client projects audit the operator profile.
   let targetSlug: string | null = null
-  let targetSource: 'channel' | 'me' = 'me'
+  let targetSource: 'project' | 'legacy_channel' | 'me' = 'me'
   let targetUrl: string | null = null
 
-  const { data: channels } = await supabase
-    .from('channel_profiles')
-    .select('channel, url')
-    .eq('org_id', org_id)
-    .eq('is_active', true)
-  const personalCh = (channels ?? []).find(c => c.channel === 'linkedin_personal')
-  if (personalCh?.url) {
-    const m = (personalCh.url as string).match(/linkedin\.com\/in\/([^/?#]+)/i)
+  const personalUrl = linkedInPersonalUrl(sourceResolution.channels)
+  if (personalUrl) {
+    const m = personalUrl.match(/linkedin\.com\/in\/([^/?#]+)/i)
     if (m) {
       targetSlug = decodeURIComponent(m[1]).replace(/\/+$/, '')
-      targetSource = 'channel'
-      targetUrl = personalCh.url as string
+      targetSource = sourceResolution.source === 'project_brain' ? 'project' : 'legacy_channel'
+      targetUrl = personalUrl
     }
+  }
+
+  if (!targetSlug && !sourceResolution.project.is_default) {
+    return jsonResponse({
+      success: false,
+      error: 'Add this client LinkedIn profile URL to the Demand Brain before running a 360Brew audit. Shared research profiles cannot be audited as the client.',
+    }, 400)
   }
 
   // 2) Fetch the target profile. If we resolved a channel slug, use it
@@ -110,8 +115,15 @@ Deno.serve(async (req) => {
       fullProfile = await profileRes.json() as Record<string, unknown>
       myProviderId = (fullProfile.provider_id as string) ?? null
     } else {
-      // Slug didn't resolve (private profile, typo, etc.) — fall back to /me
-      // with a warning rather than failing.
+      if (!sourceResolution.project.is_default) {
+        const errText = await profileRes.text()
+        return jsonResponse({
+          success: false,
+          error: `Client LinkedIn profile lookup failed (${profileRes.status}). Check the Demand Brain LinkedIn profile URL. ${errText.slice(0, 200)}`,
+        }, 502)
+      }
+      // Slug did not resolve for the legacy default workspace path, preserve
+      // the old /me fallback there only.
       console.warn(`brew360: slug "${targetSlug}" lookup failed (HTTP ${profileRes.status}); falling back to /me`)
       targetSlug = null
       targetSource = 'me'
@@ -153,12 +165,26 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 3) Pull brand_voice if it exists for this org (optional context)
-  const { data: brand } = await supabase
+  // 3) Pull brand_voice if it exists, preferring the active client project and
+  // falling back to the org-level legacy row only when no project row exists.
+  const { data: brandRows } = await supabase
     .from('brand_voice')
-    .select('tone, writing_rules, forbidden_phrases, required_phrases, system_prompt')
+    .select('tone, writing_rules, forbidden_phrases, required_phrases, system_prompt, project_id, updated_at')
     .eq('org_id', org_id)
-    .maybeSingle()
+    .or(`project_id.eq.${project_id},project_id.is.null`)
+    .order('updated_at', { ascending: false })
+    .limit(8)
+  const brandCandidates = (brandRows ?? []) as Array<{
+    tone?: string[] | null
+    writing_rules?: string[] | null
+    forbidden_phrases?: string[] | null
+    required_phrases?: string[] | null
+    system_prompt?: string | null
+    project_id?: string | null
+  }>
+  const brand = brandCandidates.find(row => row.project_id === project_id)
+    ?? brandCandidates.find(row => row.project_id == null)
+    ?? null
 
   // 4) Build context from the rich profile (linkedin_sections=*)
   const profileContext = {
@@ -305,8 +331,8 @@ Analyze this profile and content against the 360Brew algorithm. Return the JSON 
     skills_count: profileContext.skills_total,
     // Resolved audit target — operator can verify the audit ran against the
     // intended profile, not whatever account happens to be connected.
-    audited_target: targetSource === 'channel'
-      ? { source: 'channel', slug: targetSlug, url: targetUrl }
+    audited_target: targetSource === 'project' || targetSource === 'legacy_channel'
+      ? { source: targetSource, slug: targetSlug, url: targetUrl }
       : { source: 'me', slug: (fullProfile.public_identifier as string) ?? null, url: null },
   }
 

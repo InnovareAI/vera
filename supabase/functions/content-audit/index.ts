@@ -1,11 +1,11 @@
-// Content audit agent. Reads channel_profiles for an org, fetches what it can
-// from each channel, asks Claude to synthesise a proposed brand_voice +
-// personas + skills, saves the result to audit_runs. Streams SSE progress
-// events as it goes.
+// Content audit agent. Reads the active project's Demand Brain source URLs,
+// fetches what it can from each channel, asks Claude to synthesise a proposed
+// brand_voice + personas + skills, saves the result to audit_runs. Streams SSE
+// progress events as it goes.
 //
-// Adapters today: blog/medium via RSS. LinkedIn channels require Unipile
-// (deferred until login). YouTube needs YOUTUBE_API_KEY. X needs APIFY_TOKEN.
-// Unknown channels are surfaced as "needs platform setup" in the audit log.
+// Adapters today: blog/medium via RSS, LinkedIn via Unipile research, X via
+// Apify, and other public sources via direct HTML fallback. Unsupported or
+// blocked channels are surfaced as adapter notes in the audit log.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from 'npm:@supabase/supabase-js'
@@ -14,6 +14,7 @@ import type { Json } from '../_shared/database.types.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { resolveProjectTextRuntime, streamText, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
 import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
+import { resolveProjectAuditChannels, type AuditChannelProfile } from '../_shared/project-sources.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -29,10 +30,7 @@ const APIFY_API_TOKEN = Deno.env.get('APIFY_API_TOKEN')
 const MAX_ITEMS_PER_CHANNEL = 20
 const MAX_CHARS_PER_ITEM = 4000
 
-interface ChannelProfile {
-  channel: string
-  url: string
-}
+type ChannelProfile = AuditChannelProfile
 
 interface FetchedItem {
   channel: string
@@ -92,16 +90,20 @@ Deno.serve(async (req) => {
         const auditId = run.id as string
         send('started', { audit_id: auditId })
 
-        // 2. Fetch channels + research account. A workspace account wins; an
-        // InnovareAI operator can fall back to the shared research profile.
-        const [{ data: channels, error: chErr }, unipile] = await Promise.all([
-          supabase.from('channel_profiles').select('channel, url').eq('org_id', org_id).eq('is_active', true),
+        // 2. Fetch project-scoped channels + research account. A workspace
+        // research account wins; an InnovareAI operator can fall back to the
+        // shared research profile. Client projects never read org-wide channel
+        // profiles, which may belong to a different client in the same org.
+        const [sourceResolution, unipile] = await Promise.all([
+          resolveProjectAuditChannels(supabase, org_id, project_id),
           resolveUnipileResearchConnection(supabase, org_id, { requesterUserId }),
         ])
-        if (chErr) throw new Error(`channels query failed: ${chErr.message}`)
-        if (!channels?.length) throw new Error('No channels configured for this org')
+        const channels = sourceResolution.channels
+        if (!channels?.length) {
+          throw new Error('No client source URLs configured. Add the website, LinkedIn, Medium, YouTube, or X source in this client Demand Brain before running the content audit.')
+        }
         const unipileAccountId = unipile.ok ? unipile.accountId : null
-        send('channels_loaded', { channels, unipile_connected: !!unipileAccountId })
+        send('channels_loaded', { channels, source: sourceResolution.source, unipile_connected: !!unipileAccountId })
 
         // 3. Fetch content from each channel
         const results: FetchResult[] = []
@@ -115,7 +117,7 @@ Deno.serve(async (req) => {
 
         const usable = results.filter(r => r.ok && r.items.length > 0)
         if (!usable.length) {
-          throw new Error('No channels yielded usable content (LinkedIn/YouTube/X need platform setup; only blog and Medium work today).')
+          throw new Error('No channels yielded usable content. Check the source URLs and connector notes for LinkedIn, YouTube, Instagram, Facebook, Quora, Reddit, or X.')
         }
 
         // 4. Synthesise via Claude
@@ -181,16 +183,24 @@ async function fetchChannel(
       case 'medium':
         return await fetchRSS(channel, url)
       case 'linkedin_personal':
-        if (!unipileAccountId) return { channel, url, ok: false, items: [], reason: 'Click "Connect LinkedIn" above to enable this channel.' }
+        if (!unipileAccountId) return { channel, url, ok: false, items: [], reason: linkedInResearchReason() }
         return await fetchLinkedInPosts(channel, url, unipileAccountId)
       case 'linkedin_company':
-        if (!unipileAccountId) return { channel, url, ok: false, items: [], reason: 'Click "Connect LinkedIn" above to enable this channel.' }
+        if (!unipileAccountId) return { channel, url, ok: false, items: [], reason: linkedInResearchReason() }
         return await fetchLinkedInCompany(url, unipileAccountId)
+      case 'linkedin_events':
+        return await fetchGenericHtmlSource(channel, url, 'LinkedIn events need public page access or a connected research adapter; direct public HTML was attempted.')
       case 'linkedin_newsletter':
-        if (!unipileAccountId) return { channel, url, ok: false, items: [], reason: 'Click "Connect LinkedIn" above to enable this channel.' }
+        if (!unipileAccountId) return { channel, url, ok: false, items: [], reason: linkedInResearchReason() }
         return await fetchLinkedInNewsletter(url, unipileAccountId, channels)
+      case 'instagram':
+        return await fetchGenericHtmlSource(channel, url, 'Instagram audit needs public page access or the Instagram research adapter; direct public HTML was attempted.')
       case 'youtube':
-        return { channel, url, ok: false, items: [], reason: 'YouTube audit needs YOUTUBE_API_KEY (not configured).' }
+        return await fetchGenericHtmlSource(channel, url, 'YouTube audit needs the YouTube API adapter for reliable video history; direct public HTML was attempted.')
+      case 'quora':
+      case 'reddit':
+      case 'facebook':
+        return await fetchGenericHtmlSource(channel, url, `${labelForChannel(channel)} is manual or read-first for now; direct public HTML was attempted.`)
       case 'twitter':
         if (!APIFY_API_TOKEN) return { channel, url, ok: false, items: [], reason: 'APIFY_API_TOKEN not configured on the server.' }
         return await fetchTwitterViaApify(url)
@@ -200,6 +210,22 @@ async function fetchChannel(
   } catch (e) {
     return { channel, url, ok: false, items: [], reason: e instanceof Error ? e.message : String(e) }
   }
+}
+
+function linkedInResearchReason(): string {
+  return 'LinkedIn research needs a connected workspace or InnovareAI shared research profile. Configure it in Settings > Integrations > Shared LinkedIn research profile.'
+}
+
+function labelForChannel(channel: string): string {
+  const labels: Record<string, string> = {
+    quora: 'Quora',
+    reddit: 'Reddit',
+    facebook: 'Facebook',
+    instagram: 'Instagram',
+    youtube: 'YouTube',
+    linkedin_events: 'LinkedIn events',
+  }
+  return labels[channel] ?? channel
 }
 
 function extractTwitterHandle(url: string): string | null {
@@ -613,6 +639,60 @@ async function fetchBlogHtml(blogUrl: string, indexHtml: string): Promise<FetchR
     return { channel: 'blog', url: blogUrl, ok: false, items: [], reason: `Found ${candidates.length} candidate links but none yielded substantial article content.` }
   }
   return { channel: 'blog', url: blogUrl, ok: true, items }
+}
+
+async function fetchGenericHtmlSource(channel: string, urlIn: string, fallbackReason: string): Promise<FetchResult> {
+  const normalized = normalizePublicUrl(channel, urlIn)
+  if (!normalized) {
+    return { channel, url: urlIn, ok: false, items: [], reason: `Could not parse ${labelForChannel(channel)} URL.` }
+  }
+  try {
+    const res = await fetch(normalized, {
+      headers: {
+        Accept: 'text/html,application/xhtml+xml,text/plain,*/*',
+        'User-Agent': 'Mozilla/5.0 (compatible; VeraAuditor/0.1; +https://innovareai.com)',
+      },
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) {
+      return { channel, url: urlIn, ok: false, items: [], reason: `${fallbackReason} HTTP ${res.status}.` }
+    }
+    const body = await res.text()
+    const text = extractArticleText(body).slice(0, MAX_CHARS_PER_ITEM)
+    if (text.length < 120) {
+      return { channel, url: urlIn, ok: false, items: [], reason: `${fallbackReason} No readable public text found.` }
+    }
+    return {
+      channel,
+      url: urlIn,
+      ok: true,
+      reason: fallbackReason,
+      items: [{
+        channel,
+        source_url: normalized,
+        title: extractTitle(body) ?? labelForChannel(channel),
+        text,
+      }],
+    }
+  } catch (error) {
+    return { channel, url: urlIn, ok: false, items: [], reason: `${fallbackReason} ${error instanceof Error ? error.message : String(error)}` }
+  }
+}
+
+function normalizePublicUrl(channel: string, raw: string): string | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  if (channel === 'reddit' && /^r\/[A-Za-z0-9_]+/i.test(trimmed)) {
+    return `https://www.reddit.com/${trimmed.replace(/^\/+/, '')}`
+  }
+  if (channel === 'twitter' && trimmed.startsWith('@')) return `https://x.com/${trimmed.slice(1)}`
+  try {
+    const url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`)
+    if (!['http:', 'https:'].includes(url.protocol)) return null
+    return url.toString()
+  } catch {
+    return null
+  }
 }
 
 interface PostCandidate { href: string; title: string }

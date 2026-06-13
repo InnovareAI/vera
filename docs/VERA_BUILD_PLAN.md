@@ -263,6 +263,7 @@ Current state:
 - The `vera-notice` worker now creates a weekly learning observation per client when there are fresh demand signals, pending learning skill proposals, approved unscheduled posts, or SAM handoff candidates.
 - Weekly learning observations include current-week metrics, previous-week comparison, top assets, pending skill proposals, SAM handoff candidates, and a route back to the client Learning page.
 - The VERA launcher now renders weekly learning observations as action cards with metrics, top assets, skill proposals, SAM handoff counts, and direct actions to Learning, AI Settings, and prefilled VERA briefs.
+- Client content audits and LinkedIn audits now resolve website, LinkedIn, Instagram, YouTube, Medium, Quora, Reddit, Facebook, and X source URLs from the active client's Demand Brain. Legacy org-wide channel profiles are only used for the default workspace project.
 
 Next step:
 
