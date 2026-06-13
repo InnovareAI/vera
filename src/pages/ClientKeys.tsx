@@ -225,6 +225,25 @@ export default function ClientKeys() {
   }
 
   function togglePolicy(key: 'images_enabled' | 'standard_video_enabled' | 'premium_media_enabled', value: boolean) {
+    if (value && key === 'images_enabled') {
+      const route = imageModelProvider(aiPolicy.default_image_model, { hasOpenRouter, hasOpenAI, hasFal })
+      if (!route) {
+        push({
+          kind: 'warn',
+          title: 'Image route is not ready',
+          body: `${modelLabel(aiPolicy.default_image_model)} does not match this client's active keys. Add OpenRouter for Nano Banana, FAL for Seedream/Qwen/FAL routes, or OpenAI for OpenAI Image Gen 2.`,
+        })
+        return
+      }
+    }
+    if (value && key === 'standard_video_enabled' && !hasFal) {
+      push({
+        kind: 'warn',
+        title: 'Add client FAL first',
+        body: 'Standard video can only be enabled when this client space has its own active FAL key.',
+      })
+      return
+    }
     if (value && (key === 'standard_video_enabled' || key === 'premium_media_enabled') && !aiPolicy.monthly_budget_usd) {
       push({ kind: 'warn', title: 'Set a monthly cap first', body: 'Video and premium media require an explicit client budget cap.' })
       return
@@ -257,6 +276,39 @@ export default function ClientKeys() {
       default_image_model: modelDraft.default_image_model || DEFAULT_AI_POLICY.default_image_model,
       default_video_model: modelDraft.default_video_model || DEFAULT_AI_POLICY.default_video_model,
       default_image_video_model: modelDraft.default_image_video_model || DEFAULT_AI_POLICY.default_image_video_model,
+    }
+    const imageRoute = imageModelProvider(next.default_image_model, { hasOpenRouter, hasOpenAI, hasFal })
+    if (next.images_enabled && !imageRoute) {
+      push({
+        kind: 'warn',
+        title: 'Selected image model cannot run',
+        body: `${modelLabel(next.default_image_model)} does not match this client's active keys. Use Nano Banana with OpenRouter, Seedream/Qwen/FAL routes with FAL, or OpenAI Image Gen 2 with OpenAI.`,
+      })
+      return
+    }
+    if (isPremiumImageModel(next.default_image_model) && !next.premium_media_enabled) {
+      push({
+        kind: 'warn',
+        title: 'Premium media is locked',
+        body: `${modelLabel(next.default_image_model)} is a premium image model. Enable Premium media with a monthly cap before making it the default.`,
+      })
+      return
+    }
+    if (isPremiumImageModel(next.default_image_model) && !next.monthly_budget_usd) {
+      push({
+        kind: 'warn',
+        title: 'Set a monthly cap first',
+        body: 'Premium image defaults require an explicit client budget cap.',
+      })
+      return
+    }
+    if ((next.standard_video_enabled || next.premium_media_enabled) && !hasFal && (next.default_video_model || next.default_image_video_model)) {
+      push({
+        kind: 'warn',
+        title: 'Video defaults need client FAL',
+        body: 'Real video rendering is client-funded only. Add a client-owned FAL key before saving video defaults for an enabled video policy.',
+      })
+      return
     }
     void saveAiPolicy(next)
   }
