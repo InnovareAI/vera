@@ -17,7 +17,7 @@ import { useProject } from '../lib/projectContext'
 import { useOrg } from '../lib/orgContext'
 import { useAuth } from '../lib/auth'
 import { useRightRail } from '../lib/rightRailContext'
-import { PageHeader, SectionLabel, Field, Input, Textarea, Button, EmptyState, color, space, type as t, radius } from '../design'
+import { PageHeader, SectionLabel, Field, Input, Textarea, Button, EmptyState, Chip, color, space, type as t, radius } from '../design'
 import {
   EMPTY_BUSINESS_CONTEXT,
   compactProjectDescription,
@@ -37,6 +37,7 @@ import {
   DEMAND_SOURCE_KEYS,
   DEFAULT_DEMAND_OPERATING_MODEL,
   applyDemandDefaults,
+  type DemandPlatformDefinition,
 } from '../lib/demandModel'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
@@ -126,6 +127,114 @@ function DemandDefaultPanel({ title, items }: { title: string; items: string[] }
             +{items.length - 7}
           </span>
         )}
+      </div>
+    </div>
+  )
+}
+
+function publishingTone(mode: DemandPlatformDefinition['publishing']) {
+  if (mode === 'connected') return color.success
+  if (mode === 'cms') return color.dotBlue
+  if (mode === 'read-only') return color.warn
+  return color.ghost
+}
+
+function publishingLabel(mode: DemandPlatformDefinition['publishing']) {
+  if (mode === 'connected') return 'Connected when authorized'
+  if (mode === 'cms') return 'CMS or handoff'
+  if (mode === 'read-only') return 'Read-only'
+  return 'Manual-first'
+}
+
+function platformSourceValue(platform: DemandPlatformDefinition, context: BusinessContext) {
+  if (!platform.sourceKey) return ''
+  return context[platform.sourceKey].trim()
+}
+
+function platformIsMentioned(platform: DemandPlatformDefinition, context: BusinessContext) {
+  const haystack = [
+    context.channelStrategy,
+    context.contentFormats,
+    context.platformToneOfVoice,
+    context.demandObjective,
+  ].join(' ').toLowerCase()
+  const needles = [
+    platform.key,
+    platform.label.toLowerCase(),
+    ...(platform.key === 'x' ? ['twitter'] : []),
+    ...(platform.key === 'email' ? ['newsletter', 'nurture'] : []),
+    ...(platform.key === 'blog' ? ['website', 'seo', 'article'] : []),
+  ]
+  return needles.some(needle => haystack.includes(needle))
+}
+
+function orderedDemandPlatforms(context: BusinessContext) {
+  return [...DEMAND_PLATFORM_DEFINITIONS].sort((a, b) => {
+    const aSource = platformSourceValue(a, context) ? 1 : 0
+    const bSource = platformSourceValue(b, context) ? 1 : 0
+    if (aSource !== bSource) return bSource - aSource
+    const aMention = platformIsMentioned(a, context) ? 1 : 0
+    const bMention = platformIsMentioned(b, context) ? 1 : 0
+    if (aMention !== bMention) return bMention - aMention
+    return a.label.localeCompare(b.label)
+  })
+}
+
+function DemandChannelMatrix({ context }: { context: BusinessContext }) {
+  const platforms = orderedDemandPlatforms(context)
+  const configured = platforms.filter(platform => platformSourceValue(platform, context)).length
+
+  return (
+    <div style={{ marginTop: space[4], padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: space[4], flexWrap: 'wrap', marginBottom: space[4] }}>
+        <div>
+          <div style={{ fontSize: t.size.sm, color: color.ink, fontWeight: t.weight.semibold }}>Channel operating matrix</div>
+          <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `${space[2]} 0 0`, maxWidth: 660 }}>
+            VERA uses this map to decide what each channel is for, how content should be handled, what signals matter, and when work stays manual.
+          </p>
+        </div>
+        <Chip tone="accent">{configured}/{platforms.length} sources configured</Chip>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: space[3] }}>
+        {platforms.map(platform => {
+          const source = platformSourceValue(platform, context)
+          const mentioned = platformIsMentioned(platform, context)
+          const active = !!source || mentioned
+          return (
+            <div key={platform.key} style={{
+              padding: space[4],
+              borderRadius: radius.md,
+              border: `1px solid ${active ? color.line2 : color.line}`,
+              background: active ? color.paper : color.paper2,
+              minWidth: 0,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: space[3], marginBottom: space[3] }}>
+                <span style={{ width: 30, height: 30, borderRadius: radius.sm, background: active ? color.accentSoft : color.surface, color: active ? color.accent : color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: t.size.cap, fontWeight: t.weight.semibold, flexShrink: 0 }}>
+                  {platform.initials}
+                </span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platform.label}</div>
+                  <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: 2 }}>{source ? 'Source configured' : active ? 'In channel strategy' : 'Available'}</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', marginBottom: space[3] }}>
+                <Chip dot={publishingTone(platform.publishing)}>{publishingLabel(platform.publishing)}</Chip>
+                {source && <Chip dot={color.success}>Source</Chip>}
+                {!source && active && <Chip dot={color.info}>Planned</Chip>}
+              </div>
+              {source && (
+                <div title={source} style={{ fontSize: t.size.micro, color: color.ghost, padding: `${space[2]} ${space[3]}`, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.xs, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: space[3] }}>
+                  {source}
+                </div>
+              )}
+              <p style={{ margin: `0 0 ${space[3]}`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.45 }}>{platform.role}</p>
+              <p style={{ margin: `0 0 ${space[3]}`, color: color.ghost, fontSize: t.size.micro, lineHeight: 1.45 }}>{platform.workflow}</p>
+              <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap' }}>
+                {platform.outcomeSignals.map(signal => <Chip key={signal}>{signal}</Chip>)}
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -549,6 +658,8 @@ export default function Brain() {
             </div>
           </div>
         </div>
+
+        <DemandChannelMatrix context={business} />
 
         <div style={{ marginTop: space[4], padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], marginBottom: space[4] }}>
