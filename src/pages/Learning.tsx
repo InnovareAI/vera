@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ElementType, ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, BarChart3, CheckCircle2, Lightbulb, RefreshCw, Send, Share2, Sparkles, Target, TrendingUp, Zap } from 'lucide-react'
+import { ArrowRight, BarChart3, CheckCircle2, Check, Copy, Lightbulb, RefreshCw, Send, Share2, Sparkles, Target, TrendingUp, UserCheck, X, Zap } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { ContentMetricSnapshot, Post } from '../lib/supabase'
+import { useAuth } from '../lib/auth'
 import { parseProjectInstructions, type BusinessContext, type BusinessContextKey } from '../lib/businessContext'
 import {
   DEMAND_GROWTH_OUTCOMES,
@@ -14,7 +15,7 @@ import {
 } from '../lib/demandModel'
 import { useProject } from '../lib/projectContext'
 import { useRightRail } from '../lib/rightRailContext'
-import { Button, PageHeader, SectionLabel, color, radius, space, type as t } from '../design'
+import { Button, PageHeader, SectionLabel, color, radius, space, type as t, useToast } from '../design'
 
 type LearningMetric = {
   postId: string
@@ -48,6 +49,32 @@ type HandoffCandidate = {
   score: number
   triggers: string[]
   prompt: string
+}
+
+type SamHandoffStatus = 'queued' | 'in_progress' | 'done' | 'dismissed'
+
+type SamHandoffAction = {
+  id: string
+  org_id: string
+  project_id: string
+  observation_id: string | null
+  post_id: string | null
+  title: string
+  channel: string | null
+  score: number
+  triggers: string[]
+  status: SamHandoffStatus
+  priority: 'low' | 'medium' | 'high'
+  payload: Record<string, unknown> | null
+  created_by: string | null
+  assigned_to: string | null
+  assigned_at: string | null
+  handed_to_sam_at: string | null
+  completed_at: string | null
+  dismissed_at: string | null
+  actioned_at: string | null
+  created_at: string
+  updated_at: string
 }
 
 type LearningSkillProposal = {
@@ -95,27 +122,34 @@ const DEMAND_METRICS = new Set([
   'meeting_requests',
 ])
 
+const HANDOFF_SELECT = 'id, org_id, project_id, observation_id, post_id, title, channel, score, triggers, status, priority, payload, created_by, assigned_to, assigned_at, handed_to_sam_at, completed_at, dismissed_at, actioned_at, created_at, updated_at'
+
 export default function Learning() {
   const { activeProject } = useProject()
+  const { user } = useAuth()
+  const { push } = useToast()
   const navigate = useNavigate()
   const [posts, setPosts] = useState<Post[]>([])
   const [snapshots, setSnapshots] = useState<ContentMetricSnapshot[]>([])
+  const [handoffActions, setHandoffActions] = useState<SamHandoffAction[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [skillMessage, setSkillMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
   const [savingSkillKey, setSavingSkillKey] = useState<string | null>(null)
+  const [handoffBusyKey, setHandoffBusyKey] = useState<string | null>(null)
   useRightRail(null, [])
 
   const load = useCallback(async () => {
     if (!activeProject?.id) {
       setPosts([])
       setSnapshots([])
+      setHandoffActions([])
       setLoading(false)
       return
     }
     setLoading(true)
     setError(null)
-    const [postRes, metricRes] = await Promise.all([
+    const [postRes, metricRes, handoffRes] = await Promise.all([
       supabase
         .from('content_posts')
         .select('*')
@@ -129,13 +163,20 @@ export default function Learning() {
         .in('metric_name', Array.from(DEMAND_METRICS))
         .order('pulled_at', { ascending: false })
         .limit(1500),
+      supabase
+        .from('sam_handoff_actions')
+        .select(HANDOFF_SELECT)
+        .eq('project_id', activeProject.id)
+        .order('updated_at', { ascending: false })
+        .limit(80),
     ])
-    const firstError = postRes.error ?? metricRes.error
+    const firstError = postRes.error ?? metricRes.error ?? handoffRes.error
     if (firstError) {
       setError(firstError.message)
     } else {
       setPosts((postRes.data ?? []) as Post[])
       setSnapshots((metricRes.data ?? []) as ContentMetricSnapshot[])
+      setHandoffActions((handoffRes.data ?? []) as SamHandoffAction[])
     }
     setLoading(false)
   }, [activeProject?.id])
@@ -158,6 +199,19 @@ export default function Learning() {
   const experiments = useMemo(() => buildExperiments(posts, metrics, demandContext, channelRows), [posts, metrics, demandContext, channelRows])
   const measuredChannels = channelRows.filter(row => row.measured > 0).length
   const handoffCandidates = useMemo(() => buildHandoffCandidates(posts, metrics, demandContext), [posts, metrics, demandContext])
+  const activeHandoffActions = useMemo(() => handoffActions.filter(action => action.status !== 'done' && action.status !== 'dismissed'), [handoffActions])
+  const closedHandoffActions = useMemo(() => handoffActions.filter(action => action.status === 'done' || action.status === 'dismissed').slice(0, 6), [handoffActions])
+  const handoffActionByPost = useMemo(() => {
+    const byPost = new Map<string, SamHandoffAction>()
+    for (const action of handoffActions) {
+      if (action.post_id && !byPost.has(action.post_id)) byPost.set(action.post_id, action)
+    }
+    return byPost
+  }, [handoffActions])
+  const untrackedHandoffCandidates = useMemo(
+    () => handoffCandidates.filter(candidate => !handoffActionByPost.has(candidate.id)).slice(0, 6),
+    [handoffCandidates, handoffActionByPost],
+  )
   const skillProposals = useMemo(() => buildSkillProposals(posts, metrics, demandContext, channelRows), [posts, metrics, demandContext, channelRows])
 
   function briefInVera(candidate: HandoffCandidate) {
@@ -243,6 +297,120 @@ export default function Learning() {
 
   function openSkillSettings() {
     navigate('/skills?view=skills&scope=client&q=learning-proposal')
+  }
+
+  async function queueHandoffCandidate(candidate: HandoffCandidate) {
+    if (!activeProject?.id || !activeProject.org_id) return
+    const existing = handoffActionByPost.get(candidate.id)
+    if (existing) {
+      push({ kind: 'info', title: 'Already tracked', body: 'This signal is already in the SAM handoff queue.' })
+      return
+    }
+    const busyKey = `queue:${candidate.id}`
+    setHandoffBusyKey(busyKey)
+    const { data, error: insertError } = await supabase
+      .from('sam_handoff_actions')
+      .insert({
+        org_id: activeProject.org_id,
+        project_id: activeProject.id,
+        post_id: candidate.id,
+        title: candidate.title,
+        channel: candidate.channel,
+        score: candidate.score,
+        triggers: candidate.triggers,
+        status: 'queued',
+        priority: handoffPriorityFromScore(candidate.score, candidate.triggers),
+        created_by: user?.id ?? null,
+        payload: {
+          source: 'learning_loop',
+          prompt: candidate.prompt,
+          candidate,
+        },
+      })
+      .select(HANDOFF_SELECT)
+      .single()
+    setHandoffBusyKey(null)
+    if (insertError) {
+      if (insertError.code === '23505') {
+        push({ kind: 'warn', title: 'Already queued', body: 'This post already has a SAM handoff action.' })
+        void load()
+        return
+      }
+      push({ kind: 'danger', title: 'Queue failed', body: insertError.message })
+      return
+    }
+    setHandoffActions(prev => [data as SamHandoffAction, ...prev])
+    push({ kind: 'success', title: 'SAM handoff queued', body: 'The signal is now tracked for this client.' })
+  }
+
+  async function updateHandoffAction(id: string, patch: Partial<SamHandoffAction>, toast: { title: string; body: string }) {
+    const busyKey = `action:${id}`
+    setHandoffBusyKey(busyKey)
+    const { data, error: updateError } = await supabase
+      .from('sam_handoff_actions')
+      .update(patch)
+      .eq('id', id)
+      .select(HANDOFF_SELECT)
+      .single()
+    setHandoffBusyKey(null)
+    if (updateError) {
+      push({ kind: 'danger', title: 'Handoff update failed', body: updateError.message })
+      return null
+    }
+    setHandoffActions(prev => prev.map(action => action.id === id ? data as SamHandoffAction : action))
+    push({ kind: 'success', title: toast.title, body: toast.body })
+    return data as SamHandoffAction
+  }
+
+  async function assignHandoff(action: SamHandoffAction) {
+    if (!user?.id) {
+      push({ kind: 'warn', title: 'Sign in required', body: 'Sign in again before assigning handoffs.' })
+      return
+    }
+    const now = new Date().toISOString()
+    await updateHandoffAction(action.id, {
+      assigned_to: user.id,
+      assigned_at: action.assigned_at ?? now,
+      status: action.status === 'queued' ? 'in_progress' : action.status,
+    }, { title: 'Assigned', body: 'This SAM handoff is assigned to you.' })
+  }
+
+  async function handToSam(action: SamHandoffAction) {
+    const prompt = buildSamHandoffText(action)
+    try { await navigator.clipboard.writeText(prompt) } catch { /* clipboard can be blocked */ }
+    const now = new Date().toISOString()
+    await updateHandoffAction(action.id, {
+      handed_to_sam_at: action.handed_to_sam_at ?? now,
+      actioned_at: action.actioned_at ?? now,
+      assigned_to: action.assigned_to ?? user?.id ?? null,
+      assigned_at: action.assigned_at ?? (user?.id ? now : null),
+      status: action.status === 'queued' ? 'in_progress' : action.status,
+    }, { title: 'SAM brief copied', body: 'The handoff brief is ready to paste into SAM.' })
+  }
+
+  async function completeHandoff(action: SamHandoffAction) {
+    const now = new Date().toISOString()
+    await updateHandoffAction(action.id, {
+      status: 'done',
+      completed_at: action.completed_at ?? now,
+      actioned_at: action.actioned_at ?? now,
+    }, { title: 'Handoff completed', body: 'The SAM handoff is marked complete.' })
+  }
+
+  async function dismissHandoff(action: SamHandoffAction) {
+    const now = new Date().toISOString()
+    await updateHandoffAction(action.id, {
+      status: 'dismissed',
+      dismissed_at: action.dismissed_at ?? now,
+    }, { title: 'Handoff dismissed', body: 'The signal is no longer active in the queue.' })
+  }
+
+  async function reopenHandoff(action: SamHandoffAction) {
+    await updateHandoffAction(action.id, {
+      status: 'queued',
+      dismissed_at: null,
+      completed_at: null,
+    }, { title: 'Handoff reopened', body: 'The signal is back in the active queue.' })
   }
 
   return (
@@ -351,16 +519,70 @@ export default function Learning() {
         <Panel>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: space[3], marginBottom: space[4], flexWrap: 'wrap' }}>
             <SectionLabel>SAM handoff queue</SectionLabel>
-            <span style={{ color: color.ghost, fontSize: t.size.cap }}>{handoffCandidates.length} candidate{handoffCandidates.length === 1 ? '' : 's'}</span>
+            <span style={{ color: color.ghost, fontSize: t.size.cap }}>
+              {activeHandoffActions.length} active · {untrackedHandoffCandidates.length} new signal{untrackedHandoffCandidates.length === 1 ? '' : 's'}
+            </span>
           </div>
-          {handoffCandidates.length ? (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: space[3] }}>
-              {handoffCandidates.map(candidate => (
-                <HandoffCard key={candidate.id} candidate={candidate} onBrief={() => briefInVera(candidate)} />
+          {activeHandoffActions.length ? (
+            <div style={{ display: 'grid', gap: space[3], marginBottom: untrackedHandoffCandidates.length ? space[5] : 0 }}>
+              {activeHandoffActions.map(action => (
+                <SamHandoffActionCard
+                  key={action.id}
+                  action={action}
+                  busy={handoffBusyKey === `action:${action.id}`}
+                  currentUserId={user?.id ?? null}
+                  onAssign={() => void assignHandoff(action)}
+                  onCopy={() => void handToSam(action)}
+                  onComplete={() => void completeHandoff(action)}
+                  onDismiss={() => void dismissHandoff(action)}
+                  onReopen={() => void reopenHandoff(action)}
+                />
               ))}
             </div>
           ) : (
-            <LearningState>No handoff candidates yet. VERA needs measured posts with comments, shares, clicks, saves, buyer questions, meeting requests, or a strong demand score.</LearningState>
+            <LearningState>No active SAM handoffs yet. Queue a detected signal when VERA sees comments, shares, clicks, traffic, buyer questions, or meeting requests worth sales follow-up.</LearningState>
+          )}
+
+          {untrackedHandoffCandidates.length > 0 && (
+            <div style={{ marginTop: activeHandoffActions.length ? 0 : space[4] }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: space[3], marginBottom: space[3], flexWrap: 'wrap' }}>
+                <span style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>Detected signals</span>
+                <span style={{ color: color.ghost, fontSize: t.size.cap }}>Queue the ones SAM should research</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: space[3] }}>
+                {untrackedHandoffCandidates.map(candidate => (
+                  <HandoffCard
+                    key={candidate.id}
+                    candidate={candidate}
+                    onBrief={() => briefInVera(candidate)}
+                    onQueue={() => void queueHandoffCandidate(candidate)}
+                    queueing={handoffBusyKey === `queue:${candidate.id}`}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {closedHandoffActions.length > 0 && (
+            <div style={{ marginTop: space[5], paddingTop: space[4], borderTop: `1px solid ${color.line}` }}>
+              <div style={{ color: color.ghost, fontSize: t.size.cap, fontWeight: t.weight.medium, marginBottom: space[3] }}>Recent closed handoffs</div>
+              <div style={{ display: 'grid', gap: space[2] }}>
+                {closedHandoffActions.map(action => (
+                  <SamHandoffActionCard
+                    key={action.id}
+                    action={action}
+                    busy={handoffBusyKey === `action:${action.id}`}
+                    currentUserId={user?.id ?? null}
+                    compact
+                    onAssign={() => void assignHandoff(action)}
+                    onCopy={() => void handToSam(action)}
+                    onComplete={() => void completeHandoff(action)}
+                    onDismiss={() => void dismissHandoff(action)}
+                    onReopen={() => void reopenHandoff(action)}
+                  />
+                ))}
+              </div>
+            </div>
           )}
         </Panel>
       </section>
@@ -477,7 +699,17 @@ function SignalRow({ label, value, body }: { label: string; value: number; body:
   )
 }
 
-function HandoffCard({ candidate, onBrief }: { candidate: HandoffCandidate; onBrief: () => void }) {
+function HandoffCard({
+  candidate,
+  onBrief,
+  onQueue,
+  queueing,
+}: {
+  candidate: HandoffCandidate
+  onBrief: () => void
+  onQueue: () => void
+  queueing: boolean
+}) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: space[3], padding: space[4], border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: space[3], justifyContent: 'space-between' }}>
@@ -492,11 +724,135 @@ function HandoffCard({ candidate, onBrief }: { candidate: HandoffCandidate; onBr
           <span key={trigger} style={{ padding: '3px 8px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: color.ink2, fontSize: t.size.micro }}>{trigger}</span>
         ))}
       </div>
-      <button onClick={onBrief} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, width: '100%', marginTop: 'auto', padding: '8px 11px', borderRadius: radius.md, border: `1px solid ${color.line}`, background: color.surface, color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.medium, cursor: 'pointer' }}>
-        <Send size={13} />
-        Brief in Vera
-      </button>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[2], marginTop: 'auto' }}>
+        <button onClick={onBrief} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '8px 10px', borderRadius: radius.md, border: `1px solid ${color.line}`, background: color.surface, color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.medium, cursor: 'pointer' }}>
+          <Send size={13} />
+          Brief
+        </button>
+        <button onClick={onQueue} disabled={queueing} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '8px 10px', borderRadius: radius.md, border: `1px solid ${color.accent}`, background: 'var(--accent-tint)', color: color.accent, fontSize: t.size.cap, fontWeight: t.weight.medium, cursor: queueing ? 'wait' : 'pointer', opacity: queueing ? 0.68 : 1 }}>
+          <UserCheck size={13} />
+          {queueing ? 'Queueing' : 'Queue'}
+        </button>
+      </div>
     </div>
+  )
+}
+
+function SamHandoffActionCard({
+  action,
+  busy,
+  compact = false,
+  currentUserId,
+  onAssign,
+  onCopy,
+  onComplete,
+  onDismiss,
+  onReopen,
+}: {
+  action: SamHandoffAction
+  busy: boolean
+  compact?: boolean
+  currentUserId: string | null
+  onAssign: () => void
+  onCopy: () => void
+  onComplete: () => void
+  onDismiss: () => void
+  onReopen: () => void
+}) {
+  const isClosed = action.status === 'done' || action.status === 'dismissed'
+  const assignedLabel = action.assigned_to
+    ? action.assigned_to === currentUserId ? 'Assigned to you' : 'Assigned'
+    : 'Unassigned'
+  const statusTone = action.status === 'done'
+    ? color.success
+    : action.status === 'dismissed'
+      ? color.ghost
+      : action.status === 'in_progress'
+        ? color.info
+        : color.warn
+  const priorityTone = action.priority === 'high' ? color.danger : action.priority === 'medium' ? color.warn : color.ghost
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: compact ? 'minmax(0, 1fr) auto' : 'minmax(0, 1fr)', gap: space[3], padding: compact ? space[3] : space[4], border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: space[3], flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.35 }}>{action.title}</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: space[2] }}>
+              <Pill tone={statusTone}>{handoffStatusLabel(action.status)}</Pill>
+              <Pill tone={priorityTone}>{action.priority} priority</Pill>
+              <Pill>{assignedLabel}</Pill>
+              {action.channel && <Pill>{action.channel}</Pill>}
+              <Pill>{action.score} score</Pill>
+            </div>
+          </div>
+          {!compact && (
+            <span style={{ color: color.ghost, fontSize: t.size.micro, whiteSpace: 'nowrap' }}>
+              Updated {formatHandoffDate(action.updated_at)}
+            </span>
+          )}
+        </div>
+        {!compact && (
+          <>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: space[3] }}>
+              {(action.triggers.length ? action.triggers : ['No trigger detail']).map(trigger => (
+                <span key={trigger} style={{ padding: '3px 8px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: color.ink2, fontSize: t.size.micro }}>{trigger}</span>
+              ))}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap', marginTop: space[3], color: color.ghost, fontSize: t.size.micro }}>
+              {action.assigned_at && <span>Assigned {formatHandoffDate(action.assigned_at)}</span>}
+              {action.handed_to_sam_at && <span>Copied {formatHandoffDate(action.handed_to_sam_at)}</span>}
+              {action.completed_at && <span>Completed {formatHandoffDate(action.completed_at)}</span>}
+              {action.dismissed_at && <span>Dismissed {formatHandoffDate(action.dismissed_at)}</span>}
+            </div>
+          </>
+        )}
+      </div>
+      <div style={{ display: 'flex', alignItems: compact ? 'center' : 'flex-start', justifyContent: compact ? 'flex-end' : 'flex-start', gap: space[2], flexWrap: 'wrap' }}>
+        {isClosed ? (
+          <HandoffActionButton icon={RefreshCw} label="Reopen" disabled={busy} onClick={onReopen} />
+        ) : (
+          <>
+            <HandoffActionButton icon={UserCheck} label={action.assigned_to ? 'Reassign' : 'Assign'} disabled={busy} onClick={onAssign} />
+            <HandoffActionButton icon={Copy} label="Copy for SAM" disabled={busy} onClick={onCopy} />
+            <HandoffActionButton icon={Check} label="Complete" disabled={busy} onClick={onComplete} tone={color.success} />
+            <HandoffActionButton icon={X} label="Dismiss" disabled={busy} onClick={onDismiss} tone={color.ghost} />
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Pill({ children, tone = color.ghost }: { children: ReactNode; tone?: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', padding: '3px 8px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: tone, fontSize: t.size.micro, fontWeight: t.weight.medium }}>
+      {children}
+    </span>
+  )
+}
+
+function HandoffActionButton({
+  icon: Icon,
+  label,
+  disabled,
+  onClick,
+  tone = color.ink,
+}: {
+  icon: ElementType
+  label: string
+  disabled: boolean
+  onClick: () => void
+  tone?: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '7px 9px', borderRadius: radius.md, border: `1px solid ${color.line}`, background: color.surface, color: tone, fontSize: t.size.micro, fontWeight: t.weight.medium, cursor: disabled ? 'wait' : 'pointer', opacity: disabled ? 0.65 : 1 }}
+    >
+      <Icon size={12} />
+      {label}
+    </button>
   )
 }
 
@@ -611,6 +967,58 @@ function LearningState({ children }: { children: ReactNode }) {
       {children}
     </div>
   )
+}
+
+function handoffPriorityFromScore(score: number, triggers: string[]): 'low' | 'medium' | 'high' {
+  const triggerText = triggers.join(' ').toLowerCase()
+  if (score >= 45 || triggerText.includes('meeting request') || triggerText.includes('buyer question')) return 'high'
+  if (score >= 20 || triggerText.includes('qualified visit') || triggerText.includes('comment') || triggerText.includes('share')) return 'medium'
+  return 'low'
+}
+
+function handoffStatusLabel(status: SamHandoffStatus) {
+  if (status === 'in_progress') return 'In progress'
+  if (status === 'done') return 'Done'
+  if (status === 'dismissed') return 'Dismissed'
+  return 'Queued'
+}
+
+function formatHandoffDate(value: string | null) {
+  if (!value) return 'unknown'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'unknown'
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function handoffPromptFromPayload(action: SamHandoffAction) {
+  if (!isRecord(action.payload)) return null
+  const prompt = action.payload.prompt
+  return typeof prompt === 'string' && prompt.trim() ? prompt.trim() : null
+}
+
+function buildSamHandoffText(action: SamHandoffAction) {
+  const existingPrompt = handoffPromptFromPayload(action)
+  if (existingPrompt) return existingPrompt
+  return [
+    'Create a SAM handoff brief for this VERA content signal.',
+    '',
+    `Asset: ${action.title}`,
+    `Channel: ${action.channel || 'Unassigned'}`,
+    `Triggers: ${action.triggers.length ? action.triggers.join(', ') : 'No trigger detail'}`,
+    `Demand score: ${action.score}`,
+    `Priority: ${action.priority}`,
+    '',
+    'Return:',
+    '1. why this signal matters',
+    '2. likely buyer pain or intent',
+    '3. accounts or people SAM should research',
+    '4. outreach angle and objection to prepare for',
+    '5. next VERA content experiment',
+  ].join('\n')
 }
 
 function buildOperatingRows(context: BusinessContext) {

@@ -87,9 +87,14 @@ export type Database = {
       sam_handoff_actions: {
         Row: {
           actioned_at: string | null
+          assigned_at: string | null
+          assigned_to: string | null
           channel: string | null
+          completed_at: string | null
           created_at: string
           created_by: string | null
+          dismissed_at: string | null
+          handed_to_sam_at: string | null
           id: string
           observation_id: string | null
           org_id: string
@@ -105,9 +110,14 @@ export type Database = {
         }
         Insert: {
           actioned_at?: string | null
+          assigned_at?: string | null
+          assigned_to?: string | null
           channel?: string | null
+          completed_at?: string | null
           created_at?: string
           created_by?: string | null
+          dismissed_at?: string | null
+          handed_to_sam_at?: string | null
           id?: string
           observation_id?: string | null
           org_id: string
@@ -123,9 +133,14 @@ export type Database = {
         }
         Update: {
           actioned_at?: string | null
+          assigned_at?: string | null
+          assigned_to?: string | null
           channel?: string | null
+          completed_at?: string | null
           created_at?: string
           created_by?: string | null
+          dismissed_at?: string | null
+          handed_to_sam_at?: string | null
           id?: string
           observation_id?: string | null
           org_id?: string
@@ -140,6 +155,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "sam_handoff_actions_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "sam_handoff_actions_observation_id_fkey"
             columns: ["observation_id"]

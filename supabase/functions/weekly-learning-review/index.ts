@@ -200,7 +200,6 @@ async function queueHandoffs(
   const { data: existing, error: existingError } = await supabase
     .from("sam_handoff_actions")
     .select("post_id")
-    .eq("observation_id", args.observationId)
     .eq("project_id", args.projectId)
   if (existingError) return { ok: false, error: existingError.message }
 
