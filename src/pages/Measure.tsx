@@ -145,6 +145,19 @@ type ManualMetricDraft = {
 
 type ManualMetricMessage = { tone: 'danger' | 'success'; text: string } | null
 
+type OwnedPageMetricRow = {
+  key: string
+  source: 'Search' | 'GA4'
+  label: string
+  primary: number
+  primaryLabel: string
+  secondary: number
+  secondaryLabel: string
+  rate: number | null
+  detail: string
+  lastSync: string | null
+}
+
 type SourceStats = {
   search: {
     clicks: number
@@ -166,6 +179,7 @@ type SourceStats = {
   }
   hasSearch: boolean
   hasAnalytics: boolean
+  pages: OwnedPageMetricRow[]
 }
 
 const MANUAL_METRIC_FIELDS: Array<{ key: ManualMetricKey; label: string; helper: string }> = [
@@ -944,6 +958,57 @@ function SearchAnalyticsPanel({ stats }: { stats: SourceStats }) {
         helper={stats.hasAnalytics ? `${formatPercent(stats.analytics.engagementRate)} engagement - ${formatNumber(stats.analytics.pageViews)} page views` : 'Waiting for GA4'}
         tone={color.warn}
       />
+      <OwnedPagesList pages={stats.pages} />
+    </div>
+  )
+}
+
+function OwnedPagesList({ pages }: { pages: OwnedPageMetricRow[] }) {
+  if (!pages.length) return null
+
+  return (
+    <div style={{ gridColumn: '1 / -1', background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[5] }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], flexWrap: 'wrap' }}>
+        <div>
+          <SectionLabel>Top owned pages</SectionLabel>
+          <p style={{ margin: `${space[2]} 0 0`, color: color.ghost, fontSize: t.size.micro }}>Search pages and GA4 landing pages from the latest metric sync.</p>
+        </div>
+        <span style={{ color: color.ghost, fontSize: t.size.micro }}>last 28d</span>
+      </div>
+      <div style={{ display: 'grid', gap: space[2], marginTop: space[4] }}>
+        {pages.map(page => (
+          <div key={page.key} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: space[3], alignItems: 'center', padding: `${space[3]} 0`, borderTop: `1px solid ${color.line}` }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 }}>
+                <span style={{
+                  flex: '0 0 auto',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  borderRadius: radius.pill,
+                  padding: '3px 8px',
+                  background: color.paper2,
+                  color: page.source === 'Search' ? color.info : color.success,
+                  fontSize: t.size.micro,
+                  fontWeight: t.weight.medium,
+                }}>
+                  {page.source}
+                </span>
+                <span title={page.label} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.medium }}>
+                  {compactPageLabel(page.label)}
+                </span>
+              </div>
+              <p style={{ margin: `${space[2]} 0 0`, color: color.ghost, fontSize: t.size.micro, lineHeight: 1.4 }}>
+                {page.detail}{page.lastSync ? ` - synced ${relativeDate(page.lastSync)}` : ''}
+              </p>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ color: color.ink, fontSize: t.size.lg, fontWeight: t.weight.semibold, lineHeight: 1.1 }}>{formatNumber(page.primary)}</div>
+              <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: space[1] }}>{page.primaryLabel}</div>
+              <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: space[1] }}>{formatNumber(page.secondary)} {page.secondaryLabel}</div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -1686,7 +1751,80 @@ function buildSourceStats(snapshots: ContentMetricSnapshot[], windowValue: Retur
     },
     hasSearch: !!(searchClicks || searchImpressions),
     hasAnalytics: !!(analyticsSessions || analyticsUsers),
+    pages: buildOwnedPageRows(snapshots, windowValue),
   }
+}
+
+function buildOwnedPageRows(snapshots: ContentMetricSnapshot[], windowValue: ReturnType<typeof rangeWindow>): OwnedPageMetricRow[] {
+  const groups = new Map<string, ContentMetricSnapshot[]>()
+
+  for (const snapshot of snapshots) {
+    if (snapshot.post_id) continue
+    if (snapshot.object_type !== 'search_page' && snapshot.object_type !== 'analytics_landing_page') continue
+    if (!snapshot.provider_object_id) continue
+    const time = new Date(snapshot.pulled_at).getTime()
+    if (windowValue.start && time < windowValue.start.getTime()) continue
+    if (windowValue.end && time > windowValue.end.getTime()) continue
+
+    const key = `${snapshot.provider}:${snapshot.object_type}:${snapshot.provider_object_id}`
+    const list = groups.get(key) ?? []
+    list.push(snapshot)
+    groups.set(key, list)
+  }
+
+  return [...groups.entries()]
+    .map(([key, list]) => ownedPageRowFromMetrics(key, list))
+    .filter((row): row is OwnedPageMetricRow => !!row)
+    .sort((a, b) => b.primary - a.primary || b.secondary - a.secondary)
+    .slice(0, 8)
+}
+
+function ownedPageRowFromMetrics(key: string, list: ContentMetricSnapshot[]): OwnedPageMetricRow | null {
+  const latest = latestMetricByName(list)
+  const sample = list[0]
+  const label = sample?.provider_object_id
+  if (!sample || !label) return null
+  const lastSync = latestDate(list.map(metric => metric.pulled_at))
+
+  if (sample.object_type === 'search_page') {
+    const clicks = latest.get('clicks')?.metric_value ?? 0
+    const impressions = latest.get('impressions')?.metric_value ?? 0
+    const ctr = latest.get('ctr')?.metric_value ?? null
+    const avgPosition = latest.get('avg_position')?.metric_value ?? null
+    return {
+      key,
+      source: 'Search',
+      label,
+      primary: clicks,
+      primaryLabel: 'clicks',
+      secondary: impressions,
+      secondaryLabel: 'impressions',
+      rate: ctr,
+      detail: `${formatPercent(ctr)} CTR, avg position ${formatDecimal(avgPosition, 1)}`,
+      lastSync,
+    }
+  }
+
+  if (sample.object_type === 'analytics_landing_page') {
+    const sessions = latest.get('sessions')?.metric_value ?? 0
+    const pageViews = latest.get('page_views')?.metric_value ?? 0
+    const engagedSessions = latest.get('engaged_sessions')?.metric_value ?? 0
+    const engagementRate = latest.get('engagement_rate')?.metric_value ?? null
+    return {
+      key,
+      source: 'GA4',
+      label,
+      primary: sessions,
+      primaryLabel: 'sessions',
+      secondary: pageViews,
+      secondaryLabel: 'page views',
+      rate: engagementRate,
+      detail: `${formatNumber(engagedSessions)} engaged sessions, ${formatPercent(engagementRate)} engagement`,
+      lastSync,
+    }
+  }
+
+  return null
 }
 
 function buildStatusCounts(rows: PostRowData[]) {
@@ -1991,6 +2129,17 @@ function latestSourceMetricMap(snapshots: ContentMetricSnapshot[], windowValue: 
   return map
 }
 
+function latestMetricByName(snapshots: ContentMetricSnapshot[]) {
+  const map = new Map<string, ContentMetricSnapshot>()
+  for (const snapshot of snapshots) {
+    const current = map.get(snapshot.metric_name)
+    if (!current || new Date(snapshot.pulled_at).getTime() > new Date(current.pulled_at).getTime()) {
+      map.set(snapshot.metric_name, snapshot)
+    }
+  }
+  return map
+}
+
 function normalizeSnapshots(rows: ContentMetricSnapshot[]) {
   return rows.map(row => ({
     ...row,
@@ -2094,6 +2243,16 @@ function providerLabel(provider: string) {
     unknown: 'Unknown',
   }
   return labels[provider] ?? provider.replaceAll('_', ' ')
+}
+
+function compactPageLabel(value: string) {
+  if (!value.startsWith('http')) return value
+  try {
+    const url = new URL(value)
+    return `${url.hostname}${url.pathname === '/' ? '' : url.pathname}`
+  } catch {
+    return value
+  }
 }
 
 function providerDot(provider: string) {

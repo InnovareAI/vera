@@ -604,6 +604,7 @@ async function syncSearchConsoleSource(
     sourceMetric(project, "google_search_console", siteUrl, siteUrl, "search_site", "impressions", impressions, "last_28d", metricTime, pulledAt, raw),
     sourceMetric(project, "google_search_console", siteUrl, siteUrl, "search_site", "ctr", ctr, "last_28d", metricTime, pulledAt, raw),
     sourceMetric(project, "google_search_console", siteUrl, siteUrl, "search_site", "avg_position", position, "last_28d", metricTime, pulledAt, raw),
+    ...searchConsolePageMetrics(project, siteUrl, topPages, "last_28d", metricTime, pulledAt, range),
   ].filter((row): row is MetricRow => !!row)
 
   if (!metricRows.length) return sourceSkipped(integration, "google_search_console", "search_site", "Search Console returned no search metrics.")
@@ -632,11 +633,20 @@ async function syncGa4Source(
 
   const range = completedDateRange(28)
   const metricNames = ["sessions", "activeUsers", "screenPageViews", "engagedSessions", "engagementRate", "eventCount"]
-  const report = await ga4RunReport(property, accessToken, {
-    dateRanges: [{ startDate: range.startDate, endDate: range.endDate }],
-    metrics: metricNames.map(name => ({ name })),
-    keepEmptyRows: false,
-  })
+  const [report, landingPageReport] = await Promise.all([
+    ga4RunReport(property, accessToken, {
+      dateRanges: [{ startDate: range.startDate, endDate: range.endDate }],
+      metrics: metricNames.map(name => ({ name })),
+      keepEmptyRows: false,
+    }),
+    ga4RunReport(property, accessToken, {
+      dateRanges: [{ startDate: range.startDate, endDate: range.endDate }],
+      dimensions: [{ name: "landingPagePlusQueryString" }],
+      metrics: metricNames.map(name => ({ name })),
+      limit: 10,
+      keepEmptyRows: false,
+    }).catch(error => ({ error: error instanceof Error ? error.message : String(error) })),
+  ])
   const values = ga4MetricMap(report, metricNames)
   const pulledAt = new Date().toISOString()
   const metricTime = `${range.endDate}T00:00:00.000Z`
@@ -646,6 +656,7 @@ async function syncGa4Source(
     start_date: range.startDate,
     end_date: range.endDate,
     report,
+    landing_page_report: landingPageReport,
   }
   const metricRows = [
     sourceMetric(project, "google_analytics_4", property, property, "analytics_property", "sessions", values.sessions, "last_28d", metricTime, pulledAt, raw),
@@ -654,6 +665,7 @@ async function syncGa4Source(
     sourceMetric(project, "google_analytics_4", property, property, "analytics_property", "engaged_sessions", values.engagedSessions, "last_28d", metricTime, pulledAt, raw),
     sourceMetric(project, "google_analytics_4", property, property, "analytics_property", "engagement_rate", values.engagementRate, "last_28d", metricTime, pulledAt, raw),
     sourceMetric(project, "google_analytics_4", property, property, "analytics_property", "events", values.eventCount, "last_28d", metricTime, pulledAt, raw),
+    ...ga4LandingPageMetrics(project, property, landingPageReport, metricNames, "last_28d", metricTime, pulledAt, range),
   ].filter((row): row is MetricRow => !!row)
 
   if (!metricRows.length) return sourceSkipped(integration, "google_analytics_4", "analytics_property", "GA4 returned no traffic metrics.")
@@ -732,6 +744,67 @@ function sourceMetric(
     pulled_at: pulledAt,
     raw: sanitizeRaw(raw),
   }
+}
+
+function searchConsolePageMetrics(
+  project: ProjectRow,
+  siteUrl: string,
+  pages: SearchConsoleRow[],
+  metricPeriod: string,
+  metricTime: string | null,
+  pulledAt: string,
+  range: { startDate: string; endDate: string },
+): Array<MetricRow | null> {
+  return pages.flatMap(row => {
+    const pageUrl = firstString(row.keys?.[0])
+    if (!pageUrl) return []
+    const raw = {
+      source: "google_search_console",
+      site_url: siteUrl,
+      start_date: range.startDate,
+      end_date: range.endDate,
+      row,
+    }
+    return [
+      sourceMetric(project, "google_search_console", siteUrl, pageUrl, "search_page", "clicks", row.clicks, metricPeriod, metricTime, pulledAt, raw),
+      sourceMetric(project, "google_search_console", siteUrl, pageUrl, "search_page", "impressions", row.impressions, metricPeriod, metricTime, pulledAt, raw),
+      sourceMetric(project, "google_search_console", siteUrl, pageUrl, "search_page", "ctr", row.ctr, metricPeriod, metricTime, pulledAt, raw),
+      sourceMetric(project, "google_search_console", siteUrl, pageUrl, "search_page", "avg_position", row.position, metricPeriod, metricTime, pulledAt, raw),
+    ]
+  })
+}
+
+function ga4LandingPageMetrics(
+  project: ProjectRow,
+  property: string,
+  report: unknown,
+  metricNames: string[],
+  metricPeriod: string,
+  metricTime: string | null,
+  pulledAt: string,
+  range: { startDate: string; endDate: string },
+): Array<MetricRow | null> {
+  const rows = Array.isArray(valueAt(report, "rows")) ? valueAt(report, "rows") as NonNullable<Ga4ReportResponse["rows"]> : []
+  return rows.flatMap(row => {
+    const path = firstString(row.dimensionValues?.[0]?.value)
+    if (!path || path === "(not set)") return []
+    const values = ga4RowMetricMap(row, metricNames)
+    const raw = {
+      source: "google_analytics_4",
+      property,
+      start_date: range.startDate,
+      end_date: range.endDate,
+      row,
+    }
+    return [
+      sourceMetric(project, "google_analytics_4", property, path, "analytics_landing_page", "sessions", values.sessions, metricPeriod, metricTime, pulledAt, raw),
+      sourceMetric(project, "google_analytics_4", property, path, "analytics_landing_page", "users", values.activeUsers, metricPeriod, metricTime, pulledAt, raw),
+      sourceMetric(project, "google_analytics_4", property, path, "analytics_landing_page", "page_views", values.screenPageViews, metricPeriod, metricTime, pulledAt, raw),
+      sourceMetric(project, "google_analytics_4", property, path, "analytics_landing_page", "engaged_sessions", values.engagedSessions, metricPeriod, metricTime, pulledAt, raw),
+      sourceMetric(project, "google_analytics_4", property, path, "analytics_landing_page", "engagement_rate", values.engagementRate, metricPeriod, metricTime, pulledAt, raw),
+      sourceMetric(project, "google_analytics_4", property, path, "analytics_landing_page", "events", values.eventCount, metricPeriod, metricTime, pulledAt, raw),
+    ]
+  })
 }
 
 function addEngagementRate(
@@ -1291,11 +1364,19 @@ function weightedAverage(rows: SearchConsoleRow[], valueKey: "ctr" | "position",
 
 function ga4MetricMap(report: Ga4ReportResponse, metricNames: string[]): Record<string, number | null> {
   const firstRow = report.rows?.[0]
+  return firstRow ? ga4RowMetricMap(firstRow, metricNames) : emptyMetricMap(metricNames)
+}
+
+function ga4RowMetricMap(row: NonNullable<Ga4ReportResponse["rows"]>[number], metricNames: string[]): Record<string, number | null> {
   const values: Record<string, number | null> = {}
   for (const [index, name] of metricNames.entries()) {
-    values[name] = toNumber(firstRow?.metricValues?.[index]?.value)
+    values[name] = toNumber(row.metricValues?.[index]?.value)
   }
   return values
+}
+
+function emptyMetricMap(metricNames: string[]): Record<string, number | null> {
+  return Object.fromEntries(metricNames.map(name => [name, null]))
 }
 
 function valueAt(value: unknown, key: string): unknown {
