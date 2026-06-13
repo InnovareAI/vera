@@ -1382,7 +1382,7 @@ function policyTitle(route: ApprovalRoute) {
     route.policyApprovalMode ? `Approval: ${route.policyApprovalMode}` : '',
     route.policySpeakerMode ? `Speaker: ${route.policySpeakerMode}` : '',
     route.publishGuard ? `Guard: ${route.publishGuard}` : '',
-    route.samTrigger ? `SAM: ${route.samTrigger}` : '',
+    route.samTrigger ? `Follow-up: ${route.samTrigger}` : '',
   ].filter(Boolean).join('\n')
 }
 

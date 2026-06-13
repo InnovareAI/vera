@@ -5,7 +5,7 @@
 // model). Returns a structured JSON audit with per-principle scores, profile
 // optimisation suggestions, content strategy, and quick wins.
 //
-// Uses the active project's Demand Brain LinkedIn profile URL as the audit
+// Uses the active project's Strategy Brain LinkedIn profile URL as the audit
 // target. The connected Unipile account is read-only research access, not proof
 // that the connected account itself is the client profile.
 //
@@ -19,7 +19,7 @@ import { checkProjectAiBudget, type ProjectAiBudgetWarning } from '../_shared/ai
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { resolveProjectTextRuntime, streamText, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
 import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
-import { linkedInPersonalUrl, resolveProjectAuditChannels } from '../_shared/project-sources.ts'
+import { linkedInPersonalUrl, projectHasLinkedInStrategy, resolveProjectAuditChannels } from '../_shared/project-sources.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
 
   // 1) Get read-only LinkedIn research access + the project's source URLs.
   //    The Unipile account is just a research token. The target to audit must
-  //    come from the client Demand Brain for client projects.
+  //    come from the client Strategy Brain for client projects.
   const { data: org } = await supabase
     .from('organizations')
     .select('name, settings')
@@ -83,6 +83,12 @@ Deno.serve(async (req) => {
   const accountId = unipile.accountId
   const headers = { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' }
   const sourceResolution = await resolveProjectAuditChannels(supabase, org_id, project_id)
+  if (!projectHasLinkedInStrategy(sourceResolution)) {
+    return jsonResponse({
+      success: false,
+      error: 'LinkedIn audit is not enabled for this client strategy. Add a LinkedIn source or explicit LinkedIn strategy in the Strategy Brain first.',
+    }, 400)
+  }
 
   // Resolve audit target: prefer the project's LinkedIn profile URL. Fall back
   // to /me only for the default workspace project, preserving legacy internal
@@ -104,7 +110,7 @@ Deno.serve(async (req) => {
   if (!targetSlug && !sourceResolution.project.is_default) {
     return jsonResponse({
       success: false,
-      error: 'Add this client LinkedIn profile URL to the Demand Brain before running a 360Brew audit. Shared research profiles cannot be audited as the client.',
+      error: 'Add this client LinkedIn profile URL to the Strategy Brain before running a 360Brew audit. Shared research profiles cannot be audited as the client.',
     }, 400)
   }
 
@@ -126,7 +132,7 @@ Deno.serve(async (req) => {
         const errText = await profileRes.text()
         return jsonResponse({
           success: false,
-          error: `Client LinkedIn profile lookup failed (${profileRes.status}). Check the Demand Brain LinkedIn profile URL. ${errText.slice(0, 200)}`,
+          error: `Client LinkedIn profile lookup failed (${profileRes.status}). Check the Strategy Brain LinkedIn profile URL. ${errText.slice(0, 200)}`,
         }, 502)
       }
       // Slug did not resolve for the legacy default workspace path, preserve
@@ -301,9 +307,9 @@ ${principlesJsonShape}
       }
     | undefined
 
-  const intentBlock = auditIntent ? `## Audit Intent (operator-set ground truth — score AGAINST this, not against generic best practices)
+  const intentBlock = auditIntent ? `## Audit Intent (operator-set ground truth - score AGAINST this, not against generic best practices)
 ${auditIntent.summary        ? `**Summary (echo this verbatim into the "audited_against" field of your output):**\n${auditIntent.summary}\n` : ''}
-${auditIntent.icp_summary    ? `- **ICP** (who this profile is for): ${auditIntent.icp_summary}` : ''}
+${auditIntent.icp_summary    ? `- **Audience** (who this profile is for): ${auditIntent.icp_summary}` : ''}
 ${auditIntent.offer          ? `- **Offer**: ${auditIntent.offer}` : ''}
 ${auditIntent.value_prop     ? `- **Value prop**: ${auditIntent.value_prop}` : ''}
 ${auditIntent.role_positioning ? `- **Role positioning**: ${auditIntent.role_positioning}` : ''}

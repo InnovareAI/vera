@@ -191,8 +191,8 @@ const MANUAL_METRIC_FIELDS: Array<{ key: ManualMetricKey; label: string; helper:
   { key: 'saves', label: 'Saves', helper: 'Bookmarks or saves' },
   { key: 'clicks', label: 'Clicks', helper: 'Traffic-driving clicks' },
   { key: 'qualified_traffic', label: 'Qualified traffic', helper: 'Useful visits or sessions' },
-  { key: 'buyer_questions', label: 'Buyer questions', helper: 'Commercial questions' },
-  { key: 'meeting_requests', label: 'Meeting requests', helper: 'Demo or call requests' },
+  { key: 'buyer_questions', label: 'Audience questions', helper: 'Questions or objections' },
+  { key: 'meeting_requests', label: 'Inquiries', helper: 'Calls, bookings, purchases, or requests' },
 ]
 
 const EMPTY_MANUAL_VALUES: Record<ManualMetricKey, string> = Object.fromEntries(
@@ -512,7 +512,7 @@ export default function Measure() {
       rawValue: stats.clicks + stats.qualifiedTraffic,
       icon: Zap,
       tone: color.info,
-      helper: `${formatNumber(stats.buyerQuestions)} buyer questions, ${formatNumber(stats.meetingRequests)} meeting requests`,
+      helper: `${formatNumber(stats.buyerQuestions)} audience questions, ${formatNumber(stats.meetingRequests)} inquiries`,
     },
     {
       label: 'Metric coverage',
@@ -1245,14 +1245,14 @@ function RedditListeningPanel({ topic, onTopic, listening, error, onRun, listens
   return (
     <div style={card}>
       <p style={{ fontSize: t.size.cap, color: color.ghost, margin: `0 0 ${space[3]}`, lineHeight: 1.5 }}>
-        Pull what buyers are actually saying on Reddit about a topic. VERA reads and summarizes, it never posts. Use the pain points and phrasing to sharpen LinkedIn, cold email, and landing pages.
+        Pull what people are actually saying on Reddit about a topic. VERA reads and summarizes, it never posts. Use the pain points and phrasing to sharpen posts, answers, landing pages, and campaign angles.
       </p>
       <div style={{ display: 'flex', gap: space[2], alignItems: 'flex-start' }}>
         <input
           value={topic}
           onChange={e => onTopic(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onRun() } }}
-          placeholder="e.g. cold email deliverability for B2B SaaS"
+          placeholder="e.g. sensitive skin face balm"
           disabled={disabled || listening}
           style={{
             flex: 1,

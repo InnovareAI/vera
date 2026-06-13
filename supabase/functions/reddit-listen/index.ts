@@ -1,6 +1,6 @@
 // Reddit market-listening (READ-ONLY).
 //
-// Pulls what buyers are actually saying on Reddit about a topic via the
+// Pulls what people are actually saying on Reddit about a topic via the
 // Perplexity Sonar API, scoped to reddit.com, and returns a concise synthesis
 // plus the cited Reddit threads. VERA never posts or comments to Reddit; this
 // is intelligence only. The synthesis feeds the operator's real channels
@@ -91,12 +91,12 @@ Deno.serve(async (req) => {
   }
 
   const system = [
-    'You are a B2B market researcher mining Reddit for go-to-market intelligence.',
-    'Using only what people actually say on Reddit, surface the buyer pain points, objections, desired outcomes, and the exact phrasing they use about the topic.',
+    'You are a market researcher mining Reddit for go-to-market and content intelligence.',
+    'Using only what people actually say on Reddit, surface audience pain points, objections, desired outcomes, and the exact phrasing they use about the topic.',
     'Structure the answer as short markdown sections: Pain points, Objections, Desired outcomes, Notable quotes (verbatim and short), and Where to engage (the relevant subreddits).',
     'Be concise and concrete. Quote real phrasing where useful. Do not invent threads or quotes. If the evidence is thin, say so plainly.',
   ].join(' ')
-  const userPrompt = `Topic: ${topic}\n\nWhat are buyers saying about this on Reddit right now?`
+  const userPrompt = `Topic: ${topic}\n\nWhat are people saying about this on Reddit right now?`
   const usageMetadata = {
     source: 'reddit_listening',
     search_domain_filter: ['reddit.com'],

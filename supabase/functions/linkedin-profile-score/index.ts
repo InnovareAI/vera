@@ -1,7 +1,7 @@
 // LinkedIn Profile Scorer
 //
 // Scores a LinkedIn profile against LinkedIn profile best practices. For client
-// projects, the target comes from the active Demand Brain LinkedIn profile URL.
+// projects, the target comes from the active Strategy Brain LinkedIn profile URL.
 // The connected Unipile account is research access, not the profile target.
 // Returns a per-section breakdown with completeness + quality scores and fixes.
 //
@@ -18,7 +18,7 @@ import { checkProjectAiBudget, type ProjectAiBudgetWarning } from '../_shared/ai
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { completeText, resolveProjectTextRuntime, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
 import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
-import { linkedInPersonalUrl, resolveProjectAuditChannels } from '../_shared/project-sources.ts'
+import { linkedInPersonalUrl, projectHasLinkedInStrategy, resolveProjectAuditChannels } from '../_shared/project-sources.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -98,10 +98,16 @@ Deno.serve(async (req) => {
   const accountId = unipile.accountId
   const headers = { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' }
   const sourceResolution = await resolveProjectAuditChannels(supabase, org_id, project_id)
+  if (!projectHasLinkedInStrategy(sourceResolution)) {
+    return json({
+      success: false,
+      error: 'LinkedIn audit is not enabled for this client strategy. Add a LinkedIn source or explicit LinkedIn strategy in the Strategy Brain first.',
+    }, 400)
+  }
 
   // Resolve target. Priority order:
   //   1. Explicit `vanity` param passed by the caller
-  //   2. Active project's LinkedIn profile URL from Demand Brain
+  //   2. Active project's LinkedIn profile URL from Strategy Brain
   //   3. `/me`, but only for the default workspace project
   let resolvedTarget: string = (vanity ?? '').trim()
   let resolvedSource: 'param' | 'project' | 'legacy_channel' | 'me' = resolvedTarget ? 'param' : 'me'
@@ -122,7 +128,7 @@ Deno.serve(async (req) => {
   if (!resolvedTarget && !sourceResolution.project.is_default) {
     return json({
       success: false,
-      error: 'Add this client LinkedIn profile URL to the Demand Brain before scoring a profile. Shared research profiles cannot be scored as the client.',
+      error: 'Add this client LinkedIn profile URL to the Strategy Brain before scoring a profile. Shared research profiles cannot be scored as the client.',
     }, 400)
   }
 
@@ -162,27 +168,27 @@ Deno.serve(async (req) => {
 
 Rules a great headline follows:
 - ≤120 chars total.
-- Starts with a verb describing what they DO (Building, Helping, Leading, Designing) — not an adjective or noun-phrase like "Founder of…".
-- Names a single, sharp audience or outcome ("for B2B sales teams", "agentic AI for SaaS founders").
-- ONE primary company only. If the person has multiple executive roles, demote secondary affiliations to Experience — DO NOT stack them in the headline.
+- Starts with a verb describing what they DO (Building, Helping, Leading, Designing), not an adjective or noun phrase like "Founder of...".
+- Names a single, sharp audience or outcome ("for sensitive-skin shoppers", "agentic AI for operations teams").
+- ONE primary company only. If the person has multiple executive roles, demote secondary affiliations to Experience. DO NOT stack them in the headline.
 - No more than one pipe. No credential stacking (no "ex-X | ex-Y | ex-Z").
 - No emoji at the start.
-- About / summary content (provided below) gives context for what they actually do — use it to anchor the rewrite, don't invent a new positioning.
+- About / summary content (provided below) gives context for what they actually do. Use it to anchor the rewrite, don't invent a new positioning.
 
 When the input headline contains TWO OR MORE executive roles (founder, co-founder, CEO, etc.) at different companies:
 - Pick the primary company based on the About text (the company most central to their current focus).
 - The rewrite features only the primary company.
-- Call this out explicitly in observations ("Current headline lists N affiliations — picked X as primary because Y").`
+- Call this out explicitly in observations ("Current headline lists N affiliations. Picked X as primary because Y").`
     // Pull audit_intent so the proposed headline targets the operator's
-    // intended ICP/positioning, not whatever the model guesses from the
+    // intended audience/positioning, not whatever the model guesses from the
     // current headline. This is the single biggest input to a good rewrite.
     const auditIntent = ((org?.settings as Record<string, unknown> | null) ?? {}).audit_intent as
       | { icp_summary?: string; role_positioning?: string; themes?: string[]; offer?: string; value_prop?: string }
       | undefined
     const intentBlock = auditIntent ? `
 
-## Audit Intent (operator-set ground truth — the rewrite MUST align with this):
-${auditIntent.icp_summary    ? `- ICP: ${auditIntent.icp_summary}` : ''}
+## Audit Intent (operator-set ground truth - the rewrite MUST align with this):
+${auditIntent.icp_summary    ? `- Audience: ${auditIntent.icp_summary}` : ''}
 ${auditIntent.role_positioning ? `- Role positioning: ${auditIntent.role_positioning}` : ''}
 ${auditIntent.offer          ? `- Offer: ${auditIntent.offer}` : ''}
 ${auditIntent.value_prop     ? `- Value prop: ${auditIntent.value_prop}` : ''}

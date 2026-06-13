@@ -376,8 +376,8 @@ function NewClientModal({ onClose }: { onClose: () => void }) {
         <label style={labelStyle}>Content goals <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
         <textarea value={context.contentGoals} onChange={e => updateContext('contentGoals', e.target.value)} placeholder="Awareness, leads, launches, trust, recruiting."
           style={{ ...textareaStyle, marginBottom: 12 }} />
-        <label style={labelStyle}>Demand objective <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
-        <textarea value={context.demandObjective} onChange={e => updateContext('demandObjective', e.target.value)} placeholder="Top-of-funnel goal for this client."
+        <label style={labelStyle}>Content objective <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
+        <textarea value={context.demandObjective} onChange={e => updateContext('demandObjective', e.target.value)} placeholder="Awareness, trust, traffic, community, leads, sales, recruiting, or education."
           style={{ ...textareaStyle, marginBottom: 12 }} />
         <label style={labelStyle}>Approval model <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
         <textarea value={context.approvalModel} onChange={e => updateContext('approvalModel', e.target.value)} placeholder="Operator-only, client lead, all stakeholders, or case-by-case."
@@ -482,7 +482,7 @@ export default function Layout() {
         {/* Active client — top-of-rail switcher (always-visible context). */}
         <ClientSwitcher />
 
-        {/* Primary nav grouped around the B2B demand-content loop. */}
+        {/* Primary nav grouped around the content strategy loop. */}
         <nav className="pt-1 space-y-0.5">
           <RailItem to={p('vera')}      icon={MessageSquare}   label="Command" onClick={() => window.dispatchEvent(new CustomEvent('vera:home'))} />
 
@@ -492,7 +492,7 @@ export default function Layout() {
           <RailItem to={p('artifacts')} icon={Library}         label="Studio" />
 
           <RailLabel>Demand</RailLabel>
-          <RailItem to={p('brain')}     icon={Brain}           label="Demand Brain" />
+          <RailItem to={p('brain')}     icon={Brain}           label="Strategy Brain" />
           <RailItem to={p('measure')}   icon={BarChart3}       label="Performance" />
           <RailItem to={p('learning')}  icon={TrendingUp}      label="Learning" />
           <RailItem to={p('keys')}      icon={KeyRound}        label="Integrations" />

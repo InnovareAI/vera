@@ -169,7 +169,7 @@ export function approvalRouteForPost(post: Post, context?: BusinessContext): App
       checklist: [
         `Apply channel approval path: ${policy.approvalMode}`,
         `Confirm publishing guard: ${policy.publishGuard}`,
-        `Confirm SAM handoff trigger: ${policy.samTrigger}`,
+        `Confirm follow-up trigger: ${policy.samTrigger}`,
         ...checklist,
       ],
       approverHint: stakeholders,

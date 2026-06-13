@@ -1,4 +1,4 @@
-// Content audit agent. Reads the active project's Demand Brain source URLs,
+// Content audit agent. Reads the active project's Strategy Brain source URLs,
 // fetches what it can from each channel, asks Claude to synthesise a proposed
 // brand_voice + personas + skills, saves the result to audit_runs. Streams SSE
 // progress events as it goes.
@@ -108,7 +108,7 @@ Deno.serve(async (req) => {
         const channels = sourceResolution.channels
         const itemsPerChannel = sourcePullItemsPerChannel(sourceResolution.sourcePullDepth)
         if (!channels?.length) {
-          throw new Error('No client source URLs configured. Add the website, LinkedIn, Medium, YouTube, or X source in this client Demand Brain before running the content audit.')
+          throw new Error('No client source URLs configured. Add the website, LinkedIn, Medium, YouTube, or X source in this client Strategy Brain before running the content audit.')
         }
         const unipileAccountId = unipile.ok ? unipile.accountId : null
         send('channels_loaded', {
@@ -898,7 +898,7 @@ async function synthesise(
   usageMetadata: Record<string, unknown>,
   send: (event: string, data: unknown) => void,
 ): Promise<{ proposal: Proposal; inputTokens: number | null; outputTokens: number | null; budgetWarning: ProjectAiBudgetWarning | null }> {
-  const sys = `You are VERA's Demand Brain auditor. You read a company's existing content and extract a precise model of their voice, audience, channel roles, demand strategy, and repeatable content patterns. Output ONLY valid JSON in exactly this shape, no prose, no markdown fences:
+  const sys = `You are VERA's Strategy Brain auditor. You read a company's existing content and extract a precise model of their voice, audience, channel roles, content strategy assumptions, and repeatable content patterns. Output ONLY valid JSON in exactly this shape, no prose, no markdown fences:
 
 {
   "brand_voice": {
@@ -943,8 +943,8 @@ async function synthesise(
   },
   "personas": [
     {
-      "name": "Short label, e.g. 'Series B SaaS founder'",
-      "title": "Job title",
+      "name": "Short label, e.g. 'returning customers' or 'technical operators'",
+      "title": "Role, segment, or audience descriptor",
       "pain_points": ["2-4 specific pains observed in the content's framing"],
       "goals": ["2-4 specific goals the content speaks to"],
       "is_primary": true
@@ -965,10 +965,10 @@ Rules:
 - Base every claim on the content. Do not invent generic best practices; extract patterns that are actually present.
 - If the content is sparse, say less. Fewer rules, fewer skills. Quality over quantity.
 - Do not return source URLs in business_context. The app already stores source URLs separately.
-- business_context should focus on B2B demand creation: top-of-funnel role, ICP, pain, proof, channel fit, approval, engagement signals, qualified traffic path, and SAM handoff triggers.
+- business_context should focus on the assumptions visible in the content: audience, objective, offer, problems, proof, channel fit, approval, engagement signals, traffic path, and follow-up triggers.
 - platformToneOfVoice should separate a shared brand core from platform-specific tone when the evidence supports it.
 - speakerStrategy should say when Vera should write as the company, founder, named expert, or team. If evidence is unclear, say this needs human review.
-- engagementSignals should prioritize comments, shares, qualified clicks, buyer questions, and traffic, not only likes or views.
+- engagementSignals should prioritize comments, shares, saves, qualified clicks, questions, inquiries, purchases, community actions, and traffic, not only likes or views.
 - channelOperatingPolicies may include only channels with evidence. Supported keys: linkedin, youtube, medium, quora, reddit, x, instagram, facebook, blog, email.
 - For every channelOperatingPolicies entry, use fields speakerMode, approvalMode, publishGuard, measurementFocus, samTrigger, risk. Risk must be low, medium, or high.
 - Personas should reflect who the author is writing FOR (their audience), not who the author IS.

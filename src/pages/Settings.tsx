@@ -17,7 +17,7 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'workspace',    label: 'Workspace',    icon: Building2 },
   { id: 'team',         label: 'Access',       icon: Users },
   { id: 'integrations', label: 'Integrations', icon: Plug },
-  { id: 'usage',        label: 'AI Usage',     icon: BarChart3 },
+  { id: 'usage',        label: 'Generation Usage', icon: BarChart3 },
 ]
 
 function initialSettingsTab(): Tab {
@@ -283,7 +283,7 @@ function IntegrationsTab() {
     <div className="max-w-5xl space-y-5">
       <div>
         <h2 className="text-base font-semibold text-gray-900">Agentic integrations</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Connect client-owned accounts. Channel strategy and writing rules live inside each client Demand Brain.</p>
+        <p className="text-sm text-gray-500 mt-0.5">Connect client-owned accounts. Channel strategy and writing rules live inside each client Strategy Brain.</p>
       </div>
 
       <ClientIntegrationsCard />
@@ -298,7 +298,7 @@ function IntegrationsTab() {
         </div>
         <div className="px-4 py-3 space-y-3">
           <p className="text-xs text-gray-500 leading-relaxed">
-            Use Demand Brain for channel tone of voice, speaker mode, approval routing, publish guards, measurement focus, and SAM handoff triggers. Settings stays focused on credentials, OAuth, publisher health, and workspace access.
+            Use Strategy Brain for channel tone of voice, speaker mode, approval routing, publish guards, measurement focus, and follow-up triggers. Settings stays focused on credentials, OAuth, publisher health, and workspace access.
           </p>
           <button
             type="button"
@@ -306,7 +306,7 @@ function IntegrationsTab() {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 transition-colors"
           >
             <ShieldCheck size={12} />
-            {activeProject?.slug ? 'Open Demand Brain' : 'Pick a client space'}
+            {activeProject?.slug ? 'Open Strategy Brain' : 'Pick a client space'}
           </button>
         </div>
       </div>
@@ -319,7 +319,7 @@ function IntegrationsTab() {
         </div>
         <div className="px-4 py-3 space-y-3">
           <p className="text-xs text-gray-500 leading-relaxed">
-            Open a client space, then go to API keys to set text, image, and video defaults. Premium image and video models require an explicit monthly cap before they can run.
+            Open a client space, then go to API keys to set text, image, and video defaults. Premium image and video models require an explicit generation cap before they can run.
           </p>
           <button
             type="button"
@@ -362,6 +362,8 @@ type UsageProject = {
 
 type UsageAiPolicy = {
   monthly_budget_usd: number | null
+  budget_guard_enabled: boolean
+  budget_guard_mode: 'warn' | 'enforce'
   images_enabled: boolean
   standard_video_enabled: boolean
   premium_media_enabled: boolean
@@ -597,7 +599,7 @@ function AiUsageTab() {
     <div className="max-w-5xl space-y-5">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-base font-semibold text-gray-900">AI Usage</h2>
+          <h2 className="text-base font-semibold text-gray-900">Generation Usage</h2>
           <p className="text-sm text-gray-500 mt-0.5">Current-month spend, provider usage, and platform media access.</p>
         </div>
         <button
@@ -626,7 +628,7 @@ function AiUsageTab() {
         <UsageMetric label="Images" value={String(summary.images)} detail={`${summary.imageEvents} image calls`} />
         <UsageMetric label="Videos" value={String(summary.videos)} detail={`${summary.videoEvents} video calls`} tone={summary.videoEvents > 0 ? 'warn' : 'neutral'} />
         <UsageMetric
-          label="Budget risk"
+          label="Gen cap risk"
           value={String(riskSummary.budgetAlerts)}
           detail={`${riskSummary.videoPolicyAlerts} media policy alerts`}
           tone={riskSummary.budgetAlerts > 0 || riskSummary.videoPolicyAlerts > 0 ? 'danger' : 'neutral'}
@@ -674,7 +676,7 @@ function AiUsageTab() {
         <div className="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-medium text-gray-800">Client spend controls</p>
-            <p className="text-xs text-gray-500 mt-0.5">Current month by client space, budget cap, media policy, and key source.</p>
+            <p className="text-xs text-gray-500 mt-0.5">Current month by client space, generation cap, media policy, and key source.</p>
           </div>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500">{clientRows.length} spaces</span>
         </div>
@@ -682,7 +684,7 @@ function AiUsageTab() {
           <table className="w-full min-w-[920px] border-collapse">
             <thead>
               <tr className="border-b border-gray-100">
-                {['Client', 'Spend', 'Budget', 'Activity', 'Media', 'Key source', 'Status'].map(label => (
+                {['Client', 'Spend', 'Gen budget', 'Activity', 'Media', 'Key source', 'Status'].map(label => (
                   <th key={label} className="px-4 py-2 text-left text-[10px] uppercase tracking-[0.05em] font-semibold text-gray-400">{label}</th>
                 ))}
               </tr>
@@ -701,7 +703,7 @@ function AiUsageTab() {
                     </td>
                     <td className="px-4 py-3 text-sm font-semibold text-gray-900">{formatUsageUsd(row.cost)}</td>
                     <td className="px-4 py-3">
-                      <BudgetCell cost={row.cost} budget={row.policy.monthly_budget_usd} />
+                      <BudgetCell cost={row.cost} budget={row.policy.monthly_budget_usd} guardEnabled={row.policy.budget_guard_enabled} guardMode={row.policy.budget_guard_mode} />
                     </td>
                     <td className="px-4 py-3">
                       <p className="text-xs text-gray-700">{row.events} events</p>
@@ -1149,7 +1151,15 @@ function EmptyLine({ text }: { text: string }) {
   return <div className="px-4 py-6 text-sm text-gray-400">{text}</div>
 }
 
-function BudgetCell({ cost, budget }: { cost: number; budget: number | null }) {
+function BudgetCell({ cost, budget, guardEnabled, guardMode }: { cost: number; budget: number | null; guardEnabled: boolean; guardMode: 'warn' | 'enforce' }) {
+  if (!guardEnabled) {
+    return (
+      <div>
+        <p className="text-xs font-medium text-gray-500">Guard off</p>
+        <p className="text-xs text-gray-400 mt-0.5">Generation spend logged</p>
+      </div>
+    )
+  }
   if (!budget) {
     return (
       <div>
@@ -1169,7 +1179,7 @@ function BudgetCell({ cost, budget }: { cost: number; budget: number | null }) {
       <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mt-1.5">
         <div className={`h-full rounded-full ${barClass}`} style={{ width: `${percent}%` }} />
       </div>
-      <p className="text-xs text-gray-400 mt-1">cap {formatUsageUsd(budget)}</p>
+      <p className="text-xs text-gray-400 mt-1">cap {formatUsageUsd(budget)} · {guardMode === 'enforce' ? 'enforce' : 'warn'}</p>
     </div>
   )
 }
@@ -1319,7 +1329,7 @@ function summarizeByModel(rows: GenerationUsageRow[]): ModelUsageSummary[] {
 function summarizeUsageRisk(rows: ClientUsageSummary[]) {
   return rows.reduce((summary, row) => {
     if (row.platformEvents > 0 && !isPlatformMediaProject(row.slug)) summary.platformExposureClients += 1
-    if (row.policy.monthly_budget_usd && row.cost >= row.policy.monthly_budget_usd) summary.budgetAlerts += 1
+    if (row.policy.budget_guard_enabled && row.policy.budget_guard_mode === 'enforce' && row.policy.monthly_budget_usd && row.cost >= row.policy.monthly_budget_usd) summary.budgetAlerts += 1
     if (row.videoEvents > 0 && !row.policy.standard_video_enabled) summary.videoPolicyAlerts += 1
     return summary
   }, { platformExposureClients: 0, budgetAlerts: 0, videoPolicyAlerts: 0 })
@@ -1337,13 +1347,22 @@ function clientUsageStatus(row: ClientUsageSummary) {
       className: 'rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700',
     }
   }
-  if (budget && row.cost >= budget) {
+  if (row.policy.budget_guard_enabled && row.policy.budget_guard_mode === 'enforce' && budget && row.cost >= budget) {
     return {
       level: 'danger' as const,
       kind: 'budget' as const,
       label: 'Over cap',
-      detail: 'Disable media or raise the client budget.',
+      detail: 'Generation cap enforcement is active.',
       className: 'rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700',
+    }
+  }
+  if (row.policy.budget_guard_enabled && row.policy.budget_guard_mode === 'warn' && budget && row.cost >= budget) {
+    return {
+      level: 'warn' as const,
+      kind: 'budget' as const,
+      label: 'Warn only',
+      detail: 'Generation cap exceeded, workflows continue.',
+      className: 'rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700',
     }
   }
   if (row.videoEvents > 0 && !row.policy.standard_video_enabled) {
@@ -1386,6 +1405,8 @@ function parseUsageAiPolicy(value: unknown): UsageAiPolicy {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return {
       monthly_budget_usd: null,
+      budget_guard_enabled: true,
+      budget_guard_mode: 'warn',
       images_enabled: true,
       standard_video_enabled: false,
       premium_media_enabled: false,
@@ -1394,6 +1415,8 @@ function parseUsageAiPolicy(value: unknown): UsageAiPolicy {
   const raw = value as Record<string, unknown>
   return {
     monthly_budget_usd: typeof raw.monthly_budget_usd === 'number' && Number.isFinite(raw.monthly_budget_usd) && raw.monthly_budget_usd > 0 ? raw.monthly_budget_usd : null,
+    budget_guard_enabled: typeof raw.budget_guard_enabled === 'boolean' ? raw.budget_guard_enabled : true,
+    budget_guard_mode: raw.budget_guard_mode === 'enforce' ? 'enforce' : 'warn',
     images_enabled: typeof raw.images_enabled === 'boolean' ? raw.images_enabled : true,
     standard_video_enabled: typeof raw.standard_video_enabled === 'boolean' ? raw.standard_video_enabled : false,
     premium_media_enabled: typeof raw.premium_media_enabled === 'boolean' ? raw.premium_media_enabled : false,

@@ -4,6 +4,8 @@ import { Loader2, Check, AlertCircle, Sparkles } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { useProject } from '../lib/projectContext'
+import { parseProjectInstructions } from '../lib/businessContext'
+import { demandPlatformHasStrategyEvidence } from '../lib/demandModel'
 
 const AUDIT_URL   = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/content-audit`
 const CONNECT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/unipile-connect`
@@ -57,8 +59,9 @@ export default function OnboardingAudit() {
     let cancelled = false
 
     async function preflight() {
-      // 1. If callback from Unipile, persist the account_id and route to the
-      //    mandatory LinkedIn-score step before the voice audit.
+      // 1. If callback from Unipile, persist the account_id and continue the
+      //    normal source audit. LinkedIn profile scoring is now optional and
+      //    only available when the client Strategy Brain makes LinkedIn valid.
       const unipileStatus = searchParams.get('unipile_status')
       const accountId = searchParams.get('account_id')
       if (unipileStatus === 'success' && accountId) {
@@ -71,8 +74,7 @@ export default function OnboardingAudit() {
             unipile_health_status: 'healthy',
           })
           .eq('id', orgId)
-        navigate(`/linkedin-score/${orgId}`, { replace: true })
-        return
+        navigate(`/onboarding/audit/${orgId}`, { replace: true })
       }
       if (unipileStatus === 'error') {
         if (!cancelled) setError('LinkedIn connection was cancelled or failed.')
@@ -88,7 +90,10 @@ export default function OnboardingAudit() {
       setUnipileConnected(connected)
       setChannels((chs ?? []) as ChannelsLoaded['channels'])
 
-      const hasLinkedIn = (chs ?? []).some(c => (LINKEDIN_CHANNELS as readonly string[]).includes(c.channel))
+      const strategyContext = parseProjectInstructions(activeProject?.instructions ?? '').businessContext
+      const hasProjectLinkedIn = activeProject?.org_id === orgId && demandPlatformHasStrategyEvidence('linkedin', strategyContext)
+      const hasLegacyLinkedIn = !!activeProject?.is_default && (chs ?? []).some(c => (LINKEDIN_CHANNELS as readonly string[]).includes(c.channel))
+      const hasLinkedIn = hasProjectLinkedIn || hasLegacyLinkedIn
       if (hasLinkedIn && !connected) {
         setPhase('awaiting_unipile')
       } else {
@@ -100,7 +105,7 @@ export default function OnboardingAudit() {
     return () => { cancelled = true }
     // Callback params are consumed once per org route. runAudit is guarded by startedRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId])
+  }, [orgId, activeProject?.id, activeProject?.instructions, activeProject?.is_default, activeProject?.org_id])
 
   async function startUnipileConnect() {
     if (!orgId) return

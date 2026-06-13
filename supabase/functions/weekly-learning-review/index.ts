@@ -211,7 +211,7 @@ async function queueHandoffs(
       project_id: args.projectId,
       observation_id: args.observationId,
       post_id: candidate.post_id!,
-      title: candidate.title || "SAM handoff candidate",
+      title: candidate.title || "Follow-up candidate",
       channel: candidate.channel || null,
       score: candidate.score ?? 0,
       triggers: candidate.triggers ?? [],

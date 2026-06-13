@@ -73,6 +73,8 @@ type AiPolicy = {
   standard_video_enabled: boolean
   premium_media_enabled: boolean
   platform_media_keys_enabled: boolean
+  budget_guard_enabled: boolean
+  budget_guard_mode: 'warn' | 'enforce'
   monthly_budget_usd: number | null
   default_text_model: string | null
   default_image_model: string
@@ -85,6 +87,8 @@ const DEFAULT_AI_POLICY: AiPolicy = {
   standard_video_enabled: false,
   premium_media_enabled: false,
   platform_media_keys_enabled: false,
+  budget_guard_enabled: true,
+  budget_guard_mode: 'warn',
   monthly_budget_usd: null,
   default_text_model: null,
   default_image_model: 'nano-banana',
@@ -238,10 +242,10 @@ export default function ClientKeys() {
       return
     }
     refetch()
-    push({ kind: 'success', title: 'AI usage policy updated' })
+    push({ kind: 'success', title: 'Generation policy updated' })
   }
 
-  function togglePolicy(key: 'images_enabled' | 'standard_video_enabled' | 'premium_media_enabled', value: boolean) {
+  function togglePolicy(key: 'images_enabled' | 'standard_video_enabled' | 'premium_media_enabled' | 'budget_guard_enabled', value: boolean) {
     if (value && key === 'images_enabled') {
       const route = imageModelProvider(aiPolicy.default_image_model, { hasOpenRouter, hasOpenAI, hasFal })
       if (!route) {
@@ -262,24 +266,28 @@ export default function ClientKeys() {
       return
     }
     if (value && (key === 'standard_video_enabled' || key === 'premium_media_enabled') && !aiPolicy.monthly_budget_usd) {
-      push({ kind: 'warn', title: 'Set a monthly cap first', body: 'Video and premium media require an explicit client budget cap.' })
+      push({ kind: 'warn', title: 'Set a generation cap first', body: 'Video and premium media require an explicit client generation cap.' })
       return
     }
     void saveAiPolicy({ ...aiPolicy, [key]: value })
+  }
+
+  function saveBudgetGuardMode(mode: 'warn' | 'enforce') {
+    void saveAiPolicy({ ...aiPolicy, budget_guard_mode: mode, budget_guard_enabled: true })
   }
 
   function saveBudgetCap() {
     const raw = budgetDraft.trim()
     const nextBudget = raw === '' ? null : Number(raw)
     if (nextBudget !== null && (!Number.isFinite(nextBudget) || nextBudget < 0)) {
-      push({ kind: 'warn', title: 'Enter a valid monthly cap' })
+      push({ kind: 'warn', title: 'Enter a valid generation cap' })
       return
     }
     const normalized = nextBudget !== null && nextBudget > 0
       ? Math.round(nextBudget * 100) / 100
       : null
     if (normalized === null && (aiPolicy.standard_video_enabled || aiPolicy.premium_media_enabled)) {
-      push({ kind: 'warn', title: 'Keep a cap for paid media', body: 'Turn off video and premium media before clearing the monthly cap.' })
+      push({ kind: 'warn', title: 'Keep a cap for paid media', body: 'Turn off video and premium media before clearing the generation cap.' })
       return
     }
     setBudgetDraft(normalized === null ? '' : String(normalized))
@@ -307,15 +315,15 @@ export default function ClientKeys() {
       push({
         kind: 'warn',
         title: 'Premium media is locked',
-        body: `${modelLabel(next.default_image_model)} is a premium image model. Enable Premium media with a monthly cap before making it the default.`,
+        body: `${modelLabel(next.default_image_model)} is a premium image model. Enable Premium media with a generation cap before making it the default.`,
       })
       return
     }
     if (isPremiumImageModel(next.default_image_model) && !next.monthly_budget_usd) {
       push({
         kind: 'warn',
-        title: 'Set a monthly cap first',
-        body: 'Premium image defaults require an explicit client budget cap.',
+        title: 'Set a generation cap first',
+        body: 'Premium image defaults require an explicit client generation cap.',
       })
       return
     }
@@ -473,9 +481,17 @@ export default function ClientKeys() {
       </section>
 
       <section style={{ marginBottom: space[8] }}>
-        <SectionLabel style={{ marginBottom: space[3] }} action={policySaving ? 'Saving...' : 'Auto-save'}>AI usage policy</SectionLabel>
+        <SectionLabel style={{ marginBottom: space[3] }} action={policySaving ? 'Saving...' : 'Auto-save'}>Generation policy</SectionLabel>
         <div style={card}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: space[3] }}>
+            <PolicyToggle
+              icon={ShieldCheck}
+              title="Generation budget guard"
+              body="Warn on content generation, image, video, and future paid social spend. Enforce mode is optional so workflows keep moving by default."
+              checked={aiPolicy.budget_guard_enabled}
+              disabled={policySaving}
+              onChange={value => togglePolicy('budget_guard_enabled', value)}
+            />
             <PolicyToggle
               icon={ImagePlus}
               title="Image generation"
@@ -549,13 +565,13 @@ export default function ClientKeys() {
               </Button>
             </div>
             <p style={{ fontSize: t.size.micro, color: color.faint, margin: `${space[3]} 0 0`, lineHeight: 1.5 }}>
-              Premium image defaults still require Premium media plus a monthly cap. OpenAI Image Gen 2 should stay a premium override, not the normal default.
+              Premium image defaults still require Premium media plus a generation cap. OpenAI Image Gen 2 should stay a premium override, not the normal default.
             </p>
           </div>
-          <div style={{ marginTop: space[5], borderTop: `1px solid ${color.line}`, paddingTop: space[4], display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) auto', gap: space[3], alignItems: 'end' }}>
+          <div style={{ marginTop: space[5], borderTop: `1px solid ${color.line}`, paddingTop: space[4], display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: space[3], alignItems: 'end' }}>
             <Field
-              label="Monthly cap (USD)"
-              helper="Blank means no cap. The cap uses estimated logged spend for this client space."
+              label="Generation cap (USD)"
+              helper="Blank means no cap. This covers generated content, media renders, and future paid social generation spend."
             >
               <Input
                 value={budgetDraft}
@@ -564,12 +580,29 @@ export default function ClientKeys() {
                 placeholder="No cap"
               />
             </Field>
+            <Field
+              label="Guard mode"
+              helper={aiPolicy.budget_guard_enabled ? 'Warn keeps workflows running. Enforce blocks over-cap requests.' : 'Budget guard is off.'}
+            >
+              <Select
+                value={aiPolicy.budget_guard_mode}
+                onChange={event => saveBudgetGuardMode(event.target.value === 'enforce' ? 'enforce' : 'warn')}
+                disabled={policySaving || !aiPolicy.budget_guard_enabled}
+              >
+                <option value="warn">Warn only</option>
+                <option value="enforce">Enforce cap</option>
+              </Select>
+            </Field>
             <Button variant="secondary" leading={<Clock3 size={14} />} onClick={saveBudgetCap} disabled={policySaving}>
               Save cap
             </Button>
             <p style={{ gridColumn: '1 / -1', fontSize: t.size.micro, color: color.faint, margin: 0, lineHeight: 1.5 }}>
               Current month: {formatMoney(usageSummary.currentMonthCost)}
               {aiPolicy.monthly_budget_usd ? ` of ${formatMoney(aiPolicy.monthly_budget_usd)}` : ''}
+              {aiPolicy.budget_guard_enabled ? `, guard ${aiPolicy.budget_guard_mode === 'enforce' ? 'enforces the cap' : 'warns only'}` : ', guard off'}
+            </p>
+            <p style={{ gridColumn: '1 / -1', fontSize: t.size.micro, color: color.faint, margin: 0, lineHeight: 1.5 }}>
+              Connector reads, analytics imports, login, and publishing actions are not governed by this cap unless they invoke paid generation.
             </p>
           </div>
         </div>
@@ -811,6 +844,8 @@ function buildSpendGuard(aiPolicy: AiPolicy, activeProviders: Set<string>, usage
     aiPolicy.standard_video_enabled && !hasClientVideo ? 'video key missing' : '',
     premiumDefault && !aiPolicy.premium_media_enabled ? 'premium default locked' : '',
     aiPolicy.platform_media_keys_enabled ? 'platform fallback enabled' : '',
+    !aiPolicy.budget_guard_enabled ? 'budget guard off' : '',
+    aiPolicy.budget_guard_enabled && aiPolicy.budget_guard_mode === 'warn' ? 'warn-only budget guard' : '',
     budgetPct !== null && budgetPct >= 90 ? 'budget near cap' : '',
     usageSummary.platformKeyEvents > 0 ? 'platform usage seen' : '',
   ].filter(Boolean)
@@ -820,10 +855,14 @@ function buildSpendGuard(aiPolicy: AiPolicy, activeProviders: Set<string>, usage
     metrics: [
       {
         icon: Clock3,
-        label: 'Budget',
-        value: budget ? `${budgetPct}%` : 'No cap',
-        detail: budget ? `${formatMoney(used)} used, ${formatMoney(remaining ?? 0)} left` : 'Set a cap before video or premium media.',
-        tone: !budget ? 'warn' : budgetPct !== null && budgetPct >= 90 ? 'danger' : budgetPct !== null && budgetPct >= 70 ? 'warn' : 'success',
+        label: 'Generation cap',
+        value: !aiPolicy.budget_guard_enabled ? 'Off' : budget ? `${budgetPct}%` : 'No cap',
+        detail: !aiPolicy.budget_guard_enabled
+          ? 'Generation spend is logged, but generation cap warnings and blocks are disabled.'
+          : budget
+            ? `${formatMoney(used)} used, ${formatMoney(remaining ?? 0)} left. ${aiPolicy.budget_guard_mode === 'enforce' ? 'Cap enforcement is on.' : 'Warn-only mode keeps workflows running.'}`
+            : 'Set a cap before video or premium media.',
+        tone: !aiPolicy.budget_guard_enabled ? 'info' : !budget ? 'warn' : budgetPct !== null && budgetPct >= 90 ? 'danger' : budgetPct !== null && budgetPct >= 70 ? 'warn' : 'success',
       },
       {
         icon: KeyRound,
@@ -898,7 +937,7 @@ function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>, pric
       label: 'Premium media',
       status: aiPolicy.premium_media_enabled ? 'Enabled' : 'Locked',
       detail: aiPolicy.premium_media_enabled
-        ? aiPolicy.monthly_budget_usd ? 'Premium models are allowed with a monthly cap. Use only for approved production work.' : 'Premium is enabled, but the budget cap is missing.'
+        ? aiPolicy.monthly_budget_usd ? 'Premium models are allowed with a generation cap. Use only for approved production work.' : 'Premium is enabled, but the generation cap is missing.'
         : 'OpenAI Image Gen 2, Imagen 4, Recraft, Ideogram, Kling, Sora, Veo, and Seedance stay approval-gated.',
       tone: aiPolicy.premium_media_enabled ? (aiPolicy.monthly_budget_usd ? 'warn' : 'danger') : 'success',
     },
@@ -1186,6 +1225,8 @@ function parseAiPolicy(value: unknown): AiPolicy {
     standard_video_enabled: typeof raw.standard_video_enabled === 'boolean' ? raw.standard_video_enabled : DEFAULT_AI_POLICY.standard_video_enabled,
     premium_media_enabled: typeof raw.premium_media_enabled === 'boolean' ? raw.premium_media_enabled : DEFAULT_AI_POLICY.premium_media_enabled,
     platform_media_keys_enabled: typeof raw.platform_media_keys_enabled === 'boolean' ? raw.platform_media_keys_enabled : DEFAULT_AI_POLICY.platform_media_keys_enabled,
+    budget_guard_enabled: typeof raw.budget_guard_enabled === 'boolean' ? raw.budget_guard_enabled : DEFAULT_AI_POLICY.budget_guard_enabled,
+    budget_guard_mode: raw.budget_guard_mode === 'enforce' ? 'enforce' : DEFAULT_AI_POLICY.budget_guard_mode,
     monthly_budget_usd: typeof raw.monthly_budget_usd === 'number' && Number.isFinite(raw.monthly_budget_usd) && raw.monthly_budget_usd > 0 ? raw.monthly_budget_usd : null,
     default_text_model: typeof raw.default_text_model === 'string' && raw.default_text_model.trim() ? raw.default_text_model.trim() : null,
     default_image_model: typeof raw.default_image_model === 'string' && raw.default_image_model.trim() ? raw.default_image_model.trim() : DEFAULT_AI_POLICY.default_image_model,

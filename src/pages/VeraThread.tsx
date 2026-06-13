@@ -32,8 +32,8 @@ import {
   demandChannelPolicyOverrideCount,
   demandChannelMatrixPrompt,
   demandChannelsFromContext,
+  demandPlatformHasStrategyEvidence,
   type DemandChannelOperatingPolicy,
-  type DemandPlatformDefinition,
 } from '../lib/demandModel'
 import {
   buildModelRecommendations,
@@ -142,6 +142,8 @@ type ProviderCapabilities = {
   defaultImageModel: string
   defaultVideoModel: string
   defaultImageVideoModel: string
+  budgetGuardEnabled: boolean
+  budgetGuardMode: 'warn' | 'enforce'
   monthlyBudgetUsd: number | null
 }
 type StoredAttachment =
@@ -163,6 +165,8 @@ const DEFAULT_CLIENT_AI_POLICY = {
   defaultImageModel: 'nano-banana',
   defaultVideoModel: 'hailuo',
   defaultImageVideoModel: 'hailuo-i2v',
+  budgetGuardEnabled: true,
+  budgetGuardMode: 'warn' as const,
   monthlyBudgetUsd: null as number | null,
 }
 
@@ -187,6 +191,8 @@ const DEFAULT_PROVIDER_CAPABILITIES: ProviderCapabilities = {
   defaultImageModel: DEFAULT_CLIENT_AI_POLICY.defaultImageModel,
   defaultVideoModel: DEFAULT_CLIENT_AI_POLICY.defaultVideoModel,
   defaultImageVideoModel: DEFAULT_CLIENT_AI_POLICY.defaultImageVideoModel,
+  budgetGuardEnabled: DEFAULT_CLIENT_AI_POLICY.budgetGuardEnabled,
+  budgetGuardMode: DEFAULT_CLIENT_AI_POLICY.budgetGuardMode,
   monthlyBudgetUsd: DEFAULT_CLIENT_AI_POLICY.monthlyBudgetUsd,
 }
 const PLATFORM_MEDIA_KEYS_ENABLED = import.meta.env.VITE_PLATFORM_MEDIA_KEYS_ENABLED === 'true'
@@ -205,6 +211,8 @@ function parseClientAiPolicy(value: unknown) {
     defaultImageModel: typeof policy.default_image_model === 'string' && policy.default_image_model.trim() ? policy.default_image_model.trim() : DEFAULT_CLIENT_AI_POLICY.defaultImageModel,
     defaultVideoModel: typeof policy.default_video_model === 'string' && policy.default_video_model.trim() ? policy.default_video_model.trim() : DEFAULT_CLIENT_AI_POLICY.defaultVideoModel,
     defaultImageVideoModel: typeof policy.default_image_video_model === 'string' && policy.default_image_video_model.trim() ? policy.default_image_video_model.trim() : DEFAULT_CLIENT_AI_POLICY.defaultImageVideoModel,
+    budgetGuardEnabled: typeof policy.budget_guard_enabled === 'boolean' ? policy.budget_guard_enabled : DEFAULT_CLIENT_AI_POLICY.budgetGuardEnabled,
+    budgetGuardMode: policy.budget_guard_mode === 'enforce' ? 'enforce' as const : DEFAULT_CLIENT_AI_POLICY.budgetGuardMode,
     monthlyBudgetUsd: typeof policy.monthly_budget_usd === 'number' && Number.isFinite(policy.monthly_budget_usd) ? policy.monthly_budget_usd : null,
   }
 }
@@ -461,9 +469,9 @@ type DemandPlanSnapshot = {
 }
 
 const DEMAND_PLAN_FIELDS: Array<{ key: BusinessContextKey; label: string }> = [
-  { key: 'demandObjective', label: 'Demand objective' },
+  { key: 'demandObjective', label: 'Content objective' },
   { key: 'offer', label: 'Offer' },
-  { key: 'audience', label: 'ICP' },
+  { key: 'audience', label: 'Audience' },
   { key: 'speakerStrategy', label: 'Speaker strategy' },
   { key: 'platformToneOfVoice', label: 'Platform TOV' },
   { key: 'channelStrategy', label: 'Channel strategy' },
@@ -471,7 +479,7 @@ const DEMAND_PLAN_FIELDS: Array<{ key: BusinessContextKey; label: string }> = [
   { key: 'approvalModel', label: 'Approval model' },
   { key: 'approvalStakeholders', label: 'Approval stakeholders' },
   { key: 'engagementSignals', label: 'Engagement signals' },
-  { key: 'samHandoffRules', label: 'SAM handoff' },
+  { key: 'samHandoffRules', label: 'Follow-up rules' },
 ]
 
 function splitList(value: string, max = 5) {
@@ -494,26 +502,9 @@ function demandPolicyRiskLabel(risk: DemandChannelOperatingPolicy['risk']) {
   return 'standard review'
 }
 
-function platformMentionedInStrategy(platform: DemandPlatformDefinition, context: BusinessContext) {
-  const haystack = [
-    context.channelStrategy,
-    context.contentFormats,
-    context.platformToneOfVoice,
-    context.demandObjective,
-  ].join(' ').toLowerCase()
-  const needles = [
-    platform.key,
-    platform.label.toLowerCase(),
-    ...(platform.key === 'x' ? ['twitter'] : []),
-    ...(platform.key === 'email' ? ['newsletter', 'nurture'] : []),
-    ...(platform.key === 'blog' ? ['website', 'seo', 'article'] : []),
-  ]
-  return needles.some(needle => haystack.includes(needle))
-}
-
 function activeDemandPolicyPlatforms(context: BusinessContext) {
   const active = DEMAND_PLATFORM_DEFINITIONS.filter(platform => (
-    (platform.sourceKey && context[platform.sourceKey]?.trim()) || platformMentionedInStrategy(platform, context)
+    demandPlatformHasStrategyEvidence(platform, context)
   ))
   return active.length ? active : DEMAND_PLATFORM_DEFINITIONS
 }
@@ -817,6 +808,8 @@ export default function VeraThread() {
         defaultImageModel: aiPolicy.defaultImageModel,
         defaultVideoModel: aiPolicy.defaultVideoModel,
         defaultImageVideoModel: aiPolicy.defaultImageVideoModel,
+        budgetGuardEnabled: aiPolicy.budgetGuardEnabled,
+        budgetGuardMode: aiPolicy.budgetGuardMode,
         monthlyBudgetUsd: aiPolicy.monthlyBudgetUsd,
       })
     })()
@@ -1125,10 +1118,10 @@ export default function VeraThread() {
               ? { ...m, tools: (m.tools ?? []).map(tl => tl.id === ev.id ? { ...tl, status: 'done' } : tl) } : m))
           } else if (ev.type === 'budget_warning') {
             const warning = ev.warning as Record<string, unknown> | undefined
-            const message = typeof warning?.message === 'string' ? warning.message : 'This generation request needs an AI budget review.'
+            const message = typeof warning?.message === 'string' ? warning.message : 'This generation request needs a generation budget review.'
             push({
               kind: 'warn',
-              title: 'AI budget warning',
+              title: 'Generation budget warning',
               body: message,
               duration: 9000,
             })
@@ -1526,7 +1519,7 @@ export default function VeraThread() {
     if (action === 'handoff') {
       const handoffs = (payload.sam_handoff_candidates ?? []).filter(item => item.post_id)
       if (handoffs.length === 0) {
-        push({ kind: 'warn', title: 'No SAM handoffs', body: 'There are no scored handoff candidates on this review.' })
+        push({ kind: 'warn', title: 'No follow-ups', body: 'There are no scored follow-up candidates on this review.' })
         return
       }
       body.queue_all_handoffs = true
@@ -1555,7 +1548,7 @@ export default function VeraThread() {
       } else if (action === 'handoff') {
         const queued = data?.queued_handoff_ids?.length ?? 0
         const skipped = data?.skipped_duplicate_handoff_count ?? 0
-        push({ kind: 'success', title: 'SAM handoffs queued', body: skipped ? `${queued} queued, ${skipped} already existed.` : `${queued} handoff action(s) queued.` })
+        push({ kind: 'success', title: 'Follow-ups queued', body: skipped ? `${queued} queued, ${skipped} already existed.` : `${queued} follow-up action(s) queued.` })
       } else {
         setObservations(prev => prev.filter(item => item.id !== o.id))
         push({ kind: 'success', title: 'Review complete', body: 'Weekly learning was marked as reviewed.' })
@@ -2102,15 +2095,15 @@ type LaunchAction = { icon: React.ElementType; title: string; sub: string; promp
 function buildLaunchActions(stats: { pending: number; campaigns: number }): LaunchAction[] {
   const a: LaunchAction[] = []
   a.push(stats.campaigns > 0
-    ? { icon: Megaphone, title: 'Improve Demand Campaign', sub: `${stats.campaigns} active campaign${stats.campaigns === 1 ? '' : 's'}`, prompt: "Review this client's active campaigns and suggest the highest-impact improvement to ICP, pain point, offer, CTA, cadence, and channel mix. Prioritize top-of-funnel demand creation." }
-    : { icon: Megaphone, title: 'Plan Demand Campaign', sub: 'B2B TOF series', prompt: 'Plan a B2B top-of-funnel demand campaign for this client. Define ICP, pain point, offer, funnel goal, channels, success metric, and draft the first content batch.' })
-  a.push({ icon: PenLine, title: 'LinkedIn Demand Post', sub: 'ICP, pain, CTA', prompt: 'Draft a LinkedIn post that creates B2B top-of-funnel demand. Include ICP, pain point, market insight, proof angle, soft CTA, and the SAM follow-up signal to watch for.' })
-  a.push({ icon: ImagePlus, title: 'Visual Asset', sub: 'Carousel or image', prompt: 'Create a platform-native visual asset for a B2B demand post. Recommend carousel, infographic, quote card, or custom image, then build the prompt and ask before rendering.' })
-  a.push({ icon: Clapperboard, title: 'Video Storyboard', sub: 'Scenes and cost', prompt: 'Create a storyboard for a short B2B demand video. Include scene beats, timing, camera notes, caption, model recommendation, and estimated prototype cost. Do not render until I explicitly approve the paid generation.' })
-  a.push({ icon: Zap, title: 'Repurpose Across Channels', sub: 'YT, Medium, Quora, Reddit, X', prompt: 'Turn one core B2B demand idea into platform-native versions for LinkedIn, YouTube, Medium, Quora, Reddit, Instagram, Facebook, blog, email, and X where relevant. Keep each version native to the channel and identify which ones should be manual, connected, or read-only.' })
+    ? { icon: Megaphone, title: 'Improve Campaign', sub: `${stats.campaigns} active campaign${stats.campaigns === 1 ? '' : 's'}`, prompt: "Review this client's active campaigns and suggest the highest-impact improvement to audience, problem, offer, CTA, cadence, and channel mix. Prioritize measurable audience response." }
+    : { icon: Megaphone, title: 'Plan Campaign', sub: 'Audience-led series', prompt: 'Plan a top-of-funnel content campaign for this client. Define audience, problem, offer, campaign goal, channels, success metric, and draft the first content batch.' })
+  a.push({ icon: PenLine, title: 'LinkedIn Post', sub: 'Audience, hook, CTA', prompt: 'Draft a LinkedIn post that creates useful audience engagement. Include audience, problem, market insight, proof angle, soft CTA, and the follow-up signal to watch for.' })
+  a.push({ icon: ImagePlus, title: 'Visual Asset', sub: 'Carousel or image', prompt: 'Create a platform-native visual asset for a campaign post. Recommend carousel, infographic, quote card, or custom image, then build the prompt and ask before rendering.' })
+  a.push({ icon: Clapperboard, title: 'Video Storyboard', sub: 'Scenes and cost', prompt: 'Create a storyboard for a short campaign video. Include scene beats, timing, camera notes, caption, model recommendation, and estimated prototype cost. Do not render until I explicitly approve the paid generation.' })
+  a.push({ icon: Zap, title: 'Repurpose Across Channels', sub: 'YT, Medium, Quora, Reddit, X', prompt: 'Turn one core content idea into platform-native versions for LinkedIn, YouTube, Medium, Quora, Reddit, Instagram, Facebook, blog, email, and X where relevant. Keep each version native to the channel and identify which ones should be manual, connected, or read-only.' })
   a.push(stats.campaigns > 0
-    ? { icon: Lightbulb, title: 'SAM Handoff Angles', sub: 'Comments, shares, traffic', prompt: 'Find content topics and engagement signals that should hand off to SAM. Turn comments, shares, clicks, and objections into sales research angles.' }
-    : { icon: Lightbulb, title: 'Demand Angles', sub: 'Fresh market hooks', prompt: "Give me 5 B2B demand angles grounded in this client's offer, ICP, buyer pains, proof points, and current market conversations." })
+    ? { icon: Lightbulb, title: 'Follow-Up Angles', sub: 'Comments, shares, traffic', prompt: 'Find content topics and engagement signals that deserve follow-up. Turn comments, shares, clicks, and objections into research, reply, or next-content angles.' }
+    : { icon: Lightbulb, title: 'Content Angles', sub: 'Fresh market hooks', prompt: "Give me 5 content angles grounded in this client's offer, audience, customer problems, proof points, and current market conversations." })
   return a.slice(0, 6)
 }
 
@@ -2234,8 +2227,8 @@ function ModelRoutingPanel({ capabilities, onAddKey, pricingCatalog, pricingSour
   const reviewedOn = latestPricingReviewDate(pricingCatalog)
   const pricingStatus = pricingCatalogBadge(pricingSource, pricingRowCount)
   const budget = capabilities.monthlyBudgetUsd
-    ? `Monthly cap: $${capabilities.monthlyBudgetUsd.toFixed(0)}`
-    : 'No monthly cap set'
+    ? `Generation cap: $${capabilities.monthlyBudgetUsd.toFixed(0)} (${capabilities.budgetGuardEnabled ? capabilities.budgetGuardMode : 'off'})`
+    : capabilities.budgetGuardEnabled ? 'No generation cap set' : 'Generation guard off'
 
   return (
     <section style={{ width: '100%', maxWidth: 760, marginTop: space[4], padding: space[4], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, textAlign: 'left' }}>
@@ -2246,7 +2239,7 @@ function ModelRoutingPanel({ capabilities, onAddKey, pricingCatalog, pricingSour
             Model routing
           </div>
           <div style={{ color: color.ghost, fontSize: t.size.cap, lineHeight: 1.45, marginTop: 3 }}>
-            Client keys first. Standard models by default. Premium and platform spend need explicit approval.
+            Client keys first. Standard models by default. Premium, generated media, and paid social spend need explicit approval.
             <br />
             Pricing guide reviewed {reviewedOn}. {pricingStatus.label}. Estimates are planning guides.
           </div>
@@ -2318,7 +2311,7 @@ function Idle({ onRun, observations, actions, onDismiss, onOpenIntegrations, onW
   const setupDone = !!setup && setup.business && setup.audience && setup.voice && setup.categories && setup.knowledge
   // Persona-first, SAM-clean: when the brain is thin, the FIRST card is "set up
   // the client" (routes to Brain). No separate checklist block.
-  const setupCard: LaunchAction = { icon: Sparkles, title: `Set up ${projectName}`, sub: 'URL, ICP, offer, proof', prompt: '', action: 'brain' }
+  const setupCard: LaunchAction = { icon: Sparkles, title: `Set up ${projectName}`, sub: 'URL, audience, offer, proof', prompt: '', action: 'brain' }
   const grid = (setup && !setupDone ? [setupCard, ...actions] : actions).slice(0, 6)
   const weeklyObservations = observations.filter(o => o.kind === 'weekly_learning')
   const otherObservations = observations.filter(o => o.kind !== 'weekly_learning')
@@ -2326,10 +2319,10 @@ function Idle({ onRun, observations, actions, onDismiss, onOpenIntegrations, onW
     <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: space[8] }}>
       <span style={{ marginBottom: space[5], display: 'inline-flex' }}><VeraAvatar size={56} hero /></span>
       <h1 style={{ fontSize: t.size.h2, fontWeight: t.weight.semibold, color: color.ink, marginBottom: space[2], textAlign: 'center' }}>
-        Create B2B demand for {projectName}
+        Create content that works for {projectName}
       </h1>
       <p style={{ fontSize: t.size.body, color: color.ghost, marginBottom: space[5], textAlign: 'center', maxWidth: '44ch' }}>
-        Turn client knowledge into campaigns, posts, visuals, storyboards, and demand signals that SAM can use.
+        Turn client knowledge into campaigns, posts, visuals, storyboards, and measurable audience signals.
       </p>
 
       {providerCapabilities.loaded && (providerCapabilities.needsTextKey || !providerCapabilities.imageReady || !providerCapabilities.videoReady) && (
@@ -2466,7 +2459,7 @@ function WeeklyLearningNoticeCard({
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(116px, 1fr))', gap: space[2] }}>
           <WeeklyLearningStat icon={BarChart3} label="Measured" value={current.measuredPosts ?? 0} detail="assets" />
           <WeeklyLearningStat icon={Sparkles} label="Signals" value={currentSignals} detail={formatLearningDelta(delta)} />
-          <WeeklyLearningStat icon={Lightbulb} label="Buyer intent" value={current.buyerIntent ?? 0} detail={`${current.buyerQuestions ?? 0} q, ${current.meetingRequests ?? 0} mtg`} />
+          <WeeklyLearningStat icon={Lightbulb} label="Intent signals" value={current.buyerIntent ?? 0} detail={`${current.buyerQuestions ?? 0} q, ${current.meetingRequests ?? 0} inquiries`} />
           <WeeklyLearningStat icon={Zap} label="Skills" value={skills.length} detail="proposals" />
         </div>
 
@@ -2496,11 +2489,11 @@ function WeeklyLearningNoticeCard({
           </button>
           <button onClick={() => onReviewAction(observation, 'handoff')} disabled={busy || handoffs.length === 0}
             style={{ ...actionStyle, opacity: busy || handoffs.length === 0 ? 0.55 : 1, cursor: busy || handoffs.length === 0 ? 'not-allowed' : 'pointer' }}>
-            <Sparkles size={13} /> {busyFor('handoff') ? 'Queuing...' : 'Queue SAM'}
+            <Sparkles size={13} /> {busyFor('handoff') ? 'Queuing...' : 'Queue follow-up'}
           </button>
           <button onClick={() => onRun(buildWeeklySamPrompt(projectName, payload, observation.detail))} disabled={handoffs.length === 0}
             style={{ ...actionStyle, opacity: handoffs.length === 0 ? 0.55 : 1, cursor: handoffs.length === 0 ? 'not-allowed' : 'pointer' }}>
-            <Send size={13} /> Brief SAM
+            <Send size={13} /> Brief follow-up
           </button>
           <button onClick={() => onReviewAction(observation, 'complete')} disabled={busy}
             style={{ ...actionStyle, opacity: busy ? 0.55 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}>
@@ -2559,7 +2552,7 @@ function buildWeeklyNextBriefPrompt(projectName: string, payload: WeeklyLearning
     .map(skill => `- ${skill.name ?? 'Learning proposal'} (${skill.confidence ?? 'medium'})`)
     .join('\n')
   return [
-    `Use the weekly VERA learning review to brief the next demand move for ${projectName}.`,
+    `Use the weekly VERA learning review to brief the next content move for ${projectName}.`,
     ``,
     detail ? `Weekly summary: ${detail}` : '',
     payload.week_key ? `Week: ${payload.week_key}` : '',
@@ -2582,17 +2575,17 @@ function buildWeeklySamPrompt(projectName: string, payload: WeeklyLearningPayloa
     .map(item => `- ${item.title ?? 'Untitled'} (${item.channel ?? 'unassigned'}, score ${item.score ?? 0}): ${(item.triggers ?? []).join(', ')}`)
     .join('\n')
   return [
-    `Create SAM handoff actions from the weekly VERA learning review for ${projectName}.`,
+    `Create follow-up actions from the weekly VERA learning review for ${projectName}.`,
     ``,
     detail ? `Weekly summary: ${detail}` : '',
     payload.week_key ? `Week: ${payload.week_key}` : '',
     ``,
-    handoffs ? `Handoff candidates:\n${handoffs}` : 'No handoff candidates are listed yet. Explain what signal is missing before SAM should act.',
+    handoffs ? `Follow-up candidates:\n${handoffs}` : 'No follow-up candidates are listed yet. Explain what signal is missing before action.',
     ``,
     `Return:`,
-    `1. the best handoff candidate`,
-    `2. likely buyer pain or intent`,
-    `3. accounts or people SAM should research`,
+    `1. the best follow-up candidate`,
+    `2. likely audience pain or intent`,
+    `3. people, accounts, or segments to research`,
     `4. outreach angle and objection to prepare for`,
     `5. the next VERA content asset to create more of this signal`,
   ].filter(Boolean).join('\n')
@@ -2621,18 +2614,18 @@ function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {
   const policyContext = [
     `Channel policy summary: ${plan.policySummary.join('; ')}`,
     `Publishing guards: ${plan.publishGuards.slice(0, 8).join('; ')}`,
-    `SAM triggers: ${plan.samTriggers.slice(0, 8).join('; ')}`,
+    `Follow-up triggers: ${plan.samTriggers.slice(0, 8).join('; ')}`,
   ].join('\n')
-  const planCampaignPrompt = `Use the saved Demand Brain and operating model for ${projectName} to plan the next B2B top-of-funnel demand campaign. Include ICP, pain, offer, conversion path, approval model, channel roles, content formats, success signals, SAM handoff rules, and the first content batch. Respect these saved channel policies:\n${policyContext}`
+  const planCampaignPrompt = `Use the saved Strategy Brain and operating model for ${projectName} to plan the next content campaign. Include audience, problem, offer, conversion path, approval model, channel roles, content formats, success signals, follow-up rules, and the first content batch. Respect these saved channel policies:\n${policyContext}`
   const channelMatrixPrompt = `${demandChannelMatrixPrompt(projectName)} Respect these saved channel policies:\n${policyContext}`
-  const handoffPrompt = `Create a SAM handoff plan for ${projectName}. Define which comments, shares, clicks, objections, questions, accounts, and traffic signals should become sales research or follow-up, and how VERA should label them. Use these saved SAM triggers:\n${plan.samTriggers.join('; ')}`
+  const handoffPrompt = `Create a follow-up plan for ${projectName}. Define which comments, shares, clicks, objections, questions, accounts, and traffic signals should become research or action, and how VERA should label them. Use these saved follow-up triggers:\n${plan.samTriggers.join('; ')}`
   return (
     <section style={{ width: '100%', maxWidth: 760, marginTop: space[5], padding: space[5], background: color.surface, border: `1px solid ${ready ? 'var(--accent-line)' : color.line}`, borderRadius: radius.lg, textAlign: 'left', boxShadow: ready ? 'var(--shadow-pop)' : 'none' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: space[4], justifyContent: 'space-between', marginBottom: space[4] }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>
             <Target size={13} />
-            Demand plan
+            Strategy plan
           </div>
           <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, marginTop: space[2], lineHeight: 1.4 }}>{plan.objective}</div>
           <div style={{ color: color.ghost, fontSize: t.size.cap, lineHeight: 1.5, marginTop: 3 }}>{plan.conversionPath}</div>
@@ -2641,10 +2634,10 @@ function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {
             <PlanPill>{plan.sourceCount}/{plan.sourceTotal} sources connected</PlanPill>
             <PlanPill>{plan.customPolicyCount} custom channel policies</PlanPill>
             {plan.highCareCount > 0 && <PlanPill tone="accent">{plan.highCareCount} high-care channels</PlanPill>}
-            <PlanPill>Sellable workspace model</PlanPill>
+            <PlanPill>Workspace model</PlanPill>
           </div>
         </div>
-        <button onClick={onOpenBrain} title="Open Demand Brain" style={{ flexShrink: 0, padding: '6px 10px', borderRadius: radius.pill, border: `1px solid ${ready ? 'var(--accent-line)' : color.line}`, background: ready ? 'var(--accent-tint)' : color.paper2, color: ready ? color.accent : color.ink2, fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
+        <button onClick={onOpenBrain} title="Open Strategy Brain" style={{ flexShrink: 0, padding: '6px 10px', borderRadius: radius.pill, border: `1px solid ${ready ? 'var(--accent-line)' : color.line}`, background: ready ? 'var(--accent-tint)' : color.paper2, color: ready ? color.accent : color.ink2, fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
           {plan.completeness}% ready
         </button>
       </div>
@@ -2672,7 +2665,7 @@ function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {
       <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap' }}>
         <button onClick={() => onRun(planCampaignPrompt)} style={actionStyle}><Megaphone size={13} /> Plan campaign</button>
         <button onClick={() => onRun(channelMatrixPrompt)} style={actionStyle}><Zap size={13} /> Channel matrix</button>
-        <button onClick={() => onRun(handoffPrompt)} style={actionStyle}><Share2 size={13} /> SAM handoff</button>
+        <button onClick={() => onRun(handoffPrompt)} style={actionStyle}><Share2 size={13} /> Follow-up plan</button>
       </div>
     </section>
   )

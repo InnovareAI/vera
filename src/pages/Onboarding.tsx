@@ -30,7 +30,7 @@ const STEPS: Step[] = [
   { id: 'linkedin_newsletter', type: 'channel', channel: 'linkedin_newsletter', field: 'linkedin_newsletter', title: 'LinkedIn newsletter',     subtitle: 'If you publish a LinkedIn newsletter, paste its URL. VERA uses it as source material for platform tone and topic depth.',                      placeholder: 'https://linkedin.com/newsletters/newsletter-name' },
   { id: 'medium',              type: 'channel', channel: 'medium',              field: 'medium',              title: 'Medium',                  subtitle: 'Your Medium profile or publication.',                                       placeholder: '@handle  or  https://medium.com/@handle' },
   { id: 'youtube',             type: 'channel', channel: 'youtube',             field: 'youtube',             title: 'YouTube channel',         subtitle: 'Your YouTube channel for videos, podcasts, Shorts, and proof assets.',                              placeholder: 'https://youtube.com/@channel' },
-  { id: 'quora',               type: 'channel', channel: 'quora',               field: 'quora',               title: 'Quora',                   subtitle: 'Profiles, Spaces, or topics that reveal buyer questions and demand angles.', placeholder: 'https://www.quora.com/profile/brand-or-person' },
+  { id: 'quora',               type: 'channel', channel: 'quora',               field: 'quora',               title: 'Quora',                   subtitle: 'Profiles, Spaces, or topics that reveal audience questions and content angles.', placeholder: 'https://www.quora.com/profile/brand-or-person' },
   { id: 'reddit',              type: 'channel', channel: 'reddit',              field: 'reddit',              title: 'Reddit',                  subtitle: 'Target subreddits or profile URLs for market listening and objection mining.', placeholder: 'r/marketing or https://reddit.com/r/marketing' },
   { id: 'facebook',            type: 'channel', channel: 'facebook',            field: 'facebook',            title: 'Facebook page',           subtitle: 'Your Facebook Page, if it is active for community or local trust.',          placeholder: 'https://facebook.com/brand' },
   { id: 'twitter',             type: 'channel', channel: 'twitter',             field: 'twitter',             title: 'X / Twitter',             subtitle: 'Only fill if you post here weekly or more. Otherwise the signal is too thin to be worth fetching.', placeholder: '@handle  or  https://x.com/handle' },
@@ -147,7 +147,7 @@ export default function Onboarding() {
 
     // Create the client as a project under the current workspace. The old
     // onboarding flow created a whole organization and org-scoped channel rows;
-    // client spaces now live in projects with their source model in Demand Brain.
+    // client spaces now live in projects with their source model in Strategy Brain.
     const { data: project, error: projectErr } = await supabase
       .from('projects')
       .insert({

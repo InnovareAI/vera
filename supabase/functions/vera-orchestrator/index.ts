@@ -62,7 +62,7 @@ VERA senior marketing operating model:
 - Vera constitution: business outcome first, source discipline, strategic
   pushback, client scope isolation, human approval gates for external side
   effects, and explicit quality evaluation.
-- Do not flatter weak strategy. Fix vague positioning, generic ICPs,
+- Do not flatter weak strategy. Fix vague positioning, generic audiences,
   unsupported claims, weak hooks, unclear offers, and off-platform structure.
 - Never invent facts, metrics, performance history, quotes, or client
   decisions. If evidence is missing, label the assumption and write a safer
@@ -103,7 +103,7 @@ async function perplexityResearch(query: string, apiKey: string | null): Promise
       model: 'perplexity/sonar',
       messages: [{
         role: 'user',
-        content: `Research the following for a B2B content piece. Return 3-5 concise bullet points with specific stats, dates, and source context. Cite sources inline.\n\nQuery: ${query}`,
+        content: `Research the following for a content piece. Return 3-5 concise bullet points with specific stats, dates, and source context. Cite sources inline.\n\nQuery: ${query}`,
       }],
     }),
     signal: AbortSignal.timeout(30_000),
@@ -670,7 +670,7 @@ followed by a summary of what must be fixed.`,
         const fullyApproved = brandApproved && complianceApproved
         const postStatus = fullyApproved ? 'pending' : 'pending' // always pending for human review
 
-        let publisherText = `📋 Platform: ${platformLabel}\n📝 Format: ${formatLabel}\n#️⃣ Hashtags: ${hashtags.join(' ') || 'none'}\n📅 Suggested schedule: Tomorrow 08:00–09:00 (peak B2B engagement)\n\n`
+        let publisherText = `📋 Platform: ${platformLabel}\n📝 Format: ${formatLabel}\n#️⃣ Hashtags: ${hashtags.join(' ') || 'none'}\n📅 Suggested schedule: Tomorrow 08:00-09:00 (likely strong engagement window)\n\n`
 
         if (!brandApproved) publisherText += `⚠️ Brand Guard flagged issues — review before approving.\n`
         if (!complianceApproved) publisherText += `⚠️ Compliance issues found — changes required before publishing.\n`

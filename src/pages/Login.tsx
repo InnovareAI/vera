@@ -4,9 +4,11 @@
 // not a rewrite — same providers, same flow.
 
 import { useState } from 'react'
-import { useLocation } from 'react-router-dom'
-import { Mail, Check, Loader2 } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { Mail, Check, Loader2, LockKeyhole, Apple } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+
+const ENABLE_APPLE_LOGIN = import.meta.env.VITE_ENABLE_APPLE_LOGIN === 'true'
 
 // Brand glyphs (inline so we don't pull an icon dep for two logos).
 function GoogleG() {
@@ -32,16 +34,19 @@ function MicrosoftLogo() {
 
 export default function Login() {
   const location = useLocation()
+  const navigate = useNavigate()
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [localMode, setLocalMode] = useState<'magic' | 'password'>('magic')
   const [sent, setSent] = useState(false)
-  const [loading, setLoading] = useState<null | 'google' | 'azure' | 'email'>(null)
+  const [loading, setLoading] = useState<null | 'google' | 'azure' | 'apple' | 'email' | 'password'>(null)
   const [error, setError] = useState('')
   const from = typeof (location.state as { from?: unknown } | null)?.from === 'string'
     ? (location.state as { from: string }).from
     : '/'
   const redirectTo = `${window.location.origin}${from}`
 
-  async function oauth(provider: 'google' | 'azure') {
+  async function oauth(provider: 'google' | 'azure' | 'apple') {
     setError(''); setLoading(provider)
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
@@ -64,6 +69,22 @@ export default function Login() {
     })
     if (error) { setError(error.message); setLoading(null) }
     else { setSent(true); setLoading(null) }
+  }
+
+  async function passwordLogin(e: React.FormEvent) {
+    e.preventDefault()
+    if (!email.trim() || !password) return
+    setError(''); setLoading('password')
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    })
+    if (error) {
+      setError(error.message)
+      setLoading(null)
+      return
+    }
+    navigate(from, { replace: true })
   }
 
   const ssoBtn: React.CSSProperties = {
@@ -106,6 +127,11 @@ export default function Login() {
                 <button onClick={() => oauth('azure')} disabled={!!loading} style={{ ...ssoBtn, opacity: loading && loading !== 'azure' ? 0.5 : 1 }}>
                   {loading === 'azure' ? <Loader2 size={16} className="animate-spin" /> : <MicrosoftLogo />} Continue with Microsoft
                 </button>
+                {ENABLE_APPLE_LOGIN && (
+                  <button onClick={() => oauth('apple')} disabled={!!loading} style={{ ...ssoBtn, opacity: loading && loading !== 'apple' ? 0.5 : 1 }}>
+                    {loading === 'apple' ? <Loader2 size={16} className="animate-spin" /> : <Apple size={17} />} Continue with Apple
+                  </button>
+                )}
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '20px 0' }}>
@@ -114,7 +140,46 @@ export default function Login() {
                 <span style={{ flex: 1, height: 1, background: 'var(--line)' }} />
               </div>
 
-              <form onSubmit={emailLink} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10, padding: 3, border: '1px solid var(--line)', borderRadius: 'var(--radius-md)', background: 'var(--paper)' }}>
+                <button
+                  type="button"
+                  onClick={() => { setLocalMode('magic'); setError('') }}
+                  style={{
+                    height: 34,
+                    border: 'none',
+                    borderRadius: 'calc(var(--radius-md) - 3px)',
+                    background: localMode === 'magic' ? 'var(--surface)' : 'transparent',
+                    color: localMode === 'magic' ? 'var(--ink)' : 'var(--ghost)',
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    fontFamily: 'var(--font-body)',
+                    cursor: 'pointer',
+                    boxShadow: localMode === 'magic' ? 'var(--shadow-pop)' : 'none',
+                  }}
+                >
+                  Magic link
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setLocalMode('password'); setError('') }}
+                  style={{
+                    height: 34,
+                    border: 'none',
+                    borderRadius: 'calc(var(--radius-md) - 3px)',
+                    background: localMode === 'password' ? 'var(--surface)' : 'transparent',
+                    color: localMode === 'password' ? 'var(--ink)' : 'var(--ghost)',
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    fontFamily: 'var(--font-body)',
+                    cursor: 'pointer',
+                    boxShadow: localMode === 'password' ? 'var(--shadow-pop)' : 'none',
+                  }}
+                >
+                  Password
+                </button>
+              </div>
+
+              <form onSubmit={localMode === 'password' ? passwordLogin : emailLink} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ position: 'relative' }}>
                   <Mail size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--faint)' }} />
                   <input
@@ -123,8 +188,22 @@ export default function Login() {
                     style={{ width: '100%', height: 44, paddingLeft: 36, paddingRight: 14, fontSize: 14, fontFamily: 'var(--font-body)', color: 'var(--ink)', background: 'var(--paper)', border: '1px solid var(--line-2)', borderRadius: 'var(--radius-md)', outline: 'none', boxSizing: 'border-box' }}
                   />
                 </div>
+                {localMode === 'password' && (
+                  <div style={{ position: 'relative' }}>
+                    <LockKeyhole size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--faint)' }} />
+                    <input
+                      type="password" value={password} onChange={e => setPassword(e.target.value)}
+                      placeholder="Password" required
+                      autoComplete="current-password"
+                      style={{ width: '100%', height: 44, paddingLeft: 36, paddingRight: 14, fontSize: 14, fontFamily: 'var(--font-body)', color: 'var(--ink)', background: 'var(--paper)', border: '1px solid var(--line-2)', borderRadius: 'var(--radius-md)', outline: 'none', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                )}
                 <button type="submit" disabled={!!loading} style={{ height: 44, borderRadius: 'var(--radius-md)', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 600, fontFamily: 'var(--font-body)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, boxShadow: 'var(--shadow-glow)' }}>
-                  {loading === 'email' ? <Loader2 size={16} className="animate-spin" /> : <Mail size={15} />} Email me a magic link
+                  {localMode === 'password'
+                    ? loading === 'password' ? <Loader2 size={16} className="animate-spin" /> : <LockKeyhole size={15} />
+                    : loading === 'email' ? <Loader2 size={16} className="animate-spin" /> : <Mail size={15} />}
+                  {localMode === 'password' ? 'Sign in with password' : 'Email me a magic link'}
                 </button>
               </form>
             </>

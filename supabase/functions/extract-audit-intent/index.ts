@@ -118,13 +118,13 @@ Deno.serve(async (req) => {
       success: true,
       audit_intent: settings.audit_intent,
       sources: [],
-      message: 'audit_intent already set — pass force=true to re-extract from website.',
+      message: 'audit_intent already set. Pass force=true to re-extract from website.',
     })
   }
 
-  // Fetch pages with structured parsing — meta tags are higher-signal than
-  // body text, especially for B2B sites where the homepage hero compresses
-  // the positioning into a few words.
+  // Fetch pages with structured parsing. Meta tags are higher-signal than
+  // body text when the homepage hero compresses the positioning into a few
+  // words.
   const base = new URL(websiteUrl)
   const candidates = CANDIDATE_PATHS.map(p => new URL(p, base).toString())
   const fetched: Array<ParsedPage> = []
@@ -149,7 +149,7 @@ Deno.serve(async (req) => {
 
   // Discover the blog via sitemap (preferred) or homepage HTML scan (fallback).
   // Marketing pages tell us what the company CLAIMS they're about; blog content
-  // tells us what they ACTUALLY write about — themes, voice, depth, cadence.
+  // tells us what they ACTUALLY write about: themes, voice, depth, cadence.
   const sitemapUrls = await discoverSitemapUrls(base)
   const blogPosts: ParsedPage[] = []
   let blogDiscoveryNote = ''
@@ -192,7 +192,7 @@ Deno.serve(async (req) => {
   }
 
   const blogBlock = blogPosts.length
-    ? `### Blog samples (${blogPosts.length} posts — actual writing, use to verify the marketing pages' claims about themes + tone)\n\n${blogPosts.map(renderBlogForCorpus).join('\n\n')}`
+    ? `### Blog samples (${blogPosts.length} posts - actual writing, use to verify the marketing pages' claims about themes + tone)\n\n${blogPosts.map(renderBlogForCorpus).join('\n\n')}`
     : `### Blog\n${blogDiscoveryNote}`
 
   const corpus = [
@@ -204,7 +204,7 @@ Deno.serve(async (req) => {
 
   // Ask the resolved client/platform text runtime to extract structured audit_intent.
   const maxTokens = 2000
-  const systemPrompt = 'You are extracting audit context from a B2B company website. Output JSON only, no prose, no markdown fences. Be specific and concrete; vague output produces vague audits.'
+  const systemPrompt = 'You are extracting audit context from a company website. Output JSON only, no prose, no markdown fences. Be specific and concrete; vague output produces vague audits. Infer whether the company is B2B, B2C, local, creator-led, commerce, recruiting, community, or mixed from the source material. Do not default to B2B.'
   const userPrompt = `Company: ${org.name}${org.industry ? ` (${org.industry})` : ''}
 Website: ${websiteUrl}
 
@@ -216,18 +216,18 @@ PAGES:
 
 ${corpus}
 
-Extract the following fields. Each must be specific to THIS company, never generic ("we serve B2B SaaS" alone is too thin; "Series B-C SaaS, $50M-$200M ARR, VP of Sales owning pipeline build" is right). When a field can't be confidently extracted, return null, don't fabricate.
+Extract the following fields. Each must be specific to THIS company, never generic ("we help teams grow" alone is too thin; "sensitive-skin shoppers choosing fragrance-free face balm" or "operations leaders replacing manual reporting workflows" is better). When a field can't be confidently extracted, return null, don't fabricate.
 
 Plus a "summary" field: a 60-90 word narrative paragraph that synthesizes the 7 structured fields into a single readable story ("X sells Y to Z; positioning is W; winning looks like V"). This is what the operator reads first and what every downstream audit (BREW360, profile score) echoes back as "Audited against:".
 
 Required output JSON (no other keys):
 {
   "summary":          "<60-90 word narrative paragraph synthesizing the 7 fields into one story. Operator reads this first; audits echo it back. Plain prose, no bullets, no headers.>",
-  "icp_summary":      "<who this offering is for, segment, role, stage, buying trigger>",
+  "icp_summary":      "<who this offering is for, segment, role, stage, context, or trigger>",
   "offer":            "<what the company sells/delivers in one specific sentence>",
   "value_prop":       "<the specific measurable outcome / differentiation vs the obvious alternative>",
-  "role_positioning": "<how the operator should be perceived on LinkedIn to credibly sell this, e.g. 'practitioner-founder building authority on HITL outbound for B2B sales', anchor in the operator's expertise, not vendor pitch language>",
-  "themes":           ["<3-5 concrete content themes that map to the offer + ICP>"],
+  "role_positioning": "<how the operator should be perceived on LinkedIn to credibly discuss this, e.g. 'practitioner-founder building authority on human-reviewed AI operations', anchor in the operator's expertise, not vendor pitch language>",
+  "themes":           ["<3-5 concrete content themes that map to the offer + audience>"],
   "tone_target":      "<voice profile, e.g. 'sharp, opinion-led practitioner; no buzzwords; data + named examples'>",
   "success_criteria": "<one sentence, what 'winning' on LinkedIn looks like for this profile in 6 months>"
 }`

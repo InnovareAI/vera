@@ -303,7 +303,7 @@ export default function Learning() {
     if (!activeProject?.id || !activeProject.org_id) return
     const existing = handoffActionByPost.get(candidate.id)
     if (existing) {
-      push({ kind: 'info', title: 'Already tracked', body: 'This signal is already in the SAM handoff queue.' })
+      push({ kind: 'info', title: 'Already tracked', body: 'This signal is already in the follow-up queue.' })
       return
     }
     const busyKey = `queue:${candidate.id}`
@@ -332,7 +332,7 @@ export default function Learning() {
     setHandoffBusyKey(null)
     if (insertError) {
       if (insertError.code === '23505') {
-        push({ kind: 'warn', title: 'Already queued', body: 'This post already has a SAM handoff action.' })
+        push({ kind: 'warn', title: 'Already queued', body: 'This post already has a follow-up action.' })
         void load()
         return
       }
@@ -340,7 +340,7 @@ export default function Learning() {
       return
     }
     setHandoffActions(prev => [data as SamHandoffAction, ...prev])
-    push({ kind: 'success', title: 'SAM handoff queued', body: 'The signal is now tracked for this client.' })
+    push({ kind: 'success', title: 'Follow-up queued', body: 'The signal is now tracked for this client.' })
   }
 
   async function updateHandoffAction(id: string, patch: Partial<SamHandoffAction>, toast: { title: string; body: string }) {
@@ -372,7 +372,7 @@ export default function Learning() {
       assigned_to: user.id,
       assigned_at: action.assigned_at ?? now,
       status: action.status === 'queued' ? 'in_progress' : action.status,
-    }, { title: 'Assigned', body: 'This SAM handoff is assigned to you.' })
+    }, { title: 'Assigned', body: 'This follow-up is assigned to you.' })
   }
 
   async function handToSam(action: SamHandoffAction) {
@@ -385,7 +385,7 @@ export default function Learning() {
       assigned_to: action.assigned_to ?? user?.id ?? null,
       assigned_at: action.assigned_at ?? (user?.id ? now : null),
       status: action.status === 'queued' ? 'in_progress' : action.status,
-    }, { title: 'SAM brief copied', body: 'The handoff brief is ready to paste into SAM.' })
+    }, { title: 'Brief copied', body: 'The follow-up brief is ready to paste into the next workflow.' })
   }
 
   async function completeHandoff(action: SamHandoffAction) {
@@ -394,7 +394,7 @@ export default function Learning() {
       status: 'done',
       completed_at: action.completed_at ?? now,
       actioned_at: action.actioned_at ?? now,
-    }, { title: 'Handoff completed', body: 'The SAM handoff is marked complete.' })
+    }, { title: 'Follow-up completed', body: 'The follow-up is marked complete.' })
   }
 
   async function dismissHandoff(action: SamHandoffAction) {
@@ -436,8 +436,8 @@ export default function Learning() {
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: space[4], marginBottom: space[8] }}>
         <MetricCard icon={Target} label="Published assets" value={summary.published} detail={`${summary.approved} approved, ${summary.scheduled} scheduled`} />
         <MetricCard icon={BarChart3} label="Measured assets" value={summary.measured} detail={`${summary.metricCount} metric snapshots`} />
-        <MetricCard icon={Share2} label="Demand signals" value={summary.demandSignals} detail="Comments, shares, saves, clicks, traffic" />
-        <MetricCard icon={Sparkles} label="Buyer intent" value={summary.buyerIntent} detail={`${summary.buyerQuestions} questions, ${summary.meetingRequests} meeting requests`} />
+        <MetricCard icon={Share2} label="Audience signals" value={summary.demandSignals} detail="Comments, shares, saves, clicks, traffic" />
+        <MetricCard icon={Sparkles} label="Intent signals" value={summary.buyerIntent} detail={`${summary.buyerQuestions} questions, ${summary.meetingRequests} inquiries`} />
         <MetricCard icon={TrendingUp} label="Engagement rate" value={summary.engagementRateLabel} detail={summary.views ? `${summary.views.toLocaleString()} views or reach` : 'Waiting for traffic data'} />
       </section>
 
@@ -457,7 +457,7 @@ export default function Learning() {
         <Panel>
           <SectionLabel>Growth outcomes</SectionLabel>
           <p style={{ margin: `${space[4]} 0 ${space[3]}`, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.5 }}>
-            Vera optimizes for demand signals, not raw output volume. The first wave is comments, shares, qualified traffic, buyer questions, and SAM research triggers.
+            Vera optimizes for audience signals, not raw output volume. The first wave is comments, shares, qualified traffic, questions, inquiries, and follow-up triggers.
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
             {DEMAND_GROWTH_OUTCOMES.map(item => (
@@ -477,27 +477,27 @@ export default function Learning() {
             {loading ? (
               <LearningState>Reading the latest content and metric signals...</LearningState>
             ) : insights.length ? insights.map(item => <InsightCard key={item.title} insight={item} />) : (
-              <LearningState>Publish and sync metrics to start the learning loop. VERA needs content outcomes before it can recommend stronger demand patterns.</LearningState>
+              <LearningState>Publish and sync metrics to start the learning loop. VERA needs content outcomes before it can recommend stronger patterns.</LearningState>
             )}
           </div>
         </Panel>
 
         <Panel>
-          <SectionLabel>SAM handoff signals</SectionLabel>
+          <SectionLabel>Follow-up signals</SectionLabel>
           <div style={{ display: 'grid', gap: space[3], marginTop: space[4] }}>
-            <SignalRow label="Comments" value={summary.comments} body="High-intent replies and objections should become SAM research context." />
+            <SignalRow label="Comments" value={summary.comments} body="High-intent replies and objections should become follow-up context." />
             <SignalRow label="Shares" value={summary.shares} body="Shares indicate message resonance and account expansion potential." />
             <SignalRow label="Clicks" value={summary.clicks} body="Traffic from content should trigger follow-up angles, not just reporting." />
             <SignalRow label="Qualified traffic" value={summary.qualifiedTraffic} body="Useful visits are stronger than raw reach because they show movement toward owned conversion paths." />
-            <SignalRow label="Buyer questions" value={summary.buyerQuestions} body="Commercial questions should become content angles and SAM research tasks." />
-            <SignalRow label="Meeting requests" value={summary.meetingRequests} body="Meeting intent is the strongest signal that VERA should brief SAM and repeat the source pattern." />
+            <SignalRow label="Audience questions" value={summary.buyerQuestions} body="Useful questions should become content angles and follow-up tasks." />
+            <SignalRow label="Inquiries" value={summary.meetingRequests} body="Inquiries are strong signals that VERA should brief the next workflow and repeat the source pattern." />
             <SignalRow label="Reach" value={summary.views} body="Views and reach are useful only when they lead to engagement, qualified visits, or sharper market learning." />
           </div>
           <div style={{ display: 'grid', gap: space[2], marginTop: space[4] }}>
             {operatingRows.length ? operatingRows.map(row => (
               <OperatingRow key={row.label} label={row.label} value={row.value} />
             )) : (
-              <LearningState>Add a demand operating model in the Demand Brain so VERA knows what traction, approval, and SAM handoff mean for this client.</LearningState>
+              <LearningState>Add a strategy model in the Strategy Brain so VERA knows what traction, approval, and follow-up mean for this client.</LearningState>
             )}
           </div>
         </Panel>
@@ -518,7 +518,7 @@ export default function Learning() {
       <section style={{ marginBottom: space[8] }}>
         <Panel>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: space[3], marginBottom: space[4], flexWrap: 'wrap' }}>
-            <SectionLabel>SAM handoff queue</SectionLabel>
+            <SectionLabel>Follow-up queue</SectionLabel>
             <span style={{ color: color.ghost, fontSize: t.size.cap }}>
               {activeHandoffActions.length} active · {untrackedHandoffCandidates.length} new signal{untrackedHandoffCandidates.length === 1 ? '' : 's'}
             </span>
@@ -540,14 +540,14 @@ export default function Learning() {
               ))}
             </div>
           ) : (
-            <LearningState>No active SAM handoffs yet. Queue a detected signal when VERA sees comments, shares, clicks, traffic, buyer questions, or meeting requests worth sales follow-up.</LearningState>
+            <LearningState>No active follow-ups yet. Queue a detected signal when VERA sees comments, shares, clicks, traffic, questions, or inquiries worth action.</LearningState>
           )}
 
           {untrackedHandoffCandidates.length > 0 && (
             <div style={{ marginTop: activeHandoffActions.length ? 0 : space[4] }}>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: space[3], marginBottom: space[3], flexWrap: 'wrap' }}>
                 <span style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>Detected signals</span>
-                <span style={{ color: color.ghost, fontSize: t.size.cap }}>Queue the ones SAM should research</span>
+                <span style={{ color: color.ghost, fontSize: t.size.cap }}>Queue the ones that need action</span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: space[3] }}>
                 {untrackedHandoffCandidates.map(candidate => (
@@ -589,7 +589,7 @@ export default function Learning() {
 
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: space[5], alignItems: 'start', marginBottom: space[8] }}>
         <Panel>
-          <SectionLabel>Next demand experiments</SectionLabel>
+          <SectionLabel>Next content experiments</SectionLabel>
           <div style={{ display: 'grid', gap: space[3], marginTop: space[4] }}>
             {experiments.map(experiment => (
               <ExperimentCard key={experiment.title} experiment={experiment} onBrief={() => briefExperimentInVera(experiment)} />
@@ -598,7 +598,7 @@ export default function Learning() {
         </Panel>
 
         <Panel>
-          <SectionLabel>Top demand assets</SectionLabel>
+          <SectionLabel>Top content assets</SectionLabel>
           <div style={{ display: 'grid', gap: space[2], marginTop: space[4] }}>
             {topRows.length ? topRows.map(row => (
               <div key={row.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: space[3], padding: `${space[3]} 0`, borderBottom: `1px solid ${color.line}` }}>
@@ -643,7 +643,7 @@ export default function Learning() {
               ))}
             </div>
           ) : (
-            <LearningState>Learning skills appear once VERA has measured demand assets. Add manual metrics or sync provider metrics to produce evidence-backed proposals.</LearningState>
+            <LearningState>Learning skills appear once VERA has measured content assets. Add manual metrics or sync provider metrics to produce evidence-backed proposals.</LearningState>
           )}
         </Panel>
       </section>
@@ -813,7 +813,7 @@ function SamHandoffActionCard({
         ) : (
           <>
             <HandoffActionButton icon={UserCheck} label={action.assigned_to ? 'Reassign' : 'Assign'} disabled={busy} onClick={onAssign} />
-            <HandoffActionButton icon={Copy} label="Copy for SAM" disabled={busy} onClick={onCopy} />
+            <HandoffActionButton icon={Copy} label="Copy brief" disabled={busy} onClick={onCopy} />
             <HandoffActionButton icon={Check} label="Complete" disabled={busy} onClick={onComplete} tone={color.success} />
             <HandoffActionButton icon={X} label="Dismiss" disabled={busy} onClick={onDismiss} tone={color.ghost} />
           </>
@@ -971,7 +971,7 @@ function LearningState({ children }: { children: ReactNode }) {
 
 function handoffPriorityFromScore(score: number, triggers: string[]): 'low' | 'medium' | 'high' {
   const triggerText = triggers.join(' ').toLowerCase()
-  if (score >= 45 || triggerText.includes('meeting request') || triggerText.includes('buyer question')) return 'high'
+  if (score >= 45 || triggerText.includes('meeting request') || triggerText.includes('buyer question') || triggerText.includes('audience question')) return 'high'
   if (score >= 20 || triggerText.includes('qualified visit') || triggerText.includes('comment') || triggerText.includes('share')) return 'medium'
   return 'low'
 }
@@ -1004,7 +1004,7 @@ function buildSamHandoffText(action: SamHandoffAction) {
   const existingPrompt = handoffPromptFromPayload(action)
   if (existingPrompt) return existingPrompt
   return [
-    'Create a SAM handoff brief for this VERA content signal.',
+    'Create a follow-up brief for this VERA content signal.',
     '',
     `Asset: ${action.title}`,
     `Channel: ${action.channel || 'Unassigned'}`,
@@ -1014,8 +1014,8 @@ function buildSamHandoffText(action: SamHandoffAction) {
     '',
     'Return:',
     '1. why this signal matters',
-    '2. likely buyer pain or intent',
-    '3. accounts or people SAM should research',
+    '2. likely audience pain or intent',
+    '3. people, accounts, or segments that need follow-up',
     '4. outreach angle and objection to prepare for',
     '5. next VERA content experiment',
   ].join('\n')
@@ -1028,7 +1028,7 @@ function buildOperatingRows(context: BusinessContext) {
     { key: 'platformToneOfVoice', label: 'Platform TOV' },
     { key: 'approvalStakeholders', label: 'Approvers' },
     { key: 'engagementSignals', label: 'Signals' },
-    { key: 'samHandoffRules', label: 'SAM handoff' },
+    { key: 'samHandoffRules', label: 'Follow-up rules' },
     { key: 'learningCadence', label: 'Learning cadence' },
   ]
   return fields
@@ -1105,7 +1105,7 @@ function buildHandoffCandidates(posts: Post[], metrics: Map<string, LearningMetr
         metric.clicks > 0 ? `${metric.clicks} click${metric.clicks === 1 ? '' : 's'}` : '',
         metric.saves > 0 ? `${metric.saves} save${metric.saves === 1 ? '' : 's'}` : '',
         metric.qualifiedTraffic > 0 ? `${metric.qualifiedTraffic} qualified visit${metric.qualifiedTraffic === 1 ? '' : 's'}` : '',
-        metric.buyerQuestions > 0 ? `${metric.buyerQuestions} buyer question${metric.buyerQuestions === 1 ? '' : 's'}` : '',
+        metric.buyerQuestions > 0 ? `${metric.buyerQuestions} audience question${metric.buyerQuestions === 1 ? '' : 's'}` : '',
         metric.meetingRequests > 0 ? `${metric.meetingRequests} meeting request${metric.meetingRequests === 1 ? '' : 's'}` : '',
         score >= 25 ? `score ${score}` : '',
       ].filter(Boolean)
@@ -1113,7 +1113,7 @@ function buildHandoffCandidates(posts: Post[], metrics: Map<string, LearningMetr
       const title = post.title || post.copy?.slice(0, 84) || 'Untitled content'
       const channel = post.channel || metric.provider || 'Unassigned'
       const prompt = [
-        `Create a SAM handoff brief for this VERA content signal.`,
+        `Create a follow-up brief for this VERA content signal.`,
         ``,
         `Client: ${context.companyName || 'current client'}`,
         `Asset: ${title}`,
@@ -1121,7 +1121,7 @@ function buildHandoffCandidates(posts: Post[], metrics: Map<string, LearningMetr
         `Triggers: ${triggers.join(', ')}`,
         `Demand score: ${score}`,
         context.engagementSignals ? `Client-defined engagement signals: ${context.engagementSignals}` : '',
-        context.samHandoffRules ? `Client-defined SAM handoff rules: ${context.samHandoffRules}` : '',
+        context.samHandoffRules ? `Client-defined follow-up rules: ${context.samHandoffRules}` : '',
         context.approvalModel ? `Approval model: ${context.approvalModel}` : '',
         context.approvalStakeholders ? `Approval stakeholders: ${context.approvalStakeholders}` : '',
         context.speakerStrategy ? `Speaker strategy: ${context.speakerStrategy}` : '',
@@ -1129,8 +1129,8 @@ function buildHandoffCandidates(posts: Post[], metrics: Map<string, LearningMetr
         ``,
         `Return:`,
         `1. why this signal matters`,
-        `2. likely buyer pain or intent`,
-        `3. accounts or people SAM should research`,
+        `2. likely audience pain or intent`,
+        `3. people, accounts, or segments that need follow-up`,
         `4. outreach angle and objection to prepare for`,
         `5. next VERA content experiment`,
       ].filter(Boolean).join('\n')
@@ -1264,7 +1264,7 @@ function buildInsights(posts: Post[], metrics: Map<string, LearningMetric>): Ins
   const top = buildTopRows(posts, metrics)[0]
   if (top) {
     insights.push({
-      title: 'Repeat the strongest demand asset pattern',
+      title: 'Repeat the strongest content asset pattern',
       body: `${top.title} is currently the strongest measured asset. Use its topic, hook structure, channel fit, and CTA as the next variation source.`,
       tone: color.accent,
     })
@@ -1278,7 +1278,7 @@ function buildInsights(posts: Post[], metrics: Map<string, LearningMetric>): Ins
   if (intentTotals.buyerQuestions > 0 || intentTotals.meetingRequests > 0) {
     insights.push({
       title: 'Commercial intent is visible',
-      body: `${intentTotals.buyerQuestions} buyer question${intentTotals.buyerQuestions === 1 ? '' : 's'} and ${intentTotals.meetingRequests} meeting request${intentTotals.meetingRequests === 1 ? '' : 's'} should become SAM research tasks and follow-up content angles.`,
+      body: `${intentTotals.buyerQuestions} audience question${intentTotals.buyerQuestions === 1 ? '' : 's'} and ${intentTotals.meetingRequests} inquir${intentTotals.meetingRequests === 1 ? 'y' : 'ies'} should become follow-up tasks and content angles.`,
       tone: color.success,
     })
   } else if (intentTotals.qualifiedTraffic > 0) {
@@ -1303,7 +1303,7 @@ function buildInsights(posts: Post[], metrics: Map<string, LearningMetric>): Ins
   if (bestChannel) {
     insights.push({
       title: `${bestChannel[0]} is carrying the strongest signal`,
-      body: `Measured demand quality is highest there so far. Bias the next batch toward this channel until another channel proves stronger.`,
+      body: `Measured signal quality is highest there so far. Bias the next batch toward this channel until another channel proves stronger.`,
       tone: color.success,
     })
   }
@@ -1311,8 +1311,8 @@ function buildInsights(posts: Post[], metrics: Map<string, LearningMetric>): Ins
   const unscheduledApproved = posts.filter(isLearningApproved).length
   if (unscheduledApproved > 0) {
     insights.push({
-      title: 'Approved demand is not fully distributed',
-      body: `${unscheduledApproved} approved asset${unscheduledApproved === 1 ? '' : 's'} still need a publishing slot. Demand cannot compound while approved content sits idle.`,
+      title: 'Approved content is not fully distributed',
+      body: `${unscheduledApproved} approved asset${unscheduledApproved === 1 ? '' : 's'} still need a publishing slot. Learning cannot compound while approved content sits idle.`,
       tone: color.warn,
     })
   }
@@ -1337,20 +1337,20 @@ function buildExperiments(
   const approvals = context.approvalStakeholders || context.approvalModel || 'Use case-based approval routing before publishing.'
   const commonContext = [
     `Client: ${context.companyName || 'current client'}`,
-    `Demand objective: ${context.demandObjective || 'create B2B top-of-funnel demand'}`,
+    `Content objective: ${context.demandObjective || 'create measurable audience response'}`,
     `Speaker strategy: ${speaker}`,
     `Platform tone of voice: ${tone}`,
     `Approval routing: ${approvals}`,
     `Engagement signals: ${context.engagementSignals || 'comments, shares, saves, clicks, and qualified traffic'}`,
-    `SAM handoff rules: ${context.samHandoffRules || 'turn useful objections, buyer questions, and high-intent engagement into sales research'}`,
+    `Follow-up rules: ${context.samHandoffRules || 'turn useful objections, questions, and high-intent engagement into follow-up work'}`,
   ].join('\n')
   return [
     {
-      title: 'Create three ICP-specific variations',
-      body: `Turn ${base} into founder, operator, and technical buyer versions. Compare comments, shares, buyer questions, and meeting requests by ICP.`,
+      title: 'Create three audience variations',
+      body: `Turn ${base} into three audience-specific versions. Compare comments, shares, questions, and inquiries by audience.`,
       tone: color.accent,
       prompt: [
-        `Plan the next VERA demand experiment: three ICP-specific variations.`,
+        `Plan the next VERA content experiment: three audience-specific variations.`,
         ``,
         commonContext,
         ``,
@@ -1362,32 +1362,32 @@ function buildExperiments(
     },
     {
       title: 'Test one problem-aware thread',
-      body: 'Lead with the pain before the offer. Measure comments, saves, clicks, qualified traffic, and buyer questions as the top-of-funnel signal.',
+      body: 'Lead with the problem before the offer. Measure comments, saves, clicks, qualified traffic, and questions as the signal.',
       tone: color.success,
       prompt: [
-        `Plan and draft one problem-aware demand experiment.`,
+        `Plan and draft one problem-aware content experiment.`,
         ``,
         commonContext,
         ``,
         `Primary channel to test: ${nextChannel}`,
         `Core proof or theme: ${base}`,
         ``,
-        `Draft the asset, define the CTA, define the approval route, and explain which comments, shares, saves, clicks, qualified visits, buyer questions, or meeting requests would prove this angle is worth scaling.`,
+        `Draft the asset, define the CTA, define the approval route, and explain which comments, shares, saves, clicks, qualified visits, questions, or inquiries would prove this angle is worth scaling.`,
       ].join('\n'),
     },
     {
-      title: 'Build one SAM handoff angle',
-      body: 'Convert the highest-engagement topic into a sales research angle for SAM, with objections and account triggers included.',
+      title: 'Build one follow-up angle',
+      body: 'Convert the highest-engagement topic into a follow-up angle with objections and useful triggers included.',
       tone: color.info,
       prompt: [
-        `Create a SAM handoff experiment from VERA performance learning.`,
+        `Create a follow-up experiment from VERA performance learning.`,
         ``,
         commonContext,
         ``,
         `Strongest current signal: ${base}`,
         `Channel context: ${nextChannel}`,
         ``,
-        `Return a SAM research brief, likely account triggers, objections to prepare for, buyer questions to answer, and the next content asset Vera should create to create more of this signal.`,
+        `Return a follow-up brief, likely triggers, objections to prepare for, questions to answer, and the next content asset Vera should create to create more of this signal.`,
       ].join('\n'),
     },
   ]
@@ -1415,9 +1415,9 @@ function buildSkillProposals(
   if (top && topMetric) {
     proposals.push({
       key: 'repeat-strongest-pattern',
-      name: `Learning proposal: repeat ${platform} demand pattern`,
-      description: `Use measured evidence from ${company} to repeat the strongest demand asset pattern without copying the same post.`,
-      triggerDescription: `Use when drafting or reviewing ${platform} content after VERA identifies a top-performing demand asset.`,
+      name: `Learning proposal: repeat ${platform} content pattern`,
+      description: `Use measured evidence from ${company} to repeat the strongest content pattern without copying the same post.`,
+      triggerDescription: `Use when drafting or reviewing ${platform} content after VERA identifies a top-performing asset.`,
       triggerWhen: {
         source: 'learning-loop',
         platform,
@@ -1425,27 +1425,27 @@ function buildSkillProposals(
         metric_signal: ['comments', 'shares', 'clicks', 'qualified_traffic', 'buyer_questions', 'meeting_requests'],
       },
       promptModule: [
-        `Purpose: repeat the strongest measured demand pattern for ${company} without reusing the same copy.`,
+        `Purpose: repeat the strongest measured content pattern for ${company} without reusing the same copy.`,
         ``,
         `Evidence: ${evidenceLine}`,
         ``,
         `Process:`,
-        `1. Identify the winning topic, hook, proof type, speaker, CTA, and buyer intent signal.`,
+        `1. Identify the winning topic, hook, proof type, speaker, CTA, and intent signal.`,
         `2. Keep the brand core and adapt the structure to the selected medium.`,
-        `3. Create a fresh variation for the next ICP or buying situation.`,
+        `3. Create a fresh variation for the next audience or situation.`,
         `4. Preserve claims discipline. Do not invent metrics, client names, or proof.`,
         `5. Define which metric should prove the pattern is worth scaling next.`,
         ``,
-        `Output: draft, approval route, measurement target, and SAM handoff condition.`,
+        `Output: draft, approval route, measurement target, and follow-up condition.`,
       ].join('\n'),
       gotchas: [
         'Do not copy the old post structure so closely that the channel looks repetitive.',
-        'Do not optimize only for views if buyer questions or meeting requests are available.',
+        'Do not optimize only for views if questions or inquiries are available.',
         'Do not use a named-person voice unless the speaker evidence supports it.',
       ],
       goodExamples: [{ label: 'Evidence', text: evidenceLine || topTitle }],
       sourceRefs: [{ label: 'Learning Loop', text: `Top asset: ${topTitle}` }],
-      tags: ['learning-proposal', 'demand-pattern', platform.toLowerCase().replace(/\s+/g, '-')],
+      tags: ['learning-proposal', 'content-pattern', platform.toLowerCase().replace(/\s+/g, '-')],
       confidence: top.score >= 30 ? 'high' : 'medium',
       performanceNotes: evidenceLine,
       injectedInto: 'writer',
@@ -1460,38 +1460,38 @@ function buildSkillProposals(
 
   if (totals.buyerQuestions > 0 || totals.meetingRequests > 0) {
     proposals.push({
-      key: 'buyer-intent-loop',
-      name: 'Learning proposal: buyer intent response loop',
-      description: `Turn buyer questions and meeting requests for ${company} into follow-up content and SAM research tasks.`,
-      triggerDescription: 'Use when a content asset produces buyer questions, meeting intent, objections, or high-value comments.',
+      key: 'audience-intent-loop',
+      name: 'Learning proposal: intent response loop',
+      description: `Turn questions and inquiries for ${company} into follow-up content and action tasks.`,
+      triggerDescription: 'Use when a content asset produces questions, inquiries, objections, or high-value comments.',
       triggerWhen: {
         source: 'learning-loop',
-        job: ['sam-handoff', 'follow-up-content', 'reply-planning'],
+        job: ['follow-up', 'follow-up-content', 'reply-planning'],
         metric_signal: ['buyer_questions', 'meeting_requests', 'comments'],
       },
       promptModule: [
-        `Purpose: convert buyer intent from content into the next VERA and SAM actions.`,
+        `Purpose: convert intent from content into the next VERA actions and follow-up workflow.`,
         ``,
-        `Evidence: ${totals.buyerQuestions} buyer question${totals.buyerQuestions === 1 ? '' : 's'} and ${totals.meetingRequests} meeting request${totals.meetingRequests === 1 ? '' : 's'} are visible in the current learning window.`,
+        `Evidence: ${totals.buyerQuestions} audience question${totals.buyerQuestions === 1 ? '' : 's'} and ${totals.meetingRequests} inquir${totals.meetingRequests === 1 ? 'y' : 'ies'} are visible in the current learning window.`,
         ``,
         `Process:`,
-        `1. Classify each question or meeting signal by pain, urgency, persona, and buying stage.`,
-        `2. Recommend the reply, the next content asset, and the SAM research angle.`,
-        `3. Identify the account or person fields SAM should enrich before outreach.`,
+        `1. Classify each question or inquiry by pain, urgency, audience, and likely next step.`,
+        `2. Recommend the reply, the next content asset, and the follow-up angle.`,
+        `3. Identify the person, account, or segment fields to enrich before action.`,
         `4. Keep the content useful. Do not turn every signal into a hard sales CTA.`,
         ``,
-        `Output: buyer intent summary, reply angle, next asset brief, SAM handoff brief, and measurement target.`,
+        `Output: intent summary, reply angle, next asset brief, follow-up brief, and measurement target.`,
       ].join('\n'),
       gotchas: [
-        'Do not treat low-context reactions as buyer intent.',
-        'Do not publish a sales-heavy follow-up if the signal is only educational.',
-        'Do not hand off to SAM without a clear research question or account trigger.',
+        'Do not treat low-context reactions as intent.',
+        'Do not publish a hard-sell follow-up if the signal is only educational.',
+        'Do not create a follow-up without a clear research question or action trigger.',
       ],
-      goodExamples: [{ label: 'Intent', text: `${totals.buyerQuestions} buyer questions, ${totals.meetingRequests} meeting requests.` }],
-      sourceRefs: [{ label: 'Learning Loop', text: 'Buyer intent summary metrics.' }],
-      tags: ['learning-proposal', 'buyer-intent', 'sam-handoff'],
+      goodExamples: [{ label: 'Intent', text: `${totals.buyerQuestions} audience questions, ${totals.meetingRequests} inquiries.` }],
+      sourceRefs: [{ label: 'Learning Loop', text: 'Intent summary metrics.' }],
+      tags: ['learning-proposal', 'intent', 'follow-up'],
       confidence: totals.meetingRequests > 0 ? 'high' : 'medium',
-      performanceNotes: `${totals.buyerQuestions} buyer questions, ${totals.meetingRequests} meeting requests, ${totals.qualifiedTraffic} qualified visits.`,
+      performanceNotes: `${totals.buyerQuestions} audience questions, ${totals.meetingRequests} inquiries, ${totals.qualifiedTraffic} qualified visits.`,
       injectedInto: 'strategist',
     })
   } else if (totals.qualifiedTraffic > 0) {
@@ -1499,32 +1499,32 @@ function buildSkillProposals(
       key: 'qualified-traffic-cta',
       name: 'Learning proposal: qualified traffic CTA test',
       description: `Use qualified traffic for ${company} to test a sharper CTA before scaling the same topic.`,
-      triggerDescription: 'Use when content produces qualified visits but no buyer questions or meeting requests yet.',
+      triggerDescription: 'Use when content produces qualified visits but no questions or inquiries yet.',
       triggerWhen: {
         source: 'learning-loop',
         job: ['cta-test', 'conversion-brief'],
         metric_signal: ['qualified_traffic'],
       },
       promptModule: [
-        `Purpose: turn qualified visits into buyer questions or meeting requests.`,
+        `Purpose: turn qualified visits into questions, inquiries, or next actions.`,
         ``,
-        `Evidence: ${totals.qualifiedTraffic} qualified visit${totals.qualifiedTraffic === 1 ? '' : 's'} with no buyer question or meeting request yet.`,
+        `Evidence: ${totals.qualifiedTraffic} qualified visit${totals.qualifiedTraffic === 1 ? '' : 's'} with no question or inquiry yet.`,
         ``,
         `Process:`,
         `1. Keep the winning topic, but change the CTA and proof path.`,
-        `2. Offer a next step that fits top-of-funnel intent.`,
-        `3. Add one question that invites a real buyer objection or use case.`,
-        `4. Measure buyer questions and meeting requests before increasing output volume.`,
+        `2. Offer a next step that fits the audience intent.`,
+        `3. Add one question that invites a real objection, preference, or use case.`,
+        `4. Measure questions and inquiries before increasing output volume.`,
       ].join('\n'),
       gotchas: [
-        'Do not mistake traffic for commercial intent.',
+        'Do not mistake traffic for intent.',
         'Do not increase volume before testing a conversion path.',
       ],
       goodExamples: [{ label: 'Traffic', text: `${totals.qualifiedTraffic} qualified visits need a sharper conversion proof point.` }],
-      sourceRefs: [{ label: 'Learning Loop', text: 'Qualified traffic without buyer intent.' }],
+      sourceRefs: [{ label: 'Learning Loop', text: 'Qualified traffic without intent.' }],
       tags: ['learning-proposal', 'qualified-traffic', 'cta-test'],
       confidence: 'medium',
-      performanceNotes: `${totals.qualifiedTraffic} qualified visits without buyer questions or meeting requests.`,
+      performanceNotes: `${totals.qualifiedTraffic} qualified visits without questions or inquiries.`,
       injectedInto: 'strategist',
     })
   }
@@ -1538,11 +1538,11 @@ function metricEvidence(metric: LearningMetric) {
     metric.shares ? `${metric.shares} shares` : '',
     metric.clicks ? `${metric.clicks} clicks` : '',
     metric.qualifiedTraffic ? `${metric.qualifiedTraffic} qualified visits` : '',
-    metric.buyerQuestions ? `${metric.buyerQuestions} buyer questions` : '',
+    metric.buyerQuestions ? `${metric.buyerQuestions} audience questions` : '',
     metric.meetingRequests ? `${metric.meetingRequests} meeting requests` : '',
     metric.views ? `${metric.views} views or reach` : '',
   ].filter(Boolean)
-  return parts.length ? parts.join(', ') : 'measured demand signals'
+  return parts.length ? parts.join(', ') : 'measured audience signals'
 }
 
 function buildTopRows(posts: Post[], metrics: Map<string, LearningMetric>) {

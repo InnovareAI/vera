@@ -37,6 +37,7 @@ import { canUsePlatformMediaKeys, isPlatformMediaProject } from '../_shared/clie
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { completeText, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
 import { selectTextModel } from '../_shared/model-recommendations.ts'
+import { projectHasLinkedInStrategy, resolveProjectAuditChannels } from '../_shared/project-sources.ts'
 import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
 import {
   assertVeraChatMessageWritable,
@@ -209,19 +210,21 @@ Marketing and content strategy expertise:
 - You are a senior marketing strategist, content strategist, creative director,
   editor, copy chief, campaign planner, and production lead in one assistant.
   Treat every request as a business communication problem, not a writing task.
-- VERA's commercial job is B2B demand and lead-gen content. Do not behave like
-  a generic social post generator. Create content that can produce comments,
-  shares, qualified traffic, useful objections, warm accounts, and SAM handoff
-  signals.
+- VERA's job is to turn the active client's Brain assumptions into measurable
+  content and marketing work. Do not behave like a generic social post
+  generator. The Brain decides whether the client is B2B, B2C, local,
+  creator-led, commerce, recruiting, community, or mixed. Create content that
+  can produce comments, shares, saves, qualified traffic, useful objections,
+  inquiries, purchases, community joins, or follow-up signals.
 - Start from the strategy spine: audience, business objective, offer, category
   context, positioning, promise, proof, objections, channel, format, CTA, and
   distribution path. Use that spine silently before you write.
 - Think in campaigns, not isolated assets. Connect one post to a larger angle,
-  narrative arc, content pillar, launch, sales motion, or trust-building job
+  narrative arc, content pillar, launch, commercial motion, or trust-building job
   whenever it helps.
 - Know the difference between awareness, demand creation, lead generation,
-  nurture, retention, recruiting, founder brand, product education, and sales
-  enablement. Choose the right job for the piece.
+  nurture, retention, recruiting, founder brand, product education, community
+  building, commerce, and sales enablement. Choose the right job for the piece.
 - Build content around a real point of view. Prefer sharp premises, useful
   frameworks, lived experience, specific trade-offs, examples, proof, and
   tension. Reject generic advice, empty inspiration, and category boilerplate.
@@ -233,7 +236,7 @@ Marketing and content strategy expertise:
   shot directions, review notes, and platform-specific formatting.
 - Content scope: support posts, carousels, images, video storyboards, short
   clips, long-form articles, Quora answers, Reddit research briefs, comments,
-  replies, newsletters, campaign arcs, and SAM handoff briefs.
+  replies, newsletters, campaign arcs, and follow-up briefs.
 - Channel fluency: adapt structure and voice for LinkedIn, YouTube, Medium,
   Quora, Reddit, Instagram, Facebook, blogs, email, X, short video, and
   carousel formats. Do not flatten every platform into the same LinkedIn post.
@@ -319,7 +322,7 @@ Specialist advisor model:
   When ingesting long books or frameworks, ask for or infer the chapter list
   first so extraction follows a stable structure.
 - Confidence matters. Prioritize validated client data, active brand voice,
-  published case studies, sales calls, performance reports, and named sources
+  published case studies, customer conversations, performance reports, and named sources
   over untested ideas. Label speculation as speculation.
 - Anti-drift rule: stay inside the selected specialist lens. Do not turn a
   positioning question into generic content tips, a copy task into strategy
@@ -337,7 +340,7 @@ Vera constitution:
   and live source material before generic assumptions. Do not invent facts,
   metrics, performance history, quotes, or client decisions.
 - Challenge weak marketing thinking. Push back on vague positioning, generic
-  ICPs, unsupported claims, weak hooks, unclear offers, and off-platform
+  audiences, unsupported claims, weak hooks, unclear offers, and off-platform
   structure. Improve the work through the answer.
 - Do not flatter. Give useful judgment with confidence and trade-offs.
 - Keep client scope isolated. Never blend one client's private knowledge,
@@ -711,7 +714,7 @@ Workspace tools:
 - get_post_detail — fetch a specific post by id or title
 - summarize_recent_activity — "what happened this week?"
 - schedule_post — set publish time on an approved post
-- run_audit — kick off LinkedIn / brew360 / content audits
+- run_audit — kick off strategy-valid content and channel audits
 
 Knowledge tools:
 - search_skills — find skills by keyword, returns FULL prompt_module
@@ -1514,7 +1517,7 @@ function renderContext(ctx: WorkspaceContext, route: string): string {
 const TOOLS = [
   {
     name: 'generate_infographic',
-    description: 'Generate a polished B2B infographic via Gemini 3 Pro Image. Use when the operator asks for an infographic, hub diagram, flow chart, multi-section visual, or NotebookLM-style explainer. Returns an image rendered inline in the chat.',
+    description: 'Generate a polished marketing infographic via Gemini 3 Pro Image. Use when the operator asks for an infographic, hub diagram, flow chart, multi-section visual, or NotebookLM-style explainer. Returns an image rendered inline in the chat.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1788,14 +1791,14 @@ const TOOLS = [
   },
   {
     name: 'run_audit',
-    description: 'Trigger a workspace audit. Use when the operator says "run the audit", "refresh LinkedIn scores", "let\'s see the latest brew360". Fires async — results land in the LinkedIn audit page within ~30s.',
+    description: 'Trigger a workspace audit. Use when the operator says "run the audit", "refresh the content audit", or asks for LinkedIn/Brew360 only when LinkedIn is part of this client strategy. Fires async.',
     input_schema: {
       type: 'object',
       properties: {
         kind: {
           type: 'string',
           enum: ['profile', 'brew360', 'content', 'all'],
-          description: 'Which audit to refresh. "all" runs everything via the refresh RPC.',
+          description: 'Which audit to refresh. "all" runs content audit and adds LinkedIn profile/Brew360 only when LinkedIn is strategy-valid for this client.',
         },
       },
       required: ['kind'],
@@ -2313,8 +2316,8 @@ async function executeTool(
             maxTokens: 6000,
             temperature: 0.2,
             json: true,
-            system: `You are VERA, InnovareAI's creative content partner. You write sharp, platform-native demand content for ${channelLabel} in the brand voice. American spelling. Never invent statistics or fake quotes.${brandBrief ? `\n\nBRAND VOICE:\n${brandBrief}` : ''}`,
-            user: `Plan a ${channelLabel} B2B demand campaign and write every post.
+            system: `You are VERA, InnovareAI's creative content partner. You write sharp, platform-native content for ${channelLabel} in the brand voice. American spelling. Never invent statistics or fake quotes.${brandBrief ? `\n\nBRAND VOICE:\n${brandBrief}` : ''}`,
+            user: `Plan a ${channelLabel} content campaign and write every post.
 
 Brief: ${brief}
 
@@ -2322,7 +2325,7 @@ Use these target channels exactly: ${channels.join(', ')}.
 Distribute the ${count} posts across those channels. If count is smaller than the channel count, choose the most relevant channels for the brief.
 Each post must include a "channel" field using one of the target channels.
 Make every post native to its channel:
-- LinkedIn: insight, founder/operator post, carousel caption, or lead-gen post.
+- LinkedIn: insight, founder/operator post, carousel caption, or conversion post.
 - YouTube: title plus description or short script outline.
 - Medium or Blog: article opener, thesis, and summary-style post.
 - Quora: useful answer to a high-intent question.
@@ -2331,7 +2334,7 @@ Make every post native to its channel:
 - Instagram or Facebook: social caption with a clear creative angle.
 - Email: newsletter or nurture email copy.
 
-Produce a coherent arc of EXACTLY ${count} posts that build on each other (no repeated angles). Each post should have a strong first line, a clear demand-generation job, and a light CTA or question. Vary the formats across the arc (story, insight, how-to, contrarian take, list, question).${categoryClause}
+Produce a coherent arc of EXACTLY ${count} posts that build on each other (no repeated angles). Each post should have a strong first line, a clear audience job, and a light CTA or question. Vary the formats across the arc (story, insight, how-to, contrarian take, list, question).${categoryClause}
 
 Output ONLY valid JSON — no prose, no markdown fences — in exactly this shape:
 {"campaign_name":"<short punchy name>","theme":"<one-line narrative anchor>","posts":[{"title":"<4-8 word internal title>","channel":"<one target channel>","copy":"<the full post>","hashtags":["tag","tag"],"category":"<one category name from the set above, or empty if none>"}]}`,
@@ -3125,15 +3128,31 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         if (!ctx.projectId) {
           return { result: 'Audit tools require an active client space.' }
         }
+        let linkedInValid = false
+        try {
+          linkedInValid = projectHasLinkedInStrategy(await resolveProjectAuditChannels(ctx.supabase, ctx.orgId, ctx.projectId))
+        } catch {
+          linkedInValid = false
+        }
+        if ((kind === 'profile' || kind === 'brew360') && !linkedInValid) {
+          return { result: 'LinkedIn audit is not enabled for this client strategy. Add a LinkedIn source or explicit LinkedIn strategy in the Strategy Brain first.' }
+        }
         if (kind === 'all') {
-          for (const fn of ['linkedin-profile-score', 'brew360-audit', 'content-audit']) {
+          const functions = linkedInValid
+            ? ['content-audit', 'linkedin-profile-score', 'brew360-audit']
+            : ['content-audit']
+          for (const fn of functions) {
             fetch(`${ctx.supabaseUrl}/functions/v1/${fn}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
               body: JSON.stringify({ org_id: ctx.orgId, project_id: ctx.projectId, operator_user_id: ctx.userId }),
             }).catch(() => {})
           }
-          return { result: 'All audits queued for this client space. Results should appear on the LinkedIn audit page shortly.' }
+          return {
+            result: linkedInValid
+              ? 'Content and LinkedIn audits queued for this client space.'
+              : 'Content audit queued. LinkedIn profile and Brew360 were skipped because LinkedIn is not part of this client strategy.',
+          }
         }
         // Single audit kind: hit the corresponding edge function async
         const fnMap: Record<string, string> = {
@@ -3149,7 +3168,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
           body: JSON.stringify({ org_id: ctx.orgId, project_id: ctx.projectId, operator_user_id: ctx.userId }),
         }).catch(() => {})
-        return { result: `${kind} audit kicked off — check the LinkedIn audit page in ~30s.` }
+        return { result: kind === 'content' ? 'Content audit queued for this client space.' : `${kind} audit queued for this client space.` }
       }
 
       case 'generate_video_storyboard': {

@@ -21,6 +21,7 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import { requireObservationMember, type AdminClient } from '../_shared/auth.ts'
+import { projectHasLinkedInStrategy, resolveProjectAuditChannels } from '../_shared/project-sources.ts'
 
 const cors = {
   'Access-Control-Allow-Origin':  '*',
@@ -103,6 +104,21 @@ async function runAudit(supabase: AdminClient, obs: Record<string, unknown>, ope
   if (!orgId || !projectId) return
 
   try {
+    const linkedInValid = projectHasLinkedInStrategy(await resolveProjectAuditChannels(supabase, orgId, projectId))
+    if (!linkedInValid) {
+      await supabase
+        .from('agent_observations')
+        .update({
+          acted_result: {
+            stage: 'skipped',
+            reason: 'LinkedIn audit is not enabled for this client strategy.',
+            finished_at: new Date().toISOString(),
+          },
+        })
+        .eq('id', obs.id as string)
+      return
+    }
+
     // Fire both audit endpoints in parallel. They each write to linkedin_audits.
     const headers = {
       'Content-Type': 'application/json',

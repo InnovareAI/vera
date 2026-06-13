@@ -1156,23 +1156,23 @@ Rules:
 - "sourcePullDepth" should be "light", "standard", or "deep" only when the source explicitly says how much source history to inspect. Otherwise return an empty string.
 - Use source posts, events, and newsletters to infer positioning, recurring topics, proof points, and content goals, but keep URLs in their own fields.
 - "offer" should capture products, services, or core value proposition.
-- "audience" should capture target buyers, users, industries, or decision makers.
+- "audience" should capture target customers, users, communities, industries, or decision makers.
 - "customerProblems" should capture pains the client solves.
 - "differentiators" should capture positioning and why the client is different.
 - "proofPoints" should capture facts, numbers, case studies, credentials, or named evidence.
 - "contentGoals" should capture messaging goals, campaign goals, themes, or calls to action.
 - "speakerStrategy" should capture who VERA may write as, including brand account, founder, named person, internal expert, or team voice, and when each should be used.
 - "platformToneOfVoice" should capture whether tone differs by medium or platform. Keep a shared brand core, but note channel-specific tone and structure when evidence supports it.
-- "demandObjective" should capture the top-of-funnel demand goal.
+- "demandObjective" should capture the content objective or working growth assumption.
 - "conversionPath" should capture where attention or engagement should go next.
 - "channelStrategy" should capture the role of each channel or medium.
 - "contentFormats" should capture the formats VERA should produce.
 - "approvalModel" should capture who approves what and when.
 - "approvalStakeholders" should capture named approvers, required stakeholder groups, and when one person versus all required stakeholders should approve.
 - "engagementSignals" should capture comments, shares, clicks, traffic, objections, or other traction signals that matter.
-- "samHandoffRules" should capture when content engagement should become SAM research or sales follow-up.
+- "samHandoffRules" should capture when content engagement should become research, sales follow-up, support follow-up, community action, or another next workflow.
 - "learningCadence" should capture how often VERA should review performance and update recommendations.
-- "channelOperatingPolicies" should remain empty unless the source clearly defines per-channel speaker, approval, publishing guard, measurement, or sales handoff rules. If present, return compact JSON keyed by platform.
+- "channelOperatingPolicies" should remain empty unless the source clearly defines per-channel speaker, approval, publishing guard, measurement, or follow-up rules. If present, return compact JSON keyed by platform.
 - "constraints" should capture legal, compliance, wording, market, region, or brand restrictions.
 
 Document:

@@ -622,7 +622,7 @@ export default function ReviewDetail() {
                 )}
                 {approvalRoute.samTrigger && (
                   <p className="text-xs leading-snug text-amber-800 mt-1">
-                    <span className="font-medium">SAM trigger:</span> {approvalRoute.samTrigger}
+                    <span className="font-medium">Follow-up trigger:</span> {approvalRoute.samTrigger}
                   </p>
                 )}
               </div>

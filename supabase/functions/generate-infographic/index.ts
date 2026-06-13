@@ -47,9 +47,9 @@ interface Stat {
 type Style = 'editorial' | 'technical' | 'playful' | 'minimal'
 
 const STYLE_GUIDES: Record<Style, string> = {
-  editorial: `Modern editorial illustration style — clean 2D vector art, soft cream/off-white background, cohesive 3-color palette (one dominant blue, one accent orange/green, dark navy for typography). Stylized characters and objects with rounded forms. Inspired by NotebookLM and high-end SaaS marketing infographics. Generous whitespace.`,
+  editorial: `Modern editorial illustration style — clean 2D vector art, soft cream/off-white background, cohesive 3-color palette (one dominant blue, one accent orange/green, dark navy for typography). Stylized characters and objects with rounded forms. Inspired by NotebookLM and high-end marketing infographics. Generous whitespace.`,
   technical: `Technical diagram style — flat geometric shapes, monospace-style accents, structured grid layout. Minimal illustration, more boxes-and-arrows. Limited palette: black/white/one accent color (electric blue or warm orange). Suited for system architecture and engineering content.`,
-  playful: `Playful editorial illustration — slightly looser linework, soft pastel palette (peach, sage, periwinkle, cream). Characters with friendly proportions, rounded UI elements, organic curves. Suited for consumer brands and approachable B2B.`,
+  playful: `Playful editorial illustration — slightly looser linework, soft pastel palette (peach, sage, periwinkle, cream). Characters with friendly proportions, rounded UI elements, organic curves. Suited for approachable brands and creator-led content.`,
   minimal: `Minimal monochrome editorial — single accent color (deep oxblood or forest green) against cream/off-white. Typographic-led with restrained illustration. Heavy negative space. Inspired by The Browser Company / Linear / Notion editorial.`,
 }
 
@@ -78,7 +78,7 @@ function buildPrompt({
     ? `\nKey stats to feature prominently as big-number callouts:\n${stats.map(s => `- ${s.value}: ${s.label}`).join('\n')}`
     : ''
 
-  return `A horizontal landscape B2B marketing infographic, 16:9 aspect ratio (much wider than tall — width should be roughly 1.78× the height). NOT a square. NOT a portrait. Imagine a presentation slide or a banner that fits across a desktop monitor.
+  return `A horizontal landscape marketing infographic, 16:9 aspect ratio (much wider than tall — width should be roughly 1.78× the height). NOT a square. NOT a portrait. Imagine a presentation slide or a banner that fits across a desktop monitor.
 
 ${styleGuide}
 

@@ -358,7 +358,7 @@ const PROVIDERS: IntegrationTemplate[] = [
     group: 'Content platforms',
     label: 'Quora',
     eyebrow: 'Answer platform',
-    description: 'Track target topics, ingest public profile or Space context, draft answers, and capture questions that should become demand content.',
+    description: 'Track target topics, ingest public profile or Space context, draft answers, and capture questions that should become content.',
     connectionKind: 'manual',
     credentialRoute: 'No direct publishing API. Use URL ingestion and approved manual answer handoff',
     primaryLabel: 'Quora profile, Space, or topic URL',
@@ -370,7 +370,7 @@ const PROVIDERS: IntegrationTemplate[] = [
       priority: 'wave_1',
       workstream: 'Content platforms',
       adapterState: 'Manual-first question research and answer drafting.',
-      nextBuild: 'Register profile, Space, or topic URLs, collect buyer questions, draft answers, and label traffic-driving themes for SAM handoff.',
+      nextBuild: 'Register profile, Space, or topic URLs, collect audience questions, draft answers, and label traffic-driving themes for follow-up.',
       requirements: ['Quora profile, Space, or topic URL', 'Manual answer owner', 'Source-quality review', 'Engagement signal tracking'],
     },
     icon: MessageSquareText,
@@ -561,7 +561,7 @@ const DEFAULT_LAUNCH = {
   workstream: 'Other',
   adapterState: 'Backlog',
   nextBuild: 'Defer until a client needs this channel.',
-  requirements: ['Client demand', 'Adapter brief', 'Permission model'],
+  requirements: ['Client strategy', 'Adapter brief', 'Permission model'],
 } satisfies NonNullable<IntegrationTemplate['launch']>
 
 function launchMeta(template: IntegrationTemplate): NonNullable<IntegrationTemplate['launch']> {

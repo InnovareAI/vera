@@ -50,9 +50,9 @@ export const DEMAND_PLATFORM_DEFINITIONS: DemandPlatformDefinition[] = [
     label: 'LinkedIn',
     sourceKey: 'linkedinCompany',
     initials: 'Li',
-    role: 'Authority, founder voice, ICP pain, and relationship-led demand.',
+    role: 'Authority, founder voice, audience problems, and relationship-led engagement.',
     workflow: 'Use Unipile for connected profiles and company pages. Draft personal, company, event, and newsletter angles separately.',
-    outcomeSignals: ['comments', 'shares', 'profile visits', 'warm accounts'],
+    outcomeSignals: ['comments', 'shares', 'profile visits', 'qualified visits'],
     publishing: 'connected',
   },
   {
@@ -80,7 +80,7 @@ export const DEMAND_PLATFORM_DEFINITIONS: DemandPlatformDefinition[] = [
     label: 'Quora',
     sourceKey: 'quora',
     initials: 'Qu',
-    role: 'Problem-aware demand, buyer questions, objections, and answer-led traffic.',
+    role: 'Problem-aware research, audience questions, objections, and answer-led traffic.',
     workflow: 'Research questions, draft useful answers, keep CTAs restrained, and require human posting.',
     outcomeSignals: ['views', 'upvotes', 'comments', 'clicks'],
     publishing: 'manual-first',
@@ -151,8 +151,8 @@ export const DEMAND_CHANNEL_OPERATING_POLICIES: Record<DemandPlatformKey, Demand
     speakerMode: 'Company, founder, or named expert, chosen per post.',
     approvalMode: 'Named-person content goes to that person. Company posts go to the client owner.',
     publishGuard: 'Publish only through a project-scoped Unipile profile or company page.',
-    measurementFocus: 'Comments, shares, profile visits, warm accounts, and qualified clicks.',
-    samTrigger: 'Senior ICP commenters, repeated objections, shares by target accounts, or direct buying questions.',
+    measurementFocus: 'Comments, shares, profile visits, qualified visitors, and qualified clicks.',
+    samTrigger: 'Relevant commenters, repeated objections, shares by target audiences, or direct questions.',
     risk: 'medium',
   },
   youtube: {
@@ -168,15 +168,15 @@ export const DEMAND_CHANNEL_OPERATING_POLICIES: Record<DemandPlatformKey, Demand
     approvalMode: 'One owner for POV drafts. Extra review for claims, comparisons, or customer stories.',
     publishGuard: 'Manual-first with canonical link and tracking note.',
     measurementFocus: 'Reads, responses, claps, referrals, and owned-site traffic.',
-    samTrigger: 'Responses with buyer questions, referral spikes, or themes that repeat in sales calls.',
+    samTrigger: 'Responses with audience questions, referral spikes, or themes that repeat across conversations.',
     risk: 'low',
   },
   quora: {
-    speakerMode: 'Helpful expert voice, not a sales account.',
+    speakerMode: 'Helpful expert voice, not a promotional account.',
     approvalMode: 'Human approval before posting because answer quality and restraint matter.',
     publishGuard: 'Manual-first. Draft useful answers and keep promotional CTAs restrained.',
     measurementFocus: 'Views, upvotes, comments, shares, and click-through to owned proof.',
-    samTrigger: 'Recurring buyer questions, objections, competitor comparisons, or intent-rich topics.',
+    samTrigger: 'Recurring audience questions, objections, competitor comparisons, or intent-rich topics.',
     risk: 'medium',
   },
   reddit: {
@@ -184,7 +184,7 @@ export const DEMAND_CHANNEL_OPERATING_POLICIES: Record<DemandPlatformKey, Demand
     approvalMode: 'No posting without operator and client approval plus community rule check.',
     publishGuard: 'Read-first by default. Vera listens, summarizes, and drafts only for human use.',
     measurementFocus: 'Comments, upvotes, objections, language patterns, and traffic intent.',
-    samTrigger: 'Repeated pain language, named vendor complaints, buying research threads, or competitor mentions.',
+    samTrigger: 'Repeated pain language, named vendor complaints, research threads, or competitor mentions.',
     risk: 'high',
   },
   x: {
@@ -192,7 +192,7 @@ export const DEMAND_CHANNEL_OPERATING_POLICIES: Record<DemandPlatformKey, Demand
     approvalMode: 'Manual approval for timely takes, sensitive topics, and threaded POV.',
     publishGuard: 'Manual-first until API economics and client plan justify deeper integration.',
     measurementFocus: 'Replies, reposts, link clicks, profile visits, and fast topic validation.',
-    samTrigger: 'ICP replies, reposts by target accounts, objection clusters, or useful conversation entry points.',
+    samTrigger: 'Audience replies, reposts by target profiles, objection clusters, or useful conversation entry points.',
     risk: 'medium',
   },
   instagram: {
@@ -216,7 +216,7 @@ export const DEMAND_CHANNEL_OPERATING_POLICIES: Record<DemandPlatformKey, Demand
     approvalMode: 'Approve outline, claims, SEO angle, and final draft before CMS publishing.',
     publishGuard: 'Publish only through a project-scoped CMS publisher or manual handoff.',
     measurementFocus: 'Organic traffic, assisted conversions, time on page, internal clicks, and query growth.',
-    samTrigger: 'High-intent search queries, conversion-path visits, article comments, or sales-relevant topics.',
+    samTrigger: 'High-intent search queries, conversion-path visits, article comments, or commercially relevant topics.',
     risk: 'low',
   },
   email: {
@@ -363,10 +363,72 @@ const DEMAND_PROVIDER_PLATFORM: Record<string, DemandPlatformKey> = {
   custom_cms: 'blog',
 }
 
+const DEMAND_PLATFORM_SOURCE_KEYS: Record<DemandPlatformKey, BusinessContextKey[]> = {
+  linkedin: ['linkedinCompany', 'linkedinProfile', 'linkedinEvents', 'linkedinNewsletter'],
+  youtube: ['youtube'],
+  medium: ['medium'],
+  quora: ['quora'],
+  reddit: ['reddit'],
+  x: ['x'],
+  instagram: ['instagram'],
+  facebook: ['facebook'],
+  blog: ['website'],
+  email: [],
+}
+
+const DEMAND_PLATFORM_ALIASES: Record<DemandPlatformKey, string[]> = {
+  linkedin: ['linkedin', 'li'],
+  youtube: ['youtube', 'you tube', 'shorts'],
+  medium: ['medium'],
+  quora: ['quora'],
+  reddit: ['reddit'],
+  x: ['x', 'twitter', 'x.com'],
+  instagram: ['instagram', 'ig', 'reels'],
+  facebook: ['facebook', 'fb'],
+  blog: ['blog', 'website', 'seo', 'article', 'wordpress', 'cms'],
+  email: ['email', 'newsletter', 'nurture'],
+}
+
 export function demandPlatformForProvider(provider: string): DemandPlatformDefinition | null {
   const key = DEMAND_PROVIDER_PLATFORM[provider]
   if (!key) return null
   return DEMAND_PLATFORM_DEFINITIONS.find(platform => platform.key === key) ?? null
+}
+
+export function demandPlatformSourceValues(platform: DemandPlatformDefinition | DemandPlatformKey, context: BusinessContext): string[] {
+  const key = typeof platform === 'string' ? platform : platform.key
+  return (DEMAND_PLATFORM_SOURCE_KEYS[key] ?? [])
+    .map(sourceKey => context[sourceKey]?.trim() ?? '')
+    .filter(Boolean)
+}
+
+export function demandPlatformSourceValue(platform: DemandPlatformDefinition | DemandPlatformKey, context: BusinessContext): string {
+  return demandPlatformSourceValues(platform, context)[0] ?? ''
+}
+
+export function demandPlatformIsMentioned(platform: DemandPlatformDefinition | DemandPlatformKey, context: BusinessContext): boolean {
+  const key = typeof platform === 'string' ? platform : platform.key
+  const haystack = [
+    context.channelStrategy,
+    context.contentFormats,
+    context.platformToneOfVoice,
+    context.demandObjective,
+  ].join(' ').toLowerCase()
+  return (DEMAND_PLATFORM_ALIASES[key] ?? [key]).some(alias => textMentionsAlias(haystack, alias))
+}
+
+export function demandPlatformHasStrategyEvidence(platform: DemandPlatformDefinition | DemandPlatformKey, context: BusinessContext): boolean {
+  return demandPlatformSourceValues(platform, context).length > 0 || demandPlatformIsMentioned(platform, context)
+}
+
+function textMentionsAlias(haystack: string, alias: string): boolean {
+  const needle = alias.toLowerCase().trim()
+  if (!needle) return false
+  if (needle.length <= 2 || /^[a-z0-9.]+$/i.test(needle)) {
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return new RegExp(`(^|[^a-z0-9.])${escaped}([^a-z0-9.]|$)`, 'i').test(haystack)
+  }
+  return haystack.includes(needle)
 }
 
 export const DEMAND_SOURCE_KEYS: BusinessContextKey[] = [
@@ -400,7 +462,7 @@ export const DEMAND_CONTENT_JOBS = [
   'X POV tests',
   'Comments and replies',
   'Newsletters',
-  'SAM handoff briefs',
+  'Follow-up briefs',
 ]
 
 export const DEMAND_APPROVAL_MODES = [
@@ -419,8 +481,8 @@ export const DEMAND_OUTCOME_SIGNALS = [
   'clicks',
   'qualified traffic',
   'objections',
-  'buying triggers',
-  'warm accounts',
+  'intent signals',
+  'qualified profiles',
   'meeting requests',
 ]
 
@@ -428,8 +490,8 @@ export const DEMAND_GROWTH_OUTCOMES = [
   'comments that reveal pain or intent',
   'shares that expand account reach',
   'qualified traffic to owned pages',
-  'buyer questions worth answering',
-  'objections SAM can research',
+  'audience questions worth answering',
+  'objections worth researching',
   'content patterns worth repeating',
 ]
 
@@ -448,7 +510,7 @@ export const DEMAND_LEARNING_LOOP = [
   },
   {
     title: 'Optimize',
-    body: 'Update best practices, channel rules, SAM handoff triggers, and next content briefs from comments, shares, traffic, and conversion signals.',
+    body: 'Update best practices, channel rules, follow-up triggers, and next content briefs from comments, shares, traffic, and conversion signals.',
   },
 ]
 
@@ -501,16 +563,16 @@ export const DEFAULT_DEMAND_OPERATING_MODEL: Pick<
   | 'learningCadence'
   | 'channelOperatingPolicies'
 > = {
-  demandObjective: 'Create B2B top-of-funnel demand that produces useful conversations, comments, shares, qualified traffic, and sales research signals.',
-  conversionPath: 'Move attention into comments, shares, qualified site traffic, newsletter or event opt-ins, direct messages, and SAM follow-up queues.',
+  demandObjective: 'Create measurable audience response that produces useful conversations, comments, shares, qualified traffic, and learning signals.',
+  conversionPath: 'Move attention into comments, shares, qualified site traffic, newsletter or event opt-ins, direct messages, purchase or inquiry paths, and follow-up queues.',
   speakerStrategy: 'Choose the speaker case by case: company account for official POV, named founder or expert when lived experience matters, and team voice only when source material supports it.',
-  platformToneOfVoice: 'Keep one shared brand core, then adapt by medium: LinkedIn authoritative, YouTube explanatory, Medium article-led, Quora useful, Reddit community-native, Meta visual and conversational, X concise.',
-  channelStrategy: 'Use LinkedIn for authority and founder voice, YouTube for depth and Shorts, Medium and blog for long-form demand capture, Quora for buyer questions, Reddit for listening and language mining, Instagram and Facebook for visual proof and community trust, and X when speed or conversation entry matters.',
+  platformToneOfVoice: 'Keep one shared brand core, then adapt only for channels that have source evidence, existing audience, or an explicit strategy assumption in the Brain.',
+  channelStrategy: 'Start with source-backed channels. Add a channel only when the client has evidence there, the audience expects it, or the Brain has saved it as a tested strategy assumption.',
   contentFormats: DEMAND_CONTENT_JOBS.join(', '),
   approvalModel: 'Case based. Some posts can be approved by one named owner, sensitive claims, named-person content, or high-risk channels need all required stakeholders.',
   approvalStakeholders: 'Low-risk drafts can go to one named owner. Named-person posts, sensitive claims, regulated topics, and client-visible publishing need all required stakeholders.',
   engagementSignals: DEMAND_OUTCOME_SIGNALS.join(', '),
-  samHandoffRules: 'Hand off named accounts, repeated objections, buying-trigger comments, competitor mentions, high-intent clicks, inbound questions, and people asking for examples or pricing.',
+  samHandoffRules: 'Flag named people or accounts, repeated objections, intent-rich comments, competitor mentions, high-intent clicks, inbound questions, and people asking for examples or pricing.',
   learningCadence: 'Review performance weekly, update what works and what does not from every useful signal, refresh channel-specific tone and platform best practices monthly, and turn repeatable wins into skills.',
   channelOperatingPolicies: serializeDemandChannelPolicies(defaultDemandChannelPolicies()),
 }
@@ -535,7 +597,7 @@ export function applyDemandDefaults(context: BusinessContext): BusinessContext {
 
 export function demandChannelsFromContext(context: BusinessContext, max = 8): string[] {
   const sourceMatches = DEMAND_PLATFORM_DEFINITIONS
-    .filter(platform => platform.sourceKey && context[platform.sourceKey]?.trim())
+    .filter(platform => demandPlatformSourceValues(platform, context).length > 0)
     .map(platform => platform.label)
   const strategyMatches = context.channelStrategy
     .split(/[\n,;]+/)
@@ -547,6 +609,6 @@ export function demandChannelsFromContext(context: BusinessContext, max = 8): st
 }
 
 export function demandChannelMatrixPrompt(projectName: string): string {
-  const channels = ['LinkedIn', 'YouTube', 'Medium', 'Quora', 'Reddit', 'Instagram', 'Facebook', 'Blog', 'Email', 'X'].join(', ')
-  return `Build a channel-native B2B demand distribution matrix for ${projectName}. Cover ${channels} where relevant. For each channel, define role, audience moment, format, CTA, engagement signal, traffic path, approval risk, and what should be handed to SAM.`
+  const channels = ['LinkedIn', 'YouTube', 'Medium', 'Quora', 'Reddit', 'Instagram', 'Facebook', 'TikTok', 'Blog', 'Email', 'X'].join(', ')
+  return `Build a channel-native content distribution matrix for ${projectName}. Cover ${channels} where relevant. For each channel, define role, audience moment, format, CTA, engagement signal, traffic path, approval risk, and follow-up trigger.`
 }

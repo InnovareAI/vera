@@ -46,6 +46,8 @@ import {
   demandChannelPoliciesFromText,
   demandChannelPolicyHasOverride,
   demandChannelPolicyOverrideCount,
+  demandPlatformIsMentioned,
+  demandPlatformSourceValue,
   serializeDemandChannelPolicies,
   type DemandChannelOperatingPolicy,
   type DemandPlatformDefinition,
@@ -290,8 +292,8 @@ function cleanAuditSkillProposals(raw: unknown): AuditSkillProposal[] {
       const name = cleanText(source.name)
       const description = cleanMultilineText(source.description)
       const promptModule = cleanMultilineText(source.prompt_module) || [
-        `Apply this Demand Brain skill: ${name || 'Client-specific content skill'}.`,
-        description || 'Use the client audit evidence to improve content quality, platform fit, and demand generation.',
+        `Apply this Brain skill: ${name || 'Client-specific content skill'}.`,
+        description || 'Use the client audit evidence to improve content quality, platform fit, and campaign performance.',
       ].join('\n')
       return {
         name,
@@ -584,35 +586,13 @@ function riskLabel(risk: DemandChannelRisk) {
   return 'Standard review'
 }
 
-function platformSourceValue(platform: DemandPlatformDefinition, context: BusinessContext) {
-  if (!platform.sourceKey) return ''
-  return context[platform.sourceKey].trim()
-}
-
-function platformIsMentioned(platform: DemandPlatformDefinition, context: BusinessContext) {
-  const haystack = [
-    context.channelStrategy,
-    context.contentFormats,
-    context.platformToneOfVoice,
-    context.demandObjective,
-  ].join(' ').toLowerCase()
-  const needles = [
-    platform.key,
-    platform.label.toLowerCase(),
-    ...(platform.key === 'x' ? ['twitter'] : []),
-    ...(platform.key === 'email' ? ['newsletter', 'nurture'] : []),
-    ...(platform.key === 'blog' ? ['website', 'seo', 'article'] : []),
-  ]
-  return needles.some(needle => haystack.includes(needle))
-}
-
 function orderedDemandPlatforms(context: BusinessContext) {
   return [...DEMAND_PLATFORM_DEFINITIONS].sort((a, b) => {
-    const aSource = platformSourceValue(a, context) ? 1 : 0
-    const bSource = platformSourceValue(b, context) ? 1 : 0
+    const aSource = demandPlatformSourceValue(a, context) ? 1 : 0
+    const bSource = demandPlatformSourceValue(b, context) ? 1 : 0
     if (aSource !== bSource) return bSource - aSource
-    const aMention = platformIsMentioned(a, context) ? 1 : 0
-    const bMention = platformIsMentioned(b, context) ? 1 : 0
+    const aMention = demandPlatformIsMentioned(a, context) ? 1 : 0
+    const bMention = demandPlatformIsMentioned(b, context) ? 1 : 0
     if (aMention !== bMention) return bMention - aMention
     return a.label.localeCompare(b.label)
   })
@@ -620,14 +600,14 @@ function orderedDemandPlatforms(context: BusinessContext) {
 
 function activeDemandPlatforms(context: BusinessContext) {
   const active = DEMAND_PLATFORM_DEFINITIONS.filter(platform => (
-    Boolean(platformSourceValue(platform, context)) || platformIsMentioned(platform, context)
+    Boolean(demandPlatformSourceValue(platform, context)) || demandPlatformIsMentioned(platform, context)
   ))
   return active.length ? active : DEMAND_PLATFORM_DEFINITIONS
 }
 
 function sourceGapPlatforms(context: BusinessContext) {
   return DEMAND_PLATFORM_DEFINITIONS
-    .filter(platform => platform.sourceKey && !platformSourceValue(platform, context))
+    .filter(platform => platform.sourceKey && !demandPlatformSourceValue(platform, context))
     .slice(0, 6)
 }
 
@@ -728,7 +708,7 @@ function brainMetricSignals(metric: BrainLearningMetric) {
   const signals: string[] = []
   if (metric.comments || metric.shares || metric.engagements) signals.push('engagement')
   if (metric.clicks || metric.qualifiedTraffic) signals.push('traffic')
-  if (metric.buyerQuestions || metric.meetingRequests) signals.push('lead intent')
+  if (metric.buyerQuestions || metric.meetingRequests) signals.push('intent signal')
   if (metric.saves) signals.push('saved')
   if (metric.views) signals.push('reach')
   return signals
@@ -793,7 +773,7 @@ function BrainReadinessPanel({
   const activePlatforms = DEMAND_PLATFORM_DEFINITIONS.filter(platform => (
     activeEvidenceKeys.has(platform.key) || activeDemandPlatforms(context).some(activePlatform => activePlatform.key === platform.key)
   ))
-  const plannedChannels = activePlatforms.filter(platform => !platformSourceValue(platform, context) && platformIsMentioned(platform, context)).length
+  const plannedChannels = activePlatforms.filter(platform => !demandPlatformSourceValue(platform, context) && demandPlatformIsMentioned(platform, context)).length
   const highCareChannels = activePlatforms.filter(platform => (policies[platform.key] ?? DEMAND_CHANNEL_OPERATING_POLICIES[platform.key]).risk === 'high').length
   const customPolicies = demandChannelPolicyOverrideCount(policies)
   const gaps = sourceGapPlatforms(context)
@@ -805,7 +785,7 @@ function BrainReadinessPanel({
   const strongestPlatform = strongestEvidence ? DEMAND_PLATFORM_DEFINITIONS.find(platform => platform.key === strongestEvidence.key) : null
   const evidenceRows = DEMAND_PLATFORM_DEFINITIONS
     .map(platform => ({ platform, evidence: channelEvidence.get(platform.key) }))
-    .filter(row => row.evidence?.posts || platformSourceValue(row.platform, context) || platformIsMentioned(row.platform, context))
+    .filter(row => row.evidence?.posts || demandPlatformSourceValue(row.platform, context) || demandPlatformIsMentioned(row.platform, context))
     .sort((a, b) => {
       const aEvidence = a.evidence
       const bEvidence = b.evidence
@@ -824,10 +804,10 @@ function BrainReadinessPanel({
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.ink, fontSize: t.size.body, fontWeight: t.weight.semibold }}>
             <Target size={16} color={color.accent} />
-            Demand operating readiness
+            Strategy readiness
           </div>
           <p style={{ margin: `${space[2]} 0 0`, maxWidth: 720, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.5 }}>
-            This is the client model VERA uses to plan content, route approvals, measure traction, and decide what should move to SAM.
+            This is the client model VERA uses to plan content, route approvals, measure traction, and decide which assumptions need follow-up.
           </p>
         </div>
         <Chip tone={readiness >= 70 ? 'accent' : 'default'} size="md">{readiness}% ready</Chip>
@@ -835,8 +815,8 @@ function BrainReadinessPanel({
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: space[3] }}>
         <ReadinessTile icon={Link2} label="Sources" value={`${sourceCount}/${DEMAND_SOURCE_KEYS.length}`} detail="Website and channel evidence" tone={sourceCount ? color.success : color.warn} />
-        <ReadinessTile icon={BrainIcon} label="Context" value={`${factCount}/${DEMAND_FACT_KEYS.length}`} detail="Offer, ICP, proof, constraints" tone={factCount >= 6 ? color.success : color.warn} />
-        <ReadinessTile icon={Sparkles} label="Operating fields" value={`${operatingCount}/${Object.keys(DEFAULT_DEMAND_OPERATING_MODEL).length}`} detail="Demand, formats, signals, learning" tone={operatingCount >= 5 ? color.success : color.warn} />
+        <ReadinessTile icon={BrainIcon} label="Context" value={`${factCount}/${DEMAND_FACT_KEYS.length}`} detail="Offer, audience, proof, constraints" tone={factCount >= 6 ? color.success : color.warn} />
+        <ReadinessTile icon={Sparkles} label="Operating fields" value={`${operatingCount}/${Object.keys(DEFAULT_DEMAND_OPERATING_MODEL).length}`} detail="Objectives, formats, signals, learning" tone={operatingCount >= 5 ? color.success : color.warn} />
         <ReadinessTile icon={ShieldCheck} label="Custom policies" value={customPolicies} detail="Channel rules beyond defaults" tone={customPolicies ? color.accent : color.ghost} />
         <ReadinessTile icon={AlertTriangle} label="High-care channels" value={highCareChannels} detail="Approval-sensitive surfaces" tone={highCareChannels ? color.danger : color.success} />
         <ReadinessTile icon={Target} label="Planned channels" value={plannedChannels} detail="Mentioned but no source URL yet" tone={plannedChannels ? color.info : color.ghost} />
@@ -849,8 +829,8 @@ function BrainReadinessPanel({
       <div style={{ marginTop: space[4], display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
         <span style={{ color: color.ghost, fontSize: t.size.cap, marginRight: space[1] }}>Source gaps</span>
         {gaps.length ? gaps.map(platform => (
-          <Chip key={platform.key} dot={platformIsMentioned(platform, context) ? color.info : color.ghost}>{platform.label}</Chip>
-        )) : <Chip dot={color.success}>All demand sources configured</Chip>}
+          <Chip key={platform.key} dot={demandPlatformIsMentioned(platform, context) ? color.info : color.ghost}>{platform.label}</Chip>
+        )) : <Chip dot={color.success}>All source channels configured</Chip>}
       </div>
 
       <div style={{ marginTop: space[4], padding: space[4], background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
@@ -858,7 +838,7 @@ function BrainReadinessPanel({
           <div>
             <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>Learning evidence</div>
             <p style={{ margin: `${space[1]} 0 0`, color: color.ghost, fontSize: t.size.micro, lineHeight: 1.4 }}>
-              Posts and metrics VERA can use to improve channel strategy and decide what should move to SAM.
+              Posts and metrics VERA can use to improve channel strategy and decide which assumptions deserve follow-up.
             </p>
           </div>
           <Chip dot={measuredPosts ? color.success : color.warn}>{measuredPosts} measured</Chip>
@@ -935,7 +915,7 @@ function DemandChannelMatrix({
   onEditPolicy: (key: DemandPlatformKey) => void
 }) {
   const platforms = orderedDemandPlatforms(context)
-  const configured = platforms.filter(platform => platformSourceValue(platform, context)).length
+  const configured = platforms.filter(platform => demandPlatformSourceValue(platform, context)).length
   const measured = platforms.filter(platform => (channelEvidence.get(platform.key)?.measured ?? 0) > 0).length
 
   return (
@@ -954,8 +934,8 @@ function DemandChannelMatrix({
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: space[3] }}>
         {platforms.map(platform => {
-          const source = platformSourceValue(platform, context)
-          const mentioned = platformIsMentioned(platform, context)
+          const source = demandPlatformSourceValue(platform, context)
+          const mentioned = demandPlatformIsMentioned(platform, context)
           const evidence = channelEvidence.get(platform.key)
           const hasEvidence = (evidence?.posts ?? 0) > 0
           const active = !!source || mentioned || hasEvidence
@@ -998,7 +978,7 @@ function DemandChannelMatrix({
                 <PolicyLine label="Speaker" value={policy.speakerMode} />
                 <PolicyLine label="Approval" value={policy.approvalMode} />
                 <PolicyLine label="Guard" value={policy.publishGuard} />
-                <PolicyLine label="SAM" value={policy.samTrigger} />
+                <PolicyLine label="Follow-up" value={policy.samTrigger} />
               </div>
               <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap' }}>
                 {platform.outcomeSignals.map(signal => <Chip key={signal}>{signal}</Chip>)}
@@ -1056,7 +1036,7 @@ function DemandChannelPolicyEditor({
         <div>
           <div style={{ fontSize: t.size.sm, color: color.ink, fontWeight: t.weight.semibold }}>Channel policy editor</div>
           <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `${space[2]} 0 0`, maxWidth: 700 }}>
-            These rules become part of this client's Demand Brain. Vera uses them when choosing a speaker, routing approval, deciding whether work can publish, and deciding which signals move to SAM.
+            These rules become part of this client's Strategy Brain. Vera uses them when choosing a speaker, routing approval, deciding whether work can publish, and deciding which signals need follow-up.
           </p>
         </div>
         <div style={{ display: 'flex', gap: space[2], alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1130,7 +1110,7 @@ function DemandChannelPolicyEditor({
             <Field label="Measurement focus">
               <Textarea rows={3} value={policy.measurementFocus} onChange={e => onChange(platform.key, { measurementFocus: e.target.value })} />
             </Field>
-            <Field label="SAM handoff trigger">
+            <Field label="Follow-up trigger">
               <Textarea rows={3} value={policy.samTrigger} onChange={e => onChange(platform.key, { samTrigger: e.target.value })} />
             </Field>
             <Field label="Approval risk" helper="This affects the visible policy badge. Publishing enforcement remains controlled by integrations and approvals.">
@@ -1476,7 +1456,7 @@ export default function Brain() {
   const rmFrom = (key: keyof BrandVoice, i: number) => setBv(p => ({ ...p, [key]: ((p[key] as string[]) || []).filter((_, x) => x !== i) }))
 
   // ── agentic draft: Vera reads the client's content (content-audit) and
-  // proposes Demand Brain fields plus brand voice. The operator reviews and
+  // proposes Brain fields plus brand voice. The operator reviews and
   // saves. Agentic-first means the brain should not start as a blank form. ──
   const [drafting, setDrafting] = useState(false)
   const [draftStatus, setDraftStatus] = useState('')
@@ -1533,7 +1513,7 @@ export default function Brain() {
       name: proposal.name,
       description: proposal.description,
       injected_into: proposal.injected_into,
-      trigger_description: 'Use when generating, refining, reviewing, or publishing demand content for this client.',
+      trigger_description: 'Use when generating, refining, reviewing, or publishing content for this client.',
       trigger_when: {
         source: 'demand_brain_audit',
         client_id: activeProject.id,
@@ -1542,10 +1522,10 @@ export default function Brain() {
       gotchas: [],
       good_examples: [],
       bad_examples: [],
-      source_refs: [{ label: 'Demand Brain audit', text: 'Drafted from client source audit.' }],
+      source_refs: [{ label: 'Brain audit', text: 'Drafted from client source audit.' }],
       confidence: 'medium',
-      performance_notes: 'Created from Demand Brain audit proposal. Validate against future content outcomes.',
-      tags: ['demand-brain', 'audit-proposal'],
+      performance_notes: 'Created from Brain audit proposal. Validate against future content outcomes.',
+      tags: ['strategy-brain', 'audit-proposal'],
       is_system: false,
       is_active: true,
       last_reviewed_at: new Date().toISOString(),
@@ -1562,7 +1542,7 @@ export default function Brain() {
   async function runDraft() {
     if (!activeOrg?.id || !activeProject?.id || drafting) return
     if (!session?.access_token) {
-      setDraftStatus('Sign in again before drafting the Demand Brain.')
+      setDraftStatus('Sign in again before drafting the Strategy Brain.')
       return
     }
     setDrafting(true); setDraftStatus("Reading this client's content...")
@@ -1588,7 +1568,7 @@ export default function Brain() {
           let ev: { event?: string; message?: string; proposal?: { brand_voice?: Record<string, string[] | string>; business_context?: unknown; personas?: unknown[]; skills?: unknown[] } }
           try { ev = JSON.parse(json) } catch { continue }
           if (ev.event === 'started' || ev.event === 'fetching') setDraftStatus("Reading this client's content...")
-          else if (ev.event === 'synthesising') setDraftStatus('Drafting the Demand Brain...')
+          else if (ev.event === 'synthesising') setDraftStatus('Drafting the Strategy Brain...')
           else if (ev.event === 'done') {
             const v = ev.proposal?.brand_voice ?? {}
             const contextPatch = normalizeAuditBusinessContext(ev.proposal?.business_context)
@@ -1608,7 +1588,7 @@ export default function Brain() {
             setDraftAudienceProposals(audienceProposals)
             setDraftSkillProposals(skillProposals)
             setBvInherited(false)
-            setDraftStatus(`Drafted from this client's content. Review the Demand Brain and Save.${contextCount ? ` ${contextCount} demand field${contextCount === 1 ? '' : 's'} updated.` : ''}${n ? ` ${n} audience proposal${n === 1 ? '' : 's'} ready.` : ''}${skillCount ? ` ${skillCount} skill proposal${skillCount === 1 ? '' : 's'} ready.` : ''}`)
+            setDraftStatus(`Drafted from this client's content. Review the Strategy Brain and Save.${contextCount ? ` ${contextCount} strategy field${contextCount === 1 ? '' : 's'} updated.` : ''}${n ? ` ${n} audience proposal${n === 1 ? '' : 's'} ready.` : ''}${skillCount ? ` ${skillCount} skill proposal${skillCount === 1 ? '' : 's'} ready.` : ''}`)
           }
           else if (ev.event === 'error') throw new Error(ev.message ?? 'audit failed')
         }
@@ -1663,15 +1643,15 @@ export default function Brain() {
   const operatingKeys = Object.keys(DEFAULT_DEMAND_OPERATING_MODEL) as BusinessContextKey[]
   const factCount = DEMAND_FACT_KEYS.filter(key => business[key].trim()).length
   const operatingCount = operatingKeys.filter(key => business[key].trim()).length
-  const applyLeadGenDefaults = () => {
+  const applyStrategyDefaults = () => {
     setBusiness(prev => applyDemandDefaults(prev))
-    setSourceStatus('Lead-gen operating defaults added. Review and save.')
+    setSourceStatus('Neutral strategy defaults added. Review and save.')
   }
 
   return (
     <div style={{ padding: `${space[8]} ${space[8]} 0`, maxWidth: 1040 }}>
-      <PageHeader eyebrow={activeProject.name} title="Demand Brain"
-        subtitle="The client demand intelligence VERA uses every turn: ICP, offer, buyer pains, proof, voice, sources, and constraints." />
+      <PageHeader eyebrow={activeProject.name} title="Strategy Brain"
+        subtitle="The working assumptions VERA uses every turn: audience, offer, problems, proof, voice, sources, channels, and constraints." />
 
       <BrainReadinessPanel
         context={business}
@@ -1691,7 +1671,7 @@ export default function Brain() {
           {drafting ? <><Loader2 size={14} className="animate-spin" /> Drafting...</> : <><Sparkles size={14} /> Draft this brain with Vera</>}
         </Button>
         <span style={{ flex: 1, minWidth: 200, fontSize: t.size.cap, color: draftStatus ? color.ink2 : color.ghost, lineHeight: 1.5 }}>
-          {draftStatus || "Vera reads this client's content and drafts the Demand Brain. You review and save."}
+          {draftStatus || "Vera reads this client's content and drafts the Strategy Brain. You review and save."}
         </span>
       </div>
 
@@ -1715,7 +1695,7 @@ export default function Brain() {
           <div>
             <SectionLabel>Demand context</SectionLabel>
             <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `${space[2]} 0 0` }}>
-              Start with the company URL, then add the social sources and facts VERA should use for demand creation.
+              Start with the company URL, then add the social sources and facts VERA should use for strategy and content creation.
             </p>
           </div>
           <span style={{ fontSize: t.size.cap, color: color.ghost }}>
@@ -1884,7 +1864,7 @@ export default function Brain() {
               <Textarea value={business.audience} onChange={e => updateBusiness('audience', e.target.value)} rows={3} placeholder="Who buys, who uses it, decision makers, industries, regions, customer segments." />
             </Field>
             <Field label="Customer problems">
-              <Textarea value={business.customerProblems} onChange={e => updateBusiness('customerProblems', e.target.value)} rows={3} placeholder="Pain points, unmet needs, buying triggers, risks, objections." />
+              <Textarea value={business.customerProblems} onChange={e => updateBusiness('customerProblems', e.target.value)} rows={3} placeholder="Pain points, unmet needs, intent triggers, risks, objections." />
             </Field>
             <Field label="Differentiators">
               <Textarea value={business.differentiators} onChange={e => updateBusiness('differentiators', e.target.value)} rows={3} placeholder="Positioning, category, why this client is different, proof of advantage." />
@@ -1896,10 +1876,10 @@ export default function Brain() {
               <Textarea value={business.proofPoints} onChange={e => updateBusiness('proofPoints', e.target.value)} rows={3} placeholder="Metrics, case studies, customer names, credentials, testimonials, awards." />
             </Field>
             <Field label="Content goals">
-              <Textarea value={business.contentGoals} onChange={e => updateBusiness('contentGoals', e.target.value)} rows={3} placeholder="Awareness, lead generation, recruiting, trust, launches, events, campaign themes." />
+              <Textarea value={business.contentGoals} onChange={e => updateBusiness('contentGoals', e.target.value)} rows={3} placeholder="Awareness, trust, traffic, community, leads, sales, recruiting, launches, events, campaign themes." />
             </Field>
             <Field label="Speaker strategy">
-              <Textarea value={business.speakerStrategy} onChange={e => updateBusiness('speakerStrategy', e.target.value)} rows={3} placeholder="Who VERA can write as: brand, founder, sales lead, product expert, client team, or a named person. Define when each voice should be used." />
+              <Textarea value={business.speakerStrategy} onChange={e => updateBusiness('speakerStrategy', e.target.value)} rows={3} placeholder="Who VERA can write as: brand, founder, creator, product expert, client team, or a named person. Define when each voice should be used." />
             </Field>
             <Field label="Platform tone of voice">
               <Textarea value={business.platformToneOfVoice} onChange={e => updateBusiness('platformToneOfVoice', e.target.value)} rows={3} placeholder="What changes by medium: LinkedIn authority, YouTube explainer, Medium essay, Quora answer, Reddit community-safe, Instagram visual proof, X concise POV." />
@@ -1922,11 +1902,11 @@ export default function Brain() {
         <div style={{ marginTop: space[4], padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], marginBottom: space[4] }}>
             <div>
-              <div style={{ fontSize: t.size.sm, color: color.ink, fontWeight: t.weight.semibold }}>Demand operating model</div>
-              <div style={{ fontSize: t.size.cap, color: color.ghost, marginTop: 2 }}>The rules for what VERA creates, who approves it, what counts as traction, and what moves to SAM.</div>
+              <div style={{ fontSize: t.size.sm, color: color.ink, fontWeight: t.weight.semibold }}>Strategy assumptions</div>
+              <div style={{ fontSize: t.size.cap, color: color.ghost, marginTop: 2 }}>The rules for what VERA creates, who approves it, what counts as traction, and which signals need follow-up.</div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
-              <Button variant="secondary" size="sm" onClick={applyLeadGenDefaults}>Use lead-gen defaults</Button>
+              <Button variant="secondary" size="sm" onClick={applyStrategyDefaults}>Use neutral defaults</Button>
               {instrSaved && <span style={{ fontSize: t.size.cap, color: color.success }}>Saved.</span>}
             </div>
           </div>
@@ -1935,7 +1915,7 @@ export default function Brain() {
             <DemandDefaultPanel title="Approval modes" items={DEMAND_APPROVAL_MODES} />
             <DemandDefaultPanel title="Outcome signals" items={DEMAND_OUTCOME_SIGNALS} />
             <DemandDefaultPanel title="Growth outcomes" items={DEMAND_GROWTH_OUTCOMES} />
-            <DemandDefaultPanel title="Product guardrails" items={DEMAND_COMMERCIAL_REQUIREMENTS} />
+            <DemandDefaultPanel title="Operating guardrails" items={DEMAND_COMMERCIAL_REQUIREMENTS} />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))', gap: space[3], marginBottom: space[4] }}>
             {DEMAND_LEARNING_LOOP.map(step => (
@@ -1946,14 +1926,14 @@ export default function Brain() {
             ))}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: space[4] }}>
-            <Field label="Demand objective">
-              <Textarea value={business.demandObjective} onChange={e => updateBusiness('demandObjective', e.target.value)} rows={3} placeholder="Top-of-funnel goal, e.g. category awareness, founder trust, lead-gen for a specific offer, or market education." />
+            <Field label="Content objective">
+              <Textarea value={business.demandObjective} onChange={e => updateBusiness('demandObjective', e.target.value)} rows={3} placeholder="What this content should prove or create: awareness, trust, audience growth, traffic, leads, sales, recruiting, education, or community." />
             </Field>
             <Field label="Conversion path">
-              <Textarea value={business.conversionPath} onChange={e => updateBusiness('conversionPath', e.target.value)} rows={3} placeholder="Where attention should go next: comments, DMs, landing page, newsletter, webinar, sales call, SAM research queue." />
+              <Textarea value={business.conversionPath} onChange={e => updateBusiness('conversionPath', e.target.value)} rows={3} placeholder="Where attention should go next: comments, DMs, landing page, newsletter, event, product page, store, booking, community, or follow-up queue." />
             </Field>
             <Field label="Channel strategy">
-              <Textarea value={business.channelStrategy} onChange={e => updateBusiness('channelStrategy', e.target.value)} rows={3} placeholder="Role of each channel: LinkedIn for authority, YouTube for depth, Medium for SEO, Quora and Reddit for problem-aware demand, X for speed." />
+              <Textarea value={business.channelStrategy} onChange={e => updateBusiness('channelStrategy', e.target.value)} rows={3} placeholder="Role of each channel: LinkedIn for authority, YouTube for depth, Instagram and TikTok for visual reach, Medium for essays, Quora and Reddit for questions, X for speed." />
             </Field>
             <Field label="Content formats">
               <Textarea value={business.contentFormats} onChange={e => updateBusiness('contentFormats', e.target.value)} rows={3} placeholder="Posts, carousels, video storyboards, Shorts, long-form articles, answers, comments, founder POV, case breakdowns." />
@@ -1962,10 +1942,10 @@ export default function Brain() {
               <Textarea value={business.approvalModel} onChange={e => updateBusiness('approvalModel', e.target.value)} rows={3} placeholder="Who approves what: operator-only, client lead, legal, all stakeholders, or case-by-case based on topic, claim, or channel." />
             </Field>
             <Field label="Engagement signals">
-              <Textarea value={business.engagementSignals} onChange={e => updateBusiness('engagementSignals', e.target.value)} rows={3} placeholder="What counts: comments, shares, saves, clicks, traffic quality, objections, buying triggers, competitor mentions, meeting requests." />
+              <Textarea value={business.engagementSignals} onChange={e => updateBusiness('engagementSignals', e.target.value)} rows={3} placeholder="What counts: comments, shares, saves, clicks, traffic quality, objections, intent signals, purchases, inquiries, community joins, meeting requests." />
             </Field>
-            <Field label="SAM handoff rules">
-              <Textarea value={business.samHandoffRules} onChange={e => updateBusiness('samHandoffRules', e.target.value)} rows={3} placeholder="When engagement becomes sales research: named accounts, buying intent, objections, warm commenters, repeated topic demand, inbound questions." />
+            <Field label="Follow-up rules">
+              <Textarea value={business.samHandoffRules} onChange={e => updateBusiness('samHandoffRules', e.target.value)} rows={3} placeholder="When engagement needs action: named people or accounts, purchase intent, objections, useful comments, repeated topic demand, inbound questions, or support requests." />
             </Field>
             <Field label="Learning cadence">
               <Textarea value={business.learningCadence} onChange={e => updateBusiness('learningCadence', e.target.value)} rows={3} placeholder="How often VERA should review performance, refresh best practices, recommend experiments, and update channel-specific tone of voice." />
@@ -1987,7 +1967,7 @@ export default function Brain() {
           The standing brief VERA reads <strong style={{ color: color.ink }}>every turn</strong> for {activeProject.name}: tone, do/don't, positioning, recurring CTAs, in plain language.
         </p>
         <Textarea value={instr} onChange={e => setInstr(e.target.value)} rows={7}
-          placeholder={`e.g. Write in a confident, peer-to-peer voice for B2B founders. Lead with a concrete number or a real failure mode, never a hypothetical. Avoid "leverage", "synergy", "game-changer". Always close with one sharp question.`} />
+          placeholder={`e.g. Write in a confident, practical voice for experienced operators. Lead with a concrete observation or real failure mode, never a hypothetical. Avoid "leverage", "synergy", "game-changer". Close with one sharp question when the channel supports it.`} />
         <div style={{ display: 'flex', alignItems: 'center', gap: space[3], marginTop: space[3] }}>
           <Button variant="primary" size="md" onClick={saveInstr} disabled={instrSaving} style={{ background: color.ink, color: color.surface }}>
             {instrSaving ? <Loader2 size={14} /> : <Check size={14} />} Save instructions
@@ -2007,7 +1987,7 @@ export default function Brain() {
         </p>
         <div style={{ display: 'grid', gap: space[4] }}>
           <Field label="Persona name"><Input value={bv.persona_name ?? ''} onChange={e => setBv(f => ({ ...f, persona_name: e.target.value }))} placeholder="e.g. Alex" /></Field>
-          <Field label="Persona descriptor"><Input value={bv.persona_descriptor ?? ''} onChange={e => setBv(f => ({ ...f, persona_descriptor: e.target.value }))} placeholder="A sharp, empathetic B2B strategist" /></Field>
+          <Field label="Persona descriptor"><Input value={bv.persona_descriptor ?? ''} onChange={e => setBv(f => ({ ...f, persona_descriptor: e.target.value }))} placeholder="A sharp, empathetic content strategist" /></Field>
           <Field label="User tone of voice" helper="How the person or brand should sound when VERA writes for them.">
             <Textarea value={bv.system_prompt ?? ''} onChange={e => setBv(f => ({ ...f, system_prompt: e.target.value }))} rows={4} placeholder="Direct, practical, warm, lightly opinionated. Uses short sentences, concrete examples, and avoids hype." />
           </Field>
@@ -2122,7 +2102,7 @@ function AuditProposalPanel({
             Audit proposals
           </div>
           <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>
-            Add useful findings to this client's Brain. Dismiss anything that does not fit the demand strategy.
+            Add useful findings to this client's Brain. Dismiss anything that does not fit the saved strategy.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -2287,13 +2267,13 @@ function AudienceEditor({ initial, orgId, projectId, onSaved, onCancel }: {
   return (
     <div style={{ padding: space[4], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, display: 'flex', flexDirection: 'column', gap: space[3] }}>
       <div style={{ display: 'flex', gap: space[3], alignItems: 'center' }}>
-        <Input value={a.name ?? ''} placeholder="Audience name (e.g. VP of Sales)" onChange={e => setA(p => ({ ...p, name: e.target.value }))} style={{ flex: 1 }} />
+        <Input value={a.name ?? ''} placeholder="Audience name (e.g. returning customers)" onChange={e => setA(p => ({ ...p, name: e.target.value }))} style={{ flex: 1 }} />
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: t.size.cap, color: color.ink2, cursor: 'pointer', whiteSpace: 'nowrap' }}>
           <input type="checkbox" checked={!!a.is_primary} onChange={e => setA(p => ({ ...p, is_primary: e.target.checked }))} /> Primary
         </label>
       </div>
-      <TagInput label="Pain points" placeholder="e.g. Forecast credibility with the board" items={(a.pain_points as string[]) ?? []} onAdd={v => addArr('pain_points', v)} onRemove={i => rmArr('pain_points', i)} />
-      <TagInput label="Goals" placeholder="e.g. Hit pipeline targets without more headcount" items={(a.goals as string[]) ?? []} onAdd={v => addArr('goals', v)} onRemove={i => rmArr('goals', i)} />
+      <TagInput label="Pain points" placeholder="e.g. hard to choose the right product" items={(a.pain_points as string[]) ?? []} onAdd={v => addArr('pain_points', v)} onRemove={i => rmArr('pain_points', i)} />
+      <TagInput label="Goals" placeholder="e.g. build trust, drive visits, grow community" items={(a.goals as string[]) ?? []} onAdd={v => addArr('goals', v)} onRemove={i => rmArr('goals', i)} />
       <div style={{ display: 'flex', gap: space[2] }}>
         <Button variant="primary" size="sm" onClick={save} disabled={saving || !a.name?.trim()} style={{ background: color.ink, color: color.surface }}>{saving ? <Loader2 size={13} /> : <Check size={13} />} Save</Button>
         <Button variant="ghost" size="sm" onClick={del}><Trash2 size={13} /> {a.id ? 'Delete' : 'Cancel'}</Button>

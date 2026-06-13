@@ -420,7 +420,7 @@ export default function Artifacts() {
       <PageHeader
         eyebrow={activeProject.name}
         title="Studio"
-        subtitle="Everything VERA produces or reuses for this client: campaigns, posts, media, logos, guidelines, briefs, and demand assets."
+        subtitle="Everything VERA produces or reuses for this client: campaigns, posts, media, logos, guidelines, briefs, and content assets."
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: space[3], marginBottom: space[5] }}>

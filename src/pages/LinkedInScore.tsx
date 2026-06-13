@@ -20,6 +20,8 @@ import { supabase } from '../lib/supabase'
 import { useRightRail } from '../lib/rightRailContext'
 import { useAuth } from '../lib/auth'
 import { useProject } from '../lib/projectContext'
+import { parseProjectInstructions } from '../lib/businessContext'
+import { demandPlatformHasStrategyEvidence } from '../lib/demandModel'
 
 const PROFILE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/linkedin-profile-score`
 const BREW_URL    = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/brew360-audit`
@@ -87,6 +89,8 @@ export default function LinkedInScore() {
   const [togglesOpen, setTogglesOpen] = useState(false)
   const [hasBrandVoice, setHasBrandVoice] = useState(false)
   const [recentRuns, setRecentRuns] = useState<Array<{ kind: string; created_at: string; score: number | null }>>([])
+  const [strategyGate, setStrategyGate] = useState<'loading' | 'valid' | 'invalid'>('loading')
+  const [strategyGateDetail, setStrategyGateDetail] = useState('')
 
   // Persist toggles to localStorage (UI fallback) AND to organisations.settings
   // (durable per-org). Org settings win on load.
@@ -115,6 +119,10 @@ export default function LinkedInScore() {
       setError('Open this audit from an active client space and sign in again.')
       return
     }
+    if (strategyGate !== 'valid') {
+      setError('LinkedIn audit is not enabled for this client strategy.')
+      return
+    }
     setProfileLoading(true)
     setError(null)
     try {
@@ -129,12 +137,16 @@ export default function LinkedInScore() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally { setProfileLoading(false) }
-  }, [orgId, projectId, session?.access_token])
+  }, [orgId, projectId, session?.access_token, strategyGate])
 
   const runBrew = useCallback(async () => {
     if (!orgId) return
     if (!session?.access_token || !projectId) {
       setError('Open this audit from an active client space and sign in again.')
+      return
+    }
+    if (strategyGate !== 'valid') {
+      setError('LinkedIn audit is not enabled for this client strategy.')
       return
     }
     setBrewLoading(true)
@@ -166,13 +178,54 @@ export default function LinkedInScore() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally { setBrewLoading(false) }
-  }, [orgId, projectId, session?.access_token, enabledPrinciples])
+  }, [orgId, projectId, session?.access_token, enabledPrinciples, strategyGate])
+
+  useEffect(() => {
+    if (!orgId || !projectId || activeProject?.org_id !== orgId) {
+      setStrategyGate('invalid')
+      setStrategyGateDetail('Open this audit from an active client space.')
+      return
+    }
+    let cancelled = false
+    const context = parseProjectInstructions(activeProject?.instructions ?? '').businessContext
+    if (demandPlatformHasStrategyEvidence('linkedin', context)) {
+      setStrategyGate('valid')
+      setStrategyGateDetail('LinkedIn is configured in this client Strategy Brain.')
+      return
+    }
+    setStrategyGate('loading')
+    Promise.all([
+      supabase
+        .from('client_integrations')
+        .select('id', { count: 'exact', head: true })
+        .eq('project_id', projectId)
+        .eq('provider', 'linkedin')
+        .in('status', ['connected', 'healthy']),
+      supabase
+        .from('content_posts')
+        .select('id', { count: 'exact', head: true })
+        .eq('project_id', projectId)
+        .ilike('channel', '%linkedin%'),
+    ]).then(([integrationRes, postRes]) => {
+      if (cancelled) return
+      const hasLinkedInConnection = !integrationRes.error && (integrationRes.count ?? 0) > 0
+      const hasLinkedInContent = !postRes.error && (postRes.count ?? 0) > 0
+      if (hasLinkedInConnection || hasLinkedInContent) {
+        setStrategyGate('valid')
+        setStrategyGateDetail(hasLinkedInConnection ? 'LinkedIn is connected for this client.' : 'This client already has LinkedIn content history.')
+      } else {
+        setStrategyGate('invalid')
+        setStrategyGateDetail('Add a LinkedIn source or explicit LinkedIn strategy in the client Strategy Brain first.')
+      }
+    })
+    return () => { cancelled = true }
+  }, [activeProject?.id, activeProject?.instructions, activeProject?.org_id, orgId, projectId])
 
   // On first mount: load org settings (toggles) + cached results from
   // linkedin_audits + brand_voice existence (drives Continue visibility).
   // Only fetch fresh audits if no cached row exists.
   useEffect(() => {
-    if (!orgId || !projectId) return
+    if (!orgId || !projectId || strategyGate !== 'valid') return
     let cancelled = false
     async function load() {
       // 1. Load org toggle settings (if set, override localStorage)
@@ -225,7 +278,7 @@ export default function LinkedInScore() {
     load()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId, projectId])
+  }, [orgId, projectId, strategyGate])
 
   // Update runAt when fresh results land
   useEffect(() => { if (profile && !profileLoading) setProfileRunAt(new Date().toISOString()) }, [profile, profileLoading])
@@ -247,6 +300,48 @@ export default function LinkedInScore() {
     />,
     [recentRuns, enabledPrinciples.length],
   )
+
+  if (strategyGate !== 'valid') {
+    return (
+      <div className="max-w-4xl mx-auto py-8 px-4 pb-16">
+        <div
+          className="p-6"
+          style={{
+            background: 'var(--paper-warm)',
+            border: '1px solid var(--paper-edge)',
+            borderRadius: 'var(--radius-lg)',
+          }}
+        >
+          <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
+            LinkedIn audit is optional
+          </p>
+          <p className="text-sm mt-2 leading-relaxed" style={{ color: 'var(--ink-quiet)' }}>
+            {strategyGate === 'loading'
+              ? 'Checking whether LinkedIn belongs in this client strategy.'
+              : strategyGateDetail || 'LinkedIn is not currently part of this client strategy.'}
+          </p>
+          {strategyGate !== 'loading' && (
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => navigate(activeProject?.slug ? `/p/${activeProject.slug}/brain` : '/')}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium transition-opacity hover:opacity-90"
+                style={{ background: 'var(--ink)', color: 'var(--paper-warm)', borderRadius: 'var(--radius-md)' }}
+              >
+                Open Strategy Brain
+              </button>
+              <button
+                onClick={() => navigate(activeProject?.slug ? `/p/${activeProject.slug}/vera` : '/')}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium transition-colors"
+                style={{ border: '1px solid var(--paper-edge)', color: 'var(--ink-quiet)', borderRadius: 'var(--radius-md)' }}
+              >
+                Back to Vera
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-4xl mx-auto py-8 px-4 pb-16">
@@ -502,8 +597,8 @@ function relativeTime(iso: string): string {
 }
 
 // ─── AuditContextCard ────────────────────────────────────────────────────────
-// Captures the operator's ICP, offer, value prop, positioning, themes, tone,
-// and success criteria so both audits score against intent, not generic
+// Captures the operator's audience, offer, value prop, positioning, themes,
+// tone, and success criteria so both audits score against intent, not generic
 // best practices. Pre-fills via the extract-audit-intent edge function
 // (which crawls the org website + LLM-extracts). Operator reviews/edits/saves.
 
@@ -632,7 +727,7 @@ function AuditContextCard({ orgId, projectId, accessToken }: { orgId: string; pr
         <div className="space-y-3">
           <IntentField label="Summary (the foundation BREW360 echoes back)" hint="60-90 word narrative — who you are, who for, what success looks like"
             value={draft.summary} onChange={v => setDraft(d => ({ ...d, summary: v }))} />
-          <IntentField label="ICP (who is this for?)" hint="Segment, role, stage, buying trigger"
+          <IntentField label="Audience (who is this for?)" hint="Segment, role, stage, trigger"
             value={draft.icp_summary} onChange={v => setDraft(d => ({ ...d, icp_summary: v }))} />
           <IntentField label="Offer (what you sell)" hint="Concrete deliverable, not category"
             value={draft.offer} onChange={v => setDraft(d => ({ ...d, offer: v }))} />
@@ -697,7 +792,7 @@ function AuditContextCard({ orgId, projectId, accessToken }: { orgId: string; pr
       )}
 
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
-        <CompactRow label="ICP"           value={intent?.icp_summary} />
+        <CompactRow label="Audience"      value={intent?.icp_summary} />
         <CompactRow label="Offer"         value={intent?.offer} />
         <CompactRow label="Value prop"    value={intent?.value_prop} />
         <CompactRow label="Positioning"   value={intent?.role_positioning} />

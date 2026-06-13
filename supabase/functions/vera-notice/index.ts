@@ -179,7 +179,7 @@ Deno.serve(async (req) => {
           kind: 'knowledge_gap',
           severity: 'high',
           title: `${projectName} has no brief or brand voice`,
-          detail: `I have nothing to ground drafts in for this project — anything I write will be generic B2B noise.`,
+          detail: `I have nothing to ground drafts in for this project, so anything I write will be generic.`,
           proposed_action: 'Paste a brief or point me at your website',
           action_kind: 'prompt_knowledge_input',
           action_payload: { project_id: projectId },
@@ -356,7 +356,7 @@ async function buildWeeklyLearningObservation(
     signalSummary(current),
     changeSummary(change, previous.demandSignals),
     `${skillProposals.length} learning skill proposal${skillProposals.length === 1 ? '' : 's'} need review.`,
-    `${handoffs.length} SAM handoff candidate${handoffs.length === 1 ? '' : 's'} should be queued.`,
+    `${handoffs.length} follow-up candidate${handoffs.length === 1 ? '' : 's'} should be queued.`,
   ].filter(Boolean)
 
   const severity: Observation['severity'] =
@@ -497,8 +497,8 @@ function buildHandoffCandidates(posts: ContentPostRow[], metrics: Map<string, Le
         metric.clicks > 0 ? `${metric.clicks} click${metric.clicks === 1 ? '' : 's'}` : '',
         metric.saves > 0 ? `${metric.saves} save${metric.saves === 1 ? '' : 's'}` : '',
         metric.qualifiedTraffic > 0 ? `${metric.qualifiedTraffic} qualified visit${metric.qualifiedTraffic === 1 ? '' : 's'}` : '',
-        metric.buyerQuestions > 0 ? `${metric.buyerQuestions} buyer question${metric.buyerQuestions === 1 ? '' : 's'}` : '',
-        metric.meetingRequests > 0 ? `${metric.meetingRequests} meeting request${metric.meetingRequests === 1 ? '' : 's'}` : '',
+        metric.buyerQuestions > 0 ? `${metric.buyerQuestions} audience question${metric.buyerQuestions === 1 ? '' : 's'}` : '',
+        metric.meetingRequests > 0 ? `${metric.meetingRequests} inquir${metric.meetingRequests === 1 ? 'y' : 'ies'}` : '',
         score >= 25 ? `score ${score}` : '',
       ].filter(Boolean)
       if (!triggers.length) return null
@@ -550,22 +550,22 @@ function metricEvidence(metric: LearningMetric) {
     metric.shares ? `${metric.shares} shares` : '',
     metric.clicks ? `${metric.clicks} clicks` : '',
     metric.qualifiedTraffic ? `${metric.qualifiedTraffic} qualified visits` : '',
-    metric.buyerQuestions ? `${metric.buyerQuestions} buyer questions` : '',
-    metric.meetingRequests ? `${metric.meetingRequests} meeting requests` : '',
+    metric.buyerQuestions ? `${metric.buyerQuestions} audience questions` : '',
+    metric.meetingRequests ? `${metric.meetingRequests} inquiries` : '',
     metric.views ? `${metric.views} views or reach` : '',
   ].filter(Boolean)
-  return parts.length ? parts.join(', ') : 'measured demand signals'
+  return parts.length ? parts.join(', ') : 'measured audience signals'
 }
 
 function signalSummary(summary: LearningSummary) {
-  if (!summary.measuredPosts) return 'No fresh measured demand signals yet.'
+  if (!summary.measuredPosts) return 'No fresh measured audience signals yet.'
   const parts = [
     summary.comments ? `${summary.comments} comments` : '',
     summary.shares ? `${summary.shares} shares` : '',
     summary.clicks ? `${summary.clicks} clicks` : '',
     summary.qualifiedTraffic ? `${summary.qualifiedTraffic} qualified visits` : '',
-    summary.buyerQuestions ? `${summary.buyerQuestions} buyer questions` : '',
-    summary.meetingRequests ? `${summary.meetingRequests} meeting requests` : '',
+    summary.buyerQuestions ? `${summary.buyerQuestions} audience questions` : '',
+    summary.meetingRequests ? `${summary.meetingRequests} inquiries` : '',
   ].filter(Boolean)
   return parts.length ? `Signals: ${parts.join(', ')}.` : `Signals: ${summary.views} views or reach.`
 }

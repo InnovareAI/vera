@@ -35,10 +35,16 @@ const LABEL_TO_KEY: Record<string, string> = {
   "facebook page": "facebook",
   "x profile": "x",
   "source pull depth": "sourcePullDepth",
+  "platform tone of voice": "platformToneOfVoice",
+  "content objective": "demandObjective",
+  "channel strategy": "channelStrategy",
+  "content formats": "contentFormats",
 }
 
 type ProjectBusinessContext = Record<string, string>
 export type SourcePullDepth = "light" | "standard" | "deep"
+const LINKEDIN_SOURCE_KEYS = ["linkedinCompany", "linkedinProfile", "linkedinEvents", "linkedinNewsletter"]
+const LINKEDIN_CHANNELS = new Set(["linkedin_company", "linkedin_personal", "linkedin_events", "linkedin_newsletter"])
 
 export async function resolveProjectAuditChannels(
   supabase: AdminClient,
@@ -65,7 +71,7 @@ export async function resolveProjectAuditChannels(
   }
 
   // Legacy org-wide channels are only safe for the default workspace project.
-  // Client projects must use their own Demand Brain source URLs.
+  // Client projects must use their own Strategy Brain source URLs.
   if (projectRow.is_default) {
     const legacyChannels = await loadLegacyOrgChannels(supabase, orgId)
     if (legacyChannels.length) {
@@ -117,6 +123,19 @@ export function linkedInPersonalUrl(channels: AuditChannelProfile[]): string | n
   return channels.find(channel => channel.channel === "linkedin_personal")?.url ?? null
 }
 
+export function projectHasLinkedInStrategy(sourceResolution: ProjectSourceResolution): boolean {
+  if (sourceResolution.channels.some(channel => LINKEDIN_CHANNELS.has(channel.channel))) return true
+  const context = parseProjectBusinessContext(sourceResolution.project.instructions)
+  if (LINKEDIN_SOURCE_KEYS.some(key => cleanString(context[key]))) return true
+  const strategyText = [
+    context.channelStrategy,
+    context.contentFormats,
+    context.platformToneOfVoice,
+    context.demandObjective,
+  ].filter(Boolean).join(" ").toLowerCase()
+  return textMentionsAlias(strategyText, "linkedin") || textMentionsAlias(strategyText, "li")
+}
+
 async function loadLegacyOrgChannels(
   supabase: AdminClient,
   orgId: string,
@@ -156,6 +175,13 @@ function cleanString(value: unknown): string | undefined {
 function normalizeSourcePullDepth(value: string | undefined): SourcePullDepth {
   if (value === "light" || value === "deep" || value === "standard") return value
   return "standard"
+}
+
+function textMentionsAlias(haystack: string, alias: string): boolean {
+  const needle = alias.toLowerCase().trim()
+  if (!needle) return false
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return new RegExp(`(^|[^a-z0-9.])${escaped}([^a-z0-9.]|$)`, "i").test(haystack)
 }
 
 function decodeBusinessContextValue(value: string): string {
