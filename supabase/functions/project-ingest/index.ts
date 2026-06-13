@@ -1,13 +1,14 @@
-// project-ingest — accepts paste / URL / file-already-in-storage,
-// embeds text content, writes to project_knowledge (semantic retrieval)
-// and project_assets (raw file metadata).
+// project-ingest accepts paste / URL / file-already-in-storage,
+// indexes or stores text content in project_knowledge and writes raw file
+// metadata to project_assets.
 //
 // Modes:
 //   { kind: 'paste',   project_id, title, content }
-//     → chunks + embeds, stores in project_knowledge.
+//     → chunks + embeds when the client has an embedding key, otherwise
+//       stores raw project knowledge for fallback retrieval.
 //
 //   { kind: 'url',     project_id, title?, source_url }
-//     → fetches URL, strips HTML, chunks + embeds, stores in
+//     → fetches URL, strips HTML, chunks + embeds when possible, stores in
 //       project_knowledge with source_kind='url' + source_url.
 //
 //   { kind: 'file',    project_id, storage_path, file_name, mime_type,
@@ -17,7 +18,7 @@
 //       and ingests text into project_knowledge, linking the two rows.
 //       PDF / DOCX / images stored raw; text extraction is a follow-up.
 //
-// All flows return { ok: true, id, chunks_ingested? }.
+// All flows return { ok: true, id, chunks_ingested?, indexed? }.
 
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
@@ -55,7 +56,11 @@ type RuntimeAudit = {
 type ClassifyRuntime =
   | ({ provider: 'anthropic'; key: string; model: string; keySource: 'platform' | 'client' } & RuntimeAudit)
   | ({ provider: 'openrouter'; key: string; model: string; keySource: 'client' } & RuntimeAudit)
-type IngestRuntimes = { embedding: EmbedRuntime; classifier: ClassifyRuntime | null }
+type IngestRuntimes = {
+  embedding: EmbedRuntime | null
+  classifier: ClassifyRuntime | null
+  embeddingUnavailableReason: string | null
+}
 
 // ─── helpers ─────────────────────────────────────────────────────────
 function chunkText(text: string, max = 1200, overlap = 150): string[] {
@@ -266,7 +271,13 @@ Deno.serve(async (req) => {
           return json(200, { ok: true, asset_id: assetRow.id, chunks_ingested: 0, note: 'asset stored; extracted text too short to embed' })
         }
         const knowledgeResult = await ingestText(supabase, projectScope, runtimes.value, fileName, text, 'upload', null, fileName, fileSize)
-        const knowledgeJson = await knowledgeResult.json() as { id?: string; chunks_ingested?: number }
+        const knowledgeJson = await knowledgeResult.json() as {
+          id?: string
+          chunks_ingested?: number
+          chunks_available?: number
+          indexed?: boolean
+          note?: string
+        }
         if (knowledgeJson.id) {
           await supabase.from('project_assets')
             .update({ knowledge_id: knowledgeJson.id })
@@ -277,6 +288,9 @@ Deno.serve(async (req) => {
           asset_id: assetRow.id,
           knowledge_id: knowledgeJson.id,
           chunks_ingested: knowledgeJson.chunks_ingested,
+          chunks_available: knowledgeJson.chunks_available,
+          indexed: knowledgeJson.indexed,
+          note: knowledgeJson.note,
           extracted_chars: text.length,
         })
       }
@@ -308,64 +322,70 @@ async function resolveIngestRuntimes(
   }
 
   if (platformProject) {
-    if (!OPENAI_API_KEY) {
-      return {
-        ok: false,
-        response: json(500, { error: 'OPENAI_API_KEY is not configured for knowledge embeddings.' }),
-        message: 'platform OpenAI embeddings are not configured',
-      }
-    }
     return {
       ok: true,
       value: {
-        embedding: { provider: 'openai', key: OPENAI_API_KEY, model: OPENAI_EMBED_MODEL, keySource: 'platform' },
+        embedding: OPENAI_API_KEY
+          ? { provider: 'openai', key: OPENAI_API_KEY, model: OPENAI_EMBED_MODEL, keySource: 'platform' }
+          : null,
         classifier: ANTHROPIC_API_KEY
           ? classifierRuntime('anthropic', ANTHROPIC_API_KEY, ANTHROPIC_CLASSIFY_MODEL, 'platform')
           : null,
+        embeddingUnavailableReason: OPENAI_API_KEY ? null : 'platform OpenAI embeddings are not configured',
       },
     }
   }
 
-  let openai: { key: string; provider: string } | null
+  let embedding: EmbedRuntime | null = null
+  let embeddingUnavailableReason: string | null = null
   try {
-    openai = await loadClientApiKey(supabase, project.id, ['openai'])
+    const openai = await loadClientApiKey(supabase, project.id, ['openai'])
+    if (openai?.key) {
+      embedding = { provider: 'openai', key: openai.key, model: OPENAI_EMBED_MODEL, keySource: 'client' }
+    } else {
+      embeddingUnavailableReason = 'no client OpenAI key configured for semantic embeddings'
+    }
   } catch (error) {
-    return {
-      ok: false,
-      response: json(403, { error: `Client OpenAI key for knowledge embeddings is unavailable: ${errorMessage(error)}` }),
-      message: `client OpenAI key is unavailable: ${errorMessage(error)}`,
-    }
-  }
-  if (!openai?.key) {
-    return {
-      ok: false,
-      response: json(403, { error: 'Searchable knowledge ingestion requires this client space to use its own OpenAI key for embeddings.' }),
-      message: 'add a client OpenAI key for searchable knowledge embeddings',
-    }
+    embeddingUnavailableReason = `client OpenAI key is unavailable: ${errorMessage(error)}`
   }
 
-  let classifier: ClassifyRuntime | null = null
-  try {
-    const [openRouter, anthropic] = await Promise.all([
-      loadClientApiKey(supabase, project.id, ['openrouter']),
-      loadClientApiKey(supabase, project.id, ['anthropic']),
-    ])
-    if (openRouter?.key) {
-      classifier = classifierRuntime('openrouter', openRouter.key, OPENROUTER_CLASSIFY_MODEL, 'client')
-    } else if (anthropic?.key) {
-      classifier = classifierRuntime('anthropic', anthropic.key, ANTHROPIC_CLASSIFY_MODEL, 'client')
-    }
-  } catch (error) {
-    console.warn(`knowledge classifier key unavailable: ${errorMessage(error)}`)
-  }
+  const classifier = await resolveClientClassifierRuntime(supabase, project)
 
   return {
     ok: true,
     value: {
-      embedding: { provider: 'openai', key: openai.key, model: OPENAI_EMBED_MODEL, keySource: 'client' },
+      embedding,
       classifier,
+      embeddingUnavailableReason,
     },
   }
+}
+
+async function resolveClientClassifierRuntime(
+  supabase: AdminClient,
+  project: ProjectScope,
+): Promise<ClassifyRuntime | null> {
+  let openRouter: { key: string; provider: string } | null = null
+  try {
+    openRouter = await loadClientApiKey(supabase, project.id, ['openrouter'])
+  } catch (error) {
+    console.warn(`knowledge OpenRouter classifier key unavailable: ${errorMessage(error)}`)
+  }
+  if (openRouter?.key) {
+    return classifierRuntime('openrouter', openRouter.key, OPENROUTER_CLASSIFY_MODEL, 'client')
+  }
+
+  let anthropic: { key: string; provider: string } | null = null
+  try {
+    anthropic = await loadClientApiKey(supabase, project.id, ['anthropic'])
+  } catch (error) {
+    console.warn(`knowledge Anthropic classifier key unavailable: ${errorMessage(error)}`)
+  }
+  if (anthropic?.key) {
+    return classifierRuntime('anthropic', anthropic.key, ANTHROPIC_CLASSIFY_MODEL, 'client')
+  }
+
+  return null
 }
 
 function classifierRuntime(
@@ -490,6 +510,13 @@ Suggestion examples:
     })
   } catch (e) {
     console.warn(`classify: ${e instanceof Error ? e.message : String(e)}`)
+    await supabase.from('project_knowledge').update({
+      kind: 'reference',
+      summary: 'Stored as project knowledge. Classification failed, but VERA can still retrieve the content.',
+      extracted: null,
+      suggestion: null,
+      classified_at: new Date().toISOString(),
+    }).eq('id', knowledgeId).is('classified_at', null)
   }
 }
 
@@ -570,13 +597,20 @@ async function ingestText(
     return json(400, { error: 'content too short (<30 chars)' })
   }
 
-  // For embedding a "document" head — embed first chunk as the representative
+  // For embedding a "document" head, embed first chunk as the representative.
   const chunks = chunkText(content)
   if (chunks.length === 0) return json(400, { error: 'no usable chunks after splitting' })
 
   // We store ONE row per document with the full content + an embedding of the
   // head (first ~1200 chars). For larger docs, future revision can split rows.
-  const headEmbedding = await embed(supabase, project, runtimes.embedding, chunks[0])
+  const headEmbedding = runtimes.embedding
+    ? await embed(supabase, project, runtimes.embedding, chunks[0])
+    : null
+  const indexed = Boolean(headEmbedding)
+  const classifiedAt = runtimes.classifier ? null : new Date().toISOString()
+  const rawSummary = indexed
+    ? 'Stored as project knowledge. Add a classifier key to auto-summarize and tag future uploads.'
+    : `Stored as raw project knowledge. ${runtimes.embeddingUnavailableReason ?? 'No embedding runtime is available.'}`
 
   const { data: row, error: insErr } = await supabase
     .from('project_knowledge')
@@ -588,7 +622,18 @@ async function ingestText(
       source_url: sourceUrl,
       file_name: fileName,
       file_size: fileSize,
-      embedding: headEmbedding as unknown as string,
+      embedding: headEmbedding as unknown as string | null,
+      kind: runtimes.classifier ? null : 'reference',
+      summary: runtimes.classifier ? null : rawSummary,
+      extracted: runtimes.classifier
+        ? null
+        : {
+            indexed,
+            chunks: chunks.length,
+            storage: indexed ? 'semantic' : 'raw',
+            reason: indexed ? null : runtimes.embeddingUnavailableReason,
+          } as Json,
+      classified_at: classifiedAt,
     })
     .select()
     .single()
@@ -597,10 +642,19 @@ async function ingestText(
   // Agentic next step — VERA classifies the doc and proposes an action.
   // Fire-and-forget so the upload response stays fast; the UI polls or
   // re-fetches and shows the classification when ready (typically 1-3s).
-  // @ts-expect-error EdgeRuntime is provided by the Supabase edge runtime.
-  EdgeRuntime.waitUntil(classifyAndStore(supabase, project, runtimes.classifier, row.id as string, content))
+  if (runtimes.classifier) {
+    // @ts-expect-error EdgeRuntime is provided by the Supabase edge runtime.
+    EdgeRuntime.waitUntil(classifyAndStore(supabase, project, runtimes.classifier, row.id as string, content))
+  }
 
-  return json(200, { ok: true, id: row.id, chunks_ingested: chunks.length })
+  return json(200, {
+    ok: true,
+    id: row.id,
+    chunks_ingested: indexed ? chunks.length : 0,
+    chunks_available: chunks.length,
+    indexed,
+    note: indexed ? null : rawSummary,
+  })
 }
 
 function errorMessage(error: unknown) {

@@ -184,12 +184,24 @@ export default function Knowledge() {
       },
       body: JSON.stringify(body),
     })
-    const data = await res.json()
+    const data = await res.json() as {
+      error?: string
+      chunks_ingested?: number
+      chunks_available?: number
+      indexed?: boolean
+      asset_id?: string
+      note?: string | null
+    }
     if (!res.ok || data.error) return { ok: false, error: data.error ?? `HTTP ${res.status}` }
     const parts: string[] = []
-    if (data.chunks_ingested) parts.push(`${data.chunks_ingested} chunk${data.chunks_ingested === 1 ? '' : 's'} embedded`)
-    if (data.asset_id)        parts.push('asset stored')
-    return { ok: true, report: parts.join(' · ') }
+    if (data.chunks_ingested) {
+      parts.push(`${data.chunks_ingested} chunk${data.chunks_ingested === 1 ? '' : 's'} embedded`)
+    } else if (data.indexed === false && data.chunks_available) {
+      parts.push(`${data.chunks_available} chunk${data.chunks_available === 1 ? '' : 's'} stored raw`)
+    }
+    if (data.asset_id) parts.push('asset stored')
+    if (data.note) parts.push(data.note)
+    return { ok: true, report: parts.join(' · ') || 'stored' }
   }
 
   async function submitPaste() {
