@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js"
 import Anthropic from "npm:@anthropic-ai/sdk"
 import mammoth from "npm:mammoth@1.10.0"
 import type { AdminClient } from "../_shared/auth.ts"
-import { loadProjectAiPolicy } from "../_shared/ai-policy.ts"
+import { checkProjectAiBudget, loadProjectAiPolicy, type ProjectAiBudgetWarning } from "../_shared/ai-policy.ts"
 import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
 import { selectTextModel, type ModelSelectionSource } from "../_shared/model-recommendations.ts"
@@ -21,6 +21,9 @@ const UNIPILE_API_KEY = Deno.env.get("UNIPILE_API_KEY")
 const UNIPILE_BASE_URL = normalizeUnipileBaseUrl(
   Deno.env.get("UNIPILE_BASE_URL") ?? Deno.env.get("UNIPILE_API_URL") ?? Deno.env.get("UNIPILE_DSN") ?? "",
 )
+const APPROX_CHARS_PER_TOKEN = 4
+const BUSINESS_CONTEXT_EXTRACT_MAX_TOKENS = 1800
+const EMBED_INPUT_CHAR_LIMIT = 8000
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -126,6 +129,10 @@ type ExtractionRuntimeAudit = {
   policyDefaultModel: string | null
 }
 
+type BudgetCheck =
+  | { ok: true; warning: ProjectAiBudgetWarning | null }
+  | { ok: false; message: string }
+
 const FIELD_KEYS = [
   "website",
   "linkedinCompany",
@@ -172,6 +179,68 @@ function normalizeUnipileBaseUrl(raw: string) {
   const trimmed = raw.trim().replace(/\/+$/, "")
   if (!trimmed) return ""
   return trimmed.endsWith("/api/v1") ? trimmed : `${trimmed}/api/v1`
+}
+
+function approxTokensFromChars(chars: number): number {
+  return Math.max(1, Math.ceil(chars / APPROX_CHARS_PER_TOKEN))
+}
+
+function approxPromptChars(value: unknown): number {
+  if (value == null) return 0
+  if (typeof value === "string") return value.length
+  if (typeof value === "number" || typeof value === "boolean") return String(value).length
+  if (Array.isArray(value)) return value.reduce((sum, item) => sum + approxPromptChars(item), 0)
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>
+    if (record.type === "document") {
+      const source = record.source as Record<string, unknown> | undefined
+      const data = typeof source?.data === "string" ? source.data : ""
+      return data.length + approxPromptChars(record.title)
+    }
+    return Object.entries(record).reduce((sum, [key, item]) => sum + key.length + approxPromptChars(item), 0)
+  }
+  return 0
+}
+
+async function checkBusinessContextBudget(
+  supabase: AdminClient,
+  project: ProjectScope,
+  runtime: ExtractionRuntime,
+  content: unknown[],
+  metadata: Record<string, unknown>,
+): Promise<BudgetCheck> {
+  const budget = await checkProjectAiBudget(supabase, project.id, {
+    orgId: project.org_id,
+    projectId: project.id,
+    provider: runtime.provider,
+    model: runtime.model,
+    operation: "business_context.extract",
+    inputTokens: approxTokensFromChars(approxPromptChars(content)),
+    outputTokens: BUSINESS_CONTEXT_EXTRACT_MAX_TOKENS,
+    metadata,
+  })
+  if (!budget.ok) return { ok: false, message: budget.message }
+  return { ok: true, warning: budget.warning }
+}
+
+async function checkSourceEmbeddingBudget(
+  supabase: AdminClient,
+  project: ProjectScope,
+  runtime: EmbedRuntime,
+  text: string,
+): Promise<BudgetCheck> {
+  const budget = await checkProjectAiBudget(supabase, project.id, {
+    orgId: project.org_id,
+    projectId: project.id,
+    provider: runtime.provider,
+    model: runtime.model,
+    operation: "knowledge.embed",
+    inputTokens: approxTokensFromChars(text.slice(0, EMBED_INPUT_CHAR_LIMIT).length),
+    outputTokens: 0,
+    metadata: { key_source: runtime.keySource, source: "business_context_source_pull" },
+  })
+  if (!budget.ok) return { ok: false, message: budget.message }
+  return { ok: true, warning: budget.warning }
 }
 
 Deno.serve(async (req) => {
@@ -233,6 +302,21 @@ Deno.serve(async (req) => {
   const runtime = await resolveExtractionRuntime(supabase as unknown as AdminClient, project.id, project.org_id, requiresAnthropicDocuments)
   if (!runtime.ok) return runtime.response
 
+  const usageMetadata = extractionRuntimeUsageMetadata(runtime.runtime, {
+    task: "extract-business-context",
+    source: fileName,
+    pulled_sources: !!body.pull_sources,
+    source_count: sources?.length ?? 0,
+  })
+  const budget = await checkBusinessContextBudget(
+    supabase as unknown as AdminClient,
+    project as ProjectScope,
+    runtime.runtime,
+    content.value,
+    usageMetadata,
+  )
+  if (!budget.ok) return jsonError(budget.message, 402)
+
   const startedAt = Date.now()
   let extraction: Awaited<ReturnType<typeof runExtraction>>
   try {
@@ -249,19 +333,17 @@ Deno.serve(async (req) => {
     inputTokens: extraction.inputTokens,
     outputTokens: extraction.outputTokens,
     durationMs: Date.now() - startedAt,
-    metadata: extractionRuntimeUsageMetadata(runtime.runtime, {
-      task: "extract-business-context",
-      source: fileName,
-      pulled_sources: !!body.pull_sources,
-      source_count: sources?.length ?? 0,
-    }),
+    metadata: {
+      ...usageMetadata,
+      ...(budget.warning ? { budget_warning: budget.warning } : {}),
+    },
   })
 
   const context = parseContextJson(extraction.output)
   const knowledge = body.pull_sources && pulledDocs.length
     ? await persistPulledSourceKnowledge(supabase, project as ProjectScope, pulledDocs, sources ?? [])
     : undefined
-  return json({ ok: true, context, source: fileName, sources, knowledge })
+  return json({ ok: true, context, source: fileName, sources, knowledge, ...(budget.warning ? { budget_warning: budget.warning } : {}) })
 })
 
 async function resolveExtractionRuntime(
@@ -370,7 +452,7 @@ async function runAnthropicExtraction(
   const anthropic = new Anthropic({ apiKey: runtime.key })
   const response = await anthropic.messages.create({
     model: runtime.model,
-    max_tokens: 1800,
+    max_tokens: BUSINESS_CONTEXT_EXTRACT_MAX_TOKENS,
     temperature: 0,
     messages: [{
       role: "user",
@@ -411,7 +493,7 @@ async function runOpenRouterExtraction(
     body: JSON.stringify({
       model: runtime.model,
       temperature: 0,
-      max_tokens: 1800,
+      max_tokens: BUSINESS_CONTEXT_EXTRACT_MAX_TOKENS,
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
     }),
@@ -809,7 +891,17 @@ async function persistPulledSourceKnowledge(
       const content = sourceDocumentKnowledgeContent(doc)
       const chunks = chunkText(content)
       if (!chunks.length) throw new Error("Source content is too short to store")
-      const embedding = runtime ? await embedSourceKnowledge(supabase as unknown as AdminClient, project, runtime, chunks[0]) : null
+      let perDocEmbeddingSkipMessage = embeddingSkipMessage
+      let embedding: number[] | null = null
+      if (runtime) {
+        const budget = await checkSourceEmbeddingBudget(supabase as unknown as AdminClient, project, runtime, chunks[0])
+        if (budget.ok) {
+          embedding = await embedSourceKnowledge(supabase as unknown as AdminClient, project, runtime, chunks[0], budget.warning)
+        } else {
+          perDocEmbeddingSkipMessage = budget.message
+        }
+      }
+      const indexSkipMessage = embedding ? null : perDocEmbeddingSkipMessage
       const title = `${doc.label} source pull`
       const extracted = {
         source: doc.source,
@@ -844,7 +936,7 @@ async function persistPulledSourceKnowledge(
         if (report) {
           report.knowledgeStatus = embedding ? "updated" : "updated_unindexed"
           report.knowledgeId = existing.id
-          if (!embedding && embeddingSkipMessage) report.knowledgeError = embeddingSkipMessage
+          if (indexSkipMessage) report.knowledgeError = indexSkipMessage
         }
       } else {
         const { data, error } = await supabase
@@ -870,7 +962,7 @@ async function persistPulledSourceKnowledge(
         if (report) {
           report.knowledgeStatus = embedding ? "stored" : "stored_unindexed"
           report.knowledgeId = data?.id as string | undefined
-          if (!embedding && embeddingSkipMessage) report.knowledgeError = embeddingSkipMessage
+          if (indexSkipMessage) report.knowledgeError = indexSkipMessage
         }
       }
     } catch (error) {
@@ -917,6 +1009,7 @@ async function embedSourceKnowledge(
   project: ProjectScope,
   runtime: EmbedRuntime,
   text: string,
+  budgetWarning: ProjectAiBudgetWarning | null,
 ): Promise<number[]> {
   const startedAt = Date.now()
   const response = await fetch("https://api.openai.com/v1/embeddings", {
@@ -939,11 +1032,15 @@ async function embedSourceKnowledge(
     projectId: project.id,
     provider: runtime.provider,
     model: runtime.model,
-    operation: "knowledge.source_embed",
+    operation: "knowledge.embed",
     inputTokens: data.usage?.prompt_tokens ?? data.usage?.total_tokens ?? null,
     outputTokens: 0,
     durationMs: Date.now() - startedAt,
-    metadata: { key_source: runtime.keySource, source: "business_context_source_pull" },
+    metadata: {
+      key_source: runtime.keySource,
+      source: "business_context_source_pull",
+      ...(budgetWarning ? { budget_warning: budgetWarning } : {}),
+    },
   })
   return embedding
 }
