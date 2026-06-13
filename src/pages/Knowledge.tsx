@@ -47,10 +47,12 @@ interface KnowledgeRow {
   file_name: string | null
   file_size: number | null
   created_at: string
+  updated_at: string
   // VERA-classified fields (populated async after ingest by project-ingest)
-  kind: 'brief' | 'voice' | 'audit' | 'positioning' | 'case_study' | 'intel' | 'reference' | 'other' | null
+  kind: 'brief' | 'voice' | 'audit' | 'positioning' | 'case_study' | 'intel' | 'reference' | 'source_pull' | 'other' | null
   summary: string | null
   suggestion: string | null
+  extracted: unknown
   classified_at: string | null
 }
 
@@ -95,6 +97,33 @@ function iconFor(kind: string) {
   return FileText
 }
 
+function sourceConnectorLabel(source: unknown) {
+  if (source === 'unipile') return 'Unipile'
+  if (source === 'apify') return 'Apify'
+  if (source === 'direct') return 'Direct'
+  return 'Connector'
+}
+
+function sourcePullMeta(row: KnowledgeRow) {
+  const extracted = row.extracted && typeof row.extracted === 'object' ? row.extracted as Record<string, unknown> : {}
+  const items = typeof extracted.items === 'number' ? extracted.items : null
+  const requestedItems = typeof extracted.requestedItems === 'number' ? extracted.requestedItems : null
+  const indexed = typeof extracted.indexed === 'boolean' ? extracted.indexed : null
+  const collectedAt = typeof extracted.collectedAt === 'string' ? extracted.collectedAt : row.updated_at
+  return {
+    connector: sourceConnectorLabel(extracted.source),
+    itemLabel: items == null ? 'items unknown' : requestedItems ? `${items}/${requestedItems} items` : `${items} item${items === 1 ? '' : 's'}`,
+    indexed,
+    collectedAt,
+  }
+}
+
+function compactDate(value: string) {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return 'unknown date'
+  return parsed.toLocaleDateString()
+}
+
 export default function Knowledge() {
   const { activeProject } = useProject()
   const [mode, setMode] = useState<Mode>('paste')
@@ -118,7 +147,7 @@ export default function Knowledge() {
     }
     const [kRes, aRes] = await Promise.all([
       supabase.from('project_knowledge')
-        .select('id, project_id, title, content, source_kind, source_url, file_name, file_size, created_at, kind, summary, suggestion, classified_at')
+        .select('id, project_id, title, content, source_kind, source_url, file_name, file_size, created_at, updated_at, kind, summary, suggestion, extracted, classified_at')
         .eq('project_id', activeProject.id)
         .order('created_at', { ascending: false }),
       supabase.from('project_assets')
@@ -135,7 +164,7 @@ export default function Knowledge() {
   // Poll while any knowledge entry is still being classified by VERA
   // (classification fires after upload and typically lands in 1-3s).
   useEffect(() => {
-    const pending = knowledge.some(k => !k.classified_at)
+    const pending = knowledge.some(k => k.kind !== 'source_pull' && !k.classified_at)
     if (!pending) return
     const id = setInterval(load, 2000)
     return () => clearInterval(id)
@@ -444,59 +473,65 @@ export default function Knowledge() {
             Knowledge · {knowledge.length}
           </p>
           <div style={{ borderTop: '1px solid var(--paper-edge)' }}>
-            {knowledge.map(k => (
-              <div
-                key={k.id}
-                className="flex items-start gap-3 py-3 group"
-                style={{ borderBottom: '1px solid var(--paper-edge)' }}
-              >
-                <KindBadge kind={k.kind} classified={!!k.classified_at} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13.5px] truncate" style={{ color: 'var(--ink)' }}>{k.title}</p>
-
-                  {/* VERA's classification summary — speaks back what she found */}
-                  {k.summary && (
-                    <p className="text-[12.5px] mt-1 leading-snug" style={{ color: 'var(--ink-quiet)' }}>
-                      <span style={{ color: 'var(--ink)' }}>VERA</span> · {k.summary}
-                    </p>
-                  )}
-
-                  {/* Agentic proposed action */}
-                  {k.suggestion && (
-                    <div className="mt-2 inline-flex items-center gap-2 text-[12px] px-2.5 py-1.5"
-                      style={{
-                        background: 'var(--accent-tint)',
-                        borderRadius: 'var(--radius-sm)',
-                        color: 'var(--accent)',
-                      }}
-                    >
-                      <span>↗</span>
-                      <span style={{ color: 'var(--ink)' }}>{k.suggestion}</span>
-                    </div>
-                  )}
-
-                  <p className="text-[11px] mt-1.5" style={{ color: 'var(--ghost)' }}>
-                    {k.source_url ? (
-                      <>
-                        <a href={k.source_url} target="_blank" rel="noreferrer" className="hover:underline">
-                          {k.source_url}
-                        </a>
-                        {' · '}
-                      </>
-                    ) : null}
-                    {k.source_kind} · {k.content.length.toLocaleString()} chars · {new Date(k.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-                <button
-                  onClick={() => deleteKnowledge(k.id)}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity p-1"
-                  style={{ color: 'var(--ghost)' }}
-                  title="Delete"
+            {knowledge.map(k => {
+              const isSourcePull = k.kind === 'source_pull'
+              const pullMeta = isSourcePull ? sourcePullMeta(k) : null
+              return (
+                <div
+                  key={k.id}
+                  className="flex items-start gap-3 py-3 group"
+                  style={{ borderBottom: '1px solid var(--paper-edge)' }}
                 >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            ))}
+                  <KindBadge kind={k.kind} classified={isSourcePull || !!k.classified_at} indexed={pullMeta?.indexed ?? null} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13.5px] truncate" style={{ color: 'var(--ink)' }}>{k.title}</p>
+
+                    {/* VERA's classification summary — speaks back what she found */}
+                    {k.summary && (
+                      <p className="text-[12.5px] mt-1 leading-snug" style={{ color: 'var(--ink-quiet)' }}>
+                        <span style={{ color: 'var(--ink)' }}>VERA</span> · {k.summary}
+                      </p>
+                    )}
+
+                    {/* Agentic proposed action */}
+                    {k.suggestion && (
+                      <div className="mt-2 inline-flex items-center gap-2 text-[12px] px-2.5 py-1.5"
+                        style={{
+                          background: 'var(--accent-tint)',
+                          borderRadius: 'var(--radius-sm)',
+                          color: 'var(--accent)',
+                        }}
+                      >
+                        <span>↗</span>
+                        <span style={{ color: 'var(--ink)' }}>{k.suggestion}</span>
+                      </div>
+                    )}
+
+                    <p className="text-[11px] mt-1.5" style={{ color: 'var(--ghost)' }}>
+                      {k.source_url ? (
+                        <>
+                          <a href={k.source_url} target="_blank" rel="noreferrer" className="hover:underline">
+                            {k.source_url}
+                          </a>
+                          {' · '}
+                        </>
+                      ) : null}
+                      {pullMeta
+                        ? `source pull · ${pullMeta.connector} · ${pullMeta.itemLabel} · ${pullMeta.indexed === true ? 'semantic indexed' : pullMeta.indexed === false ? 'raw fallback' : 'stored'} · refreshed ${compactDate(pullMeta.collectedAt)}`
+                        : `${k.source_kind} · ${k.content.length.toLocaleString()} chars · ${compactDate(k.created_at)}`}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => deleteKnowledge(k.id)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                    style={{ color: 'var(--ghost)' }}
+                    title="Delete"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              )
+            })}
           </div>
         </section>
       )}
@@ -575,9 +610,10 @@ const KIND_LABEL: Record<string, string> = {
   case_study:  'Case study',
   intel:       'Intel',
   reference:   'Reference',
+  source_pull: 'Source',
   other:       'Other',
 }
-function KindBadge({ kind, classified }: { kind: KnowledgeRow['kind']; classified: boolean }) {
+function KindBadge({ kind, classified, indexed }: { kind: KnowledgeRow['kind']; classified: boolean; indexed?: boolean | null }) {
   if (!classified) {
     return (
       <span
@@ -586,6 +622,20 @@ function KindBadge({ kind, classified }: { kind: KnowledgeRow['kind']; classifie
         title="VERA is reading…"
       >
         <Loader2 size={9} className="animate-spin" /> Reading
+      </span>
+    )
+  }
+  if (kind === 'source_pull') {
+    return (
+      <span
+        className="text-[10px] uppercase font-medium px-1.5 py-0.5 rounded mt-0.5 flex-shrink-0"
+        style={{
+          background: indexed ? 'rgba(22,163,74,0.10)' : 'rgba(245,158,11,0.12)',
+          color: indexed ? 'rgb(22,101,52)' : 'rgb(146,64,14)',
+          letterSpacing: '0.06em',
+        }}
+      >
+        {KIND_LABEL.source_pull}
       </span>
     )
   }
@@ -598,7 +648,7 @@ function KindBadge({ kind, classified }: { kind: KnowledgeRow['kind']; classifie
         letterSpacing: '0.06em',
       }}
     >
-      {KIND_LABEL[kind ?? 'other']}
+      {KIND_LABEL[kind ?? 'other'] ?? KIND_LABEL.other}
     </span>
   )
 }
