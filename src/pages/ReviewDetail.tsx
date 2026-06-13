@@ -121,16 +121,20 @@ export default function ReviewDetail() {
       })
   }, [id])
 
+  const linkedInCheckPostId = post?.id ?? null
+  const linkedInCheckChannel = post?.channel ?? null
+  const linkedInCheckProjectId = post?.project_id ?? null
+
   useEffect(() => {
     let cancelled = false
     async function checkLinkedInPublishReady() {
-      const isLinkedIn = post?.channel?.toLowerCase() === 'linkedin'
-      if (!post || !isLinkedIn) {
+      const isLinkedIn = linkedInCheckChannel?.toLowerCase() === 'linkedin'
+      if (!linkedInCheckPostId || !isLinkedIn) {
         setLinkedInPublishReady(false)
         setLinkedInPublishDetail('Connect LinkedIn publishing in client integrations first.')
         return
       }
-      if (!post.project_id) {
+      if (!linkedInCheckProjectId) {
         setLinkedInPublishReady(true)
         setLinkedInPublishDetail('Legacy workspace LinkedIn publishing route.')
         return
@@ -139,7 +143,7 @@ export default function ReviewDetail() {
       const { data, error } = await supabase
         .from('client_integrations')
         .select('id, status, health_status, external_ref, config')
-        .eq('project_id', post.project_id)
+        .eq('project_id', linkedInCheckProjectId)
         .eq('provider', 'linkedin')
         .eq('status', 'connected')
         .order('updated_at', { ascending: false })
@@ -171,7 +175,7 @@ export default function ReviewDetail() {
 
     void checkLinkedInPublishReady()
     return () => { cancelled = true }
-  }, [post?.id, post?.channel, post?.project_id])
+  }, [linkedInCheckChannel, linkedInCheckPostId, linkedInCheckProjectId])
 
   // Refine with VERA — the reviewer's feedback goes straight to VERA, who
   // edits the copy / image / video on THIS post in place (refine_post tool).
