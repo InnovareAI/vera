@@ -125,7 +125,7 @@ fallback_status="$(curl -sS -o "$response_file" -w '%{http_code}' --max-time 20 
   -d "{\"post_id\":\"$fallback_post_id\",\"auto_mark_posted\":false}" \
   "$SUPABASE_PUBLIC_URL/functions/v1/unipile-post")"
 fallback_body="$(cat "$response_file")"
-if [[ "$fallback_status" != "400" || "$fallback_body" != *"No connected linkedin Unipile account for this client"* ]]; then
+if [[ "$fallback_status" != "400" || "$fallback_body" != *"No connected linkedin Unipile account for this space"* ]]; then
   printf 'Expected project post without client integration to reject legacy org fallback, got HTTP %s\n%s\n' "$fallback_status" "$fallback_body" >&2
   exit 1
 fi
@@ -159,7 +159,7 @@ mismatch_status="$(curl -sS -o "$response_file" -w '%{http_code}' --max-time 20 
   -d "{\"post_id\":\"$mismatch_post_id\",\"as_organization\":\"urn:li:organization:99999\",\"auto_mark_posted\":false}" \
   "$SUPABASE_PUBLIC_URL/functions/v1/unipile-post")"
 mismatch_body="$(cat "$response_file")"
-if [[ "$mismatch_status" != "403" || "$mismatch_body" != *"LinkedIn company page is not connected to this client space"* ]]; then
+if [[ "$mismatch_status" != "403" || "$mismatch_body" != *"LinkedIn company page is not connected to this space"* ]]; then
   printf 'Expected mismatched LinkedIn company page to be rejected, got HTTP %s\n%s\n' "$mismatch_status" "$mismatch_body" >&2
   exit 1
 fi

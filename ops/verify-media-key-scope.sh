@@ -89,7 +89,7 @@ if [[ "$image_status" != "403" ]]; then
   printf 'Expected image HTTP 403, got HTTP %s\n%s\n' "$image_status" "$body" >&2
   exit 1
 fi
-if [[ "$body" != *"requires this client space to use its own OpenRouter, OpenAI, or FAL key"* ]]; then
+if [[ "$body" != *"requires this space to use its own OpenRouter, OpenAI, or FAL key"* ]]; then
   printf 'Unexpected image response body:\n%s\n' "$body" >&2
   exit 1
 fi
@@ -106,8 +106,8 @@ if [[ "$video_submit_status" != "403" ]]; then
   printf 'Expected video submit HTTP 403, got HTTP %s\n%s\n' "$video_submit_status" "$video_submit_body" >&2
   exit 1
 fi
-if [[ "$video_submit_body" != *"Video generation requires this client space to use its own FAL key"* \
-   && "$video_submit_body" != *"Video generation is disabled for this client space"* ]]; then
+if [[ "$video_submit_body" != *"Video generation requires this space to use its own FAL key"* \
+   && "$video_submit_body" != *"Video generation is disabled for this space"* ]]; then
   printf 'Unexpected video submit response body:\n%s\n' "$video_submit_body" >&2
   exit 1
 fi
@@ -135,7 +135,7 @@ if [[ "$video_status" != "403" ]]; then
   printf 'Expected video HTTP 403, got HTTP %s\n%s\n' "$video_status" "$video_body" >&2
   exit 1
 fi
-if [[ "$video_body" != *"Video generation requires this client space to use its own FAL key"* ]]; then
+if [[ "$video_body" != *"Video generation requires this space to use its own FAL key"* ]]; then
   printf 'Unexpected video response body:\n%s\n' "$video_body" >&2
   exit 1
 fi
