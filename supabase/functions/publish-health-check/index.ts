@@ -8,9 +8,9 @@
 // unchanged ('unknown') because transient outages shouldn't punish
 // the operator.
 //
-// In phase 0 no connectors exist yet — this is a stub that walks the
-// (empty) publishers table. Connector dispatch fills in as each platform
-// connector ships.
+// Trigger: pg_cron daily. Or manually:
+//   curl -X POST .../functions/v1/publish-health-check \
+//     -H "Authorization: Bearer $SERVICE_ROLE_KEY"
 
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
@@ -18,8 +18,11 @@ import { createClient } from 'npm:@supabase/supabase-js'
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
+  'Access-Control-Allow-Headers': 'authorization, content-type, apikey',
 }
+
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -28,10 +31,15 @@ Deno.serve(async (req) => {
       status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
+  if (!isServiceRequest(req)) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
 
   const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY,
   )
 
   const { data: publishers, error } = await supabase
@@ -76,6 +84,12 @@ Deno.serve(async (req) => {
   })
 })
 
+function isServiceRequest(req: Request) {
+  const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+  const apiKey = req.headers.get('apikey') ?? ''
+  return bearer === SUPABASE_SERVICE_ROLE_KEY || apiKey === SUPABASE_SERVICE_ROLE_KEY
+}
+
 // Connector dispatch. Calls the per-platform edge function's health_check
 // action via internal HTTP (rather than imports — keeps each connector
 // independently deployable).
@@ -85,9 +99,6 @@ async function checkPublisher(
   _credentialsRef: string,
   publisher_id?: string,
 ): Promise<{ status: 'healthy' | 'stale' | 'unknown'; detail?: string }> {
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-
   const targetFn = ({
     wordpress: 'wordpress-publish',
     ghost: 'ghost-publish',
@@ -104,12 +115,12 @@ async function checkPublisher(
   }
 
   try {
-    const res = await fetch(`${supabaseUrl}/functions/v1/${targetFn}`, {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/${targetFn}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${serviceKey}`,
-        'apikey': serviceKey,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'apikey': SUPABASE_SERVICE_ROLE_KEY,
       },
       body: JSON.stringify({ action: 'health_check', publisher_id }),
     })
