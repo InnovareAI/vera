@@ -609,6 +609,21 @@ export default function ReviewDetail() {
                     ? 'Send via Postmark to a recipient list, or copy + paste into your own email tool.'
                     : 'Copy the bundle, open the composer, paste, and publish.'}
             </p>
+            {(approvalRoute.publishGuard || approvalRoute.samTrigger) && (
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+                <p className="text-[11px] font-semibold text-amber-800 mb-1">Channel policy before publishing</p>
+                {approvalRoute.publishGuard && (
+                  <p className="text-xs leading-snug text-amber-800">
+                    <span className="font-medium">Guard:</span> {approvalRoute.publishGuard}
+                  </p>
+                )}
+                {approvalRoute.samTrigger && (
+                  <p className="text-xs leading-snug text-amber-800 mt-1">
+                    <span className="font-medium">SAM trigger:</span> {approvalRoute.samTrigger}
+                  </p>
+                )}
+              </div>
+            )}
             {post.channel?.toLowerCase() === 'linkedin' && (
               <button onClick={postToLinkedIn} disabled={marking || !linkedInPublishReady}
                 title={linkedInPublishDetail}

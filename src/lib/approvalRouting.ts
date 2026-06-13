@@ -11,6 +11,10 @@ export type ApprovalRoute = {
   reason: string
   checklist: string[]
   approverHint: string
+  publishGuard?: string
+  samTrigger?: string
+  policyApprovalMode?: string
+  policySpeakerMode?: string
 }
 
 const manualFirstChannels = new Set(['medium', 'quora', 'reddit', 'x', 'twitter'])
@@ -102,6 +106,16 @@ function channelPolicy(channel: string, context?: BusinessContext): DemandChanne
   return demandChannelPoliciesFromText(context?.channelOperatingPolicies)[key]
 }
 
+function policyRouteFields(policy?: DemandChannelOperatingPolicy | null): Pick<ApprovalRoute, 'publishGuard' | 'samTrigger' | 'policyApprovalMode' | 'policySpeakerMode'> {
+  if (!policy) return {}
+  return {
+    publishGuard: policy.publishGuard,
+    samTrigger: policy.samTrigger,
+    policyApprovalMode: policy.approvalMode,
+    policySpeakerMode: policy.speakerMode,
+  }
+}
+
 function contextText(context?: BusinessContext) {
   if (!context) return ''
   return [
@@ -159,6 +173,7 @@ export function approvalRouteForPost(post: Post, context?: BusinessContext): App
         ...checklist,
       ],
       approverHint: stakeholders,
+      ...policyRouteFields(policy),
     }
   }
 
@@ -175,6 +190,7 @@ export function approvalRouteForPost(post: Post, context?: BusinessContext): App
         ...checklist,
       ],
       approverHint: stakeholders,
+      ...policyRouteFields(policy),
     }
   }
 
@@ -190,6 +206,7 @@ export function approvalRouteForPost(post: Post, context?: BusinessContext): App
         ...checklist,
       ],
       approverHint: stakeholders,
+      ...policyRouteFields(policy),
     }
   }
 
@@ -205,6 +222,7 @@ export function approvalRouteForPost(post: Post, context?: BusinessContext): App
         ...checklist,
       ],
       approverHint: context?.approvalStakeholders?.trim() || 'Client lead or operator',
+      ...policyRouteFields(policy),
     }
   }
 
@@ -220,6 +238,7 @@ export function approvalRouteForPost(post: Post, context?: BusinessContext): App
         ...checklist,
       ],
       approverHint: post.author?.trim() || post.profile_name?.trim() || 'Named speaker',
+      ...policyRouteFields(policy),
     }
   }
 
@@ -230,5 +249,6 @@ export function approvalRouteForPost(post: Post, context?: BusinessContext): App
     reason: 'Low-risk social post with no named speaker or sensitive claim detected.',
     checklist,
     approverHint: context?.approvalStakeholders?.trim() || 'Operator or assigned reviewer',
+    ...policyRouteFields(policy),
   }
 }

@@ -241,6 +241,7 @@ Current state:
 - Demand Brain now exposes per-channel operating policy for speaker mode, approval path, publishing guard, measurement focus, and SAM handoff trigger across the full organic channel set.
 - Demand Brain channel policies are now client-editable, saved into project instructions, preserved by document extraction, and read by approval routing for review risk, checklists, and publishing guard context.
 - Command now summarizes saved channel policies in the Demand plan and injects publishing guards plus SAM triggers into campaign, channel matrix, and handoff prompts.
+- Review Detail now repeats the saved channel publishing guard and SAM trigger immediately before final publishing actions.
 - Vera chat now uses the shared LinkedIn research resolver, so an InnovareAI operator profile can research across client spaces without granting client publishing rights.
 - `ops/verify-media-key-scope.sh` now provides a no-spend production regression check that a client space without a FAL key cannot call a FAL-only image model through `generate-image`.
 - Shared text runtimes now use the same model-selection audit metadata, including requested model, policy default, selection source, and selection reason.
