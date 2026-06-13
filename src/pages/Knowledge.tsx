@@ -17,11 +17,18 @@
 // Per row: delete affordance, download (signed URL), title/source.
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Upload, Link2, FileText, Loader2, Trash2, ExternalLink, FileImage, FileType } from 'lucide-react'
+import { Upload, Link2, FileText, Loader2, Trash2, ExternalLink, FileImage, FileType, Brain as BrainIcon, Check } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useProject } from '../lib/projectContext'
 import { useRightRail } from '../lib/rightRailContext'
 import { useAuth } from '../lib/auth'
+import {
+  EMPTY_BUSINESS_CONTEXT,
+  mergeProjectInstructions,
+  parseProjectInstructions,
+  type BusinessContext,
+  type BusinessContextKey,
+} from '../lib/businessContext'
 import {
   PageHeader,
   EmptyState,
@@ -70,6 +77,14 @@ interface AssetRow {
 }
 
 type Mode = 'paste' | 'url' | 'file'
+
+type BrainUpdate = {
+  key: BusinessContextKey
+  label: string
+  value: string
+}
+
+const BRAIN_APPLY_META_KEY = '__vera_brain_apply'
 
 function classifyAssetKind(mime: string): string {
   if (mime.startsWith('image/'))           return 'image'
@@ -125,8 +140,122 @@ function compactDate(value: string) {
   return parsed.toLocaleDateString()
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function asCleanString(value: unknown): string {
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return ''
+}
+
+function asStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map(asCleanString).filter(Boolean)
+  }
+  const single = asCleanString(value)
+  return single ? [single] : []
+}
+
+function compactForBrain(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function pushUpdate(updates: BrainUpdate[], key: BusinessContextKey, label: string, value: unknown) {
+  const parts = Array.isArray(value) ? asStringList(value) : [asCleanString(value)]
+  const clean = parts.map(compactForBrain).filter(Boolean).join('; ')
+  if (clean) updates.push({ key, label, value: clean })
+}
+
+function joinExtractedParts(extracted: Record<string, unknown>, pairs: Array<[string, string]>): string {
+  return pairs
+    .map(([field, label]) => {
+      const value = Array.isArray(extracted[field])
+        ? asStringList(extracted[field]).join('; ')
+        : asCleanString(extracted[field])
+      return value ? `${label}: ${value}` : ''
+    })
+    .filter(Boolean)
+    .join('. ')
+}
+
+function appliedBrainMeta(row: KnowledgeRow): Record<string, unknown> | null {
+  const meta = asRecord(row.extracted)[BRAIN_APPLY_META_KEY]
+  return Object.keys(asRecord(meta)).length ? asRecord(meta) : null
+}
+
+function appliedBrainFields(row: KnowledgeRow): BusinessContextKey[] {
+  const fields = appliedBrainMeta(row)?.fields
+  if (!Array.isArray(fields)) return []
+  return fields.map(asCleanString).filter(Boolean) as BusinessContextKey[]
+}
+
+function buildBrainUpdates(row: KnowledgeRow): BrainUpdate[] {
+  const updates: BrainUpdate[] = []
+  const extracted = asRecord(row.extracted)
+  const kind = row.kind ?? 'other'
+
+  if (kind === 'voice') {
+    pushUpdate(updates, 'platformToneOfVoice', 'Voice rules', joinExtractedParts(extracted, [
+      ['tone', 'Tone'],
+      ['writing_rules', 'Writing rules'],
+      ['forbidden_phrases', 'Forbidden phrases'],
+      ['required_phrases', 'Required phrases'],
+    ]))
+  } else if (kind === 'brief') {
+    pushUpdate(updates, 'audience', 'Brief audience', extracted.audience)
+    pushUpdate(updates, 'offer', 'Brief value proposition', extracted.value_prop)
+    pushUpdate(updates, 'contentGoals', 'Brief key messages', extracted.key_messages)
+    pushUpdate(updates, 'conversionPath', 'Brief CTA', extracted.cta)
+    pushUpdate(updates, 'channelStrategy', 'Brief channel', extracted.channel)
+  } else if (kind === 'positioning') {
+    pushUpdate(updates, 'differentiators', 'Positioning', joinExtractedParts(extracted, [
+      ['category', 'Category'],
+      ['differentiator', 'Differentiator'],
+    ]))
+    pushUpdate(updates, 'audience', 'Target persona', extracted.target_persona)
+    pushUpdate(updates, 'competitors', 'Positioned against', extracted.against_who)
+  } else if (kind === 'case_study') {
+    pushUpdate(updates, 'proofPoints', 'Case study proof', joinExtractedParts(extracted, [
+      ['customer', 'Customer'],
+      ['outcome_number', 'Outcome'],
+      ['mechanism', 'Mechanism'],
+      ['quote', 'Quote'],
+    ]))
+  } else if (kind === 'audit') {
+    pushUpdate(updates, 'contentGoals', 'Audit fixes', extracted.top_fixes)
+    pushUpdate(updates, 'proofPoints', 'Audit strengths', extracted.strengths)
+    pushUpdate(updates, 'constraints', 'Audit finding', extracted.overall_finding)
+  } else if (kind === 'intel') {
+    pushUpdate(updates, 'competitors', 'Intel', joinExtractedParts(extracted, [
+      ['competitor', 'Competitor'],
+      ['what_happened', 'What happened'],
+      ['why_it_matters', 'Why it matters'],
+    ]))
+  } else if (kind === 'reference') {
+    pushUpdate(updates, 'contentGoals', 'Reference use', joinExtractedParts(extracted, [
+      ['what_it_documents', 'Documents'],
+      ['useful_when', 'Useful when'],
+    ]))
+  }
+
+  if (updates.length === 0 && kind !== 'source_pull' && row.summary) {
+    pushUpdate(updates, 'constraints', 'Knowledge note', row.summary)
+  }
+
+  return updates
+}
+
+function appendBrainEntry(existing: string, row: KnowledgeRow, update: BrainUpdate): string {
+  const source = row.title.trim() || 'Knowledge'
+  const entry = `${update.label} from ${source}: ${update.value}`
+  if (existing.includes(entry)) return existing
+  return [existing.trim(), entry].filter(Boolean).join('\n')
+}
+
 export default function Knowledge() {
-  const { activeProject } = useProject()
+  const { activeProject, refetch } = useProject()
   const { session } = useAuth()
   const [mode, setMode] = useState<Mode>('paste')
   const [pasteText, setPasteText] = useState('')
@@ -139,6 +268,7 @@ export default function Knowledge() {
   const [knowledge, setKnowledge] = useState<KnowledgeRow[]>([])
   const [assets, setAssets] = useState<AssetRow[]>([])
   const [dragOver, setDragOver] = useState(false)
+  const [applyingBrainId, setApplyingBrainId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
@@ -284,6 +414,65 @@ export default function Knowledge() {
     if (!confirm('Delete this knowledge entry? VERA will lose access.')) return
     await supabase.from('project_knowledge').delete().eq('id', id)
     load()
+  }
+
+  async function applyKnowledgeToBrain(row: KnowledgeRow) {
+    if (!activeProject?.id || applyingBrainId) return
+    const updates = buildBrainUpdates(row)
+    if (updates.length === 0) {
+      setError('This knowledge entry does not contain structured Brain fields yet.')
+      return
+    }
+
+    setApplyingBrainId(row.id)
+    setError(null)
+    setReport(null)
+
+    const parsed = parseProjectInstructions(activeProject.instructions ?? '')
+    const context: BusinessContext = {
+      ...EMPTY_BUSINESS_CONTEXT,
+      ...parsed.businessContext,
+      companyName: parsed.businessContext.companyName || activeProject.name,
+    }
+
+    for (const update of updates) {
+      context[update.key] = appendBrainEntry(context[update.key], row, update)
+    }
+
+    const { error: projectError } = await supabase
+      .from('projects')
+      .update({ instructions: mergeProjectInstructions(parsed.customInstructions, context) })
+      .eq('id', activeProject.id)
+
+    if (projectError) {
+      setError(projectError.message)
+      setApplyingBrainId(null)
+      return
+    }
+
+    const extracted = asRecord(row.extracted)
+    const appliedAt = new Date().toISOString()
+    const fields = updates.map(update => update.key)
+    const nextExtracted = {
+      ...extracted,
+      [BRAIN_APPLY_META_KEY]: {
+        applied_at: appliedAt,
+        fields,
+      },
+    }
+    const { error: rowError } = await supabase
+      .from('project_knowledge')
+      .update({ extracted: nextExtracted })
+      .eq('id', row.id)
+
+    if (rowError) {
+      setReport(`Applied to Brain. Could not mark the knowledge row: ${rowError.message}`)
+    } else {
+      setKnowledge(current => current.map(item => item.id === row.id ? { ...item, extracted: nextExtracted } : item))
+      setReport(`Applied to Brain · ${Array.from(new Set(fields)).join(', ')}`)
+    }
+    setApplyingBrainId(null)
+    refetch()
   }
 
   async function deleteAsset(asset: AssetRow) {
@@ -495,6 +684,10 @@ export default function Knowledge() {
             {knowledge.map(k => {
               const isSourcePull = k.kind === 'source_pull'
               const pullMeta = isSourcePull ? sourcePullMeta(k) : null
+              const brainUpdates = buildBrainUpdates(k)
+              const brainFields = appliedBrainFields(k)
+              const appliedToBrain = brainFields.length > 0
+              const applyingThisRow = applyingBrainId === k.id
               return (
                 <div
                   key={k.id}
@@ -523,6 +716,27 @@ export default function Knowledge() {
                       >
                         <span>↗</span>
                         <span style={{ color: 'var(--ink)' }}>{k.suggestion}</span>
+                      </div>
+                    )}
+
+                    {brainUpdates.length > 0 && (
+                      <div className="mt-2 flex items-center gap-2 flex-wrap">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          leading={appliedToBrain ? <Check size={13} /> : <BrainIcon size={13} />}
+                          loading={applyingThisRow}
+                          disabled={appliedToBrain || (!!applyingBrainId && !applyingThisRow)}
+                          onClick={() => { void applyKnowledgeToBrain(k) }}
+                          title={appliedToBrain ? 'Already applied to this client Brain' : 'Apply extracted fields to this client Brain'}
+                        >
+                          {appliedToBrain ? 'In Brain' : 'Apply to Brain'}
+                        </Button>
+                        <span style={{ color: 'var(--ghost)', fontSize: t.size.micro }}>
+                          {appliedToBrain
+                            ? `Saved to ${Array.from(new Set(brainFields)).join(', ')}`
+                            : `Updates ${Array.from(new Set(brainUpdates.map(update => update.key))).join(', ')}`}
+                        </span>
                       </div>
                     )}
 
