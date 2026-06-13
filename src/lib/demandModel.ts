@@ -377,15 +377,15 @@ const DEMAND_PLATFORM_SOURCE_KEYS: Record<DemandPlatformKey, BusinessContextKey[
 }
 
 const DEMAND_PLATFORM_ALIASES: Record<DemandPlatformKey, string[]> = {
-  linkedin: ['linkedin', 'li'],
-  youtube: ['youtube', 'you tube', 'shorts'],
+  linkedin: ['linkedin', 'linkedin company', 'linkedin company page', 'linkedin profile', 'linkedin personal', 'linkedin events', 'linkedin newsletter', 'li'],
+  youtube: ['youtube', 'you tube', 'youtube channel', 'shorts'],
   medium: ['medium'],
   quora: ['quora'],
   reddit: ['reddit'],
   x: ['x', 'twitter', 'x.com'],
-  instagram: ['instagram', 'ig', 'reels'],
-  facebook: ['facebook', 'fb'],
-  blog: ['blog', 'website', 'seo', 'article', 'wordpress', 'cms'],
+  instagram: ['instagram', 'instagram profile', 'ig', 'reels'],
+  facebook: ['facebook', 'facebook page', 'fb'],
+  blog: ['blog', 'website', 'company website', 'seo', 'article', 'wordpress', 'cms'],
   email: ['email', 'newsletter', 'nurture'],
 }
 
@@ -393,6 +393,43 @@ export function demandPlatformForProvider(provider: string): DemandPlatformDefin
   const key = DEMAND_PROVIDER_PLATFORM[provider]
   if (!key) return null
   return DEMAND_PLATFORM_DEFINITIONS.find(platform => platform.key === key) ?? null
+}
+
+export function demandActiveChannelKeysFromText(raw: string | null | undefined): DemandPlatformKey[] {
+  const source = raw?.trim()
+  if (!source) return []
+  let values: string[] = []
+  try {
+    const parsed = JSON.parse(source) as unknown
+    if (Array.isArray(parsed)) values = parsed.map(item => String(item))
+  } catch {
+    values = source.split(/[\n,;|]+/)
+  }
+  const keys: DemandPlatformKey[] = []
+  for (const value of values) {
+    const normalized = value.trim().toLowerCase()
+    if (!normalized) continue
+    const platform = DEMAND_PLATFORM_DEFINITIONS.find(item => (
+      item.key === normalized ||
+      item.label.toLowerCase() === normalized ||
+      (DEMAND_PLATFORM_ALIASES[item.key] ?? []).some(alias => alias.toLowerCase() === normalized)
+    ))
+    if (platform && !keys.includes(platform.key)) keys.push(platform.key)
+  }
+  return keys
+}
+
+export function serializeDemandActiveChannels(keys: DemandPlatformKey[]): string {
+  return Array.from(new Set(keys)).join(', ')
+}
+
+export function demandPlatformIsExplicitlySelected(platform: DemandPlatformDefinition | DemandPlatformKey, context: BusinessContext): boolean {
+  const key = typeof platform === 'string' ? platform : platform.key
+  return demandActiveChannelKeysFromText(context.activeChannels).includes(key)
+}
+
+export function demandHasExplicitChannelSelection(context: BusinessContext): boolean {
+  return demandActiveChannelKeysFromText(context.activeChannels).length > 0
 }
 
 export function demandPlatformSourceValues(platform: DemandPlatformDefinition | DemandPlatformKey, context: BusinessContext): string[] {
@@ -418,6 +455,11 @@ export function demandPlatformIsMentioned(platform: DemandPlatformDefinition | D
 }
 
 export function demandPlatformHasStrategyEvidence(platform: DemandPlatformDefinition | DemandPlatformKey, context: BusinessContext): boolean {
+  const activeKeys = demandActiveChannelKeysFromText(context.activeChannels)
+  if (activeKeys.length) {
+    const key = typeof platform === 'string' ? platform : platform.key
+    return activeKeys.includes(key)
+  }
   return demandPlatformSourceValues(platform, context).length > 0 || demandPlatformIsMentioned(platform, context)
 }
 
@@ -551,6 +593,7 @@ export const DEMAND_CONTENT_METRIC_PROVIDERS = [
 export const DEFAULT_DEMAND_OPERATING_MODEL: Pick<
   BusinessContext,
   | 'demandObjective'
+  | 'activeChannels'
   | 'conversionPath'
   | 'speakerStrategy'
   | 'platformToneOfVoice'
@@ -564,6 +607,7 @@ export const DEFAULT_DEMAND_OPERATING_MODEL: Pick<
   | 'channelOperatingPolicies'
 > = {
   demandObjective: 'Create measurable audience response that produces useful conversations, comments, shares, qualified traffic, and learning signals.',
+  activeChannels: '',
   conversionPath: 'Move attention into comments, shares, qualified site traffic, newsletter or event opt-ins, direct messages, purchase or inquiry paths, and follow-up queues.',
   speakerStrategy: 'Choose the speaker case by case: company account for official POV, named founder or expert when lived experience matters, and team voice only when source material supports it.',
   platformToneOfVoice: 'Keep one shared brand core, then adapt only for channels that have source evidence, existing audience, or an explicit strategy assumption in the Brain.',
@@ -581,6 +625,7 @@ export function applyDemandDefaults(context: BusinessContext): BusinessContext {
   return {
     ...context,
     demandObjective: context.demandObjective || DEFAULT_DEMAND_OPERATING_MODEL.demandObjective,
+    activeChannels: context.activeChannels || DEFAULT_DEMAND_OPERATING_MODEL.activeChannels,
     conversionPath: context.conversionPath || DEFAULT_DEMAND_OPERATING_MODEL.conversionPath,
     speakerStrategy: context.speakerStrategy || DEFAULT_DEMAND_OPERATING_MODEL.speakerStrategy,
     platformToneOfVoice: context.platformToneOfVoice || DEFAULT_DEMAND_OPERATING_MODEL.platformToneOfVoice,
@@ -596,6 +641,13 @@ export function applyDemandDefaults(context: BusinessContext): BusinessContext {
 }
 
 export function demandChannelsFromContext(context: BusinessContext, max = 8): string[] {
+  const activeKeys = demandActiveChannelKeysFromText(context.activeChannels)
+  if (activeKeys.length) {
+    return activeKeys
+      .map(key => DEMAND_PLATFORM_DEFINITIONS.find(platform => platform.key === key)?.label)
+      .filter((label): label is string => Boolean(label))
+      .slice(0, max)
+  }
   const sourceMatches = DEMAND_PLATFORM_DEFINITIONS
     .filter(platform => demandPlatformSourceValues(platform, context).length > 0)
     .map(platform => platform.label)

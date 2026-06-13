@@ -48,6 +48,7 @@ type BusinessContext = {
   facebook: string
   x: string
   sourcePullDepth: string
+  activeChannels: string
   industry: string
   offer: string
   audience: string
@@ -147,6 +148,7 @@ const FIELD_KEYS = [
   "facebook",
   "x",
   "sourcePullDepth",
+  "activeChannels",
   "companyName",
   "industry",
   "offer",
@@ -1154,6 +1156,7 @@ Rules:
 - Treat "website" as the primary company URL when present.
 - Extract LinkedIn company pages, LinkedIn personal profiles, LinkedIn events, LinkedIn newsletters, Instagram profiles, YouTube channels, Medium pages, Quora profiles, Reddit profiles or communities, Facebook pages, and X profiles only when explicitly present.
 - "sourcePullDepth" should be "light", "standard", or "deep" only when the source explicitly says how much source history to inspect. Otherwise return an empty string.
+- "activeChannels" should list only the channels the source makes strategy-valid for this client. Use comma-separated platform keys from: linkedin, youtube, medium, quora, reddit, x, instagram, facebook, blog, email. If the source is only a URL list with no strategic intent, infer from the provided source URLs. If the source says a channel is not part of strategy, omit it even if a URL exists.
 - Use source posts, events, and newsletters to infer positioning, recurring topics, proof points, and content goals, but keep URLs in their own fields.
 - "offer" should capture products, services, or core value proposition.
 - "audience" should capture target customers, users, communities, industries, or decision makers.

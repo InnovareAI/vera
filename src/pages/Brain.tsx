@@ -40,6 +40,8 @@ import {
   DEMAND_SOURCE_PULL_DEPTHS,
   DEFAULT_DEMAND_OPERATING_MODEL,
   applyDemandDefaults,
+  demandActiveChannelKeysFromText,
+  demandHasExplicitChannelSelection,
   demandSourcePullDepthItems,
   normalizeDemandSourcePullDepth,
   defaultDemandChannelPolicies,
@@ -48,6 +50,7 @@ import {
   demandChannelPolicyOverrideCount,
   demandPlatformIsMentioned,
   demandPlatformSourceValue,
+  serializeDemandActiveChannels,
   serializeDemandChannelPolicies,
   type DemandChannelOperatingPolicy,
   type DemandPlatformDefinition,
@@ -587,7 +590,11 @@ function riskLabel(risk: DemandChannelRisk) {
 }
 
 function orderedDemandPlatforms(context: BusinessContext) {
+  const selectedKeys = demandActiveChannelKeysFromText(context.activeChannels)
   return [...DEMAND_PLATFORM_DEFINITIONS].sort((a, b) => {
+    const aSelected = selectedKeys.includes(a.key) ? 1 : 0
+    const bSelected = selectedKeys.includes(b.key) ? 1 : 0
+    if (aSelected !== bSelected) return bSelected - aSelected
     const aSource = demandPlatformSourceValue(a, context) ? 1 : 0
     const bSource = demandPlatformSourceValue(b, context) ? 1 : 0
     if (aSource !== bSource) return bSource - aSource
@@ -599,14 +606,22 @@ function orderedDemandPlatforms(context: BusinessContext) {
 }
 
 function activeDemandPlatforms(context: BusinessContext) {
+  const selectedKeys = demandActiveChannelKeysFromText(context.activeChannels)
+  if (selectedKeys.length) {
+    return DEMAND_PLATFORM_DEFINITIONS.filter(platform => selectedKeys.includes(platform.key))
+  }
   const active = DEMAND_PLATFORM_DEFINITIONS.filter(platform => (
     Boolean(demandPlatformSourceValue(platform, context)) || demandPlatformIsMentioned(platform, context)
   ))
-  return active.length ? active : DEMAND_PLATFORM_DEFINITIONS
+  return active
 }
 
 function sourceGapPlatforms(context: BusinessContext) {
-  return DEMAND_PLATFORM_DEFINITIONS
+  const selectedKeys = demandActiveChannelKeysFromText(context.activeChannels)
+  const source = selectedKeys.length
+    ? DEMAND_PLATFORM_DEFINITIONS.filter(platform => selectedKeys.includes(platform.key))
+    : DEMAND_PLATFORM_DEFINITIONS
+  return source
     .filter(platform => platform.sourceKey && !demandPlatformSourceValue(platform, context))
     .slice(0, 6)
 }
@@ -903,6 +918,96 @@ function ReadinessTile({
   )
 }
 
+function ActiveChannelSelector({
+  context,
+  channelEvidence,
+  onChange,
+}: {
+  context: BusinessContext
+  channelEvidence: Map<DemandPlatformKey, BrainChannelEvidence>
+  onChange: (value: string) => void
+}) {
+  const explicit = demandHasExplicitChannelSelection(context)
+  const activeKeys = demandActiveChannelKeysFromText(context.activeChannels)
+  const inferredKeys = DEMAND_PLATFORM_DEFINITIONS
+    .filter(platform => (
+      demandPlatformSourceValue(platform, context) ||
+      demandPlatformIsMentioned(platform, context) ||
+      (channelEvidence.get(platform.key)?.posts ?? 0) > 0
+    ))
+    .map(platform => platform.key)
+  const selectedKeys = explicit ? activeKeys : inferredKeys
+
+  function toggle(key: DemandPlatformKey) {
+    const base = explicit ? activeKeys : inferredKeys
+    const next = base.includes(key)
+      ? base.filter(item => item !== key)
+      : [...base, key]
+    onChange(serializeDemandActiveChannels(next))
+  }
+
+  return (
+    <div style={{ gridColumn: '1 / -1', padding: space[4], border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: space[3], marginBottom: space[3], flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>Active channels</div>
+          <p style={{ margin: `${space[1]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.45, maxWidth: 680 }}>
+            These are the channels Vera can treat as strategy-valid for this client. If none are saved, Vera infers from source URLs, strategy text, and content history.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: space[2], alignItems: 'center', flexWrap: 'wrap' }}>
+          <Chip dot={explicit ? color.accent : color.ghost}>{explicit ? `${activeKeys.length} saved` : 'Inferring'}</Chip>
+          {explicit && (
+            <Button variant="ghost" size="sm" onClick={() => onChange('')}>
+              Clear
+            </Button>
+          )}
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 154px), 1fr))', gap: space[2] }}>
+        {DEMAND_PLATFORM_DEFINITIONS.map(platform => {
+          const selected = selectedKeys.includes(platform.key)
+          const source = demandPlatformSourceValue(platform, context)
+          const mentioned = demandPlatformIsMentioned(platform, context)
+          const evidence = channelEvidence.get(platform.key)
+          const evidencePosts = evidence?.posts ?? 0
+          const hint = source ? 'Source' : evidencePosts ? `${evidencePosts} posts` : mentioned ? 'Mentioned' : platform.publishing
+          return (
+            <button
+              key={platform.key}
+              type="button"
+              onClick={() => toggle(platform.key)}
+              title={platform.role}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '24px minmax(0, 1fr)',
+                gap: space[2],
+                alignItems: 'center',
+                textAlign: 'left',
+                padding: `${space[2]} ${space[3]}`,
+                borderRadius: radius.sm,
+                border: `1px solid ${selected ? color.accent : color.line}`,
+                background: selected ? color.accentSoft : color.surface,
+                color: color.ink,
+                cursor: 'pointer',
+                minWidth: 0,
+              }}
+            >
+              <span style={{ width: 24, height: 24, borderRadius: radius.xs, background: selected ? color.accent : color.paper2, color: selected ? color.surface : color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: t.size.micro, fontWeight: t.weight.semibold }}>
+                {platform.initials}
+              </span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: t.size.cap, fontWeight: t.weight.semibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platform.label}</span>
+                <span style={{ display: 'block', marginTop: 1, fontSize: t.size.micro, color: selected ? color.accent : color.ghost, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hint}</span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function DemandChannelMatrix({
   context,
   policies,
@@ -917,6 +1022,8 @@ function DemandChannelMatrix({
   const platforms = orderedDemandPlatforms(context)
   const configured = platforms.filter(platform => demandPlatformSourceValue(platform, context)).length
   const measured = platforms.filter(platform => (channelEvidence.get(platform.key)?.measured ?? 0) > 0).length
+  const explicitChannels = demandHasExplicitChannelSelection(context)
+  const selectedKeys = demandActiveChannelKeysFromText(context.activeChannels)
 
   return (
     <div style={{ marginTop: space[4], padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
@@ -938,7 +1045,8 @@ function DemandChannelMatrix({
           const mentioned = demandPlatformIsMentioned(platform, context)
           const evidence = channelEvidence.get(platform.key)
           const hasEvidence = (evidence?.posts ?? 0) > 0
-          const active = !!source || mentioned || hasEvidence
+          const selected = selectedKeys.includes(platform.key)
+          const active = explicitChannels ? selected : !!source || mentioned || hasEvidence
           const policy = policies[platform.key] ?? DEMAND_CHANNEL_OPERATING_POLICIES[platform.key]
           const customized = demandChannelPolicyHasOverride(platform.key, policy)
           return (
@@ -955,12 +1063,13 @@ function DemandChannelMatrix({
                 </span>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platform.label}</div>
-                  <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: 2 }}>{source ? 'Source configured' : evidence?.measured ? 'Learning from metrics' : hasEvidence ? 'Content tracked' : active ? 'In channel strategy' : 'Available'}</div>
+                  <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: 2 }}>{active ? source ? 'Source configured' : selected ? 'Brain-selected channel' : evidence?.measured ? 'Learning from metrics' : hasEvidence ? 'Content tracked' : 'In channel strategy' : 'Not active'}</div>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', marginBottom: space[3] }}>
                 <Chip dot={publishingTone(platform.publishing)}>{publishingLabel(platform.publishing)}</Chip>
                 <Chip dot={riskTone(policy.risk)}>{riskLabel(policy.risk)}</Chip>
+                {selected && <Chip dot={color.accent}>Brain-selected</Chip>}
                 {source && <Chip dot={color.success}>Source</Chip>}
                 {!source && mentioned && <Chip dot={color.info}>Planned</Chip>}
                 {hasEvidence && <Chip dot={evidence?.measured ? color.success : color.warn}>{evidence?.posts ?? 0} posts</Chip>}
@@ -1789,19 +1898,11 @@ export default function Brain() {
                 ))}
               </Select>
             </Field>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
-              {DEMAND_PLATFORM_DEFINITIONS.map(platform => (
-                <div key={platform.key} title={platform.role} style={{ padding: '7px 8px', borderRadius: radius.sm, border: `1px solid ${color.line}`, background: color.surface }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: t.size.micro, color: color.ink, fontWeight: t.weight.semibold }}>
-                    <span style={{ width: 22, height: 22, borderRadius: radius.sm, background: color.accentSoft, color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{platform.initials}</span>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platform.label}</span>
-                  </div>
-                  <div style={{ marginTop: 3, color: color.ghost, fontSize: t.size.micro, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {platform.publishing}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <ActiveChannelSelector
+              context={business}
+              channelEvidence={channelEvidence}
+              onChange={value => updateBusiness('activeChannels', value)}
+            />
             {(extractStatus || extractError || sourceStatus || sourceError) && (
               <p style={{ margin: 0, fontSize: t.size.cap, color: (extractError || sourceError) ? color.danger : color.success, lineHeight: 1.5 }}>
                 {extractError || sourceError || extractStatus || sourceStatus}

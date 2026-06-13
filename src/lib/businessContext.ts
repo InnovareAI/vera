@@ -13,6 +13,7 @@ export type BusinessContextKey =
   | 'facebook'
   | 'x'
   | 'sourcePullDepth'
+  | 'activeChannels'
   | 'industry'
   | 'offer'
   | 'audience'
@@ -52,6 +53,7 @@ export const EMPTY_BUSINESS_CONTEXT: BusinessContext = {
   facebook: '',
   x: '',
   sourcePullDepth: '',
+  activeChannels: '',
   industry: '',
   offer: '',
   audience: '',
@@ -92,6 +94,7 @@ const BUSINESS_CONTEXT_FIELDS: Array<{ key: BusinessContextKey; label: string }>
   { key: 'facebook', label: 'Facebook page' },
   { key: 'x', label: 'X profile' },
   { key: 'sourcePullDepth', label: 'Source pull depth' },
+  { key: 'activeChannels', label: 'Active channels' },
   { key: 'companyName', label: 'Company' },
   { key: 'industry', label: 'Industry' },
   { key: 'offer', label: 'Offer' },

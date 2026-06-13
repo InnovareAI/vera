@@ -1,6 +1,8 @@
 import {
   parseProjectBusinessContext,
+  projectHasLinkedInStrategy,
   resolveProjectAuditChannels,
+  type ProjectSourceResolution,
 } from "./project-sources.ts"
 import type { AdminClient } from "./auth.ts"
 
@@ -54,6 +56,7 @@ Deno.test("parseProjectBusinessContext reads source pull depth and all first-wav
 - Facebook page: https://facebook.com/example
 - X profile: https://x.com/example
 - Source pull depth: deep
+- Active channels: blog, instagram
 [[/VERA_BUSINESS_CONTEXT]]`)
 
   assertEquals(context.website, "https://example.com")
@@ -65,6 +68,44 @@ Deno.test("parseProjectBusinessContext reads source pull depth and all first-wav
   assertEquals(context.facebook, "https://facebook.com/example")
   assertEquals(context.x, "https://x.com/example")
   assertEquals(context.sourcePullDepth, "deep")
+  assertEquals(context.activeChannels, "blog, instagram")
+})
+
+Deno.test("projectHasLinkedInStrategy lets explicit active channels override source URLs", () => {
+  const withoutLinkedIn: ProjectSourceResolution = {
+    project: {
+      id: "project-1",
+      org_id: "org-1",
+      name: "Example",
+      is_default: false,
+      instructions: `[[VERA_BUSINESS_CONTEXT]]
+- Website: https://example.com
+- LinkedIn company page: https://linkedin.com/company/example
+- Active channels: blog, instagram
+[[/VERA_BUSINESS_CONTEXT]]`,
+    },
+    channels: [
+      { channel: "blog", url: "https://example.com" },
+      { channel: "linkedin_company", url: "https://linkedin.com/company/example" },
+    ],
+    source: "project_brain",
+    sourcePullDepth: "standard",
+  }
+
+  const withLinkedIn: ProjectSourceResolution = {
+    ...withoutLinkedIn,
+    project: {
+      ...withoutLinkedIn.project,
+      instructions: `[[VERA_BUSINESS_CONTEXT]]
+- Website: https://example.com
+- LinkedIn company page: https://linkedin.com/company/example
+- Active channels: blog, LinkedIn company page
+[[/VERA_BUSINESS_CONTEXT]]`,
+    },
+  }
+
+  assertEquals(projectHasLinkedInStrategy(withoutLinkedIn), false)
+  assertEquals(projectHasLinkedInStrategy(withLinkedIn), true)
 })
 
 Deno.test("resolveProjectAuditChannels returns project channels and requested pull depth", async () => {

@@ -922,6 +922,7 @@ async function synthesise(
     "platformToneOfVoice": "",
     "demandObjective": "",
     "conversionPath": "",
+    "activeChannels": "",
     "channelStrategy": "",
     "contentFormats": "",
     "approvalModel": "",
@@ -966,6 +967,7 @@ Rules:
 - If the content is sparse, say less. Fewer rules, fewer skills. Quality over quantity.
 - Do not return source URLs in business_context. The app already stores source URLs separately.
 - business_context should focus on the assumptions visible in the content: audience, objective, offer, problems, proof, channel fit, approval, engagement signals, traffic path, and follow-up triggers.
+- activeChannels should be a comma-separated list of platform keys that are strategy-valid based on the audited content. Supported keys: linkedin, youtube, medium, quora, reddit, x, instagram, facebook, blog, email. Include only channels with evidence or clear strategic intent.
 - platformToneOfVoice should separate a shared brand core from platform-specific tone when the evidence supports it.
 - speakerStrategy should say when Vera should write as the company, founder, named expert, or team. If evidence is unclear, say this needs human review.
 - engagementSignals should prioritize comments, shares, saves, qualified clicks, questions, inquiries, purchases, community actions, and traffic, not only likes or views.

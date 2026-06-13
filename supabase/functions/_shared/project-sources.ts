@@ -35,6 +35,7 @@ const LABEL_TO_KEY: Record<string, string> = {
   "facebook page": "facebook",
   "x profile": "x",
   "source pull depth": "sourcePullDepth",
+  "active channels": "activeChannels",
   "platform tone of voice": "platformToneOfVoice",
   "content objective": "demandObjective",
   "channel strategy": "channelStrategy",
@@ -45,6 +46,20 @@ type ProjectBusinessContext = Record<string, string>
 export type SourcePullDepth = "light" | "standard" | "deep"
 const LINKEDIN_SOURCE_KEYS = ["linkedinCompany", "linkedinProfile", "linkedinEvents", "linkedinNewsletter"]
 const LINKEDIN_CHANNELS = new Set(["linkedin_company", "linkedin_personal", "linkedin_events", "linkedin_newsletter"])
+const DEMAND_PLATFORM_KEYS = ["linkedin", "youtube", "medium", "quora", "reddit", "x", "instagram", "facebook", "blog", "email"] as const
+type DemandPlatformKey = typeof DEMAND_PLATFORM_KEYS[number]
+const PLATFORM_ALIASES: Record<DemandPlatformKey, string[]> = {
+  linkedin: ["linkedin", "linkedin company", "linkedin company page", "linkedin profile", "linkedin personal", "linkedin events", "linkedin newsletter", "li"],
+  youtube: ["youtube", "you tube", "youtube channel", "shorts"],
+  medium: ["medium"],
+  quora: ["quora"],
+  reddit: ["reddit"],
+  x: ["x", "twitter", "x.com"],
+  instagram: ["instagram", "instagram profile", "ig", "reels"],
+  facebook: ["facebook", "facebook page", "fb"],
+  blog: ["blog", "website", "company website", "seo", "article", "wordpress", "cms"],
+  email: ["email", "newsletter", "nurture"],
+}
 
 export async function resolveProjectAuditChannels(
   supabase: AdminClient,
@@ -124,8 +139,10 @@ export function linkedInPersonalUrl(channels: AuditChannelProfile[]): string | n
 }
 
 export function projectHasLinkedInStrategy(sourceResolution: ProjectSourceResolution): boolean {
-  if (sourceResolution.channels.some(channel => LINKEDIN_CHANNELS.has(channel.channel))) return true
   const context = parseProjectBusinessContext(sourceResolution.project.instructions)
+  const activeChannels = activeChannelKeysFromText(context.activeChannels)
+  if (activeChannels.length) return activeChannels.includes("linkedin")
+  if (sourceResolution.channels.some(channel => LINKEDIN_CHANNELS.has(channel.channel))) return true
   if (LINKEDIN_SOURCE_KEYS.some(key => cleanString(context[key]))) return true
   const strategyText = [
     context.channelStrategy,
@@ -175,6 +192,29 @@ function cleanString(value: unknown): string | undefined {
 function normalizeSourcePullDepth(value: string | undefined): SourcePullDepth {
   if (value === "light" || value === "deep" || value === "standard") return value
   return "standard"
+}
+
+function activeChannelKeysFromText(raw: string | undefined): DemandPlatformKey[] {
+  const source = raw?.trim()
+  if (!source) return []
+  let values: string[] = []
+  try {
+    const parsed = JSON.parse(source) as unknown
+    if (Array.isArray(parsed)) values = parsed.map(item => String(item))
+  } catch {
+    values = source.split(/[\n,;|]+/)
+  }
+  const keys: DemandPlatformKey[] = []
+  for (const value of values) {
+    const normalized = value.trim().toLowerCase()
+    if (!normalized) continue
+    const key = DEMAND_PLATFORM_KEYS.find(candidate => (
+      candidate === normalized ||
+      PLATFORM_ALIASES[candidate].some(alias => alias.toLowerCase() === normalized)
+    ))
+    if (key && !keys.includes(key)) keys.push(key)
+  }
+  return keys
 }
 
 function textMentionsAlias(haystack: string, alias: string): boolean {
