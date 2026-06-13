@@ -1201,10 +1201,29 @@ function hasLearningSignal(metric: LearningMetric) {
   )
 }
 
+function normalizeLifecycleStatus(status?: string | null) {
+  return (status ?? '').trim().toLowerCase().replace(/\s+/g, '_')
+}
+
+function isLearningPosted(post: Post) {
+  const status = normalizeLifecycleStatus(post.status)
+  return !!post.posted_at || !!post.published_at || !!post.posted_url || status === 'posted' || status === 'published'
+}
+
+function isLearningScheduled(post: Post) {
+  if (isLearningPosted(post)) return false
+  const status = normalizeLifecycleStatus(post.status)
+  return status === 'scheduled' || (status === 'approved' && !!(post.scheduled_at || post.publish_date))
+}
+
+function isLearningApproved(post: Post) {
+  return normalizeLifecycleStatus(post.status) === 'approved' && !isLearningScheduled(post) && !isLearningPosted(post)
+}
+
 function buildSummary(posts: Post[], metrics: Map<string, LearningMetric>, snapshotCount: number) {
-  const published = posts.filter(post => post.posted_at || post.published_at || post.status?.toLowerCase() === 'posted').length
-  const approved = posts.filter(post => post.status?.toLowerCase() === 'approved').length
-  const scheduled = posts.filter(post => post.scheduled_at).length
+  const published = posts.filter(isLearningPosted).length
+  const approved = posts.filter(isLearningApproved).length
+  const scheduled = posts.filter(isLearningScheduled).length
   const measured = Array.from(metrics.values()).filter(hasLearningSignal).length
   const totals = Array.from(metrics.values()).reduce((acc, metric) => ({
     views: acc.views + metric.views,
@@ -1289,7 +1308,7 @@ function buildInsights(posts: Post[], metrics: Map<string, LearningMetric>): Ins
     })
   }
 
-  const unscheduledApproved = posts.filter(post => post.status?.toLowerCase() === 'approved' && !post.scheduled_at && !post.posted_at).length
+  const unscheduledApproved = posts.filter(isLearningApproved).length
   if (unscheduledApproved > 0) {
     insights.push({
       title: 'Approved demand is not fully distributed',
