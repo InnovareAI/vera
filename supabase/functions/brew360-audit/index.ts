@@ -15,8 +15,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from 'npm:@supabase/supabase-js'
 import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
+import { checkProjectAiBudget, type ProjectAiBudgetWarning } from '../_shared/ai-policy.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
-import { resolveProjectTextRuntime, streamText, textRuntimeUsageMetadata } from '../_shared/text-runtime.ts'
+import { resolveProjectTextRuntime, streamText, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
 import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
 import { linkedInPersonalUrl, resolveProjectAuditChannels } from '../_shared/project-sources.ts'
 
@@ -30,6 +31,12 @@ const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const UNIPILE_DSN     = Deno.env.get('UNIPILE_DSN')
 const UNIPILE_API_KEY = Deno.env.get('UNIPILE_API_KEY')
+const APPROX_CHARS_PER_TOKEN = 4
+const BREW360_MAX_TOKENS = 4096
+
+type BudgetCheck =
+  | { ok: true; warning: ProjectAiBudgetWarning | null }
+  | { ok: false; message: string }
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -348,8 +355,26 @@ Analyze this profile and content against the 360Brew algorithm. Return the JSON 
 
       let raw = ''
       try {
+        const usageMetadata = textRuntimeUsageMetadata(runtime.runtime, {
+          posts_analyzed: postsContext.length,
+          principles_enabled: enabled,
+        })
+        const budget = await checkAuditBudget(
+          supabase,
+          org_id,
+          project_id,
+          runtime.runtime,
+          'audit.brew360',
+          systemPrompt,
+          userMessage,
+          BREW360_MAX_TOKENS,
+          usageMetadata,
+        )
+        if (!budget.ok) throw new Error(budget.message)
+        if (budget.warning) send('budget_warning', { warning: budget.warning })
+        const startedAt = Date.now()
         const completion = await streamText(runtime.runtime, {
-          maxTokens: 4096,
+          maxTokens: BREW360_MAX_TOKENS,
           temperature: 0.3,
           system: systemPrompt,
           user: userMessage,
@@ -377,7 +402,11 @@ Analyze this profile and content against the 360Brew algorithm. Return the JSON 
           operation: 'audit.brew360',
           inputTokens: completion.inputTokens,
           outputTokens: completion.outputTokens,
-          metadata: textRuntimeUsageMetadata(runtime.runtime, { posts_analyzed: postsContext.length }),
+          durationMs: Date.now() - startedAt,
+          metadata: {
+            ...usageMetadata,
+            ...(budget.warning ? { budget_warning: budget.warning } : {}),
+          },
         })
         send('done', payload)
         controller.close()
@@ -403,6 +432,35 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
+}
+
+function approxTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / APPROX_CHARS_PER_TOKEN))
+}
+
+async function checkAuditBudget(
+  supabase: AdminClient,
+  orgId: string,
+  projectId: string,
+  runtime: TextRuntime,
+  operation: string,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+  metadata: Record<string, unknown>,
+): Promise<BudgetCheck> {
+  const budget = await checkProjectAiBudget(supabase, projectId, {
+    orgId,
+    projectId,
+    provider: runtime.provider,
+    model: runtime.model,
+    operation,
+    inputTokens: approxTokens(`${systemPrompt}\n\n${userPrompt}`),
+    outputTokens: maxTokens,
+    metadata,
+  })
+  if (!budget.ok) return { ok: false, message: budget.message }
+  return { ok: true, warning: budget.warning }
 }
 
 function cleanString(value: unknown): string | null {

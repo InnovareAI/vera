@@ -11,6 +11,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from 'npm:@supabase/supabase-js'
 import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
+import { checkProjectAiBudget, type ProjectAiBudgetWarning } from '../_shared/ai-policy.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { resolveProjectTextRuntime, streamText, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
 import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
@@ -29,6 +30,12 @@ const APIFY_API_TOKEN = Deno.env.get('APIFY_API_TOKEN')
 
 const DEFAULT_ITEMS_PER_CHANNEL = 25
 const MAX_CHARS_PER_ITEM = 4000
+const APPROX_CHARS_PER_TOKEN = 4
+const CONTENT_SYNTHESIS_MAX_TOKENS = 6144
+
+type BudgetCheck =
+  | { ok: true; warning: ProjectAiBudgetWarning | null }
+  | { ok: false; message: string }
 
 type ChannelProfile = AuditChannelProfile
 
@@ -131,7 +138,12 @@ Deno.serve(async (req) => {
         send('synthesising', { sources: usable.map(r => ({ channel: r.channel, items: r.items.length })) })
 
         const corpus = buildCorpus(usable)
-        const synthesis = await synthesise(runtime.runtime, corpus, send)
+        const usageMetadata = textRuntimeUsageMetadata(runtime.runtime, {
+          channels_audited: usable.length,
+          items_audited: usable.reduce((sum, r) => sum + r.items.length, 0),
+        })
+        const startedAt = Date.now()
+        const synthesis = await synthesise(supabase, org_id, project_id, runtime.runtime, corpus, usageMetadata, send)
         const proposal = synthesis.proposal
         await logGenerationUsage(supabase, {
           orgId: org_id,
@@ -141,7 +153,11 @@ Deno.serve(async (req) => {
           operation: 'audit.content',
           inputTokens: synthesis.inputTokens,
           outputTokens: synthesis.outputTokens,
-          metadata: textRuntimeUsageMetadata(runtime.runtime),
+          durationMs: Date.now() - startedAt,
+          metadata: {
+            ...usageMetadata,
+            ...(synthesis.budgetWarning ? { budget_warning: synthesis.budgetWarning } : {}),
+          },
         })
 
         // 5. Save proposal
@@ -874,10 +890,14 @@ interface Proposal {
 }
 
 async function synthesise(
+  supabase: AdminClient,
+  orgId: string,
+  projectId: string,
   runtime: TextRuntime,
   corpus: string,
+  usageMetadata: Record<string, unknown>,
   send: (event: string, data: unknown) => void,
-): Promise<{ proposal: Proposal; inputTokens: number | null; outputTokens: number | null }> {
+): Promise<{ proposal: Proposal; inputTokens: number | null; outputTokens: number | null; budgetWarning: ProjectAiBudgetWarning | null }> {
   const sys = `You are VERA's Demand Brain auditor. You read a company's existing content and extract a precise model of their voice, audience, channel roles, demand strategy, and repeatable content patterns. Output ONLY valid JSON in exactly this shape, no prose, no markdown fences:
 
 {
@@ -953,11 +973,15 @@ Rules:
 - For every channelOperatingPolicies entry, use fields speakerMode, approvalMode, publishGuard, measurementFocus, samTrigger, risk. Risk must be low, medium, or high.
 - Personas should reflect who the author is writing FOR (their audience), not who the author IS.
 - Skills are reusable patterns: a hook style, a structural template, a recurring argument frame. 2-5 skills max.`
+  const userMessage = `Analyse this content and produce the JSON proposal:\n\n${corpus}`
+  const budget = await checkAuditBudget(supabase, orgId, projectId, runtime, 'audit.content', sys, userMessage, CONTENT_SYNTHESIS_MAX_TOKENS, usageMetadata)
+  if (!budget.ok) throw new Error(budget.message)
+  if (budget.warning) send('budget_warning', { warning: budget.warning })
 
   const response = await streamText(runtime, {
     system: sys,
-    user: `Analyse this content and produce the JSON proposal:\n\n${corpus}`,
-    maxTokens: 6144,
+    user: userMessage,
+    maxTokens: CONTENT_SYNTHESIS_MAX_TOKENS,
     json: true,
     onText: text => send('synthesis_chunk', { text }),
   })
@@ -980,7 +1004,36 @@ Rules:
   }
   if (!Array.isArray(proposal.personas)) proposal.personas = []
   if (!Array.isArray(proposal.skills)) proposal.skills = []
-  return { proposal, inputTokens: response.inputTokens, outputTokens: response.outputTokens }
+  return { proposal, inputTokens: response.inputTokens, outputTokens: response.outputTokens, budgetWarning: budget.warning }
+}
+
+function approxTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / APPROX_CHARS_PER_TOKEN))
+}
+
+async function checkAuditBudget(
+  supabase: AdminClient,
+  orgId: string,
+  projectId: string,
+  runtime: TextRuntime,
+  operation: string,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+  metadata: Record<string, unknown>,
+): Promise<BudgetCheck> {
+  const budget = await checkProjectAiBudget(supabase, projectId, {
+    orgId,
+    projectId,
+    provider: runtime.provider,
+    model: runtime.model,
+    operation,
+    inputTokens: approxTokens(`${systemPrompt}\n\n${userPrompt}`),
+    outputTokens: maxTokens,
+    metadata,
+  })
+  if (!budget.ok) return { ok: false, message: budget.message }
+  return { ok: true, warning: budget.warning }
 }
 
 function cleanString(value: unknown): string | null {

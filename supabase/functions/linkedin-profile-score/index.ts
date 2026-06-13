@@ -14,7 +14,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from 'npm:@supabase/supabase-js'
 import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
-import { completeText, resolveProjectTextRuntime, type TextRuntime } from '../_shared/text-runtime.ts'
+import { checkProjectAiBudget, type ProjectAiBudgetWarning } from '../_shared/ai-policy.ts'
+import { logGenerationUsage } from '../_shared/generation-usage.ts'
+import { completeText, resolveProjectTextRuntime, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
 import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
 import { linkedInPersonalUrl, resolveProjectAuditChannels } from '../_shared/project-sources.ts'
 
@@ -28,6 +30,12 @@ const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const UNIPILE_DSN     = Deno.env.get('UNIPILE_DSN')
 const UNIPILE_API_KEY = Deno.env.get('UNIPILE_API_KEY')
+const APPROX_CHARS_PER_TOKEN = 4
+const HEADLINE_REVIEW_MAX_TOKENS = 600
+
+type BudgetCheck =
+  | { ok: true; warning: ProjectAiBudgetWarning | null }
+  | { ok: false; message: string }
 
 interface Profile {
   provider_id?: string
@@ -145,8 +153,10 @@ Deno.serve(async (req) => {
   // Optional: LLM-driven qualitative review of the headline (the highest-leverage field).
   // Keep prompt tiny so it returns in well under the edge wall-clock limit.
   let headlineReview: { score: number; observations: string[]; rewrite: string } | null = null
+  let headlineReviewStatus: { status: 'completed' | 'skipped'; reason?: string; budget_warning?: ProjectAiBudgetWarning } = { status: 'skipped', reason: 'No client text runtime configured' }
   try {
     if (!textRuntime) throw new Error('No client text runtime configured')
+    headlineReviewStatus = { status: 'skipped', reason: 'AI headline review failed' }
     const sys = `You are a LinkedIn headline expert. You score a headline 0-100 and propose one concrete rewrite. Output ONLY valid JSON:
 { "score": <0-100>, "observations": ["3-5 specific observations about the current headline"], "rewrite": "<a single concrete proposed headline, ≤120 chars>" }
 
@@ -178,24 +188,67 @@ ${auditIntent.offer          ? `- Offer: ${auditIntent.offer}` : ''}
 ${auditIntent.value_prop     ? `- Value prop: ${auditIntent.value_prop}` : ''}
 ${auditIntent.themes?.length ? `- Themes: ${auditIntent.themes.join(', ')}` : ''}` : ''
 
-    const response = await completeText(textRuntime as TextRuntime, {
-      maxTokens: 600,
-      temperature: 0.3,
-      json: true,
-      system: sys,
-      user: `Headline: "${profile.headline ?? ''}"
+    const userPrompt = `Headline: "${profile.headline ?? ''}"
 
 Location: ${profile.location ?? '—'}
 Followers: ${profile.follower_count ?? 0}
 Is creator: ${profile.is_creator ?? false}
 
 About / summary:
-${(profile.summary ?? '').slice(0, 1500) || '(empty)'}${intentBlock}`,
+${(profile.summary ?? '').slice(0, 1500) || '(empty)'}${intentBlock}`
+    const usageMetadata = textRuntimeUsageMetadata(textRuntime as TextRuntime, {
+      target_source: resolvedSource,
+      has_audit_intent: Boolean(auditIntent),
+    })
+    const budget = await checkAuditBudget(
+      supabase,
+      org_id,
+      project_id,
+      textRuntime as TextRuntime,
+      'audit.linkedin_profile_headline',
+      sys,
+      userPrompt,
+      HEADLINE_REVIEW_MAX_TOKENS,
+      usageMetadata,
+    )
+    if (!budget.ok) {
+      headlineReviewStatus = { status: 'skipped', reason: budget.message }
+      throw new Error(budget.message)
+    }
+    const startedAt = Date.now()
+    const response = await completeText(textRuntime as TextRuntime, {
+      maxTokens: HEADLINE_REVIEW_MAX_TOKENS,
+      temperature: 0.3,
+      json: true,
+      system: sys,
+      user: userPrompt,
+    })
+    await logGenerationUsage(supabase, {
+      orgId: org_id,
+      projectId: project_id,
+      provider: (textRuntime as TextRuntime).provider,
+      model: (textRuntime as TextRuntime).model,
+      operation: 'audit.linkedin_profile_headline',
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
+      durationMs: Date.now() - startedAt,
+      metadata: {
+        ...usageMetadata,
+        ...(budget.warning ? { budget_warning: budget.warning } : {}),
+      },
     })
     const raw = response.text
     const m = raw.match(/\{[\s\S]*\}/)
-    if (m) headlineReview = JSON.parse(m[0])
-  } catch { /* non-fatal */ }
+    headlineReviewStatus = { status: 'skipped', reason: 'AI headline review did not return JSON', ...(budget.warning ? { budget_warning: budget.warning } : {}) }
+    if (m) {
+      headlineReview = JSON.parse(m[0])
+      headlineReviewStatus = { status: 'completed', ...(budget.warning ? { budget_warning: budget.warning } : {}) }
+    }
+  } catch (error) {
+    if (headlineReviewStatus.reason === 'AI headline review failed') {
+      headlineReviewStatus = { status: 'skipped', reason: error instanceof Error ? error.message : String(error) }
+    }
+  }
 
   // If the headline got a sharp LLM score, weight it into the headline section
   if (headlineReview) {
@@ -238,6 +291,7 @@ ${(profile.summary ?? '').slice(0, 1500) || '(empty)'}${intentBlock}`,
     completeness_only_score: Math.round(completeness),
     sections,
     fixes,
+    ai_review: headlineReviewStatus,
   }
 
   // Persist normal project scoring runs, but skip ad-hoc vanity lookups.
@@ -472,6 +526,35 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
+}
+
+function approxTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / APPROX_CHARS_PER_TOKEN))
+}
+
+async function checkAuditBudget(
+  supabase: AdminClient,
+  orgId: string,
+  projectId: string,
+  runtime: TextRuntime,
+  operation: string,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+  metadata: Record<string, unknown>,
+): Promise<BudgetCheck> {
+  const budget = await checkProjectAiBudget(supabase, projectId, {
+    orgId,
+    projectId,
+    provider: runtime.provider,
+    model: runtime.model,
+    operation,
+    inputTokens: approxTokens(`${systemPrompt}\n\n${userPrompt}`),
+    outputTokens: maxTokens,
+    metadata,
+  })
+  if (!budget.ok) return { ok: false, message: budget.message }
+  return { ok: true, warning: budget.warning }
 }
 
 function cleanString(value: unknown): string | null {

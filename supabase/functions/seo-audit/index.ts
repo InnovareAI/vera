@@ -13,6 +13,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from 'npm:@supabase/supabase-js'
 import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
+import { checkProjectAiBudget, type ProjectAiBudgetWarning } from '../_shared/ai-policy.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { resolveProjectTextRuntime, streamText, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
 
@@ -29,6 +30,12 @@ const PAGESPEED_API_KEY         = Deno.env.get('PAGESPEED_API_KEY')  // optional
 const USER_AGENT = 'Mozilla/5.0 (compatible; InnovareAI-SEO-Audit/0.1; +https://innovareai.com)'
 const MAX_INNER_PAGES = 4
 const MAX_PAGE_SIZE = 500_000  // 500KB cap per page
+const APPROX_CHARS_PER_TOKEN = 4
+const SEO_SYNTHESIS_MAX_TOKENS = 3000
+
+type BudgetCheck =
+  | { ok: true; warning: ProjectAiBudgetWarning | null }
+  | { ok: false; message: string }
 
 type PageSpeedResult = {
   lighthouseResult?: {
@@ -131,7 +138,8 @@ Deno.serve(async (req) => {
 
         send('synthesising', { audit_id: auditId })
         const startedAt = Date.now()
-        const synthesis = await synthesise(runtime.runtime, signal, send)
+        const usageMetadata = textRuntimeUsageMetadata(runtime.runtime, { pages_audited: 1 + innerPages.length })
+        const synthesis = await synthesise(supabase, org_id, project_id, runtime.runtime, signal, usageMetadata, send)
         const audit = synthesis.audit
         await logGenerationUsage(supabase, {
           orgId: org_id,
@@ -142,7 +150,10 @@ Deno.serve(async (req) => {
           inputTokens: synthesis.inputTokens,
           outputTokens: synthesis.outputTokens,
           durationMs: Date.now() - startedAt,
-          metadata: textRuntimeUsageMetadata(runtime.runtime, { pages_audited: 1 + innerPages.length }),
+          metadata: {
+            ...usageMetadata,
+            ...(synthesis.budgetWarning ? { budget_warning: synthesis.budgetWarning } : {}),
+          },
         })
 
         // ── Phase 7: persist final result ───────────────────────────────────
@@ -374,10 +385,14 @@ function stripHtml(s: string): string {
 // ──────────────────────────────────────────────────────────────────────────────
 
 async function synthesise(
+  supabase: AdminClient,
+  orgId: string,
+  projectId: string,
   runtime: TextRuntime,
   signal: Record<string, unknown>,
+  usageMetadata: Record<string, unknown>,
   send: (event: string, data: unknown) => void,
-): Promise<{ audit: Record<string, unknown>; inputTokens: number | null; outputTokens: number | null }> {
+): Promise<{ audit: Record<string, unknown>; inputTokens: number | null; outputTokens: number | null; budgetWarning: ProjectAiBudgetWarning | null }> {
   const sys = `You are KAI's SEO Auditor. You score a website on classical SEO + website optimization signal and propose concrete fixes. Output ONLY valid JSON in exactly this shape — no prose, no markdown fences:
 
 {
@@ -411,9 +426,12 @@ Constraints:
 - Don't invent — score only based on what's in the data.`
 
   const userMessage = `Audit this website data:\n\n${JSON.stringify(signal, null, 2).slice(0, 18000)}`
+  const budget = await checkAuditBudget(supabase, orgId, projectId, runtime, 'audit.seo', sys, userMessage, SEO_SYNTHESIS_MAX_TOKENS, usageMetadata)
+  if (!budget.ok) throw new Error(budget.message)
+  if (budget.warning) send('budget_warning', { warning: budget.warning })
 
   const completion = await streamText(runtime, {
-    maxTokens: 3000,
+    maxTokens: SEO_SYNTHESIS_MAX_TOKENS,
     temperature: 0.2,
     system: sys,
     user: userMessage,
@@ -427,10 +445,40 @@ Constraints:
       audit: m ? JSON.parse(m[0]) : { raw: completion.text },
       inputTokens: completion.inputTokens,
       outputTokens: completion.outputTokens,
+      budgetWarning: budget.warning,
     }
   } catch {
-    return { audit: { raw: completion.text }, inputTokens: completion.inputTokens, outputTokens: completion.outputTokens }
+    return { audit: { raw: completion.text }, inputTokens: completion.inputTokens, outputTokens: completion.outputTokens, budgetWarning: budget.warning }
   }
+}
+
+function approxTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / APPROX_CHARS_PER_TOKEN))
+}
+
+async function checkAuditBudget(
+  supabase: AdminClient,
+  orgId: string,
+  projectId: string,
+  runtime: TextRuntime,
+  operation: string,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+  metadata: Record<string, unknown>,
+): Promise<BudgetCheck> {
+  const budget = await checkProjectAiBudget(supabase, projectId, {
+    orgId,
+    projectId,
+    provider: runtime.provider,
+    model: runtime.model,
+    operation,
+    inputTokens: approxTokens(`${systemPrompt}\n\n${userPrompt}`),
+    outputTokens: maxTokens,
+    metadata,
+  })
+  if (!budget.ok) return { ok: false, message: budget.message }
+  return { ok: true, warning: budget.warning }
 }
 
 function jsonError(message: string, status: number): Response {
