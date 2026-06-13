@@ -103,8 +103,8 @@ second_status="$(curl -sS -o "$response_file" -w '%{http_code}' --max-time 20 \
   -d "{\"post_id\":\"$post_id\",\"action\":\"posted\",\"posted_url\":\"https://example.com/second\",\"provider_post_id\":\"second-provider-id\"}" \
   "$SUPABASE_PUBLIC_URL/functions/v1/approval-webhook")"
 second_body="$(cat "$response_file")"
-if [[ "$second_status" != "409" || "$second_body" != *"already marked posted"* ]]; then
-  printf 'Expected second mark-posted call to be rejected, got HTTP %s\n%s\n' "$second_status" "$second_body" >&2
+if [[ "$second_status" != "200" || "$second_body" != *"\"success\":true"* || "$second_body" != *"\"already_posted\":true"* ]]; then
+  printf 'Expected second mark-posted call to be idempotent, got HTTP %s\n%s\n' "$second_status" "$second_body" >&2
   exit 1
 fi
 
