@@ -84,6 +84,18 @@ interface SkillPerformance {
   last_used_at: string | null
 }
 
+interface LearningStats {
+  activeSkills: number
+  trackedSkills: number
+  totalUses: number
+  approved: number
+  edited: number
+  rejected: number
+  noSignalSkills: number
+  bestSkill?: Skill
+  bestPerformance?: SkillPerformance
+}
+
 interface EvalScenario {
   id: string
   org_id: string | null
@@ -325,6 +337,29 @@ export default function Skills() {
     client: skills.filter(s => scopeOf(s) === 'client').length,
   }), [skills])
 
+  const learningStats = useMemo<LearningStats>(() => {
+    const visibleSkillIds = new Set(skills.map(skill => skill.id))
+    const rows = Object.values(performance)
+      .filter(row => visibleSkillIds.has(row.skill_id) && row.total_invocations > 0)
+    const bestPerformance = [...rows].sort((a, b) => {
+      const rateDiff = (b.approval_rate ?? -1) - (a.approval_rate ?? -1)
+      if (rateDiff !== 0) return rateDiff
+      return b.total_invocations - a.total_invocations
+    })[0]
+
+    return {
+      activeSkills: skills.filter(skill => skill.is_active).length,
+      trackedSkills: rows.length,
+      totalUses: rows.reduce((sum, row) => sum + row.total_invocations, 0),
+      approved: rows.reduce((sum, row) => sum + row.approved_count, 0),
+      edited: rows.reduce((sum, row) => sum + row.edited_count, 0),
+      rejected: rows.reduce((sum, row) => sum + row.rejected_count, 0),
+      noSignalSkills: skills.filter(skill => skill.is_active && !(performance[skill.id]?.total_invocations > 0)).length,
+      bestSkill: bestPerformance ? skills.find(skill => skill.id === bestPerformance.skill_id) : undefined,
+      bestPerformance,
+    }
+  }, [skills, performance])
+
   const constitutionSkills = useMemo(() => {
     const constitutionalNames = new Set([
       'Vera Constitution',
@@ -538,12 +573,14 @@ export default function Skills() {
 
       {view === 'skills' && (
         <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: space[3], marginBottom: space[5] }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: space[3], marginBottom: space[5] }}>
         <Metric icon={Sparkles} label="Global Vera" value={counts.global} tone={color.accent} />
         <Metric icon={Layers} label="Workspace" value={counts.workspace} tone={color.dotBlue} />
         <Metric icon={BookOpen} label={activeProject ? 'Active client' : 'Client'} value={counts.client} tone={color.dotGreen} />
-        <Metric icon={BarChart3} label="With signal" value={Object.keys(performance).length} tone={color.dotViolet} />
+        <Metric icon={BarChart3} label="With signal" value={learningStats.trackedSkills} tone={color.dotViolet} />
       </div>
+
+      <LearningSignalPanel stats={learningStats} />
 
       <div
         style={{
@@ -845,6 +882,71 @@ function Metric({ icon: Icon, label, value, tone }: { icon: ElementType; label: 
         <div style={{ color: color.ink, fontSize: t.size.h4, fontWeight: t.weight.semibold, lineHeight: 1 }}>{value}</div>
         <div style={{ color: color.ghost, fontSize: t.size.cap, marginTop: 3 }}>{label}</div>
       </div>
+    </div>
+  )
+}
+
+function LearningSignalPanel({ stats }: { stats: LearningStats }) {
+  const bestLabel = stats.bestSkill && stats.bestPerformance
+    ? `${stats.bestSkill.name} - ${stats.bestPerformance.approval_rate ?? 0}% approved`
+    : 'No skill has enough signal yet.'
+  const signalGap = stats.noSignalSkills > 0
+    ? `${stats.noSignalSkills} active skill${stats.noSignalSkills === 1 ? '' : 's'} still need review outcomes.`
+    : 'Every active skill has at least one review outcome.'
+
+  return (
+    <section
+      style={{
+        marginBottom: space[5],
+        background: color.surface,
+        border: `1px solid ${color.line}`,
+        borderRadius: radius.md,
+        padding: space[5],
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+        gap: space[5],
+        alignItems: 'stretch',
+      }}
+    >
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: space[2], marginBottom: space[2] }}>
+          <span style={{ width: 28, height: 28, borderRadius: radius.sm, background: color.accentSoft, color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <BarChart3 size={15} strokeWidth={2} />
+          </span>
+          <h2 style={{ margin: 0, color: color.ink, fontSize: t.size.h4, fontWeight: t.weight.semibold }}>Learning signals</h2>
+        </div>
+        <p style={{ margin: 0, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.55 }}>
+          Approvals, edits, rejections, and posted outcomes show which skills Vera should trust for each client, channel, and person.
+        </p>
+        <div style={{ marginTop: space[4], display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[3] }}>
+          <SignalMini label="Active skills" value={stats.activeSkills} tone={color.ink} />
+          <SignalMini label="Tracked skills" value={stats.trackedSkills} tone={color.dotViolet} />
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: space[3] }}>
+        <SignalMini label="Total uses" value={stats.totalUses} tone={color.dotBlue} />
+        <SignalMini label="Approved" value={stats.approved} tone={color.success} />
+        <SignalMini label="Edited" value={stats.edited} tone={color.warn} />
+        <SignalMini label="Rejected" value={stats.rejected} tone={color.danger} />
+        <div style={{ gridColumn: 'span 2', background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[4] }}>
+          <p style={{ margin: 0, color: color.ghost, fontSize: t.size.micro, fontWeight: t.weight.semibold, textTransform: 'uppercase', letterSpacing: t.letterSpacing.wide }}>Best performer</p>
+          <p style={{ margin: '6px 0 0', color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.35 }}>{bestLabel}</p>
+        </div>
+        <div style={{ gridColumn: 'span 2', background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[4] }}>
+          <p style={{ margin: 0, color: color.ghost, fontSize: t.size.micro, fontWeight: t.weight.semibold, textTransform: 'uppercase', letterSpacing: t.letterSpacing.wide }}>Signal gap</p>
+          <p style={{ margin: '6px 0 0', color: stats.noSignalSkills > 0 ? color.ink : color.success, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.35 }}>{signalGap}</p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function SignalMini({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return (
+    <div style={{ background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[3] }}>
+      <div style={{ color: tone, fontSize: t.size.h4, fontWeight: t.weight.semibold, lineHeight: 1 }}>{value}</div>
+      <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: 5, fontWeight: t.weight.semibold, textTransform: 'uppercase', letterSpacing: t.letterSpacing.wide }}>{label}</div>
     </div>
   )
 }
