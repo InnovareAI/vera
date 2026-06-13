@@ -11,6 +11,8 @@ import { resolveUnipileResearchConnection } from "../_shared/unipile-research.ts
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? ""
+const OPENAI_EMBED_MODEL = Deno.env.get("OPENAI_EMBED_MODEL") ?? "text-embedding-3-small"
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")
 const ANTHROPIC_EXTRACT_MODEL = Deno.env.get("ANTHROPIC_EXTRACT_MODEL") ?? "claude-haiku-4-5"
 const OPENROUTER_EXTRACT_MODEL = Deno.env.get("OPENROUTER_EXTRACT_MODEL") ?? "google/gemini-2.5-flash"
@@ -86,6 +88,9 @@ type SourceReport = {
   depth?: SourcePullDepth
   source?: "direct" | "apify" | "unipile"
   error?: string
+  knowledgeStatus?: "stored" | "updated" | "stored_unindexed" | "updated_unindexed" | "failed"
+  knowledgeId?: string
+  knowledgeError?: string
 }
 
 type SourceDocument = {
@@ -97,7 +102,18 @@ type SourceDocument = {
   requestedItems?: number
 }
 
+type SourceKnowledgeSummary = {
+  stored: number
+  updated: number
+  unindexed: number
+  failed: number
+  error?: string
+}
+
 type SourcePullDepth = "light" | "standard" | "deep"
+
+type ProjectScope = { id: string; org_id: string; name?: string | null }
+type EmbedRuntime = { provider: "openai"; key: string; model: string; keySource: "platform" | "client" }
 
 type ExtractionRuntime =
   | ({ provider: "anthropic"; key: string; model: string; keySource: "platform" | "client" } & ExtractionRuntimeAudit)
@@ -192,12 +208,14 @@ Deno.serve(async (req) => {
   const existing = body.existing_context ?? {}
   let fileName = body.file_name?.trim() || "uploaded document"
   let sources: SourceReport[] | undefined
+  let pulledDocs: SourceDocument[] = []
   let content: { ok: true; value: unknown[] } | { ok: false; error: string }
 
   if (body.pull_sources) {
     fileName = "website and social sources"
     const pulled = await pullSourceContent(supabase, project.org_id, existing, auth.user.id)
     sources = pulled.sources
+    pulledDocs = pulled.docs
     if (!pulled.text.trim()) return jsonError("No readable source content found. Check the URLs or configure Innovare Apify.", 400)
     content = {
       ok: true,
@@ -240,7 +258,10 @@ Deno.serve(async (req) => {
   })
 
   const context = parseContextJson(extraction.output)
-  return json({ ok: true, context, source: fileName, sources })
+  const knowledge = body.pull_sources && pulledDocs.length
+    ? await persistPulledSourceKnowledge(supabase, project as ProjectScope, pulledDocs, sources ?? [])
+    : undefined
+  return json({ ok: true, context, source: fileName, sources, knowledge })
 })
 
 async function resolveExtractionRuntime(
@@ -451,6 +472,7 @@ async function pullSourceContent(
 
   return {
     sources,
+    docs,
     text: docs
       .map(doc => [
         `## ${doc.label}`,
@@ -756,6 +778,219 @@ function decodeHtml(raw: string) {
       const parsed = Number(code)
       return Number.isFinite(parsed) ? String.fromCodePoint(parsed) : ""
     })
+}
+
+function chunkText(text: string, max = 1200, overlap = 150): string[] {
+  const out: string[] = []
+  let i = 0
+  const clean = text.replace(/\r\n/g, "\n").trim()
+  while (i < clean.length) {
+    out.push(clean.slice(i, i + max))
+    i += max - overlap
+  }
+  return out.filter(chunk => chunk.trim().length > 50)
+}
+
+async function persistPulledSourceKnowledge(
+  supabase: SupabaseAdminClient,
+  project: ProjectScope,
+  docs: SourceDocument[],
+  reports: SourceReport[],
+): Promise<SourceKnowledgeSummary> {
+  const summary: SourceKnowledgeSummary = { stored: 0, updated: 0, unindexed: 0, failed: 0 }
+  const runtimeResult = await resolveSourceKnowledgeEmbeddingRuntime(supabase as unknown as AdminClient, project)
+  const runtime = runtimeResult.ok ? runtimeResult.runtime : null
+  const embeddingSkipMessage = runtimeResult.ok ? null : runtimeResult.message
+  if (embeddingSkipMessage) summary.error = embeddingSkipMessage
+
+  for (const doc of docs) {
+    const report = findSourceReport(reports, doc)
+    try {
+      const content = sourceDocumentKnowledgeContent(doc)
+      const chunks = chunkText(content)
+      if (!chunks.length) throw new Error("Source content is too short to store")
+      const embedding = runtime ? await embedSourceKnowledge(supabase as unknown as AdminClient, project, runtime, chunks[0]) : null
+      const title = `${doc.label} source pull`
+      const extracted = {
+        source: doc.source,
+        label: doc.label,
+        url: doc.url ?? null,
+        items: doc.items,
+        requestedItems: doc.requestedItems ?? null,
+        indexed: Boolean(embedding),
+        collectedAt: new Date().toISOString(),
+      }
+      const existing = doc.url ? await findExistingSourceKnowledge(supabase, project.id, doc.url) : null
+      if (existing?.id) {
+        const { error } = await supabase
+          .from("project_knowledge")
+          .update({
+            title,
+            content,
+            source_kind: "url",
+            source_url: doc.url ?? null,
+            kind: "source_pull",
+            summary: sourceDocumentSummary(doc, Boolean(embedding)),
+            extracted,
+            suggestion: null,
+            classified_at: null,
+            embedding: embedding as unknown as string | null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id)
+        if (error) throw new Error(`knowledge update failed: ${error.message}`)
+        summary.updated += 1
+        if (!embedding) summary.unindexed += 1
+        if (report) {
+          report.knowledgeStatus = embedding ? "updated" : "updated_unindexed"
+          report.knowledgeId = existing.id
+          if (!embedding && embeddingSkipMessage) report.knowledgeError = embeddingSkipMessage
+        }
+      } else {
+        const { data, error } = await supabase
+          .from("project_knowledge")
+          .insert({
+            project_id: project.id,
+            title,
+            content,
+            source_kind: "url",
+            source_url: doc.url ?? null,
+            kind: "source_pull",
+            summary: sourceDocumentSummary(doc, Boolean(embedding)),
+            extracted,
+            suggestion: null,
+            classified_at: null,
+            embedding: embedding as unknown as string | null,
+          })
+          .select("id")
+          .single()
+        if (error) throw new Error(`knowledge insert failed: ${error.message}`)
+        summary.stored += 1
+        if (!embedding) summary.unindexed += 1
+        if (report) {
+          report.knowledgeStatus = embedding ? "stored" : "stored_unindexed"
+          report.knowledgeId = data?.id as string | undefined
+          if (!embedding && embeddingSkipMessage) report.knowledgeError = embeddingSkipMessage
+        }
+      }
+    } catch (error) {
+      summary.failed += 1
+      if (report) {
+        report.knowledgeStatus = "failed"
+        report.knowledgeError = errorMessage(error)
+      }
+    }
+  }
+
+  return summary
+}
+
+async function resolveSourceKnowledgeEmbeddingRuntime(
+  supabase: AdminClient,
+  project: ProjectScope,
+): Promise<{ ok: true; runtime: EmbedRuntime } | { ok: false; message: string }> {
+  let platformProject: boolean
+  try {
+    platformProject = await isPlatformMediaProject(supabase, project.id, project.org_id)
+  } catch (error) {
+    return { ok: false, message: `Workspace billing policy could not be resolved: ${errorMessage(error)}` }
+  }
+
+  if (platformProject) {
+    if (!OPENAI_API_KEY) return { ok: false, message: "Platform OpenAI embeddings are not configured." }
+    return { ok: true, runtime: { provider: "openai", key: OPENAI_API_KEY, model: OPENAI_EMBED_MODEL, keySource: "platform" } }
+  }
+
+  try {
+    const openai = await loadClientApiKey(supabase, project.id, ["openai"])
+    if (openai?.key) {
+      return { ok: true, runtime: { provider: "openai", key: openai.key, model: OPENAI_EMBED_MODEL, keySource: "client" } }
+    }
+  } catch (error) {
+    return { ok: false, message: `Client OpenAI key for semantic source indexing is unavailable: ${errorMessage(error)}` }
+  }
+  return { ok: false, message: "Add a client OpenAI key to make pulled source knowledge semantic-searchable." }
+}
+
+async function embedSourceKnowledge(
+  supabase: AdminClient,
+  project: ProjectScope,
+  runtime: EmbedRuntime,
+  text: string,
+): Promise<number[]> {
+  const startedAt = Date.now()
+  const response = await fetch("https://api.openai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${runtime.key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: runtime.model,
+      input: text.slice(0, 8000),
+    }),
+  })
+  if (!response.ok) throw new Error(`OpenAI embed failed with HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`)
+  const data = await response.json() as { data?: Array<{ embedding?: number[] }>; usage?: { prompt_tokens?: number; total_tokens?: number } }
+  const embedding = data.data?.[0]?.embedding
+  if (!embedding?.length) throw new Error("OpenAI embed response did not include an embedding")
+  await logGenerationUsage(supabase, {
+    orgId: project.org_id,
+    projectId: project.id,
+    provider: runtime.provider,
+    model: runtime.model,
+    operation: "knowledge.source_embed",
+    inputTokens: data.usage?.prompt_tokens ?? data.usage?.total_tokens ?? null,
+    outputTokens: 0,
+    durationMs: Date.now() - startedAt,
+    metadata: { key_source: runtime.keySource, source: "business_context_source_pull" },
+  })
+  return embedding
+}
+
+async function findExistingSourceKnowledge(
+  supabase: SupabaseAdminClient,
+  projectId: string,
+  sourceUrl: string,
+) {
+  const { data, error } = await supabase
+    .from("project_knowledge")
+    .select("id")
+    .eq("project_id", projectId)
+    .eq("source_url", sourceUrl)
+    .eq("kind", "source_pull")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw new Error(`knowledge lookup failed: ${error.message}`)
+  return data as { id: string } | null
+}
+
+function findSourceReport(reports: SourceReport[], doc: SourceDocument) {
+  return reports.find(report => report.ok && report.label === doc.label && report.url === doc.url)
+    ?? reports.find(report => report.ok && report.label === doc.label)
+}
+
+function sourceDocumentKnowledgeContent(doc: SourceDocument) {
+  return [
+    `# ${doc.label}`,
+    `Source URL: ${doc.url ?? ""}`,
+    `Connector: ${sourceConnectorName(doc.source)}`,
+    `Items collected: ${doc.items}${doc.requestedItems ? `/${doc.requestedItems}` : ""}`,
+    "",
+    doc.text.slice(0, 120_000),
+  ].join("\n")
+}
+
+function sourceDocumentSummary(doc: SourceDocument, indexed: boolean) {
+  const count = doc.requestedItems ? `${doc.items}/${doc.requestedItems}` : String(doc.items)
+  return `${sourceConnectorName(doc.source)} pulled ${count} item${doc.items === 1 ? "" : "s"} from ${doc.label}${indexed ? "" : " (stored without semantic embedding)"}.`
+}
+
+function sourceConnectorName(source: SourceDocument["source"]) {
+  if (source === "unipile") return "Unipile"
+  if (source === "apify") return "Apify"
+  return "Direct"
 }
 
 function errorMessage(error: unknown) {

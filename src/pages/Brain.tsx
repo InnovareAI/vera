@@ -82,6 +82,17 @@ type SourcePullReport = {
   depth?: string
   source?: string
   error?: string
+  knowledgeStatus?: 'stored' | 'updated' | 'stored_unindexed' | 'updated_unindexed' | 'failed'
+  knowledgeId?: string
+  knowledgeError?: string
+}
+
+type SourceKnowledgeSummary = {
+  stored?: number
+  updated?: number
+  unindexed?: number
+  failed?: number
+  error?: string
 }
 
 const DEMAND_FACT_KEYS: BusinessContextKey[] = [
@@ -221,10 +232,22 @@ function sourceItemLabel(report: SourcePullReport) {
   return `${items} item${items === 1 ? '' : 's'}`
 }
 
+function sourceKnowledgeLabel(report: SourcePullReport) {
+  if (report.knowledgeStatus === 'stored') return 'Stored'
+  if (report.knowledgeStatus === 'updated') return 'Updated'
+  if (report.knowledgeStatus === 'stored_unindexed') return 'Stored, no embedding'
+  if (report.knowledgeStatus === 'updated_unindexed') return 'Updated, no embedding'
+  if (report.knowledgeStatus === 'failed') return 'Storage failed'
+  return ''
+}
+
 function SourcePullReportPanel({ reports }: { reports: SourcePullReport[] }) {
   if (!reports.length) return null
   const okCount = reports.filter(report => report.ok).length
   const failedCount = reports.length - okCount
+  const storedCount = reports.filter(report => report.knowledgeStatus === 'stored' || report.knowledgeStatus === 'updated').length
+  const unindexedCount = reports.filter(report => report.knowledgeStatus === 'stored_unindexed' || report.knowledgeStatus === 'updated_unindexed').length
+  const storageFailedCount = reports.filter(report => report.knowledgeStatus === 'failed').length
   const sorted = [...reports].sort((a, b) => Number(b.ok) - Number(a.ok) || String(a.label ?? '').localeCompare(String(b.label ?? '')))
   return (
     <div style={{ padding: space[3], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
@@ -232,6 +255,9 @@ function SourcePullReportPanel({ reports }: { reports: SourcePullReport[] }) {
         <div style={{ color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold }}>Source pull report</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <Chip dot={okCount ? color.success : color.ghost}>{okCount} pulled</Chip>
+          {storedCount > 0 && <Chip dot={color.success}>{storedCount} indexed</Chip>}
+          {unindexedCount > 0 && <Chip dot={color.warn}>{unindexedCount} raw</Chip>}
+          {storageFailedCount > 0 && <Chip dot={color.danger}>{storageFailedCount} storage failed</Chip>}
           {failedCount > 0 && <Chip dot={color.danger}>{failedCount} failed</Chip>}
         </div>
       </div>
@@ -239,7 +265,7 @@ function SourcePullReportPanel({ reports }: { reports: SourcePullReport[] }) {
         {sorted.map((report, index) => (
           <div
             key={`${report.label ?? 'source'}-${index}`}
-            title={report.error || report.url || report.label}
+            title={report.knowledgeError || report.error || report.url || report.label}
             style={{
               display: 'grid',
               gridTemplateColumns: 'minmax(0, 1fr) auto',
@@ -259,7 +285,9 @@ function SourcePullReportPanel({ reports }: { reports: SourcePullReport[] }) {
                 </span>
               </div>
               <div style={{ marginTop: 3, color: report.ok ? color.ghost : color.danger, fontSize: t.size.micro, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {report.ok ? `${sourceConnectorLabel(report.source)} · ${sourceItemLabel(report)}` : report.error ?? 'Source pull failed'}
+                {report.ok
+                  ? `${sourceConnectorLabel(report.source)} · ${sourceItemLabel(report)}${sourceKnowledgeLabel(report) ? ` · ${sourceKnowledgeLabel(report)}` : ''}`
+                  : report.error ?? 'Source pull failed'}
               </div>
             </div>
             <Chip dot={report.ok ? color.success : color.danger}>{report.ok ? 'OK' : 'Failed'}</Chip>
@@ -1092,6 +1120,7 @@ export default function Brain() {
         error?: string
         context?: Partial<BusinessContext>
         sources?: SourcePullReport[]
+        knowledge?: SourceKnowledgeSummary
       }
       if (!res.ok) throw new Error(data.error ?? `Source pull failed with HTTP ${res.status}`)
       setBusiness(prev => mergeExtractedContext(prev, data.context ?? {}))
@@ -1106,7 +1135,13 @@ export default function Brain() {
       const itemPart = requestedItems > 0
         ? `${pulledItems}/${requestedItems} items`
         : `${pulledItems} items`
-      setSourceStatus(`${depthLabel} pull: ${okCount}/${total} sources, ${itemPart}. Review and save.`)
+      const knowledge = data.knowledge
+      const indexedCount = (knowledge?.stored ?? 0) + (knowledge?.updated ?? 0) - (knowledge?.unindexed ?? 0)
+      const rawCount = knowledge?.unindexed ?? 0
+      const knowledgePart = knowledge
+        ? ` Brain: ${Math.max(0, indexedCount)} indexed${rawCount ? `, ${rawCount} raw` : ''}${knowledge.failed ? `, ${knowledge.failed} failed` : ''}.`
+        : ''
+      setSourceStatus(`${depthLabel} pull: ${okCount}/${total} sources, ${itemPart}.${knowledgePart} Review and save.`)
     } catch (error) {
       setSourceError(error instanceof Error ? error.message : 'Could not pull these sources.')
     } finally {
