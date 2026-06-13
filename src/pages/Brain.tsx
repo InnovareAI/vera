@@ -73,7 +73,16 @@ const BUSINESS_DOC_ACCEPT = [
   '.htm',
 ].join(',')
 const MAX_BUSINESS_DOC_BYTES = 20 * 1024 * 1024
-type SourcePullReport = { label?: string; ok?: boolean; items?: number; requestedItems?: number; depth?: string; error?: string }
+type SourcePullReport = {
+  label?: string
+  url?: string
+  ok?: boolean
+  items?: number
+  requestedItems?: number
+  depth?: string
+  source?: string
+  error?: string
+}
 
 const DEMAND_FACT_KEYS: BusinessContextKey[] = [
   'offer',
@@ -194,6 +203,68 @@ function DemandDefaultPanel({ title, items }: { title: string; items: string[] }
             +{items.length - 7}
           </span>
         )}
+      </div>
+    </div>
+  )
+}
+
+function sourceConnectorLabel(source: string | undefined) {
+  if (source === 'unipile') return 'Unipile'
+  if (source === 'apify') return 'Apify'
+  if (source === 'direct') return 'Direct'
+  return 'Connector'
+}
+
+function sourceItemLabel(report: SourcePullReport) {
+  const items = report.items ?? 0
+  if (report.requestedItems && report.requestedItems > 0) return `${items}/${report.requestedItems} items`
+  return `${items} item${items === 1 ? '' : 's'}`
+}
+
+function SourcePullReportPanel({ reports }: { reports: SourcePullReport[] }) {
+  if (!reports.length) return null
+  const okCount = reports.filter(report => report.ok).length
+  const failedCount = reports.length - okCount
+  const sorted = [...reports].sort((a, b) => Number(b.ok) - Number(a.ok) || String(a.label ?? '').localeCompare(String(b.label ?? '')))
+  return (
+    <div style={{ padding: space[3], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[2], marginBottom: space[2] }}>
+        <div style={{ color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold }}>Source pull report</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <Chip dot={okCount ? color.success : color.ghost}>{okCount} pulled</Chip>
+          {failedCount > 0 && <Chip dot={color.danger}>{failedCount} failed</Chip>}
+        </div>
+      </div>
+      <div style={{ display: 'grid', gap: 7, maxHeight: 230, overflowY: 'auto', paddingRight: 2 }}>
+        {sorted.map((report, index) => (
+          <div
+            key={`${report.label ?? 'source'}-${index}`}
+            title={report.error || report.url || report.label}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0, 1fr) auto',
+              gap: space[2],
+              alignItems: 'center',
+              padding: `${space[2]} ${space[3]}`,
+              borderRadius: radius.sm,
+              border: `1px solid ${report.ok ? color.line : color.danger}`,
+              background: report.ok ? color.paper2 : color.surface,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 999, background: report.ok ? color.success : color.danger, flexShrink: 0 }} />
+                <span style={{ color: color.ink, fontSize: t.size.micro, fontWeight: t.weight.semibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {report.label ?? 'Source'}
+                </span>
+              </div>
+              <div style={{ marginTop: 3, color: report.ok ? color.ghost : color.danger, fontSize: t.size.micro, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {report.ok ? `${sourceConnectorLabel(report.source)} · ${sourceItemLabel(report)}` : report.error ?? 'Source pull failed'}
+              </div>
+            </div>
+            <Chip dot={report.ok ? color.success : color.danger}>{report.ok ? 'OK' : 'Failed'}</Chip>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -815,6 +886,7 @@ export default function Brain() {
   const [pullingSources, setPullingSources] = useState(false)
   const [sourceStatus, setSourceStatus] = useState('')
   const [sourceError, setSourceError] = useState<string | null>(null)
+  const [sourceReports, setSourceReports] = useState<SourcePullReport[]>([])
   const [selectedPolicyKey, setSelectedPolicyKey] = useState<DemandPlatformKey>('linkedin')
   const [learningPosts, setLearningPosts] = useState<Post[]>([])
   const [learningSnapshots, setLearningSnapshots] = useState<ContentMetricSnapshot[]>([])
@@ -824,6 +896,9 @@ export default function Brain() {
   useEffect(() => {
     const parsed = parseProjectInstructions(activeProject?.instructions ?? '')
     setInstr(parsed.customInstructions)
+    setSourceStatus('')
+    setSourceError(null)
+    setSourceReports([])
     setBusiness({
       ...EMPTY_BUSINESS_CONTEXT,
       ...parsed.businessContext,
@@ -987,6 +1062,7 @@ export default function Brain() {
     if (!activeProject?.id) return
     setSourceError(null)
     setSourceStatus('')
+    setSourceReports([])
     if (!session?.access_token) {
       setSourceError('Sign in before pulling sources.')
       return
@@ -1020,6 +1096,7 @@ export default function Brain() {
       if (!res.ok) throw new Error(data.error ?? `Source pull failed with HTTP ${res.status}`)
       setBusiness(prev => mergeExtractedContext(prev, data.context ?? {}))
       const reports = data.sources ?? []
+      setSourceReports(reports)
       const okCount = reports.filter(item => item.ok).length
       const total = reports.length || DEMAND_SOURCE_KEYS.filter(key => business[key].trim()).length
       const pulledItems = reports.filter(item => item.ok).reduce((sum, item) => sum + (item.items ?? 0), 0)
@@ -1317,6 +1394,7 @@ export default function Brain() {
                 {extractError || sourceError || extractStatus || sourceStatus}
               </p>
             )}
+            <SourcePullReportPanel reports={sourceReports} />
             <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap' }}>
               <Button variant="secondary" size="sm" onClick={() => businessFileRef.current?.click()} disabled={extractingContext}>
                 {extractingContext ? <Loader2 size={13} /> : <Upload size={13} />}
