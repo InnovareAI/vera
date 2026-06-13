@@ -11,9 +11,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
-  MessageSquare, Brain,
+  MessageSquare, CheckSquare, Brain,
   BarChart3, TrendingUp, Zap, Settings, LogOut, ChevronsUpDown, Check, LayoutGrid, CalendarDays, Library, Plus, Clock, ChevronRight, ChevronLeft, KeyRound,
-  FolderOpen, Edit3, PanelLeft, MoreHorizontal, HelpCircle, Bell,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useOrg } from '../lib/orgContext'
@@ -29,146 +28,47 @@ import {
   type BusinessContext,
 } from '../lib/businessContext'
 
-function IconRailItem({
-  to, icon: Icon, label, onClick, accent = '#5ee37d',
-}: { to: string; icon: React.ElementType; label: string; onClick?: () => void; accent?: string }) {
+// ─── rail item ────────────────────────────────────────────────────────────
+// SAM treatment: icon + label, generous padding. Active = solid coral fill
+// with white text/icon (the screenshot's "Sam" item). Inactive = quiet gray.
+function RailItem({
+  to, icon: Icon, label, badge, onClick,
+}: { to: string; icon: React.ElementType; label: string; badge?: number; onClick?: () => void }) {
   return (
     <NavLink
       to={to}
+      end={to === '/dashboard'}
       onClick={onClick}
-      title={label}
-      aria-label={label}
-      className="transition-colors"
+      className="flex items-center gap-2 px-2.5 py-1.5 mx-2 transition-colors"
       style={({ isActive }) => ({
-        width: 48,
-        height: 48,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: 12,
-        background: isActive ? `${accent}2e` : 'transparent',
-        color: isActive ? '#f8fbf8' : 'rgba(230,238,235,0.78)',
-        border: isActive ? `1px solid ${accent}55` : '1px solid transparent',
-      })}
-    >
-      {({ isActive }) => (
-        <Icon size={22} strokeWidth={isActive ? 2.25 : 1.85} style={{ color: isActive ? accent : undefined }} />
-      )}
-    </NavLink>
-  )
-}
-
-function IconRailButton({
-  icon: Icon, label, onClick, alert,
-}: { icon: React.ElementType; label: string; onClick: () => void; alert?: boolean }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      className="transition-colors"
-      style={{
-        width: 48,
-        height: 48,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: 12,
-        background: 'transparent',
-        border: '1px solid transparent',
-        color: 'rgba(230,238,235,0.78)',
-        cursor: 'pointer',
-        position: 'relative',
-      }}
-    >
-      <Icon size={21} strokeWidth={1.85} />
-      {alert && <span style={{ position: 'absolute', right: 11, top: 10, width: 7, height: 7, borderRadius: 99, background: '#f05252', border: '1px solid #13201f' }} />}
-    </button>
-  )
-}
-
-function SideNavRow({
-  to, icon: Icon, label, badge, accent = '#5ee37d',
-}: { to: string; icon?: React.ElementType; label: string; badge?: number; accent?: string }) {
-  return (
-    <NavLink
-      to={to}
-      className="flex items-center gap-2.5 transition-colors"
-      style={({ isActive }) => ({
-        minHeight: 40,
-        padding: Icon ? '8px 10px' : '8px 12px',
-        borderRadius: 8,
-        background: isActive ? 'rgba(255,255,255,0.20)' : 'transparent',
-        color: isActive ? '#f7fbf8' : 'rgba(236,242,240,0.86)',
-        border: '1px solid transparent',
-        boxShadow: isActive ? `inset 3px 0 0 ${accent}` : 'none',
-        fontSize: 14,
-        fontWeight: isActive ? 650 : 500,
-        textDecoration: 'none',
+        background: isActive ? 'var(--accent)' : 'transparent',
+        color: isActive ? '#fff' : 'var(--ink-quiet)',
+        fontWeight: isActive ? 600 : 450,
+        fontSize: 13,
+        borderRadius: 'var(--radius-md)',
       })}
     >
       {({ isActive }) => (
         <>
-          {Icon && <Icon size={17} strokeWidth={isActive ? 2.25 : 1.85} style={{ flexShrink: 0, color: isActive ? accent : 'rgba(210,222,218,0.72)' }} />}
+          <Icon size={16} strokeWidth={isActive ? 2.1 : 1.75}
+            style={{ color: isActive ? '#fff' : 'var(--ghost)', flexShrink: 0 }} />
           <span className="flex-1 truncate">{label}</span>
           {typeof badge === 'number' && badge > 0 && (
-            <span style={{ minWidth: 20, height: 20, padding: '0 6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: isActive ? 'rgba(255,255,255,0.24)' : '#2a61d6', color: '#fff', fontSize: 11, fontWeight: 700 }}>
+            <span
+              className="text-[11px] px-1.5 leading-tight py-px"
+              style={{
+                background: isActive ? 'rgba(255,255,255,0.22)' : 'var(--accent-tint)',
+                color: isActive ? '#fff' : 'var(--accent)',
+                borderRadius: 'var(--radius-sm)',
+                fontWeight: 600,
+              }}
+            >
               {badge}
             </span>
           )}
         </>
       )}
     </NavLink>
-  )
-}
-
-function SideNavAction({
-  icon: Icon, label, badge, onClick, indent = false, accent = 'rgba(210,222,218,0.68)',
-}: { icon?: React.ElementType; label: string; badge?: number; onClick: () => void; indent?: boolean; accent?: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full flex items-center gap-2.5 transition-colors"
-      style={{
-        minHeight: 38,
-        padding: indent ? '7px 10px 7px 34px' : (Icon ? '7px 10px' : '7px 12px'),
-        borderRadius: 8,
-        background: 'transparent',
-        border: 'none',
-        color: 'rgba(236,242,240,0.82)',
-        fontSize: 13.5,
-        fontWeight: 500,
-        cursor: 'pointer',
-        textAlign: 'left',
-      }}
-    >
-      {Icon && <Icon size={16} strokeWidth={1.8} style={{ flexShrink: 0, color: accent }} />}
-      <span className="flex-1 truncate">{label}</span>
-      {typeof badge === 'number' && badge > 0 && (
-        <span style={{ minWidth: 20, height: 20, padding: '0 6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.13)', color: '#fff', fontSize: 11, fontWeight: 700 }}>
-          {badge}
-        </span>
-      )}
-    </button>
-  )
-}
-
-function SideNavGroup({
-  label, onAdd,
-}: { label: string; onAdd?: () => void }) {
-  return (
-    <div className="flex items-center gap-2" style={{ padding: '12px 10px 4px' }}>
-      <ChevronRight size={14} style={{ transform: 'rotate(90deg)', color: 'rgba(210,222,218,0.82)', flexShrink: 0 }} />
-      <span style={{ flex: 1, fontSize: 13.5, color: '#f3f8f5', fontWeight: 700 }}>{label}</span>
-      {onAdd && (
-        <button type="button" onClick={onAdd} title={`Add ${label.toLowerCase()}`} aria-label={`Add ${label.toLowerCase()}`}
-          style={{ width: 24, height: 24, borderRadius: 7, border: 'none', background: 'transparent', color: 'rgba(236,242,240,0.86)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-          <Plus size={16} />
-        </button>
-      )}
-    </div>
   )
 }
 
@@ -181,7 +81,7 @@ function SideNavGroup({
 // row of equal peers, so a new user can see the order of the work.
 function RailLabel({ children }: { children: string }) {
   return (
-    <div style={{ padding: '10px 14px 3px', fontSize: 9.5, fontWeight: 700, letterSpacing: 0, textTransform: 'uppercase', color: 'var(--ghost)' }}>{children}</div>
+    <div style={{ padding: '10px 14px 3px', fontSize: 9.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ghost)' }}>{children}</div>
   )
 }
 
@@ -230,12 +130,11 @@ function mergeRailSessions(remote: RailSession[], local: RailSession[]) {
   return Array.from(byId.values()).sort((a, b) => b.last_at.localeCompare(a.last_at)).slice(0, 5)
 }
 
-function RailRecents({ tone = 'light' }: { tone?: 'light' | 'dark' } = {}) {
+function RailRecents() {
   const { activeProject } = useProject()
   const navigate = useNavigate()
   const location = useLocation()
   const [sessions, setSessions] = useState<RailSession[]>([])
-  const dark = tone === 'dark'
 
   useEffect(() => {
     const pid = activeProject?.id
@@ -286,20 +185,20 @@ function RailRecents({ tone = 'light' }: { tone?: 'light' | 'dark' } = {}) {
   return (
     <nav className="space-y-0.5 mt-1">
       <button onClick={startNew} title="Start a new conversation"
-        className="w-full flex items-center gap-2.5 transition-colors"
-        style={{ background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 8, width: '100%', minHeight: 38, padding: '7px 10px' }}>
-        <Plus size={15} style={{ color: dark ? '#6ee78b' : 'var(--accent)', flexShrink: 0 }} />
-        <span className="flex-1 truncate text-left" style={{ fontSize: 13, fontWeight: 600, color: dark ? 'rgba(236,242,240,0.82)' : 'var(--ink)' }}>New chat</span>
+        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 mx-2 transition-colors hover:bg-[var(--fog)]"
+        style={{ background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 'var(--radius-md)', width: 'calc(100% - 1rem)' }}>
+        <Plus size={15} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+        <span className="flex-1 truncate text-left" style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>New chat</span>
       </button>
       {sessions.length > 0 && <RailLabel>Recents</RailLabel>}
       {sessions.map(s => {
         const title = compactRecentTitle(s.title)
         return (
           <button key={s.session_id} onClick={() => open(s.session_id)} title={title} aria-label={`Open recent chat: ${title}`}
-            className="w-full flex items-center gap-2.5 transition-colors"
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 8, width: '100%', minHeight: 36, padding: '7px 10px' }}>
-            <Clock size={14} style={{ color: dark ? 'rgba(210,222,218,0.68)' : 'var(--ghost)', flexShrink: 0 }} />
-            <span className="flex-1 truncate text-left" style={{ fontSize: 13, color: dark ? 'rgba(236,242,240,0.70)' : 'var(--ink-quiet)' }}>{title}</span>
+            className="w-full flex items-center gap-2.5 px-2.5 py-1.5 mx-2 transition-colors hover:bg-[var(--fog)]"
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 'var(--radius-md)', width: 'calc(100% - 1rem)' }}>
+            <Clock size={14} style={{ color: 'var(--ghost)', flexShrink: 0 }} />
+            <span className="flex-1 truncate text-left" style={{ fontSize: 13, color: 'var(--ink-quiet)' }}>{title}</span>
           </button>
         )
       })}
@@ -307,55 +206,44 @@ function RailRecents({ tone = 'light' }: { tone?: 'light' | 'dark' } = {}) {
   )
 }
 
-function ClientSwitcher({ tone = 'light', compact = false }: { tone?: 'light' | 'dark'; compact?: boolean } = {}) {
+function ClientSwitcher() {
   const { activeProject, projects, switchProject } = useProject()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [newClientOpen, setNewClientOpen] = useState(false)
   const name = activeProject?.name ?? 'Select space'
   const glyph = (s: string) => (s.trim()[0] ?? 'C').toUpperCase()
-  const dark = tone === 'dark'
 
   return (
-    <div style={{ position: 'relative', padding: compact ? 0 : (dark ? '8px 0 6px' : '12px 8px 4px'), width: '100%' }}>
+    <div style={{ position: 'relative', padding: '12px 8px 4px' }}>
       <button onClick={() => setOpen(o => !o)}
-        style={{
-          width: compact ? 'auto' : '100%',
-          display: 'flex',
-          alignItems: 'center',
-          gap: compact ? 5 : 9,
-          padding: compact ? 0 : '8px 9px',
-          borderRadius: compact ? 0 : 8,
-          border: compact ? 'none' : (dark ? '1px solid rgba(255,255,255,0.10)' : '1px solid var(--line)'),
-          background: compact ? 'transparent' : (dark ? 'rgba(255,255,255,0.06)' : 'var(--surface)'),
-          cursor: 'pointer',
-        }}>
-        {!compact && <span style={{ width: 22, height: 22, borderRadius: 6, background: dark ? '#2dbf63' : 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{glyph(name)}</span>}
-        <span style={{ flex: compact ? '0 1 auto' : 1, minWidth: 0, textAlign: 'left', fontSize: compact ? 12.5 : 13, fontWeight: compact ? 560 : 650, color: dark ? (compact ? 'rgba(231,241,237,0.62)' : '#f7fbf8') : 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{compact ? `Viewing ${name}` : name}</span>
-        <ChevronsUpDown size={compact ? 12 : 14} style={{ color: dark ? 'rgba(226,237,232,0.68)' : 'var(--ghost)', flexShrink: 0 }} />
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '7px 9px', borderRadius: 'var(--radius-md)', border: '1px solid var(--line)', background: 'var(--surface)', cursor: 'pointer' }}>
+        <span style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{glyph(name)}</span>
+        <span style={{ flex: 1, minWidth: 0, textAlign: 'left', fontSize: 13, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+        <ChevronsUpDown size={14} style={{ color: 'var(--ghost)', flexShrink: 0 }} />
       </button>
       {open && (
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 30 }} onClick={() => setOpen(false)} />
-          <div style={{ position: 'absolute', left: dark ? 0 : 8, right: compact ? 'auto' : (dark ? 0 : 8), top: '100%', marginTop: 6, zIndex: 40, width: compact ? 250 : undefined, background: dark ? '#132421' : 'var(--surface)', border: dark ? '1px solid rgba(255,255,255,0.10)' : '1px solid var(--line)', borderRadius: 10, boxShadow: 'var(--shadow-pop)', padding: 4, maxHeight: 380, overflowY: 'auto' }}>
+          <div style={{ position: 'absolute', left: 8, right: 8, top: '100%', marginTop: 4, zIndex: 40, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-pop)', padding: 4, maxHeight: 380, overflowY: 'auto' }}>
             {projects.map(p => {
               const active = p.id === activeProject?.id
               return (
                 <button key={p.id} onClick={() => { switchProject(p.slug); setOpen(false) }}
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '7px 9px', borderRadius: 8, border: 'none', background: active ? (dark ? 'rgba(255,255,255,0.14)' : 'var(--accent-tint)') : 'transparent', cursor: 'pointer', textAlign: 'left' }}>
-                  <span style={{ width: 20, height: 20, borderRadius: 5, background: active ? (dark ? '#2dbf63' : 'var(--accent)') : (dark ? 'rgba(255,255,255,0.10)' : 'var(--fog)'), color: active || dark ? '#fff' : 'var(--ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{glyph(p.name)}</span>
-                  <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: dark ? '#f7fbf8' : 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
-                  {active && <Check size={13} style={{ color: dark ? '#6ee78b' : 'var(--accent)', flexShrink: 0 }} />}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '7px 9px', borderRadius: 'var(--radius-sm)', border: 'none', background: active ? 'var(--accent-tint)' : 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+                  <span style={{ width: 20, height: 20, borderRadius: 5, background: active ? 'var(--accent)' : 'var(--fog)', color: active ? '#fff' : 'var(--ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{glyph(p.name)}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                  {active && <Check size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
                 </button>
               )
             })}
-            <div style={{ height: 1, background: dark ? 'rgba(255,255,255,0.10)' : 'var(--line)', margin: '4px 0' }} />
+            <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
             <button onClick={() => { setOpen(false); setNewClientOpen(true) }}
-              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontSize: 12.5, color: dark ? '#6ee78b' : 'var(--accent)', fontWeight: 600 }}>
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 'var(--radius-sm)', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontSize: 12.5, color: 'var(--accent)', fontWeight: 600 }}>
               <Plus size={13} /> New space
             </button>
             <button onClick={() => { setOpen(false); navigate('/spaces') }}
-              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontSize: 12.5, color: dark ? 'rgba(226,237,232,0.68)' : 'var(--ghost)' }}>
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 'var(--radius-sm)', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontSize: 12.5, color: 'var(--ghost)' }}>
               <LayoutGrid size={13} /> View all spaces
             </button>
           </div>
@@ -583,85 +471,58 @@ export default function Layout() {
   const name = user?.email?.split('@')[0] ?? 'Account'
   const displayName = name.charAt(0).toUpperCase() + name.slice(1)
   const initials = (user?.email?.slice(0, 2) ?? 'V').toUpperCase()
-  const reviewPreferenceScope = activeProject?.id ?? activeOrg?.id ?? 'global'
-
-  const startNewPost = () => {
-    const target = p('vera')
-    if (location.pathname === target) {
-      window.dispatchEvent(new CustomEvent('vera:home'))
-      return
-    }
-    if (activeProject?.id) {
-      try { localStorage.setItem(`vera-session:${activeProject.id}`, crypto.randomUUID()) } catch { /* ignore */ }
-    }
-    navigate(target)
-  }
-
-  const openReviewTab = (tab: string) => {
-    try { localStorage.setItem(`vera-review-tab:${reviewPreferenceScope}`, tab) } catch { /* ignore */ }
-    navigate(p('review'))
-  }
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: '#0e1c1b' }}>
-      {/* Icon rail */}
+    <div className="flex h-screen overflow-hidden" style={{ background: 'transparent' }}>
+      {/* ── Left rail (SAM) ── white, narrow, flat nav, user at the bottom */}
       <aside
         className="flex-shrink-0 flex flex-col"
-        style={{
-          width: 76,
-          background: 'linear-gradient(180deg, #0c1d1a 0%, #132432 55%, #1f3c36 100%)',
-          borderRight: '1px solid rgba(255,255,255,0.08)',
-          alignItems: 'center',
-          padding: '18px 10px 14px',
-        }}
+        style={{ width: 204, background: 'var(--paper-warm)', borderRight: '1px solid var(--paper-edge)' }}
       >
-        <button
-          type="button"
-          onClick={() => navigate(p('blueprint'))}
-          title="VERA"
-          aria-label="VERA"
-          style={{
-            width: 42,
-            height: 42,
-            borderRadius: 12,
-            border: '1px solid rgba(255,255,255,0.10)',
-            background: 'rgba(255,255,255,0.08)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            marginBottom: 20,
-          }}
-        >
-          <img src="/favicon.svg" alt="" style={{ width: 28, height: 28, display: 'block' }} />
-        </button>
+        {/* Active client — top-of-rail switcher (always-visible context). */}
+        <ClientSwitcher />
 
-        <nav className="flex flex-col items-center gap-3">
-          <IconRailItem to={p('blueprint')} icon={LayoutGrid} label="Desk" accent="#6ee78b" />
-          <IconRailItem to={p('calendar')} icon={CalendarDays} label="Calendar" accent="#52d1ff" />
-          <IconRailItem to={p('review')} icon={FolderOpen} label="Publishing" accent="#f7b955" />
-          <IconRailItem to={p('vera')} icon={MessageSquare} label="Ask VERA" accent="#a78bfa" onClick={() => window.dispatchEvent(new CustomEvent('vera:home'))} />
-          <IconRailItem to={p('artifacts')} icon={Library} label="Studio" accent="#fb7185" />
-          <IconRailItem to={p('brain')} icon={Brain} label="Brain" accent="#34d399" />
-          <IconRailItem to={p('measure')} icon={BarChart3} label="Performance" accent="#60a5fa" />
+        {/* Primary nav grouped around the content strategy loop. */}
+        <nav className="pt-1 space-y-0.5">
+          <RailItem to={p('blueprint')} icon={LayoutGrid}      label="Desk" />
+          <RailItem to={p('vera')}      icon={MessageSquare}   label="Ask VERA" onClick={() => window.dispatchEvent(new CustomEvent('vera:home'))} />
+
+          <RailLabel>Production</RailLabel>
+          <RailItem to={p('review')}    icon={CheckSquare}     label="Review" badge={pendingCount} />
+          <RailItem to={p('calendar')}  icon={CalendarDays}    label="Planner" />
+          <RailItem to={p('artifacts')} icon={Library}         label="Studio" />
+
+          <RailLabel>Demand</RailLabel>
+          <RailItem to={p('brain')}     icon={Brain}           label="Strategy Brain" />
+          <RailItem to={p('measure')}   icon={BarChart3}       label="Performance" />
+          <RailItem to={p('learning')}  icon={TrendingUp}      label="Learning" />
+          <RailItem to={p('keys')}      icon={KeyRound}        label="Integrations" />
         </nav>
+
+        <RailRecents />
 
         <div className="flex-1" />
 
-        <nav className="flex flex-col items-center gap-3">
-          <IconRailItem to={p('learning')} icon={TrendingUp} label="Learning" accent="#f472b6" />
-          <IconRailItem to={p('keys')} icon={KeyRound} label="Integrations" accent="#facc15" />
-          <IconRailItem to="/skills" icon={Zap} label="AI Settings" accent="#c084fc" />
-          <IconRailButton icon={Bell} label="Notifications" onClick={() => navigate(p('review'))} alert={pendingCount > 0} />
-          <IconRailButton icon={Settings} label="Settings" onClick={() => setSettingsOpen(true)} />
-          <IconRailButton icon={HelpCircle} label="Help" onClick={() => navigate(p('blueprint'))} />
+        {/* Utility group — mirrors SAM's AI Settings · Settings · user. */}
+        {/* Settings opens as a modal (SAM pattern), not a page nav. */}
+        <nav className="space-y-0.5 pb-1">
+          <RailItem to="/skills" icon={Zap} label="AI Settings" />
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 mx-2 transition-colors hover:bg-[var(--fog)]"
+            style={{ background: 'transparent', color: 'var(--ink-quiet)', fontWeight: 450, fontSize: 13, borderRadius: 'var(--radius-md)', width: 'calc(100% - 1rem)' }}
+          >
+            <Settings size={16} strokeWidth={1.75} style={{ color: 'var(--ghost)', flexShrink: 0 }} />
+            <span className="flex-1 text-left truncate">Settings</span>
+          </button>
         </nav>
 
-        <div style={{ position: 'relative', marginTop: 12 }}>
+        {/* Signed-in user — click for an always-visible menu with Log out. */}
+        <div className="px-2 pb-3 pt-1" style={{ position: 'relative' }}>
           {userMenuOpen && (
             <>
               <div style={{ position: 'fixed', inset: 0, zIndex: 30 }} onClick={() => setUserMenuOpen(false)} />
-              <div style={{ position: 'absolute', left: 0, bottom: '100%', marginBottom: 8, zIndex: 40, width: 220, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-pop)', padding: 4 }}>
+              <div style={{ position: 'absolute', left: 8, right: 8, bottom: '100%', marginBottom: 6, zIndex: 40, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-pop)', padding: 4 }}>
                 <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--ghost)', borderBottom: '1px solid var(--line)', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {user?.email ?? 'Not signed in'}
                 </div>
@@ -673,117 +534,20 @@ export default function Layout() {
             </>
           )}
           <button onClick={() => setUserMenuOpen(o => !o)}
-            title={displayName}
-            aria-label={displayName}
-            style={{ width: 42, height: 42, borderRadius: 12, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.10)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span className="flex items-center justify-center text-[11px] font-semibold"
-              style={{ width: 28, height: 28, background: '#6ee78b', color: '#0d1a18', borderRadius: '50%' }}>
+            className="w-full flex items-center gap-2.5 px-2.5 py-2 transition-colors hover:bg-[var(--fog)]"
+            style={{ borderRadius: 'var(--radius-md)', background: 'transparent', border: 'none', cursor: 'pointer' }}>
+            <span className="w-7 h-7 flex items-center justify-center text-[11px] font-semibold flex-shrink-0"
+              style={{ background: 'var(--accent-tint)', color: 'var(--accent)', borderRadius: '50%' }}>
               {initials}
             </span>
+            <span className="flex-1 truncate text-[13.5px] text-left" style={{ color: 'var(--ink)' }}>{displayName}</span>
+            <ChevronsUpDown size={14} style={{ color: 'var(--ghost)', flexShrink: 0 }} />
           </button>
         </div>
       </aside>
 
-      {/* Publishing rail */}
-      <aside
-        className="flex-shrink-0 flex flex-col"
-        style={{
-          width: 270,
-          background: 'linear-gradient(180deg, #10211e 0%, #122525 58%, #162d32 100%)',
-          borderRight: '1px solid rgba(255,255,255,0.08)',
-          color: '#edf7f2',
-          padding: '26px 16px 16px',
-        }}
-      >
-        <div className="flex items-center gap-3" style={{ marginBottom: 18 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h1 style={{ margin: 0, color: '#f7fbf8', fontSize: 20, fontWeight: 760, lineHeight: 1.1 }}>Publishing</h1>
-              <span style={{ width: 8, height: 8, borderRadius: 99, background: '#6ee78b', boxShadow: '0 0 0 3px rgba(110,231,139,0.14)' }} />
-            </div>
-            <div style={{ marginTop: 5 }}>
-              <ClientSwitcher tone="dark" compact />
-            </div>
-          </div>
-          <button
-            type="button"
-            title="Collapse navigation"
-            aria-label="Collapse navigation"
-            style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.06)', color: 'rgba(236,242,240,0.86)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-          >
-            <PanelLeft size={17} />
-          </button>
-        </div>
-
-        <button
-          type="button"
-          onClick={startNewPost}
-          className="w-full flex items-center justify-between transition-colors"
-          style={{
-            minHeight: 46,
-            borderRadius: 9,
-            border: '1px solid rgba(255,255,255,0.10)',
-            background: '#2864d8',
-            color: '#fff',
-            padding: '0 12px 0 14px',
-            fontSize: 14.5,
-            fontWeight: 760,
-            cursor: 'pointer',
-            boxShadow: '0 14px 28px rgba(40,100,216,0.28)',
-            marginBottom: 12,
-          }}
-        >
-          <span className="flex items-center gap-2"><Plus size={18} /> New post</span>
-          <Edit3 size={17} />
-        </button>
-
-        <nav className="space-y-1" style={{ marginTop: 6 }}>
-          <SideNavRow to={p('calendar')} label="Calendar" accent="#52d1ff" />
-          <SideNavRow to={p('review')} label="Review queue" badge={pendingCount} accent="#f7b955" />
-          <SideNavAction label="Drafts" onClick={() => openReviewTab('Draft')} />
-          <SideNavAction label="Needs approval" badge={pendingCount} onClick={() => openReviewTab('Pending Review')} />
-          <SideNavAction label="Rejected" onClick={() => openReviewTab('Rejected')} />
-
-          <SideNavGroup label="Campaigns" onAdd={() => navigate(p('calendar'))} />
-          <SideNavAction label="Active campaigns" onClick={() => navigate(p('calendar'))} indent accent="#6ee78b" />
-          <SideNavAction label="Archived campaigns" onClick={() => navigate(p('calendar'))} indent accent="#94a3b8" />
-
-          <div style={{ height: 1, background: 'rgba(255,255,255,0.10)', margin: '10px 0' }} />
-
-          <SideNavRow to={p('artifacts')} label="Asset library" accent="#fb7185" />
-          <SideNavRow to={p('brain')} label="Brain" accent="#34d399" />
-          <SideNavRow to={p('measure')} label="Performance" accent="#60a5fa" />
-          <SideNavRow to={p('learning')} label="Learning loop" accent="#f472b6" />
-          <SideNavRow to={p('keys')} label="Integrations" accent="#facc15" />
-        </nav>
-
-        <div style={{ marginTop: 12 }}>
-          <SideNavGroup label="Assist" />
-          <SideNavAction label="Ask VERA" onClick={startNewPost} />
-          <SideNavAction label="Find content" onClick={() => navigate(p('brain'))} />
-          <SideNavAction label="Failed posts" onClick={() => openReviewTab('Rejected')} />
-        </div>
-
-        <div style={{ marginTop: 10, borderTop: '1px solid rgba(255,255,255,0.10)', paddingTop: 8 }}>
-          <RailRecents tone="dark" />
-        </div>
-
-        <div className="flex-1" />
-
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          className="w-full flex items-center gap-2.5"
-          style={{ minHeight: 38, padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.10)', background: 'rgba(255,255,255,0.06)', color: 'rgba(236,242,240,0.86)', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}
-        >
-          <Settings size={16} />
-          <span className="flex-1">Settings</span>
-          <MoreHorizontal size={16} />
-        </button>
-      </aside>
-
-      {/* Main canvas */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0" style={{ background: 'var(--paper)', borderTopLeftRadius: 18, overflow: 'hidden' }}>
+      {/* ── Center ── the canvas (conversation lives on the Vera tab). */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <main className="flex-1 overflow-y-auto min-h-0" style={{ background: 'var(--paper)' }}>
           <ErrorBoundary variant="route" resetKey={location.pathname}>
             <Outlet />
