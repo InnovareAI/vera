@@ -135,7 +135,7 @@ Deno.serve(async (req) => {
       }
       if (!platformAllowed) return jsonError('Platform video entitlement is no longer active for this operator.', 403)
     }
-    const fal = await resolveFalKey(supabase, jobProjectId, { allowPlatform: platformAllowed, preferPlatform: jobUsedPlatformKey })
+    const fal = await resolveFalKey(supabase, jobProjectId, access.orgId, { allowPlatform: platformAllowed, preferPlatform: jobUsedPlatformKey })
     if (!fal.ok) return fal.response
 
     const modelHint = modelSlugHint(model)
@@ -233,7 +233,7 @@ Deno.serve(async (req) => {
     )
   }
 
-  const fal = await resolveFalKey(supabase, projectId, {
+  const fal = await resolveFalKey(supabase, projectId, access.orgId, {
     allowPlatform: tierPlatformAllowed,
     preferPlatform: tierPlatformAllowed && !tierPolicyAllowed,
   })
@@ -508,14 +508,19 @@ async function recordVideoJob(
 async function resolveFalKey(
   supabase: AdminClient,
   projectId: string,
+  orgId: string,
   opts: { allowPlatform?: boolean; preferPlatform?: boolean } = {},
 ): Promise<{ ok: true; key: string; source: 'client' | 'platform' } | { ok: false; response: Response }> {
   try {
+    const platformProjectAllowed = opts.allowPlatform
+      ? await isPlatformMediaProject(supabase, projectId, orgId)
+      : false
+
     if (opts.preferPlatform) {
-      if (!opts.allowPlatform) {
+      if (!opts.allowPlatform || !platformProjectAllowed) {
         return {
           ok: false,
-          response: jsonError('Platform video rendering is not enabled for this operator.', 403),
+          response: jsonError('Platform video rendering is not enabled for this approved project and operator.', 403),
         }
       }
       if (!FAL_API_KEY) {
@@ -531,6 +536,12 @@ async function resolveFalKey(
     if (clientKey) return { ok: true, key: clientKey.key, source: 'client' }
 
     if (opts.allowPlatform) {
+      if (!platformProjectAllowed) {
+        return {
+          ok: false,
+          response: jsonError('Platform video rendering is only available inside approved platform media projects.', 403),
+        }
+      }
       if (!FAL_API_KEY) {
         return {
           ok: false,

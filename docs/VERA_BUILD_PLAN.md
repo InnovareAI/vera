@@ -220,12 +220,10 @@ Current state:
 - Media usage logs now include the requested model, policy default, model selection source, and selection reason for spend audits.
 - Weekly learning notices now have a durable review action path. Operators can enable proposed client skills, queue SAM handoff actions, and mark a weekly review complete from the VERA launcher.
 - The weekly review action is backed by a scoped Edge Function that authorizes through `requireObservationMember` and derives org and project scope from the observation row, not from client-supplied request fields.
-- The backend now includes `sam_handoff_actions`, a tenant-scoped table for content-to-sales handoff candidates with RLS, explicit grants, duplicate protection by weekly observation and post, and status tracking.
+- The backend now includes `sam_handoff_actions`, a tenant-scoped table for content-to-sales handoff candidates with RLS, explicit grants, duplicate protection by project and post, assignment, handoff, completion, dismissal, and status tracking.
 - The missing `agent_observations` create-table migration has been repaired for clean rebuilds while staying idempotent for production.
-
-Next follow-up:
-
-- Add a visible SAM handoff queue so queued actions can be assigned, dismissed, completed, or handed into SAM rather than only stored as backend state.
+- Learning now includes a visible SAM handoff queue. Operators can queue detected demand signals, assign or reassign them, copy the brief for SAM, complete, dismiss, and reopen queue items.
+- The video backend now re-verifies approved platform media project scope inside the final FAL key resolver, so platform FAL fallback cannot be enabled by a caller flag alone.
 - Shared text runtimes now use the same model-selection audit metadata, including requested model, policy default, selection source, and selection reason.
 - Client OpenRouter text defaults now fall back to Gemini Flash class when no client policy default is set.
 - AI Usage settings now filters current-month usage by model selection source: recommended, policy default, explicit override, fallback, or unknown historical events.
