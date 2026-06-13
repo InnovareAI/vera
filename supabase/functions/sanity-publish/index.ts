@@ -16,7 +16,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
-import { requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
+import { publisherClientProjectId, requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
 import { slugify } from '../_shared/markdown.ts'
 import { acquirePublishLockForOpenPost, releasePublishLock } from '../_shared/publish-guard.ts'
 import {
@@ -71,6 +71,7 @@ async function connect(supabase: AdminClient, input: Record<string, unknown>): P
   ok: boolean; publisher_id?: string; health?: HealthCheckResult; error?: PublisherError
 }> {
   const org_id = input.org_id as string
+  const client_project_id = publisherClientProjectId(input)
   const name = input.name as string
   const project_id = (input.project_id as string)?.trim()
   const dataset = (input.dataset as string)?.trim() || 'production'
@@ -102,7 +103,7 @@ async function connect(supabase: AdminClient, input: Record<string, unknown>): P
   }
 
   const { data: pub, error: insErr } = await supabase.from('publishers').insert({
-    org_id, kind: 'sanity', name,
+    org_id, project_id: client_project_id, kind: 'sanity', name,
     config: {
       project_id, dataset, document_type,
       // Default field name mapping (operator can override via SQL)

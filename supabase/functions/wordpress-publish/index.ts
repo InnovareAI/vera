@@ -26,7 +26,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
-import { requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
+import { publisherClientProjectId, requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
 import { renderMarkdown, slugify } from '../_shared/markdown.ts'
 import { acquirePublishLockForOpenPost, releasePublishLock } from '../_shared/publish-guard.ts'
 import {
@@ -90,6 +90,7 @@ async function connect(supabase: AdminClient, input: Record<string, unknown>): P
   error?: PublisherError
 }> {
   const org_id = input.org_id as string
+  const client_project_id = publisherClientProjectId(input)
   const name = input.name as string
   const base_url_raw = input.base_url as string
   const username = input.username as string
@@ -168,7 +169,7 @@ async function connect(supabase: AdminClient, input: Record<string, unknown>): P
 
   // All probes passed — save publisher + credentials
   const { data: pub, error: insErr } = await supabase.from('publishers').insert({
-    org_id, kind: 'wordpress', name,
+    org_id, project_id: client_project_id, kind: 'wordpress', name,
     config: { base_url, username, user_id: meUser.id, user_slug: meUser.slug, user_roles: meUser.roles ?? [] },
     credentials_ref: 'pending',   // overwritten by the rpc below
     default_status: 'draft',

@@ -13,6 +13,7 @@ import { useState, useEffect } from 'react'
 import { Loader2, ChevronDown, ExternalLink, Check, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
+import { useProject } from '../lib/projectContext'
 import type { Post } from '../lib/supabase'
 
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -32,10 +33,12 @@ interface Publisher {
   name: string
   health_status: string | null
   config: Record<string, unknown>
+  project_id: string | null
 }
 
 export function PublishToConnectedBlog({ post }: { post: Post }) {
   const { activeOrg } = useOrg()
+  const { activeProject } = useProject()
   const [publishers, setPublishers] = useState<Publisher[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -43,14 +46,15 @@ export function PublishToConnectedBlog({ post }: { post: Post }) {
 
   useEffect(() => {
     if (!activeOrg) return
-    supabase.from('publishers').select('id, kind, name, health_status, config')
+    let query = supabase.from('publishers').select('id, kind, name, health_status, config, project_id')
       .eq('org_id', activeOrg.id)
-      .order('connected_at', { ascending: false })
+    query = activeProject?.id ? query.eq('project_id', activeProject.id) : query.is('project_id', null)
+    query.order('connected_at', { ascending: false })
       .then(({ data }) => {
         setPublishers((data ?? []) as Publisher[])
         setLoading(false)
       })
-  }, [activeOrg])
+  }, [activeOrg, activeProject?.id])
 
   if (loading) return null
   if (publishers.length === 0) return null  // hide the whole thing when no publishers connected
@@ -125,6 +129,7 @@ function PublishModal({ publisher, post, onClose }: {
         body: JSON.stringify({
           action: 'dry_run',
           publisher_id: publisher.id,
+          post_id: post.id,
           post: toPostInput(post),
         }),
       })

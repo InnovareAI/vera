@@ -16,7 +16,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
-import { requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
+import { publisherClientProjectId, requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
 import { renderMarkdown, slugify } from '../_shared/markdown.ts'
 import { makeGhostJwt } from '../_shared/ghost-jwt.ts'
 import { acquirePublishLockForOpenPost, releasePublishLock } from '../_shared/publish-guard.ts'
@@ -71,6 +71,7 @@ async function connect(supabase: AdminClient, input: Record<string, unknown>): P
   ok: boolean; publisher_id?: string; health?: HealthCheckResult; error?: PublisherError
 }> {
   const org_id = input.org_id as string
+  const client_project_id = publisherClientProjectId(input)
   const name = input.name as string
   const base_url_raw = input.base_url as string
   const api_key = input.api_key as string
@@ -129,7 +130,7 @@ async function connect(supabase: AdminClient, input: Record<string, unknown>): P
   }
 
   const { data: pub, error: insErr } = await supabase.from('publishers').insert({
-    org_id, kind: 'ghost', name,
+    org_id, project_id: client_project_id, kind: 'ghost', name,
     config: { base_url, site_title: siteData.title ?? null, site_url: siteData.url ?? null },
     credentials_ref: 'pending',
     default_status: 'draft',

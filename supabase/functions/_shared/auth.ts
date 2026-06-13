@@ -127,6 +127,20 @@ export async function requirePublisherActionAccess(
   if (body.action === "connect") {
     const orgId = typeof body.org_id === "string" ? body.org_id : null
     if (!orgId) return auth
+    const projectId = publisherClientProjectId(body)
+    if (projectId) {
+      const { data: project, error: projectError } = await supabase
+        .from("projects")
+        .select("id, org_id")
+        .eq("id", projectId)
+        .maybeSingle()
+      if (projectError) return { ok: false, response: jsonError(projectError.message, 500, corsHeaders) }
+      if (!project) return { ok: false, response: jsonError("Client not found", 404, corsHeaders) }
+      if ((project as { org_id: string }).org_id !== orgId) return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
+    }
+    if (projectId) {
+      return await requireOrgProjectManager(supabase, auth.userId, orgId, projectId, corsHeaders)
+    }
     return await requireOrgProjectMember(supabase, auth.userId, orgId, null, corsHeaders)
   }
 
@@ -134,13 +148,15 @@ export async function requirePublisherActionAccess(
   if (!publisherId) return auth
   const { data: publisher, error } = await supabase
     .from("publishers")
-    .select("id, org_id")
+    .select("id, org_id, project_id")
     .eq("id", publisherId)
     .maybeSingle()
   if (error) return { ok: false, response: jsonError(error.message, 500, corsHeaders) }
   if (!publisher) return { ok: false, response: jsonError("Publisher not found", 404, corsHeaders) }
 
-  const publisherOrgId = (publisher as { org_id: string }).org_id
+  const publisherRow = publisher as { org_id: string; project_id?: string | null }
+  const publisherOrgId = publisherRow.org_id
+  const publisherProjectId = publisherRow.project_id ?? null
   const postId = typeof body.post_id === "string" ? body.post_id : null
   if (postId) {
     const { data: post, error: postError } = await supabase
@@ -152,10 +168,28 @@ export async function requirePublisherActionAccess(
     if (!post) return { ok: false, response: jsonError("Post not found", 404, corsHeaders) }
     const postRow = post as { org_id: string; project_id?: string | null }
     if (postRow.org_id !== publisherOrgId) return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
+    const postProjectId = postRow.project_id ?? null
+    if (postProjectId && publisherProjectId !== postProjectId) {
+      return { ok: false, response: jsonError("Publisher is not connected to this client space", 403, corsHeaders) }
+    }
+    if (!postProjectId && publisherProjectId) {
+      return { ok: false, response: jsonError("Publisher is client-scoped and cannot publish workspace-level posts", 403, corsHeaders) }
+    }
     return await requireOrgProjectMember(supabase, auth.userId, publisherOrgId, postRow.project_id ?? null, corsHeaders)
   }
 
-  return await requireOrgProjectMember(supabase, auth.userId, publisherOrgId, null, corsHeaders)
+  return await requireOrgProjectMember(supabase, auth.userId, publisherOrgId, publisherProjectId, corsHeaders)
+}
+
+export function publisherClientProjectId(body: Record<string, unknown>): string | null {
+  const direct = typeof body.client_project_id === "string" ? body.client_project_id.trim() : ""
+  if (direct) return direct
+
+  const nested = body.client && typeof body.client === "object"
+    ? (body.client as Record<string, unknown>)
+    : null
+  const nestedId = nested && typeof nested.project_id === "string" ? nested.project_id.trim() : ""
+  return nestedId || null
 }
 
 export async function requireObservationMember(
@@ -203,5 +237,30 @@ async function requireOrgProjectMember(
   if (orgResult.error) return { ok: false, response: jsonError(orgResult.error.message, 500, corsHeaders) }
   if (projectResult?.error) return { ok: false, response: jsonError(projectResult.error.message, 500, corsHeaders) }
   if (orgResult.data || projectResult?.data) return { ok: true, userId, service: false }
+  return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
+}
+
+async function requireOrgProjectManager(
+  supabase: AdminClient,
+  userId: string | null,
+  orgId: string,
+  projectId: string,
+  corsHeaders: Record<string, string>,
+): Promise<{ ok: true; userId: string | null; service: false } | { ok: false; response: Response }> {
+  if (!userId) return { ok: false, response: jsonError("Unauthorized", 401, corsHeaders) }
+
+  const [orgResult, projectResult] = await Promise.all([
+    supabase.from("org_members").select("role").eq("org_id", orgId).eq("user_id", userId).maybeSingle(),
+    supabase.from("project_members").select("role").eq("project_id", projectId).eq("user_id", userId).maybeSingle(),
+  ])
+
+  if (orgResult.error) return { ok: false, response: jsonError(orgResult.error.message, 500, corsHeaders) }
+  if (projectResult.error) return { ok: false, response: jsonError(projectResult.error.message, 500, corsHeaders) }
+
+  const orgRole = (orgResult.data as { role?: string } | null)?.role ?? null
+  const projectRole = (projectResult.data as { role?: string } | null)?.role ?? null
+  if (orgRole && ["owner", "admin", "agency_admin"].includes(orgRole)) return { ok: true, userId, service: false }
+  if (projectRole === "owner") return { ok: true, userId, service: false }
+
   return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
 }

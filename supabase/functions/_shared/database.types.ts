@@ -2464,6 +2464,7 @@ export type Database = {
           last_health_check: string | null
           name: string
           org_id: string
+          project_id: string | null
         }
         Insert: {
           config?: Json
@@ -2478,6 +2479,7 @@ export type Database = {
           last_health_check?: string | null
           name: string
           org_id: string
+          project_id?: string | null
         }
         Update: {
           config?: Json
@@ -2492,6 +2494,7 @@ export type Database = {
           last_health_check?: string | null
           name?: string
           org_id?: string
+          project_id?: string | null
         }
         Relationships: [
           {
@@ -2499,6 +2502,13 @@ export type Database = {
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "publishers_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
             referencedColumns: ["id"]
           },
         ]

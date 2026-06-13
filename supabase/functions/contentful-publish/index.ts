@@ -19,7 +19,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
-import { requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
+import { publisherClientProjectId, requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
 import { slugify } from '../_shared/markdown.ts'
 import { acquirePublishLockForOpenPost, releasePublishLock } from '../_shared/publish-guard.ts'
 import {
@@ -70,6 +70,7 @@ async function connect(supabase: AdminClient, input: Record<string, unknown>): P
   ok: boolean; publisher_id?: string; health?: HealthCheckResult; error?: PublisherError
 }> {
   const org_id = input.org_id as string
+  const client_project_id = publisherClientProjectId(input)
   const name = input.name as string
   const space_id = (input.space_id as string)?.trim()
   const environment_id = (input.environment_id as string)?.trim() || 'master'
@@ -112,7 +113,7 @@ async function connect(supabase: AdminClient, input: Record<string, unknown>): P
   const contentType = ctRes.json as { name?: string; fields?: Array<{ id: string; name: string; required: boolean; type: string }> }
 
   const { data: pub, error: insErr } = await supabase.from('publishers').insert({
-    org_id, kind: 'contentful', name,
+    org_id, project_id: client_project_id, kind: 'contentful', name,
     config: {
       space_id, environment_id, content_type_id, default_locale,
       space_name: space.name ?? null, content_type_name: contentType.name ?? null,

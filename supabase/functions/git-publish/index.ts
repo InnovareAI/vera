@@ -18,7 +18,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
-import { requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
+import { publisherClientProjectId, requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
 import { slugify } from '../_shared/markdown.ts'
 import { acquirePublishLockForOpenPost, releasePublishLock } from '../_shared/publish-guard.ts'
 import {
@@ -73,6 +73,7 @@ async function connect(supabase: AdminClient, input: Record<string, unknown>): P
   ok: boolean; publisher_id?: string; health?: HealthCheckResult; error?: PublisherError
 }> {
   const org_id = input.org_id as string
+  const client_project_id = publisherClientProjectId(input)
   const name = input.name as string
   const repo = input.repo as string  // "owner/repo"
   const branch = (input.branch as string)?.trim() || 'main'
@@ -131,7 +132,7 @@ async function connect(supabase: AdminClient, input: Record<string, unknown>): P
 
   // Save publisher row + Vault creds
   const { data: pub, error: insErr } = await supabase.from('publishers').insert({
-    org_id, kind: 'github_mdx', name,
+    org_id, project_id: client_project_id, kind: 'github_mdx', name,
     config: {
       repo, branch, content_dir, file_format: file_format.toLowerCase(),
       pr_mode, commit_author_name, commit_author_email,

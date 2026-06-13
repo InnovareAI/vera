@@ -8,6 +8,7 @@ import { useState, useEffect } from 'react'
 import { Loader2, Plus, Globe } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
+import { useProject } from '../lib/projectContext'
 
 const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
 const FN = (name: string) => `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${name}`
@@ -29,22 +30,26 @@ interface Publisher {
   health_detail: string | null
   last_health_check: string | null
   connected_at: string
+  project_id: string | null
 }
 
 export function PublishersCard() {
   const { activeOrg } = useOrg()
+  const { activeProject } = useProject()
   const [list, setList] = useState<Publisher[]>([])
   const [loading, setLoading] = useState(true)
   const [wizardOpen, setWizardOpen] = useState(false)
 
   useEffect(() => {
     if (!activeOrg) return
-    supabase.from('publishers').select('*').eq('org_id', activeOrg.id).order('connected_at', { ascending: false })
+    let query = supabase.from('publishers').select('*').eq('org_id', activeOrg.id)
+    query = activeProject?.id ? query.eq('project_id', activeProject.id) : query.is('project_id', null)
+    query.order('connected_at', { ascending: false })
       .then(({ data }) => {
         setList((data ?? []) as Publisher[])
         setLoading(false)
       })
-  }, [activeOrg])
+  }, [activeOrg, activeProject?.id])
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5">
@@ -155,6 +160,7 @@ const MANUAL_PLATFORMS: Record<string, { label: string; kind: string; fields: Ar
 
 function AddBlogWizard({ onClose }: { onClose: () => void }) {
   const { activeOrg } = useOrg()
+  const { activeProject } = useProject()
   const [url, setUrl] = useState('')
   const [discovering, setDiscovering] = useState(false)
   const [discovery, setDiscovery] = useState<Discovery | null>(null)
@@ -227,6 +233,7 @@ function AddBlogWizard({ onClose }: { onClose: () => void }) {
         org_id: activeOrg.id,
         name: editName.trim() || 'Main blog',
       }
+      if (activeProject?.id) payload.client_project_id = activeProject.id
       if (discovery.credential_needed.kind === 'wordpress') {
         Object.assign(payload, {
           base_url: discovery.hint.base_url,

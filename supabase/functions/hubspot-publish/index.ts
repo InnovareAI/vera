@@ -17,7 +17,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
-import { requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
+import { publisherClientProjectId, requirePublisherActionAccess, type AdminClient } from '../_shared/auth.ts'
 import { renderMarkdown, slugify } from '../_shared/markdown.ts'
 import { acquirePublishLockForOpenPost, releasePublishLock } from '../_shared/publish-guard.ts'
 import {
@@ -69,6 +69,7 @@ async function connect(supabase: AdminClient, input: Record<string, unknown>): P
   ok: boolean; publisher_id?: string; health?: HealthCheckResult; error?: PublisherError
 }> {
   const org_id = input.org_id as string
+  const client_project_id = publisherClientProjectId(input)
   const name = input.name as string
   const access_token = (input.access_token as string)?.trim()
   const content_group_id = (input.content_group_id as string)?.trim()
@@ -98,7 +99,7 @@ async function connect(supabase: AdminClient, input: Record<string, unknown>): P
   }
 
   const { data: pub, error: insErr } = await supabase.from('publishers').insert({
-    org_id, kind: 'hubspot', name,
+    org_id, project_id: client_project_id, kind: 'hubspot', name,
     config: {
       content_group_id,
       blog_name: matchedBlog.name ?? null,
