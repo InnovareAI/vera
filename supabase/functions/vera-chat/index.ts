@@ -808,7 +808,13 @@ interface WorkspaceContext {
     instructions: string | null
     is_default: boolean
   }
-  projectKnowledge: Array<{ title: string; excerpt: string; similarity: number; source_kind: string }>
+  projectKnowledge: Array<{
+    title: string
+    excerpt: string
+    similarity: number
+    source_kind: string
+    match_kind?: 'semantic' | 'keyword' | 'recent'
+  }>
   // Phase 3 — agent observations. VERA's notice log: things she
   // spotted (stale audit, empty queue, knowledge gap, etc.) that may
   // warrant a proactive prompt to the operator. When non-empty, the
@@ -1076,10 +1082,11 @@ async function retrieveProjectKnowledge(
   query: string,
   embeddingRuntime?: EmbeddingRuntime | null,
 ): Promise<WorkspaceContext['projectKnowledge']> {
-  if (query.length < 24) return []
+  if (query.trim().length < 8) return []
+  const fallback = () => retrieveProjectKnowledgeTextFallback(supabase, projectId, query)
   try {
-    const embedding = await embedText(query, embeddingRuntime)
-    if (!embedding) return []
+    const embedding = query.length >= 24 ? await embedText(query, embeddingRuntime) : null
+    if (!embedding) return await fallback()
     const { data, error } = await (supabase as unknown as {
       rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>
     }).rpc('project_knowledge_search', {
@@ -1089,15 +1096,115 @@ async function retrieveProjectKnowledge(
       p_threshold: 0.5,
     })
     if (error) {
-      // RPC may not exist yet — fall back to empty rather than error.
-      // The Phase 3 migration will add it; until then knowledge isn't
-      // semantically retrieved but the project still scopes the chat.
-      return []
+      return await fallback()
     }
-    return (data ?? []) as unknown as WorkspaceContext['projectKnowledge']
+    const semantic = ((data ?? []) as Array<{
+      title: string
+      excerpt: string
+      similarity: number
+      source_kind: string
+    }>).map(hit => ({ ...hit, match_kind: 'semantic' as const }))
+    if (semantic.length >= 5) return semantic
+    const textHits = await fallback()
+    return mergeProjectKnowledgeHits(semantic, textHits).slice(0, 5)
   } catch {
-    return []
+    return await fallback()
   }
+}
+
+async function retrieveProjectKnowledgeTextFallback(
+  supabase: AdminClient,
+  projectId: string,
+  query: string,
+): Promise<WorkspaceContext['projectKnowledge']> {
+  const terms = projectKnowledgeSearchTerms(query)
+  const { data, error } = await supabase
+    .from('project_knowledge')
+    .select('title, summary, content, source_kind, updated_at')
+    .eq('project_id', projectId)
+    .order('updated_at', { ascending: false })
+    .limit(25)
+  if (error || !data?.length) return []
+
+  return (data as Array<{
+    title: string | null
+    summary: string | null
+    content: string | null
+    source_kind: string | null
+    updated_at: string | null
+  }>)
+    .map((row, index) => {
+      const haystack = `${row.title ?? ''}\n${row.summary ?? ''}\n${row.content ?? ''}`.toLowerCase()
+      const score = terms.reduce((total, term) => {
+        const titleBoost = (row.title ?? '').toLowerCase().includes(term) ? 8 : 0
+        const summaryBoost = (row.summary ?? '').toLowerCase().includes(term) ? 5 : 0
+        const contentBoost = haystack.includes(term) ? 2 : 0
+        return total + titleBoost + summaryBoost + contentBoost
+      }, 0)
+      return {
+        title: row.title?.trim() || 'Project knowledge',
+        excerpt: projectKnowledgeExcerpt(row.summary || row.content || '', terms),
+        similarity: score > 0 ? Math.min(0.49, score / 40) : 0,
+        source_kind: row.source_kind || 'knowledge',
+        match_kind: (score > 0 ? 'keyword' : 'recent') as 'keyword' | 'recent',
+        score,
+        recency: index,
+      }
+    })
+    .filter(hit => hit.excerpt.trim().length > 0)
+    .sort((a, b) => b.score - a.score || a.recency - b.recency)
+    .slice(0, 5)
+    .map(hit => ({
+      title: hit.title,
+      excerpt: hit.excerpt,
+      similarity: hit.similarity,
+      source_kind: hit.source_kind,
+      match_kind: hit.match_kind,
+    }))
+}
+
+function mergeProjectKnowledgeHits(
+  primary: WorkspaceContext['projectKnowledge'],
+  fallback: WorkspaceContext['projectKnowledge'],
+): WorkspaceContext['projectKnowledge'] {
+  const seen = new Set<string>()
+  const merged: WorkspaceContext['projectKnowledge'] = []
+  for (const hit of [...primary, ...fallback]) {
+    const key = `${hit.source_kind}:${hit.title}`.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(hit)
+  }
+  return merged
+}
+
+function projectKnowledgeSearchTerms(query: string) {
+  const stop = new Set([
+    'about', 'after', 'again', 'also', 'and', 'are', 'can', 'could', 'does', 'for', 'from',
+    'have', 'how', 'into', 'our', 'please', 'should', 'that', 'the', 'their', 'then',
+    'there', 'this', 'vera', 'what', 'when', 'where', 'with', 'would', 'you', 'your',
+  ])
+  return Array.from(new Set(
+    query
+      .toLowerCase()
+      .replace(/https?:\/\/\S+/g, ' ')
+      .split(/[^a-z0-9]+/i)
+      .map(term => term.trim())
+      .filter(term => term.length >= 3 && !stop.has(term)),
+  )).slice(0, 8)
+}
+
+function projectKnowledgeExcerpt(text: string, terms: string[]) {
+  const clean = text.replace(/\s+/g, ' ').trim()
+  if (!clean) return ''
+  const lower = clean.toLowerCase()
+  const firstTermAt = terms
+    .map(term => lower.indexOf(term))
+    .filter(index => index >= 0)
+    .sort((a, b) => a - b)[0]
+  const start = firstTermAt && firstTermAt > 220 ? firstTermAt - 180 : 0
+  const excerpt = clean.slice(start, start + 900)
+  return `${start > 0 ? '...' : ''}${excerpt}${start + 900 < clean.length ? '...' : ''}`
 }
 
 // Quick KB stats (count of raw, count of articles, 5 most-recent titles).
@@ -1177,7 +1284,12 @@ function renderContext(ctx: WorkspaceContext, route: string): string {
       lines.push(``)
       lines.push(`Top ${ctx.projectKnowledge.length} relevant knowledge items for this turn:`)
       for (const k of ctx.projectKnowledge) {
-        lines.push(`  [${k.source_kind}] ${k.title} (sim ${(k.similarity * 100).toFixed(0)}%):\n    ${k.excerpt.replace(/\s+/g, ' ').trim()}`)
+        const matchLabel = k.match_kind === 'semantic'
+          ? `semantic ${(k.similarity * 100).toFixed(0)}%`
+          : k.match_kind === 'keyword'
+            ? 'keyword fallback'
+            : 'recent fallback'
+        lines.push(`  [${k.source_kind}] ${k.title} (${matchLabel}):\n    ${k.excerpt.replace(/\s+/g, ' ').trim()}`)
       }
     }
     lines.push(`</active_project>`)
