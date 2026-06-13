@@ -107,6 +107,24 @@ type SourceKnowledgeRow = {
   updated_at: string
 }
 
+type AuditAudienceProposal = {
+  name: string
+  title: string
+  pain_points: string[]
+  goals: string[]
+  is_primary: boolean
+}
+
+type AuditSkillType = 'platform' | 'content' | 'brand' | 'persona' | 'enrichment' | 'tool'
+type AuditSkillAgent = 'strategist' | 'writer' | 'brand_guard' | 'publisher' | 'all'
+type AuditSkillProposal = {
+  name: string
+  type: AuditSkillType
+  description: string
+  prompt_module: string
+  injected_into: AuditSkillAgent
+}
+
 const DEMAND_FACT_KEYS: BusinessContextKey[] = [
   'offer',
   'audience',
@@ -120,6 +138,9 @@ const DEMAND_FACT_KEYS: BusinessContextKey[] = [
   'approvalStakeholders',
   'constraints',
 ]
+
+const AUDIT_SKILL_TYPES: AuditSkillType[] = ['platform', 'content', 'brand', 'persona', 'enrichment', 'tool']
+const AUDIT_SKILL_AGENTS: AuditSkillAgent[] = ['strategist', 'writer', 'brand_guard', 'publisher', 'all']
 
 type BrainLearningMetric = {
   postId: string
@@ -209,6 +230,79 @@ function mergeExtractedContext(current: BusinessContext, extracted: Partial<Busi
     if (typeof value === 'string' && value.trim()) next[key] = value.trim()
   }
   return next
+}
+
+function cleanText(value: unknown) {
+  if (typeof value !== 'string') return ''
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function cleanMultilineText(value: unknown) {
+  if (typeof value !== 'string') return ''
+  return value.replace(/\r\n/g, '\n').trim()
+}
+
+function cleanTextList(value: unknown) {
+  if (Array.isArray(value)) return value.map(cleanText).filter(Boolean)
+  if (typeof value === 'string') {
+    return value
+      .split(/\n|;|,/)
+      .map(cleanText)
+      .filter(Boolean)
+  }
+  return []
+}
+
+function cleanAuditAudienceProposals(raw: unknown): AuditAudienceProposal[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map(item => {
+      const source = (item && typeof item === 'object') ? item as Record<string, unknown> : {}
+      const name = cleanText(source.name)
+      const title = cleanText(source.title)
+      return {
+        name: name || title,
+        title,
+        pain_points: cleanTextList(source.pain_points),
+        goals: cleanTextList(source.goals),
+        is_primary: source.is_primary === true,
+      }
+    })
+    .filter(item => item.name)
+    .slice(0, 8)
+}
+
+function cleanAuditSkillType(value: unknown): AuditSkillType {
+  const normalized = cleanText(value).toLowerCase()
+  return AUDIT_SKILL_TYPES.includes(normalized as AuditSkillType) ? normalized as AuditSkillType : 'content'
+}
+
+function cleanAuditSkillAgent(value: unknown): AuditSkillAgent {
+  const normalized = cleanText(value).toLowerCase()
+  return AUDIT_SKILL_AGENTS.includes(normalized as AuditSkillAgent) ? normalized as AuditSkillAgent : 'writer'
+}
+
+function cleanAuditSkillProposals(raw: unknown): AuditSkillProposal[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map(item => {
+      const source = (item && typeof item === 'object') ? item as Record<string, unknown> : {}
+      const name = cleanText(source.name)
+      const description = cleanMultilineText(source.description)
+      const promptModule = cleanMultilineText(source.prompt_module) || [
+        `Apply this Demand Brain skill: ${name || 'Client-specific content skill'}.`,
+        description || 'Use the client audit evidence to improve content quality, platform fit, and demand generation.',
+      ].join('\n')
+      return {
+        name,
+        type: cleanAuditSkillType(source.type),
+        description: description || `Client-specific ${cleanAuditSkillType(source.type)} skill drafted from the content audit.`,
+        prompt_module: promptModule,
+        injected_into: cleanAuditSkillAgent(source.injected_into),
+      }
+    })
+    .filter(item => item.name && item.prompt_module)
+    .slice(0, 10)
 }
 
 const AUDIT_CONTEXT_KEYS: BusinessContextKey[] = [
@@ -1386,13 +1480,96 @@ export default function Brain() {
   // saves. Agentic-first means the brain should not start as a blank form. ──
   const [drafting, setDrafting] = useState(false)
   const [draftStatus, setDraftStatus] = useState('')
+  const [draftAudienceProposals, setDraftAudienceProposals] = useState<AuditAudienceProposal[]>([])
+  const [draftSkillProposals, setDraftSkillProposals] = useState<AuditSkillProposal[]>([])
+  const [proposalSaving, setProposalSaving] = useState<string | null>(null)
+  const [proposalStatus, setProposalStatus] = useState('')
+  const [proposalError, setProposalError] = useState('')
+  useEffect(() => {
+    setDraftAudienceProposals([])
+    setDraftSkillProposals([])
+    setProposalStatus('')
+    setProposalError('')
+  }, [activeProject?.id])
+
+  async function addAudienceProposal(proposal: AuditAudienceProposal, index: number) {
+    if (!activeOrg?.id || !activeProject?.id) return
+    setProposalSaving(`audience:${index}`)
+    setProposalError('')
+    setProposalStatus('')
+    const { error } = await supabase.from('audiences').insert({
+      org_id: activeOrg.id,
+      project_id: activeProject.id,
+      kind: 'buyer_persona',
+      name: proposal.name,
+      is_primary: proposal.is_primary,
+      pain_points: proposal.pain_points,
+      goals: proposal.goals,
+      attributes: {
+        title: proposal.title,
+        source: 'content-audit',
+      },
+      notes: proposal.title ? `Drafted from content audit. Title: ${proposal.title}` : 'Drafted from content audit.',
+    })
+    setProposalSaving(null)
+    if (error) {
+      setProposalError(error.message)
+      return
+    }
+    setDraftAudienceProposals(prev => prev.filter((_, i) => i !== index))
+    setProposalStatus(`Added audience: ${proposal.name}`)
+    reloadAudiences()
+  }
+
+  async function addSkillProposal(proposal: AuditSkillProposal, index: number) {
+    if (!activeOrg?.id || !activeProject?.id) return
+    setProposalSaving(`skill:${index}`)
+    setProposalError('')
+    setProposalStatus('')
+    const { error } = await supabase.from('skills').insert({
+      org_id: activeOrg.id,
+      project_id: activeProject.id,
+      type: proposal.type,
+      name: proposal.name,
+      description: proposal.description,
+      injected_into: proposal.injected_into,
+      trigger_description: 'Use when generating, refining, reviewing, or publishing demand content for this client.',
+      trigger_when: {
+        source: 'demand_brain_audit',
+        client_id: activeProject.id,
+      },
+      prompt_module: proposal.prompt_module,
+      gotchas: [],
+      good_examples: [],
+      bad_examples: [],
+      source_refs: [{ label: 'Demand Brain audit', text: 'Drafted from client source audit.' }],
+      confidence: 'medium',
+      performance_notes: 'Created from Demand Brain audit proposal. Validate against future content outcomes.',
+      tags: ['demand-brain', 'audit-proposal'],
+      is_system: false,
+      is_active: true,
+      last_reviewed_at: new Date().toISOString(),
+    })
+    setProposalSaving(null)
+    if (error) {
+      setProposalError(error.message)
+      return
+    }
+    setDraftSkillProposals(prev => prev.filter((_, i) => i !== index))
+    setProposalStatus(`Added skill: ${proposal.name}`)
+  }
+
   async function runDraft() {
     if (!activeOrg?.id || !activeProject?.id || drafting) return
     if (!session?.access_token) {
       setDraftStatus('Sign in again before drafting the Demand Brain.')
       return
     }
-    setDrafting(true); setDraftStatus("Reading this client's content…")
+    setDrafting(true); setDraftStatus("Reading this client's content...")
+    setDraftAudienceProposals([])
+    setDraftSkillProposals([])
+    setProposalStatus('')
+    setProposalError('')
     try {
       const res = await fetch(`${SUPA}/functions/v1/content-audit`, {
         method: 'POST',
@@ -1410,13 +1587,16 @@ export default function Brain() {
           const json = line.slice(6).trim(); if (!json) continue
           let ev: { event?: string; message?: string; proposal?: { brand_voice?: Record<string, string[] | string>; business_context?: unknown; personas?: unknown[]; skills?: unknown[] } }
           try { ev = JSON.parse(json) } catch { continue }
-          if (ev.event === 'started' || ev.event === 'fetching') setDraftStatus("Reading this client's content…")
-          else if (ev.event === 'synthesising') setDraftStatus('Drafting the Demand Brain…')
+          if (ev.event === 'started' || ev.event === 'fetching') setDraftStatus("Reading this client's content...")
+          else if (ev.event === 'synthesising') setDraftStatus('Drafting the Demand Brain...')
           else if (ev.event === 'done') {
             const v = ev.proposal?.brand_voice ?? {}
             const contextPatch = normalizeAuditBusinessContext(ev.proposal?.business_context)
             const contextCount = Object.values(contextPatch).filter(value => typeof value === 'string' && value.trim()).length
-            const n = ev.proposal?.personas?.length ?? 0
+            const audienceProposals = cleanAuditAudienceProposals(ev.proposal?.personas)
+            const skillProposals = cleanAuditSkillProposals(ev.proposal?.skills)
+            const n = audienceProposals.length
+            const skillCount = skillProposals.length
             setBv(prev => ({
               ...prev,
               tone: Array.isArray(v.tone) ? v.tone : prev.tone,
@@ -1425,8 +1605,10 @@ export default function Brain() {
               required_phrases: Array.isArray(v.required_phrases) ? v.required_phrases : prev.required_phrases,
             }))
             if (contextCount) setBusiness(prev => mergeExtractedContext(prev, contextPatch))
+            setDraftAudienceProposals(audienceProposals)
+            setDraftSkillProposals(skillProposals)
             setBvInherited(false)
-            setDraftStatus(`Drafted from this client's content. Review the Demand Brain and Save.${contextCount ? ` ${contextCount} demand field${contextCount === 1 ? '' : 's'} updated.` : ''}${n ? ` Vera also spotted ${n} audience${n === 1 ? '' : 's'}; add the ones that fit.` : ''}`)
+            setDraftStatus(`Drafted from this client's content. Review the Demand Brain and Save.${contextCount ? ` ${contextCount} demand field${contextCount === 1 ? '' : 's'} updated.` : ''}${n ? ` ${n} audience proposal${n === 1 ? '' : 's'} ready.` : ''}${skillCount ? ` ${skillCount} skill proposal${skillCount === 1 ? '' : 's'} ready.` : ''}`)
           }
           else if (ev.event === 'error') throw new Error(ev.message ?? 'audit failed')
         }
@@ -1506,12 +1688,26 @@ export default function Brain() {
           instead of starting blank. Prefills the brand voice for review. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: space[3], flexWrap: 'wrap', marginBottom: space[8], padding: `${space[4]} ${space[5]}`, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg }}>
         <Button variant="secondary" size="sm" onClick={runDraft} disabled={drafting || !activeOrg}>
-          {drafting ? <><Loader2 size={14} className="animate-spin" /> Drafting…</> : <><Sparkles size={14} /> Draft this brain with Vera</>}
+          {drafting ? <><Loader2 size={14} className="animate-spin" /> Drafting...</> : <><Sparkles size={14} /> Draft this brain with Vera</>}
         </Button>
         <span style={{ flex: 1, minWidth: 200, fontSize: t.size.cap, color: draftStatus ? color.ink2 : color.ghost, lineHeight: 1.5 }}>
           {draftStatus || "Vera reads this client's content and drafts the Demand Brain. You review and save."}
         </span>
       </div>
+
+      {(draftAudienceProposals.length > 0 || draftSkillProposals.length > 0 || proposalStatus || proposalError) && (
+        <AuditProposalPanel
+          audiences={draftAudienceProposals}
+          skills={draftSkillProposals}
+          saving={proposalSaving}
+          status={proposalStatus}
+          error={proposalError}
+          onAddAudience={addAudienceProposal}
+          onDismissAudience={index => setDraftAudienceProposals(prev => prev.filter((_, i) => i !== index))}
+          onAddSkill={addSkillProposal}
+          onDismissSkill={index => setDraftSkillProposals(prev => prev.filter((_, i) => i !== index))}
+        />
+      )}
 
       {/* Business context */}
       <section style={{ marginBottom: space[9] }}>
@@ -1891,6 +2087,150 @@ export default function Brain() {
       </section>
 
       <div style={{ height: space[8] }} />
+    </div>
+  )
+}
+
+function AuditProposalPanel({
+  audiences,
+  skills,
+  saving,
+  status,
+  error,
+  onAddAudience,
+  onDismissAudience,
+  onAddSkill,
+  onDismissSkill,
+}: {
+  audiences: AuditAudienceProposal[]
+  skills: AuditSkillProposal[]
+  saving: string | null
+  status: string
+  error: string
+  onAddAudience: (proposal: AuditAudienceProposal, index: number) => void
+  onDismissAudience: (index: number) => void
+  onAddSkill: (proposal: AuditSkillProposal, index: number) => void
+  onDismissSkill: (index: number) => void
+}) {
+  const busy = !!saving
+  return (
+    <section style={{ marginBottom: space[8], padding: space[5], background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.lg }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: space[4], flexWrap: 'wrap', marginBottom: space[4] }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>
+            <Sparkles size={15} style={{ color: color.accent }} />
+            Audit proposals
+          </div>
+          <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>
+            Add useful findings to this client's Brain. Dismiss anything that does not fit the demand strategy.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {audiences.length > 0 && <Chip>{audiences.length} audience{audiences.length === 1 ? '' : 's'}</Chip>}
+          {skills.length > 0 && <Chip>{skills.length} skill{skills.length === 1 ? '' : 's'}</Chip>}
+        </div>
+      </div>
+
+      {(status || error) && (
+        <p style={{ margin: `0 0 ${space[4]}`, color: error ? color.danger : color.success, fontSize: t.size.cap }}>
+          {error || status}
+        </p>
+      )}
+
+      {audiences.length > 0 && (
+        <div style={{ marginBottom: skills.length ? space[5] : 0 }}>
+          <div style={{ fontSize: t.size.micro, color: color.ghost, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold, marginBottom: space[2] }}>
+            Audiences
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: space[3] }}>
+            {audiences.map((proposal, index) => {
+              const key = `${proposal.name}:${index}`
+              const savingThis = saving === `audience:${index}`
+              return (
+                <div key={key} style={{ padding: space[4], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: space[2], marginBottom: space[2] }}>
+                    <Target size={15} style={{ color: color.accent, marginTop: 2, flexShrink: 0 }} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: t.size.sm, color: color.ink, fontWeight: t.weight.semibold }}>{proposal.name}</div>
+                      {proposal.title && <div style={{ fontSize: t.size.micro, color: color.ghost, marginTop: 2 }}>{proposal.title}</div>}
+                    </div>
+                  </div>
+                  <ProposalList label="Pains" items={proposal.pain_points} />
+                  <ProposalList label="Goals" items={proposal.goals} />
+                  <div style={{ display: 'flex', gap: space[2], marginTop: space[3], flexWrap: 'wrap' }}>
+                    <Button variant="primary" size="sm" onClick={() => onAddAudience(proposal, index)} disabled={busy} style={{ background: color.ink, color: color.surface }}>
+                      {savingThis ? <Loader2 size={13} /> : <Check size={13} />} Add audience
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => onDismissAudience(index)} disabled={busy}>
+                      <X size={13} /> Dismiss
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {skills.length > 0 && (
+        <div>
+          <div style={{ fontSize: t.size.micro, color: color.ghost, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold, marginBottom: space[2] }}>
+            Skills
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: space[3] }}>
+            {skills.map((proposal, index) => {
+              const key = `${proposal.name}:${index}`
+              const savingThis = saving === `skill:${index}`
+              return (
+                <div key={key} style={{ padding: space[4], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: space[2], marginBottom: space[2] }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: t.size.sm, color: color.ink, fontWeight: t.weight.semibold }}>{proposal.name}</div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 5 }}>
+                        <span style={{ padding: '3px 7px', borderRadius: radius.pill, background: color.accentSoft, color: color.accent, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>{proposal.type}</span>
+                        <span style={{ padding: '3px 7px', borderRadius: radius.pill, background: color.paper2, color: color.ink2, fontSize: t.size.micro }}>Agent: {proposal.injected_into}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <p style={{ margin: `0 0 ${space[3]}`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>
+                    {proposal.description}
+                  </p>
+                  <pre style={{ margin: 0, padding: space[3], maxHeight: 136, overflow: 'auto', whiteSpace: 'pre-wrap', background: color.paper2, color: color.ink2, border: `1px solid ${color.line}`, borderRadius: radius.sm, fontSize: t.size.micro, fontFamily: t.family.mono, lineHeight: 1.5 }}>
+                    {proposal.prompt_module}
+                  </pre>
+                  <div style={{ display: 'flex', gap: space[2], marginTop: space[3], flexWrap: 'wrap' }}>
+                    <Button variant="primary" size="sm" onClick={() => onAddSkill(proposal, index)} disabled={busy} style={{ background: color.ink, color: color.surface }}>
+                      {savingThis ? <Loader2 size={13} /> : <Check size={13} />} Add skill
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => onDismissSkill(index)} disabled={busy}>
+                      <X size={13} /> Dismiss
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function ProposalList({ label, items }: { label: string; items: string[] }) {
+  if (!items.length) return null
+  return (
+    <div style={{ marginTop: space[2] }}>
+      <div style={{ fontSize: t.size.micro, color: color.ghost, fontWeight: t.weight.semibold, marginBottom: 4 }}>{label}</div>
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+        {items.slice(0, 4).map(item => (
+          <span key={item} style={{ padding: '3px 7px', borderRadius: radius.pill, background: color.paper2, color: color.ink2, border: `1px solid ${color.line}`, fontSize: t.size.micro, lineHeight: 1.2 }}>
+            {item}
+          </span>
+        ))}
+        {items.length > 4 && (
+          <span style={{ padding: '3px 7px', color: color.ghost, fontSize: t.size.micro }}>+{items.length - 4}</span>
+        )}
+      </div>
     </div>
   )
 }
