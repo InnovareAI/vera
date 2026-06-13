@@ -1,23 +1,21 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-import type { BrandVoice } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
 import { useAuth } from '../lib/auth'
 import {
-  Settings2, Users, Mic2, Plug, Building2, Save,
+  Settings2, Users, Plug, Building2, Save,
   CheckCircle2, AlertCircle, Sun, Moon, Monitor, BarChart3, ShieldCheck, RefreshCw, KeyRound, Database, ExternalLink
 } from 'lucide-react'
 import { PublishersCard } from '../components/PublishersCard'
 import { ClientIntegrationsCard } from '../components/ClientIntegrationsCard'
 import { useTheme, type Theme } from '../lib/themeContext'
 
-type Tab = 'workspace' | 'team' | 'brand' | 'integrations' | 'usage'
+type Tab = 'workspace' | 'team' | 'integrations' | 'usage'
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'workspace',    label: 'Workspace',    icon: Building2 },
   { id: 'team',         label: 'Access',       icon: Users },
-  { id: 'brand',        label: 'Brand Voice',  icon: Mic2 },
   { id: 'integrations', label: 'Integrations', icon: Plug },
   { id: 'usage',        label: 'AI Usage',     icon: BarChart3 },
 ]
@@ -272,111 +270,6 @@ function TeamTab() {
           <p className="text-xs text-amber-800">Invites are scoped to one client space. To give someone several clients, invite them to each. Organisation-wide staff access is on the roadmap.</p>
         </div>
       </div>
-    </div>
-  )
-}
-
-// ─── Brand Voice Tab ──────────────────────────────────────────────────────────
-function BrandVoiceTab() {
-  const { activeOrg } = useOrg()
-  const activeOrgId = activeOrg?.id
-  const [bv, setBv] = useState<Partial<BrandVoice>>({})
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [toneInput, setToneInput] = useState('')
-  const [ruleInput, setRuleInput] = useState('')
-  const [forbidInput, setForbidInput] = useState('')
-
-  useEffect(() => {
-    if (!activeOrgId) return
-    supabase.from('brand_voice').select('*').eq('org_id', activeOrgId).maybeSingle()
-      .then(({ data }) => { if (data) setBv(data) })
-  }, [activeOrgId])
-
-  async function handleSave() {
-    if (!activeOrg) return
-    setSaving(true)
-    const payload = { ...bv, org_id: activeOrg.id }
-    if (bv.id) {
-      await supabase.from('brand_voice').update(payload).eq('id', bv.id)
-    } else {
-      const { data } = await supabase.from('brand_voice').insert(payload).select().single()
-      if (data) setBv(data)
-    }
-    setSaving(false)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
-
-  function addToArray(key: keyof BrandVoice, val: string) {
-    if (!val.trim()) return
-    setBv(prev => ({ ...prev, [key]: [...((prev[key] as string[]) || []), val.trim()] }))
-  }
-
-  function removeFromArray(key: keyof BrandVoice, idx: number) {
-    setBv(prev => ({ ...prev, [key]: ((prev[key] as string[]) || []).filter((_, i) => i !== idx) }))
-  }
-
-  return (
-    <div className="max-w-xl space-y-5">
-      <div>
-        <h2 className="text-base font-semibold text-gray-900">Brand Voice</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Define the tone and style VERA uses when generating content.</p>
-      </div>
-
-      <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
-        <Field label="Persona Name" hint="e.g. Alex, Sam">
-          <input value={bv.persona_name ?? ''} onChange={e => setBv(f => ({...f, persona_name: e.target.value}))}
-            className="input" placeholder="Alex" />
-        </Field>
-        <Field label="Persona Descriptor" hint="One-line character description">
-          <input value={bv.persona_descriptor ?? ''} onChange={e => setBv(f => ({...f, persona_descriptor: e.target.value}))}
-            className="input" placeholder="A sharp, empathetic AI strategist" />
-        </Field>
-        <Field label="System Prompt Override" hint="Advanced: override VERA's base instructions">
-          <textarea value={bv.system_prompt ?? ''} onChange={e => setBv(f => ({...f, system_prompt: e.target.value}))}
-            className="input min-h-[80px] resize-y" placeholder="Write in first person. Never use buzzwords…" />
-        </Field>
-      </div>
-
-      <TagField
-        label="Tone Words"
-        hint="e.g. confident, empathetic, direct"
-        items={bv.tone ?? []}
-        input={toneInput}
-        setInput={setToneInput}
-        onAdd={() => { addToArray('tone', toneInput); setToneInput('') }}
-        onRemove={i => removeFromArray('tone', i)}
-        color="violet"
-      />
-
-      <TagField
-        label="Writing Rules"
-        hint="e.g. Never start a sentence with 'I', Always use Oxford comma"
-        items={bv.writing_rules ?? []}
-        input={ruleInput}
-        setInput={setRuleInput}
-        onAdd={() => { addToArray('writing_rules', ruleInput); setRuleInput('') }}
-        onRemove={i => removeFromArray('writing_rules', i)}
-        color="blue"
-      />
-
-      <TagField
-        label="Forbidden Phrases"
-        hint="e.g. leverage, synergy, game-changer"
-        items={bv.forbidden_phrases ?? []}
-        input={forbidInput}
-        setInput={setForbidInput}
-        onAdd={() => { addToArray('forbidden_phrases', forbidInput); setForbidInput('') }}
-        onRemove={i => removeFromArray('forbidden_phrases', i)}
-        color="red"
-      />
-
-      <button onClick={handleSave} disabled={saving}
-        className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 disabled:opacity-50 transition-colors">
-        {saved ? <CheckCircle2 size={14} className="text-emerald-400" /> : <Save size={14} />}
-        {saving ? 'Saving…' : saved ? 'Saved!' : 'Save Brand Voice'}
-      </button>
     </div>
   )
 }
@@ -1208,46 +1101,6 @@ function Field({ label, hint, children }: {
   )
 }
 
-function TagField({ label, hint, items, input, setInput, onAdd, onRemove, color }: {
-  label: string; hint: string; items: string[]; input: string;
-  setInput: (v: string) => void; onAdd: () => void; onRemove: (i: number) => void;
-  color: 'violet' | 'blue' | 'red'
-}) {
-  const colorMap = {
-    violet: 'bg-gray-100 text-gray-900',
-    blue:   'bg-blue-100 text-blue-700',
-    red:    'bg-red-100 text-red-700',
-  }
-
-  return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-2">
-      <div>
-        <p className="text-xs font-medium text-gray-700">{label}</p>
-        <p className="text-[11px] text-gray-400">{hint}</p>
-      </div>
-      <div className="flex flex-wrap gap-1.5 min-h-[28px]">
-        {items.map((item, i) => (
-          <span key={i} className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${colorMap[color]}`}>
-            {item}
-            <button onClick={() => onRemove(i)} className="opacity-60 hover:opacity-100 ml-0.5">×</button>
-          </span>
-        ))}
-      </div>
-      <div className="flex gap-2">
-        <input
-          value={input} onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && onAdd()}
-          className="input flex-1" placeholder="Type and press Enter…"
-        />
-        <button onClick={onAdd} disabled={!input.trim()}
-          className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-medium disabled:opacity-40 transition-colors">
-          Add
-        </button>
-      </div>
-    </div>
-  )
-}
-
 function UsageMetric({ label, value, detail, tone = 'neutral' }: { label: string; value: string; detail: string; tone?: 'neutral' | 'warn' | 'danger' }) {
   const toneClass = tone === 'danger'
     ? 'border-red-200 bg-red-50'
@@ -1753,7 +1606,6 @@ export default function Settings() {
         <div className="flex-1 overflow-y-auto px-8 py-6">
           {tab === 'workspace'    && <WorkspaceTab />}
           {tab === 'team'         && <TeamTab />}
-          {tab === 'brand'        && <BrandVoiceTab />}
           {tab === 'integrations' && <IntegrationsTab />}
           {tab === 'usage'        && <AiUsageTab />}
         </div>

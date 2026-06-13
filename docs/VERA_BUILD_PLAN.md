@@ -266,6 +266,7 @@ Current state:
 - Client content audits and LinkedIn audits now resolve website, LinkedIn, Instagram, YouTube, Medium, Quora, Reddit, Facebook, and X source URLs from the active client's Demand Brain. Legacy org-wide channel profiles are only used for the default workspace project.
 - Settings no longer edits org-wide channel writing rules from `platform_configs`. Channel tone, speaker mode, approval routing, publish guards, measurement focus, and SAM handoff triggers live in each client Demand Brain, while Settings stays focused on credentials, OAuth, publisher health, workspace access, and AI usage.
 - The legacy `platform_configs` table is retired through migration: RLS is forced, all old policies are dropped, Data API role grants are revoked, and `ops/verify-platform-configs-retired.sh` proves it has zero policies and zero anon, authenticated, or service-role grants in production.
+- Settings no longer exposes a separate workspace Brand Voice editor. Brand voice editing stays in each client Demand Brain, where Vera can inherit a workspace default but saving creates a client-specific voice.
 
 Next step:
 
