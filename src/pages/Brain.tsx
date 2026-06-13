@@ -8,7 +8,7 @@
 // · Knowledge — link to the client's searchable sources (managed in Knowledge;
 //   brand-kit files live in Artifacts).
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { Brain as BrainIcon, BookOpen, Check, Plus, X, Loader2, Trash2, Sparkles, Upload, FileText, RefreshCw } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -17,7 +17,7 @@ import { useProject } from '../lib/projectContext'
 import { useOrg } from '../lib/orgContext'
 import { useAuth } from '../lib/auth'
 import { useRightRail } from '../lib/rightRailContext'
-import { PageHeader, SectionLabel, Field, Input, Textarea, Button, EmptyState, Chip, color, space, type as t, radius } from '../design'
+import { PageHeader, SectionLabel, Field, Input, Textarea, Select, Button, EmptyState, Chip, color, space, type as t, radius } from '../design'
 import {
   EMPTY_BUSINESS_CONTEXT,
   compactProjectDescription,
@@ -38,7 +38,14 @@ import {
   DEMAND_SOURCE_KEYS,
   DEFAULT_DEMAND_OPERATING_MODEL,
   applyDemandDefaults,
+  defaultDemandChannelPolicies,
+  demandChannelPoliciesFromText,
+  demandChannelPolicyHasOverride,
+  demandChannelPolicyOverrideCount,
+  serializeDemandChannelPolicies,
+  type DemandChannelOperatingPolicy,
   type DemandPlatformDefinition,
+  type DemandPlatformKey,
   type DemandChannelRisk,
 } from '../lib/demandModel'
 
@@ -194,7 +201,15 @@ function orderedDemandPlatforms(context: BusinessContext) {
   })
 }
 
-function DemandChannelMatrix({ context }: { context: BusinessContext }) {
+function DemandChannelMatrix({
+  context,
+  policies,
+  onEditPolicy,
+}: {
+  context: BusinessContext
+  policies: Record<DemandPlatformKey, DemandChannelOperatingPolicy>
+  onEditPolicy: (key: DemandPlatformKey) => void
+}) {
   const platforms = orderedDemandPlatforms(context)
   const configured = platforms.filter(platform => platformSourceValue(platform, context)).length
 
@@ -214,7 +229,8 @@ function DemandChannelMatrix({ context }: { context: BusinessContext }) {
           const source = platformSourceValue(platform, context)
           const mentioned = platformIsMentioned(platform, context)
           const active = !!source || mentioned
-          const policy = DEMAND_CHANNEL_OPERATING_POLICIES[platform.key]
+          const policy = policies[platform.key] ?? DEMAND_CHANNEL_OPERATING_POLICIES[platform.key]
+          const customized = demandChannelPolicyHasOverride(platform.key, policy)
           return (
             <div key={platform.key} style={{
               padding: space[4],
@@ -237,6 +253,7 @@ function DemandChannelMatrix({ context }: { context: BusinessContext }) {
                 <Chip dot={riskTone(policy.risk)}>{riskLabel(policy.risk)}</Chip>
                 {source && <Chip dot={color.success}>Source</Chip>}
                 {!source && active && <Chip dot={color.info}>Planned</Chip>}
+                {customized && <Chip dot={color.accent}>Custom</Chip>}
               </div>
               {source && (
                 <div title={source} style={{ fontSize: t.size.micro, color: color.ghost, padding: `${space[2]} ${space[3]}`, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.xs, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: space[3] }}>
@@ -257,6 +274,9 @@ function DemandChannelMatrix({ context }: { context: BusinessContext }) {
               <p style={{ margin: `${space[3]} 0 0`, color: color.ghost, fontSize: t.size.micro, lineHeight: 1.45 }}>
                 Measures: {policy.measurementFocus}
               </p>
+              <Button variant="ghost" size="sm" onClick={() => onEditPolicy(platform.key)} style={{ marginTop: space[3], paddingLeft: 0, paddingRight: 0 }}>
+                Edit policy
+              </Button>
             </div>
           )
         })}
@@ -270,6 +290,136 @@ function PolicyLine({ label, value }: { label: string; value: string }) {
     <div style={{ display: 'grid', gridTemplateColumns: '58px minmax(0, 1fr)', gap: space[2], alignItems: 'start' }}>
       <span style={{ color: color.faint, fontSize: t.size.micro, lineHeight: 1.35 }}>{label}</span>
       <span style={{ color: color.ink2, fontSize: t.size.micro, lineHeight: 1.35 }}>{value}</span>
+    </div>
+  )
+}
+
+function DemandChannelPolicyEditor({
+  policies,
+  selected,
+  onSelect,
+  onChange,
+  onReset,
+  onSave,
+  saving,
+  saved,
+}: {
+  policies: Record<DemandPlatformKey, DemandChannelOperatingPolicy>
+  selected: DemandPlatformKey
+  onSelect: (key: DemandPlatformKey) => void
+  onChange: (key: DemandPlatformKey, patch: Partial<DemandChannelOperatingPolicy>) => void
+  onReset: (key: DemandPlatformKey) => void
+  onSave: () => void
+  saving: boolean
+  saved: boolean
+}) {
+  const platform = DEMAND_PLATFORM_DEFINITIONS.find(item => item.key === selected) ?? DEMAND_PLATFORM_DEFINITIONS[0]
+  const policy = policies[platform.key] ?? DEMAND_CHANNEL_OPERATING_POLICIES[platform.key]
+  const overrideCount = demandChannelPolicyOverrideCount(policies)
+  const customized = demandChannelPolicyHasOverride(platform.key, policy)
+
+  return (
+    <div style={{ marginTop: space[4], padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: space[4], flexWrap: 'wrap', marginBottom: space[4] }}>
+        <div>
+          <div style={{ fontSize: t.size.sm, color: color.ink, fontWeight: t.weight.semibold }}>Channel policy editor</div>
+          <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `${space[2]} 0 0`, maxWidth: 700 }}>
+            These rules become part of this client's Demand Brain. Vera uses them when choosing a speaker, routing approval, deciding whether work can publish, and deciding which signals move to SAM.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: space[2], alignItems: 'center', flexWrap: 'wrap' }}>
+          <Chip tone={overrideCount ? 'accent' : 'default'}>{overrideCount} custom channels</Chip>
+          {saved && <Chip dot={color.success}>Saved</Chip>}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: space[4], alignItems: 'start' }}>
+        <div style={{ display: 'grid', gap: space[2] }}>
+          {DEMAND_PLATFORM_DEFINITIONS.map(item => {
+            const active = item.key === platform.key
+            const itemCustomized = demandChannelPolicyHasOverride(item.key, policies[item.key] ?? DEMAND_CHANNEL_OPERATING_POLICIES[item.key])
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => onSelect(item.key)}
+                style={{
+                  width: '100%',
+                  minHeight: 38,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: space[3],
+                  padding: `${space[2]} ${space[3]}`,
+                  borderRadius: radius.sm,
+                  border: `1px solid ${active ? color.accentLine : color.line}`,
+                  background: active ? color.accentSoft : color.paper2,
+                  color: active ? color.accent : color.ink2,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontSize: t.size.sm,
+                  fontWeight: active ? t.weight.semibold : t.weight.medium,
+                }}
+              >
+                <span style={{ width: 24, height: 24, borderRadius: radius.xs, background: active ? color.surface : color.paper, color: active ? color.accent : color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: t.size.micro, flexShrink: 0 }}>
+                  {item.initials}
+                </span>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
+                {itemCustomized && <span style={{ width: 6, height: 6, borderRadius: 999, background: color.accent, flexShrink: 0 }} />}
+              </button>
+            )
+          })}
+        </div>
+
+        <div style={{ display: 'grid', gap: space[4], minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
+                <span style={{ color: color.ink, fontSize: t.size.body, fontWeight: t.weight.semibold }}>{platform.label}</span>
+                <Chip dot={riskTone(policy.risk)}>{riskLabel(policy.risk)}</Chip>
+                {customized ? <Chip dot={color.accent}>Custom</Chip> : <Chip>Default</Chip>}
+              </div>
+              <p style={{ color: color.ghost, fontSize: t.size.cap, lineHeight: 1.45, margin: `${space[2]} 0 0` }}>{platform.role}</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => onReset(platform.key)} disabled={!customized}>
+              Reset channel
+            </Button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: space[4] }}>
+            <Field label="Speaker mode">
+              <Textarea rows={3} value={policy.speakerMode} onChange={e => onChange(platform.key, { speakerMode: e.target.value })} />
+            </Field>
+            <Field label="Approval path">
+              <Textarea rows={3} value={policy.approvalMode} onChange={e => onChange(platform.key, { approvalMode: e.target.value })} />
+            </Field>
+            <Field label="Publishing guard">
+              <Textarea rows={3} value={policy.publishGuard} onChange={e => onChange(platform.key, { publishGuard: e.target.value })} />
+            </Field>
+            <Field label="Measurement focus">
+              <Textarea rows={3} value={policy.measurementFocus} onChange={e => onChange(platform.key, { measurementFocus: e.target.value })} />
+            </Field>
+            <Field label="SAM handoff trigger">
+              <Textarea rows={3} value={policy.samTrigger} onChange={e => onChange(platform.key, { samTrigger: e.target.value })} />
+            </Field>
+            <Field label="Approval risk" helper="This affects the visible policy badge. Publishing enforcement remains controlled by integrations and approvals.">
+              <Select value={policy.risk} onChange={e => onChange(platform.key, { risk: e.target.value as DemandChannelRisk })}>
+                <option value="low">Standard review</option>
+                <option value="medium">Approval aware</option>
+                <option value="high">High approval care</option>
+              </Select>
+            </Field>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[3], flexWrap: 'wrap' }}>
+            <Button variant="primary" size="md" onClick={onSave} disabled={saving} style={{ background: color.ink, color: color.surface }}>
+              {saving ? <Loader2 size={14} /> : <Check size={14} />} Save channel policies
+            </Button>
+            <span style={{ color: color.ghost, fontSize: t.size.cap }}>
+              Saved policies are injected into Vera's project instructions from the next turn.
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -292,6 +442,7 @@ export default function Brain() {
   const [pullingSources, setPullingSources] = useState(false)
   const [sourceStatus, setSourceStatus] = useState('')
   const [sourceError, setSourceError] = useState<string | null>(null)
+  const [selectedPolicyKey, setSelectedPolicyKey] = useState<DemandPlatformKey>('linkedin')
 
   useEffect(() => {
     const parsed = parseProjectInstructions(activeProject?.instructions ?? '')
@@ -304,10 +455,19 @@ export default function Brain() {
     })
   }, [activeProject?.id, activeProject?.instructions, activeProject?.name, activeProject?.description])
 
+  const channelPolicies = useMemo(
+    () => demandChannelPoliciesFromText(business.channelOperatingPolicies),
+    [business.channelOperatingPolicies],
+  )
+
   async function saveInstr() {
     if (!activeProject?.id) return
     setInstrSaving(true)
-    const context = { ...business, companyName: business.companyName.trim() || activeProject.name }
+    const context = {
+      ...business,
+      companyName: business.companyName.trim() || activeProject.name,
+      channelOperatingPolicies: business.channelOperatingPolicies || serializeDemandChannelPolicies(channelPolicies),
+    }
     await supabase.from('projects').update({
       instructions: mergeProjectInstructions(instr, context),
       description: compactProjectDescription(context) ?? activeProject.description ?? null,
@@ -318,6 +478,26 @@ export default function Brain() {
 
   function updateBusiness(key: BusinessContextKey, value: string) {
     setBusiness(prev => ({ ...prev, [key]: value }))
+  }
+
+  function updateChannelPolicy(key: DemandPlatformKey, patch: Partial<DemandChannelOperatingPolicy>) {
+    const next = {
+      ...channelPolicies,
+      [key]: {
+        ...channelPolicies[key],
+        ...patch,
+      },
+    }
+    setBusiness(prev => ({ ...prev, channelOperatingPolicies: serializeDemandChannelPolicies(next) }))
+  }
+
+  function resetChannelPolicy(key: DemandPlatformKey) {
+    const defaults = defaultDemandChannelPolicies()
+    const next = {
+      ...channelPolicies,
+      [key]: defaults[key],
+    }
+    setBusiness(prev => ({ ...prev, channelOperatingPolicies: serializeDemandChannelPolicies(next) }))
   }
 
   async function extractBusinessContext(files: FileList | null) {
@@ -693,7 +873,22 @@ export default function Brain() {
           </div>
         </div>
 
-        <DemandChannelMatrix context={business} />
+        <DemandChannelMatrix
+          context={business}
+          policies={channelPolicies}
+          onEditPolicy={key => setSelectedPolicyKey(key)}
+        />
+
+        <DemandChannelPolicyEditor
+          policies={channelPolicies}
+          selected={selectedPolicyKey}
+          onSelect={setSelectedPolicyKey}
+          onChange={updateChannelPolicy}
+          onReset={resetChannelPolicy}
+          onSave={saveInstr}
+          saving={instrSaving}
+          saved={instrSaved}
+        />
 
         <div style={{ marginTop: space[4], padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], marginBottom: space[4] }}>

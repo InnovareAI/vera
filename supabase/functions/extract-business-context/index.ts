@@ -61,6 +61,7 @@ type BusinessContext = {
   engagementSignals: string
   samHandoffRules: string
   learningCadence: string
+  channelOperatingPolicies: string
   constraints: string
 }
 
@@ -136,6 +137,7 @@ const FIELD_KEYS = [
   "engagementSignals",
   "samHandoffRules",
   "learningCadence",
+  "channelOperatingPolicies",
   "constraints",
 ] as const
 
@@ -818,6 +820,7 @@ Rules:
 - "engagementSignals" should capture comments, shares, clicks, traffic, objections, or other traction signals that matter.
 - "samHandoffRules" should capture when content engagement should become SAM research or sales follow-up.
 - "learningCadence" should capture how often VERA should review performance and update recommendations.
+- "channelOperatingPolicies" should remain empty unless the source clearly defines per-channel speaker, approval, publishing guard, measurement, or sales handoff rules. If present, return compact JSON keyed by platform.
 - "constraints" should capture legal, compliance, wording, market, region, or brand restrictions.
 
 Document:

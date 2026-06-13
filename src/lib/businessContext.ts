@@ -31,6 +31,7 @@ export type BusinessContextKey =
   | 'engagementSignals'
   | 'samHandoffRules'
   | 'learningCadence'
+  | 'channelOperatingPolicies'
   | 'constraints'
 
 export type BusinessContext = Record<BusinessContextKey, string>
@@ -68,6 +69,7 @@ export const EMPTY_BUSINESS_CONTEXT: BusinessContext = {
   engagementSignals: '',
   samHandoffRules: '',
   learningCadence: '',
+  channelOperatingPolicies: '',
   constraints: '',
 }
 
@@ -107,8 +109,33 @@ const BUSINESS_CONTEXT_FIELDS: Array<{ key: BusinessContextKey; label: string }>
   { key: 'engagementSignals', label: 'Engagement signals' },
   { key: 'samHandoffRules', label: 'SAM handoff rules' },
   { key: 'learningCadence', label: 'Learning cadence' },
+  { key: 'channelOperatingPolicies', label: 'Channel operating policies' },
   { key: 'constraints', label: 'Constraints' },
 ]
+
+function encodeBusinessContextValue(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\r?\n/g, '\\n')
+}
+
+function decodeBusinessContextValue(value: string): string {
+  let decoded = ''
+  for (let i = 0; i < value.length; i += 1) {
+    const char = value[i]
+    const next = value[i + 1]
+    if (char === '\\' && next === 'n') {
+      decoded += '\n'
+      i += 1
+    } else if (char === '\\' && next === '\\') {
+      decoded += '\\'
+      i += 1
+    } else {
+      decoded += char
+    }
+  }
+  return decoded
+}
 
 export function hasBusinessContext(context: BusinessContext): boolean {
   return BUSINESS_CONTEXT_FIELDS.some(({ key }) => context[key].trim().length > 0)
@@ -124,7 +151,7 @@ export function buildBusinessContextBlock(context: BusinessContext): string {
   return [
     BUSINESS_CONTEXT_START,
     'Business context for this client. Use this before drafting, planning, or answering.',
-    ...rows.map(({ label, value }) => `- ${label}: ${value}`),
+    ...rows.map(({ label, value }) => `- ${label}: ${encodeBusinessContextValue(value)}`),
     BUSINESS_CONTEXT_END,
   ].join('\n')
 }
@@ -151,7 +178,7 @@ export function parseProjectInstructions(raw: string | null | undefined): {
     const match = line.match(/^\s*-\s*([^:]+):\s*(.*)\s*$/)
     if (!match) continue
     const label = match[1].trim().toLowerCase()
-    const value = match[2].trim()
+    const value = decodeBusinessContextValue(match[2].trim())
     const field = BUSINESS_CONTEXT_FIELDS.find(item => item.label.toLowerCase() === label)
     if (field) businessContext[field.key] = value
   }

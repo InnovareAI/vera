@@ -1,4 +1,5 @@
 import type { BusinessContext } from './businessContext'
+import { demandChannelPoliciesFromText, type DemandChannelOperatingPolicy, type DemandPlatformKey } from './demandModel'
 import type { Post } from './supabase'
 
 export type ApprovalRouteTone = 'neutral' | 'info' | 'warning' | 'danger' | 'success'
@@ -71,6 +72,36 @@ function channelKey(post: Post) {
   return channel
 }
 
+function demandPolicyKey(channel: string): DemandPlatformKey | null {
+  if (channel.includes('linkedin')) return 'linkedin'
+  if (channel.includes('youtube')) return 'youtube'
+  if (channel.includes('medium')) return 'medium'
+  if (channel.includes('quora')) return 'quora'
+  if (channel.includes('reddit')) return 'reddit'
+  if (channel === 'x' || channel.includes('twitter')) return 'x'
+  if (channel.includes('instagram')) return 'instagram'
+  if (channel.includes('facebook')) return 'facebook'
+  if (channel.includes('email') || channel.includes('newsletter')) return 'email'
+  if (
+    channel.includes('blog')
+    || channel.includes('wordpress')
+    || channel.includes('webflow')
+    || channel.includes('contentful')
+    || channel.includes('sanity')
+    || channel.includes('strapi')
+    || channel.includes('ghost')
+    || channel.includes('hubspot')
+    || channel.includes('shopify')
+  ) return 'blog'
+  return null
+}
+
+function channelPolicy(channel: string, context?: BusinessContext): DemandChannelOperatingPolicy | null {
+  const key = demandPolicyKey(channel)
+  if (!key) return null
+  return demandChannelPoliciesFromText(context?.channelOperatingPolicies)[key]
+}
+
 function contextText(context?: BusinessContext) {
   if (!context) return ''
   return [
@@ -88,13 +119,16 @@ function stakeholderText(context?: BusinessContext) {
   return 'Client lead, subject owner, and operator'
 }
 
-function baseChecklist(post: Post, context?: BusinessContext) {
+function baseChecklist(post: Post, context?: BusinessContext, policy?: DemandChannelOperatingPolicy | null) {
   const checks = [
     'Message fits the client positioning',
     'Platform format and CTA are clear',
     'Comments, shares, and traffic goal are explicit',
   ]
   if (context?.platformToneOfVoice?.trim()) checks.push('Tone matches the selected platform voice')
+  if (policy?.speakerMode) checks.push(`Speaker policy: ${policy.speakerMode}`)
+  if (policy?.publishGuard) checks.push(`Publishing guard: ${policy.publishGuard}`)
+  if (policy?.measurementFocus) checks.push(`Measurement focus: ${policy.measurementFocus}`)
   if (post.media_url || post.media_type) checks.push('Creative asset matches the post and platform dimensions')
   return checks
 }
@@ -108,8 +142,25 @@ export function approvalRouteForPost(post: Post, context?: BusinessContext): App
   const hasSensitiveClaim = hasClaimRisk || hasLegalContext
   const hasVideo = media.includes('video') || channel === 'youtube'
   const namedSpeaker = isNamedSpeaker(post)
-  const checklist = baseChecklist(post, context)
+  const policy = channelPolicy(channel, context)
+  const checklist = baseChecklist(post, context, policy)
   const stakeholders = stakeholderText(context)
+
+  if (policy?.risk === 'high') {
+    return {
+      label: 'Policy required',
+      tone: 'danger',
+      risk: 'high',
+      reason: `The saved channel policy marks this channel as high approval care: ${policy.approvalMode}`,
+      checklist: [
+        `Apply channel approval path: ${policy.approvalMode}`,
+        `Confirm publishing guard: ${policy.publishGuard}`,
+        `Confirm SAM handoff trigger: ${policy.samTrigger}`,
+        ...checklist,
+      ],
+      approverHint: stakeholders,
+    }
+  }
 
   if (hasSensitiveClaim) {
     return {
@@ -147,9 +198,9 @@ export function approvalRouteForPost(post: Post, context?: BusinessContext): App
       label: 'Client lead',
       tone: 'info',
       risk: 'medium',
-      reason: 'This channel is manual-first or community-sensitive, so a human should own posting context.',
+      reason: policy?.publishGuard || 'This channel is manual-first or community-sensitive, so a human should own posting context.',
       checklist: [
-        'Check community rules, question fit, and comment posture',
+        policy?.approvalMode ? `Apply channel approval path: ${policy.approvalMode}` : 'Check community rules, question fit, and comment posture',
         'Confirm the post is helpful before it is promotional',
         ...checklist,
       ],

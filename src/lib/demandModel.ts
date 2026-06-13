@@ -34,6 +34,15 @@ export type DemandChannelOperatingPolicy = {
   risk: DemandChannelRisk
 }
 
+const DEMAND_CHANNEL_POLICY_FIELDS = [
+  'speakerMode',
+  'approvalMode',
+  'publishGuard',
+  'measurementFocus',
+  'samTrigger',
+  'risk',
+] as const
+
 export const DEMAND_PLATFORM_DEFINITIONS: DemandPlatformDefinition[] = [
   {
     key: 'linkedin',
@@ -219,6 +228,84 @@ export const DEMAND_CHANNEL_OPERATING_POLICIES: Record<DemandPlatformKey, Demand
   },
 }
 
+function isDemandChannelRisk(value: unknown): value is DemandChannelRisk {
+  return value === 'low' || value === 'medium' || value === 'high'
+}
+
+function cloneDemandChannelPolicy(policy: DemandChannelOperatingPolicy): DemandChannelOperatingPolicy {
+  return { ...policy }
+}
+
+export function defaultDemandChannelPolicies(): Record<DemandPlatformKey, DemandChannelOperatingPolicy> {
+  return Object.fromEntries(
+    DEMAND_PLATFORM_DEFINITIONS.map(platform => [
+      platform.key,
+      cloneDemandChannelPolicy(DEMAND_CHANNEL_OPERATING_POLICIES[platform.key]),
+    ]),
+  ) as Record<DemandPlatformKey, DemandChannelOperatingPolicy>
+}
+
+function normalizeDemandChannelPolicy(
+  key: DemandPlatformKey,
+  raw: unknown,
+): DemandChannelOperatingPolicy {
+  const base = DEMAND_CHANNEL_OPERATING_POLICIES[key]
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return cloneDemandChannelPolicy(base)
+  const candidate = raw as Partial<Record<keyof DemandChannelOperatingPolicy, unknown>>
+  return {
+    speakerMode: typeof candidate.speakerMode === 'string' && candidate.speakerMode.trim() ? candidate.speakerMode.trim() : base.speakerMode,
+    approvalMode: typeof candidate.approvalMode === 'string' && candidate.approvalMode.trim() ? candidate.approvalMode.trim() : base.approvalMode,
+    publishGuard: typeof candidate.publishGuard === 'string' && candidate.publishGuard.trim() ? candidate.publishGuard.trim() : base.publishGuard,
+    measurementFocus: typeof candidate.measurementFocus === 'string' && candidate.measurementFocus.trim() ? candidate.measurementFocus.trim() : base.measurementFocus,
+    samTrigger: typeof candidate.samTrigger === 'string' && candidate.samTrigger.trim() ? candidate.samTrigger.trim() : base.samTrigger,
+    risk: isDemandChannelRisk(candidate.risk) ? candidate.risk : base.risk,
+  }
+}
+
+export function demandChannelPoliciesFromText(raw: string | null | undefined): Record<DemandPlatformKey, DemandChannelOperatingPolicy> {
+  const source = raw?.trim()
+  if (!source) return defaultDemandChannelPolicies()
+  try {
+    const parsed = JSON.parse(source) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return defaultDemandChannelPolicies()
+    const record = parsed as Partial<Record<DemandPlatformKey, unknown>>
+    return Object.fromEntries(
+      DEMAND_PLATFORM_DEFINITIONS.map(platform => [
+        platform.key,
+        normalizeDemandChannelPolicy(platform.key, record[platform.key]),
+      ]),
+    ) as Record<DemandPlatformKey, DemandChannelOperatingPolicy>
+  } catch {
+    return defaultDemandChannelPolicies()
+  }
+}
+
+export function serializeDemandChannelPolicies(
+  policies: Record<DemandPlatformKey, DemandChannelOperatingPolicy>,
+): string {
+  const normalized = Object.fromEntries(
+    DEMAND_PLATFORM_DEFINITIONS.map(platform => [
+      platform.key,
+      normalizeDemandChannelPolicy(platform.key, policies[platform.key]),
+    ]),
+  )
+  return JSON.stringify(normalized, null, 2)
+}
+
+export function demandChannelPolicyHasOverride(
+  key: DemandPlatformKey,
+  policy: DemandChannelOperatingPolicy,
+): boolean {
+  const base = DEMAND_CHANNEL_OPERATING_POLICIES[key]
+  return DEMAND_CHANNEL_POLICY_FIELDS.some(field => policy[field] !== base[field])
+}
+
+export function demandChannelPolicyOverrideCount(
+  policies: Record<DemandPlatformKey, DemandChannelOperatingPolicy>,
+): number {
+  return DEMAND_PLATFORM_DEFINITIONS.filter(platform => demandChannelPolicyHasOverride(platform.key, policies[platform.key])).length
+}
+
 const DEMAND_PROVIDER_PLATFORM: Record<string, DemandPlatformKey> = {
   linkedin: 'linkedin',
   youtube: 'youtube',
@@ -362,6 +449,7 @@ export const DEFAULT_DEMAND_OPERATING_MODEL: Pick<
   | 'engagementSignals'
   | 'samHandoffRules'
   | 'learningCadence'
+  | 'channelOperatingPolicies'
 > = {
   demandObjective: 'Create B2B top-of-funnel demand that produces useful conversations, comments, shares, qualified traffic, and sales research signals.',
   conversionPath: 'Move attention into comments, shares, qualified site traffic, newsletter or event opt-ins, direct messages, and SAM follow-up queues.',
@@ -374,6 +462,7 @@ export const DEFAULT_DEMAND_OPERATING_MODEL: Pick<
   engagementSignals: DEMAND_OUTCOME_SIGNALS.join(', '),
   samHandoffRules: 'Hand off named accounts, repeated objections, buying-trigger comments, competitor mentions, high-intent clicks, inbound questions, and people asking for examples or pricing.',
   learningCadence: 'Review performance weekly, update what works and what does not from every useful signal, refresh channel-specific tone and platform best practices monthly, and turn repeatable wins into skills.',
+  channelOperatingPolicies: serializeDemandChannelPolicies(defaultDemandChannelPolicies()),
 }
 
 export function applyDemandDefaults(context: BusinessContext): BusinessContext {
@@ -390,6 +479,7 @@ export function applyDemandDefaults(context: BusinessContext): BusinessContext {
     engagementSignals: context.engagementSignals || DEFAULT_DEMAND_OPERATING_MODEL.engagementSignals,
     samHandoffRules: context.samHandoffRules || DEFAULT_DEMAND_OPERATING_MODEL.samHandoffRules,
     learningCadence: context.learningCadence || DEFAULT_DEMAND_OPERATING_MODEL.learningCadence,
+    channelOperatingPolicies: context.channelOperatingPolicies || DEFAULT_DEMAND_OPERATING_MODEL.channelOperatingPolicies,
   }
 }
 

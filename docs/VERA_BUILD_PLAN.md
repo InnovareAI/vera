@@ -239,6 +239,7 @@ Current state:
 - Learning now includes a visible SAM handoff queue. Operators can queue detected demand signals, assign or reassign them, copy the brief for SAM, complete, dismiss, and reopen queue items.
 - The video backend now re-verifies approved platform media project scope inside the final FAL key resolver, so platform FAL fallback cannot be enabled by a caller flag alone.
 - Demand Brain now exposes per-channel operating policy for speaker mode, approval path, publishing guard, measurement focus, and SAM handoff trigger across the full organic channel set.
+- Demand Brain channel policies are now client-editable, saved into project instructions, preserved by document extraction, and read by approval routing for review risk, checklists, and publishing guard context.
 - Vera chat now uses the shared LinkedIn research resolver, so an InnovareAI operator profile can research across client spaces without granting client publishing rights.
 - `ops/verify-media-key-scope.sh` now provides a no-spend production regression check that a client space without a FAL key cannot call a FAL-only image model through `generate-image`.
 - Shared text runtimes now use the same model-selection audit metadata, including requested model, policy default, selection source, and selection reason.
