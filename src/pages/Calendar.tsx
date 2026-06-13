@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase'
 import type { Campaign, Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
+import { parseProjectInstructions, type BusinessContext } from '../lib/businessContext'
+import { approvalRouteForPost, type ApprovalRoute } from '../lib/approvalRouting'
 import { PlatformChip, StatusChip } from '../components/Chip'
 import { color, radius, type as t } from '../design'
 
@@ -97,6 +99,10 @@ export default function Calendar() {
   const [scheduleError, setScheduleError] = useState<string | null>(null)
   const [dayDrawerOpen, setDayDrawerOpen] = useState(true)
   const calendarPreferenceKey = `vera-calendar-view:${activeProject?.id ?? activeOrg?.id ?? 'global'}`
+  const businessContext = useMemo(
+    () => parseProjectInstructions(activeProject?.instructions).businessContext,
+    [activeProject?.instructions],
+  )
 
   useEffect(() => {
     if (!activeOrg?.id) {
@@ -192,6 +198,7 @@ export default function Calendar() {
     return date.getFullYear() === year && date.getMonth() === month && dayPosts.length > DAILY_POST_CAPACITY
   })
   const reviewQueueCount = filteredPosts.filter(post => postStatusBucket(post) === 'review').length
+  const policySummary = policySummaryForPosts(filteredPosts, businessContext)
   const activeFilterCount = Object.values(filters).filter(value => value !== 'all').length
   const selectedDateObject = parseIsoDay(selectedDate)
   const weekStart = mondayOf(selectedDateObject)
@@ -362,6 +369,12 @@ export default function Calendar() {
               <AlertTriangle size={12} />
               {unscheduledPosts.length} unscheduled
             </span>
+            {policySummary.guarded > 0 && (
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 font-medium" style={{ color: policySummary.highCare > 0 ? color.danger : color.warn, background: policySummary.highCare > 0 ? DANGER_TINT : color.paper2, border: `1px solid ${policySummary.highCare > 0 ? DANGER_LINE : color.line}`, borderRadius: radius.pill }}>
+                <AlertTriangle size={12} />
+                {policySummary.guarded} policy checks
+              </span>
+            )}
             <span>{filteredPosts.length} visible</span>
           </div>
         </div>
@@ -459,6 +472,7 @@ export default function Calendar() {
               postsByDay={postsByDay}
               today={today}
               selectedDate={selectedDate}
+              businessContext={businessContext}
               onSelectDate={selectDate}
               onDropPost={handleDropOnDay}
             />
@@ -468,6 +482,7 @@ export default function Calendar() {
               date={selectedDateObject}
               posts={selectedPosts}
               campaignsById={campaignsById}
+              businessContext={businessContext}
               onOpen={openPost}
               onDropPost={handleDropOnDay}
               renderActions={postCardActions}
@@ -480,6 +495,7 @@ export default function Calendar() {
               campaignsById={campaignsById}
               today={today}
               selectedDate={selectedDate}
+              businessContext={businessContext}
               onSelectDate={selectDate}
               onOpen={openPost}
               onDropPost={handleDropOnDay}
@@ -490,6 +506,7 @@ export default function Calendar() {
             <AgendaView
               items={agendaPosts}
               campaignsById={campaignsById}
+              businessContext={businessContext}
               onOpen={openPost}
             />
           )}
@@ -500,6 +517,7 @@ export default function Calendar() {
               campaigns={campaigns}
               datedPosts={agendaPosts}
               campaignsById={campaignsById}
+              businessContext={businessContext}
               onOpen={openPost}
             />
           )}
@@ -507,6 +525,7 @@ export default function Calendar() {
             <KanbanView
               posts={filteredPosts}
               campaignsById={campaignsById}
+              businessContext={businessContext}
               onOpen={openPost}
               renderActions={postCardActions}
             />
@@ -515,6 +534,7 @@ export default function Calendar() {
             <PlatformView
               posts={filteredPosts}
               campaignsById={campaignsById}
+              businessContext={businessContext}
               onOpen={openPost}
               renderActions={postCardActions}
             />
@@ -525,6 +545,7 @@ export default function Calendar() {
               month={month}
               postsByDay={postsByDay}
               posts={filteredPosts}
+              businessContext={businessContext}
               selectedDate={selectedDate}
               onSelectDate={selectDate}
             />
@@ -545,6 +566,7 @@ export default function Calendar() {
               posts={selectedPosts}
               campaignsById={campaignsById}
               capacity={selectedDayCapacity}
+              businessContext={businessContext}
               onClose={() => setDayDrawerOpen(false)}
               onOpen={openPost}
               onDropPost={handleDropOnDay}
@@ -556,6 +578,7 @@ export default function Calendar() {
             posts={unscheduledPosts}
             readyCount={readyToSchedule.length}
             campaignsById={campaignsById}
+            businessContext={businessContext}
             onOpen={openPost}
             onDragStart={(event, post) => {
               event.dataTransfer.setData(DRAG_POST_MIME, post.id)
@@ -578,6 +601,7 @@ function MonthGrid({
   postsByDay,
   today,
   selectedDate,
+  businessContext,
   onSelectDate,
   onDropPost,
 }: {
@@ -585,6 +609,7 @@ function MonthGrid({
   postsByDay: Map<string, Post[]>
   today: Date
   selectedDate: string
+  businessContext: BusinessContext
   onSelectDate: (date: string) => void
   onDropPost: (event: React.DragEvent, day: string) => void
 }) {
@@ -641,7 +666,7 @@ function MonthGrid({
               </div>
               <div className="flex flex-col gap-1">
                 {dayPosts.slice(0, 3).map(post => (
-                  <CalendarPill key={post.id} post={post} />
+                  <CalendarPill key={post.id} post={post} businessContext={businessContext} />
                 ))}
                 {dayPosts.length > 3 && (
                   <span className="text-[11px]" style={{ color: color.ghost }}>+{dayPosts.length - 3} more</span>
@@ -664,6 +689,7 @@ function DayView({
   date,
   posts,
   campaignsById,
+  businessContext,
   onOpen,
   onDropPost,
   renderActions,
@@ -671,6 +697,7 @@ function DayView({
   date: Date
   posts: Post[]
   campaignsById: Map<string, Campaign>
+  businessContext: BusinessContext
   onOpen: (post: Post) => void
   onDropPost: (event: React.DragEvent, day: string, hour?: number) => void
   renderActions: (post: Post) => React.ReactNode
@@ -723,6 +750,7 @@ function DayView({
                       key={item.post.id}
                       post={item.post}
                       campaign={item.post.campaign_id ? campaignsById.get(item.post.campaign_id) ?? null : null}
+                      businessContext={businessContext}
                       onOpen={() => onOpen(item.post)}
                       actions={renderActions(item.post)}
                     />
@@ -754,6 +782,7 @@ function DayView({
                           key={item.post.id}
                           post={item.post}
                           campaign={item.post.campaign_id ? campaignsById.get(item.post.campaign_id) ?? null : null}
+                          businessContext={businessContext}
                           onOpen={() => onOpen(item.post)}
                           actions={renderActions(item.post)}
                         />
@@ -776,6 +805,7 @@ function WeekGrid({
   campaignsById,
   today,
   selectedDate,
+  businessContext,
   onSelectDate,
   onOpen,
   onDropPost,
@@ -786,6 +816,7 @@ function WeekGrid({
   campaignsById: Map<string, Campaign>
   today: Date
   selectedDate: string
+  businessContext: BusinessContext
   onSelectDate: (date: string) => void
   onOpen: (post: Post) => void
   onDropPost: (event: React.DragEvent, day: string) => void
@@ -825,6 +856,7 @@ function WeekGrid({
                   key={post.id}
                   post={post}
                   campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
+                  businessContext={businessContext}
                   onOpen={() => onOpen(post)}
                   actions={renderActions(post)}
                 />
@@ -840,10 +872,12 @@ function WeekGrid({
 function AgendaView({
   items,
   campaignsById,
+  businessContext,
   onOpen,
 }: {
   items: DatedPost[]
   campaignsById: Map<string, Campaign>
+  businessContext: BusinessContext
   onOpen: (post: Post) => void
 }) {
   if (items.length === 0) {
@@ -872,6 +906,7 @@ function AgendaView({
               <CalendarPostCard
                 post={item.post}
                 campaign={item.post.campaign_id ? campaignsById.get(item.post.campaign_id) ?? null : null}
+                businessContext={businessContext}
                 onOpen={() => onOpen(item.post)}
               />
             </div>
@@ -888,6 +923,7 @@ function GanttView({
   campaigns,
   datedPosts,
   campaignsById,
+  businessContext,
   onOpen,
 }: {
   year: number
@@ -895,6 +931,7 @@ function GanttView({
   campaigns: Campaign[]
   datedPosts: DatedPost[]
   campaignsById: Map<string, Campaign>
+  businessContext: BusinessContext
   onOpen: (post: Post) => void
 }) {
   const monthStart = new Date(year, month, 1)
@@ -995,11 +1032,13 @@ function GanttView({
 
                   {row.posts.map((item, index) => {
                     const left = ganttPointPosition(item.date, monthStart, monthEnd)
+                    const route = approvalRouteForPost(item.post, businessContext)
+                    const hasPolicySignal = shouldShowPolicySignal(route)
                     return (
                       <button
                         key={item.post.id}
                         onClick={() => onOpen(item.post)}
-                        title={`${item.post.title || 'Untitled post'} · ${item.date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`}
+                        title={`${item.post.title || 'Untitled post'} · ${item.date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}${hasPolicySignal ? `\n${policyTitle(route)}` : ''}`}
                         className="absolute flex items-center gap-1.5 max-w-[150px] px-1.5 py-1 text-left transition-colors hover:bg-[var(--paper-2)]"
                         style={{
                           left: `${left}%`,
@@ -1012,6 +1051,7 @@ function GanttView({
                         }}
                       >
                         <span style={{ width: 7, height: 7, borderRadius: '50%', background: channelColor(item.post.channel), flexShrink: 0 }} />
+                        {hasPolicySignal && <AlertTriangle size={10} style={{ color: route.risk === 'high' ? color.danger : color.warn, flexShrink: 0 }} />}
                         <span className="text-[11px] font-medium truncate">{item.post.title || item.post.channel || 'Post'}</span>
                       </button>
                     )
@@ -1029,11 +1069,13 @@ function GanttView({
 function KanbanView({
   posts,
   campaignsById,
+  businessContext,
   onOpen,
   renderActions,
 }: {
   posts: Post[]
   campaignsById: Map<string, Campaign>
+  businessContext: BusinessContext
   onOpen: (post: Post) => void
   renderActions: (post: Post) => React.ReactNode
 }) {
@@ -1064,6 +1106,7 @@ function KanbanView({
                   key={post.id}
                   post={post}
                   campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
+                  businessContext={businessContext}
                   onOpen={() => onOpen(post)}
                   actions={renderActions(post)}
                 />
@@ -1079,11 +1122,13 @@ function KanbanView({
 function PlatformView({
   posts,
   campaignsById,
+  businessContext,
   onOpen,
   renderActions,
 }: {
   posts: Post[]
   campaignsById: Map<string, Campaign>
+  businessContext: BusinessContext
   onOpen: (post: Post) => void
   renderActions: (post: Post) => React.ReactNode
 }) {
@@ -1114,6 +1159,7 @@ function PlatformView({
                   key={post.id}
                   post={post}
                   campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
+                  businessContext={businessContext}
                   onOpen={() => onOpen(post)}
                   actions={renderActions(post)}
                 />
@@ -1131,6 +1177,7 @@ function WorkloadView({
   month,
   postsByDay,
   posts,
+  businessContext,
   selectedDate,
   onSelectDate,
 }: {
@@ -1138,6 +1185,7 @@ function WorkloadView({
   month: number
   postsByDay: Map<string, Post[]>
   posts: Post[]
+  businessContext: BusinessContext
   selectedDate: string
   onSelectDate: (date: string) => void
 }) {
@@ -1145,13 +1193,15 @@ function WorkloadView({
   const monthPostTotal = days.reduce((total, day) => total + (postsByDay.get(isoDay(day))?.length ?? 0), 0)
   const reviewQueue = posts.filter(post => postStatusBucket(post) === 'review')
   const heavyDays = days.filter(day => (postsByDay.get(isoDay(day))?.length ?? 0) > DAILY_POST_CAPACITY)
+  const policySummary = policySummaryForPosts(posts, businessContext)
 
   return (
     <div className="flex-1 min-h-0 overflow-auto p-4">
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-4 gap-3 mb-4">
         <WorkloadMetric icon={<BarChart3 size={16} />} label="Posts this month" value={String(monthPostTotal)} />
         <WorkloadMetric icon={<Columns3 size={16} />} label="Review queue" value={String(reviewQueue.length)} />
         <WorkloadMetric icon={<Target size={16} />} label="Heavy days" value={String(heavyDays.length)} />
+        <WorkloadMetric icon={<AlertTriangle size={16} />} label="Policy checks" value={String(policySummary.guarded)} />
       </div>
 
       <div className="flex flex-col gap-2">
@@ -1159,6 +1209,7 @@ function WorkloadView({
           const key = isoDay(day)
           const dayPosts = postsByDay.get(key) ?? []
           const reviewCount = dayPosts.filter(post => postStatusBucket(post) === 'review').length
+          const highCareCount = dayPosts.filter(post => approvalRouteForPost(post, businessContext).risk === 'high').length
           const volumeRatio = Math.min(dayPosts.length / DAILY_POST_CAPACITY, 1)
           const reviewRatio = Math.min(reviewCount / DAILY_REVIEW_CAPACITY, 1)
           const isSelected = key === selectedDate
@@ -1189,7 +1240,9 @@ function WorkloadView({
                   <div style={{ width: `${volumeRatio * 100}%`, height: '100%', background: dayPosts.length > DAILY_POST_CAPACITY ? color.warn : color.accent }} />
                 </div>
                 <div className="flex items-center justify-between gap-3 mt-2">
-                  <span className="text-[11px]" style={{ color: color.ghost }}>{reviewCount} review</span>
+                  <span className="text-[11px]" style={{ color: highCareCount > 0 ? color.danger : color.ghost }}>
+                    {reviewCount} review{highCareCount > 0 ? ` · ${highCareCount} high-care` : ''}
+                  </span>
                   <span className="text-[11px]" style={{ color: color.ghost }}>Reviewer {DAILY_REVIEW_CAPACITY}</span>
                 </div>
                 <div style={{ height: 4, borderRadius: radius.pill, background: color.paper2, overflow: 'hidden' }}>
@@ -1274,12 +1327,67 @@ function CampaignPlannerView({
   )
 }
 
-function CalendarPill({ post }: { post: Post }) {
-  const status = displayStatus(post)
+function PolicyBadge({ route }: { route: ApprovalRoute }) {
+  if (!shouldShowPolicySignal(route)) return null
+  const isHighCare = route.risk === 'high'
   return (
-    <div className="rounded px-2 py-1" style={{ background: color.paper, border: `1px solid ${color.line}` }}>
+    <span
+      title={policyTitle(route)}
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold truncate"
+      style={{
+        maxWidth: 128,
+        color: isHighCare ? color.danger : color.warn,
+        background: isHighCare ? DANGER_TINT : color.paper2,
+        border: `1px solid ${isHighCare ? DANGER_LINE : color.line}`,
+        borderRadius: radius.pill,
+      }}
+    >
+      {isHighCare && <AlertTriangle size={10} style={{ flexShrink: 0 }} />}
+      <span className="truncate">{route.label}</span>
+    </span>
+  )
+}
+
+function shouldShowPolicySignal(route: ApprovalRoute) {
+  return route.risk !== 'low'
+    || !!route.publishGuard
+    || !!route.samTrigger
+    || !!route.policyApprovalMode
+    || !!route.policySpeakerMode
+}
+
+function policyTitle(route: ApprovalRoute) {
+  return [
+    route.label,
+    route.reason,
+    route.policyApprovalMode ? `Approval: ${route.policyApprovalMode}` : '',
+    route.policySpeakerMode ? `Speaker: ${route.policySpeakerMode}` : '',
+    route.publishGuard ? `Guard: ${route.publishGuard}` : '',
+    route.samTrigger ? `SAM: ${route.samTrigger}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+function policySummaryForPosts(posts: Post[], businessContext: BusinessContext) {
+  return posts.reduce(
+    (summary, post) => {
+      const route = approvalRouteForPost(post, businessContext)
+      if (shouldShowPolicySignal(route)) summary.guarded += 1
+      if (route.risk === 'high') summary.highCare += 1
+      return summary
+    },
+    { guarded: 0, highCare: 0 },
+  )
+}
+
+function CalendarPill({ post, businessContext }: { post: Post; businessContext: BusinessContext }) {
+  const status = displayStatus(post)
+  const route = approvalRouteForPost(post, businessContext)
+  const hasPolicySignal = shouldShowPolicySignal(route)
+  return (
+    <div className="rounded px-2 py-1" title={hasPolicySignal ? policyTitle(route) : undefined} style={{ background: color.paper, border: `1px solid ${hasPolicySignal && route.risk === 'high' ? DANGER_LINE : color.line}` }}>
       <div className="flex items-center gap-1.5">
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: channelColor(post.channel), flexShrink: 0 }} />
+        {hasPolicySignal && <AlertTriangle size={10} style={{ color: route.risk === 'high' ? color.danger : color.warn, flexShrink: 0 }} />}
         <span className="text-[11px] font-medium truncate" style={{ color: color.ink }}>
           {post.title || 'Untitled'}
         </span>
@@ -1294,6 +1402,7 @@ function CalendarPill({ post }: { post: Post }) {
 function CalendarPostCard({
   post,
   campaign,
+  businessContext,
   onOpen,
   actions,
   draggable,
@@ -1301,6 +1410,7 @@ function CalendarPostCard({
 }: {
   post: Post
   campaign: Campaign | null
+  businessContext: BusinessContext
   onOpen: () => void
   actions?: React.ReactNode
   draggable?: boolean
@@ -1309,6 +1419,9 @@ function CalendarPostCard({
   const date = targetDate(post)
   const isUnscheduled = !date
   const isUnscheduledWarning = isUnscheduled && postStatusBucket(post) !== 'approved'
+  const route = approvalRouteForPost(post, businessContext)
+  const hasPolicySignal = shouldShowPolicySignal(route)
+  const policyColor = route.risk === 'high' ? color.danger : color.warn
 
   return (
     <div
@@ -1327,6 +1440,7 @@ function CalendarPostCard({
         <div className="flex items-center gap-2 mb-2">
           <PlatformChip channel={post.channel} />
           <StatusChip status={displayStatus(post)} />
+          <PolicyBadge route={route} />
         </div>
         <div className="text-[13px] font-semibold leading-snug" style={{ color: color.ink }}>
           {post.title || 'Untitled post'}
@@ -1339,6 +1453,12 @@ function CalendarPostCard({
           <span>{date ? timeLabel(post) : 'Unscheduled'}</span>
           {campaign && <span className="truncate">· {campaign.name}</span>}
         </div>
+        {hasPolicySignal && (
+          <div className="flex items-start gap-1.5 mt-2 text-[11px] leading-snug" style={{ color: policyColor }}>
+            <AlertTriangle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
+            <span className="line-clamp-2">{route.publishGuard || route.policyApprovalMode || route.reason}</span>
+          </div>
+        )}
       </button>
       {actions && (
         <div className="flex flex-wrap items-center gap-1.5 mt-3">
@@ -1485,6 +1605,7 @@ function DayDrawer({
   posts,
   campaignsById,
   capacity,
+  businessContext,
   onClose,
   onOpen,
   onDropPost,
@@ -1494,6 +1615,7 @@ function DayDrawer({
   posts: Post[]
   campaignsById: Map<string, Campaign>
   capacity: number
+  businessContext: BusinessContext
   onClose: () => void
   onOpen: (post: Post) => void
   onDropPost: (event: React.DragEvent, day: string) => void
@@ -1501,6 +1623,7 @@ function DayDrawer({
 }) {
   const key = isoDay(date)
   const isHeavy = capacity > DAILY_POST_CAPACITY
+  const policySummary = policySummaryForPosts(posts, businessContext)
 
   return (
     <section
@@ -1518,7 +1641,7 @@ function DayDrawer({
             {date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
           </h3>
           <p className="text-[12px] mt-1" style={{ color: isHeavy ? color.warn : color.ghost }}>
-            {capacity} posts scheduled · capacity {DAILY_POST_CAPACITY}
+            {capacity} posts scheduled · capacity {DAILY_POST_CAPACITY}{policySummary.guarded > 0 ? ` · ${policySummary.guarded} policy checks` : ''}
           </p>
         </div>
         <button onClick={onClose} title="Close day drawer" className="w-8 h-8 inline-flex items-center justify-center transition-colors hover:bg-[var(--fog)]" style={iconButtonStyle}>
@@ -1538,6 +1661,7 @@ function DayDrawer({
                 key={post.id}
                 post={post}
                 campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
+                businessContext={businessContext}
                 onOpen={() => onOpen(post)}
                 actions={renderActions(post)}
               />
@@ -1553,6 +1677,7 @@ function UnscheduledTray({
   posts,
   readyCount,
   campaignsById,
+  businessContext,
   onOpen,
   onDragStart,
   renderActions,
@@ -1561,12 +1686,14 @@ function UnscheduledTray({
   posts: Post[]
   readyCount: number
   campaignsById: Map<string, Campaign>
+  businessContext: BusinessContext
   onOpen: (post: Post) => void
   onDragStart: (event: React.DragEvent, post: Post) => void
   renderActions: (post: Post) => React.ReactNode
   onCreate: () => void
 }) {
   const warningCount = posts.filter(post => postStatusBucket(post) !== 'approved').length
+  const policySummary = policySummaryForPosts(posts, businessContext)
   const hasUnscheduledWarning = warningCount > 0
 
   return (
@@ -1584,7 +1711,7 @@ function UnscheduledTray({
           </span>
         </div>
         <p className="text-[12px] mt-1" style={{ color: hasUnscheduledWarning ? color.danger : color.ghost }}>
-          {readyCount} approved · {warningCount} need review · drag cards onto the calendar.
+          {readyCount} approved · {warningCount} need review{policySummary.guarded > 0 ? ` · ${policySummary.guarded} policy checks` : ''} · drag cards onto the calendar.
         </p>
       </div>
       <div className="p-3 max-h-[360px] overflow-auto">
@@ -1604,6 +1731,7 @@ function UnscheduledTray({
                 key={post.id}
                 post={post}
                 campaign={post.campaign_id ? campaignsById.get(post.campaign_id) ?? null : null}
+                businessContext={businessContext}
                 onOpen={() => onOpen(post)}
                 draggable
                 onDragStart={event => onDragStart(event, post)}
