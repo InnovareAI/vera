@@ -436,6 +436,19 @@ export const DEMAND_PROVIDER_READINESS = [
   { provider: 'wordpress', label: 'WordPress', detail: 'Approved article publishing, page performance, referral traffic, and conversion context.' },
 ]
 
+export const DEMAND_CONTENT_METRIC_PROVIDERS = [
+  'linkedin',
+  'meta_instagram',
+  'meta_facebook_pages',
+  'youtube',
+  'medium',
+  'quora',
+  'reddit',
+  'x',
+  'wordpress',
+  'custom_cms',
+]
+
 export const DEFAULT_DEMAND_OPERATING_MODEL: Pick<
   BusinessContext,
   | 'demandObjective'

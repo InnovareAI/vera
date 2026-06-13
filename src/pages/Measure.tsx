@@ -26,7 +26,7 @@ import { useProject } from '../lib/projectContext'
 import { useOrg } from '../lib/orgContext'
 import { Button, PageHeader, SectionLabel, color, radius, space, type as t } from '../design'
 import Markdown from '../components/Markdown'
-import { DEMAND_PROVIDER_READINESS } from '../lib/demandModel'
+import { DEMAND_CONTENT_METRIC_PROVIDERS, DEMAND_PROVIDER_READINESS } from '../lib/demandModel'
 
 type RedditListen = {
   id: string
@@ -153,19 +153,6 @@ const MANUAL_METRIC_FIELDS: Array<{ key: ManualMetricKey; label: string; helper:
   { key: 'qualified_traffic', label: 'Qualified traffic', helper: 'Useful visits or sessions' },
   { key: 'buyer_questions', label: 'Buyer questions', helper: 'Commercial questions' },
   { key: 'meeting_requests', label: 'Meeting requests', helper: 'Demo or call requests' },
-]
-
-const MANUAL_PROVIDER_OPTIONS = [
-  'linkedin',
-  'meta_instagram',
-  'meta_facebook_pages',
-  'youtube',
-  'medium',
-  'quora',
-  'reddit',
-  'x',
-  'wordpress',
-  'custom_cms',
 ]
 
 const EMPTY_MANUAL_VALUES: Record<ManualMetricKey, string> = Object.fromEntries(
@@ -836,7 +823,7 @@ function KpiTile({
 }
 
 function IntegrationStrip({ summary, open, onToggle }: {
-  summary: { connected: number; total: number; issues: number; lastSync: string | null }
+  summary: { connected: number; total: number; planned: number; issues: number; lastSync: string | null }
   open: boolean
   onToggle: () => void
 }) {
@@ -849,6 +836,7 @@ function IntegrationStrip({ summary, open, onToggle }: {
           Integration health
         </span>
         <StatusPill dot={color.success}>{summary.connected}/{summary.total} connected</StatusPill>
+        {summary.planned > 0 && <StatusPill dot={color.ghost}>{summary.planned} planned</StatusPill>}
         <StatusPill dot={issueTone}>{summary.issues} need attention</StatusPill>
         <span style={{ color: color.ghost, fontSize: t.size.cap }}>Last metric sync: {summary.lastSync ? relativeDate(summary.lastSync) : 'none yet'}</span>
       </div>
@@ -868,8 +856,8 @@ function IntegrationHealthPanel({ providers }: { providers: ProviderReadiness[] 
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: space[3], marginTop: space[3] }}>
       {providers.map(provider => {
         const connected = provider.status === 'connected'
-        const issue = provider.healthStatus === 'stale' || provider.healthStatus === 'error' || provider.detail.includes('Needs review')
-        const dot = connected ? (issue ? color.warn : color.success) : color.ghost
+        const issue = providerHasIssue(provider)
+        const dot = connected ? (issue ? color.warn : color.success) : issue ? color.warn : color.ghost
         return (
           <div key={provider.provider} style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[4] }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3] }}>
@@ -1211,7 +1199,7 @@ function ManualMetricsPanel({
             disabled={disabled || saving}
             style={manualInputStyle}
           >
-            {MANUAL_PROVIDER_OPTIONS.map(provider => (
+            {DEMAND_CONTENT_METRIC_PROVIDERS.map(provider => (
               <option key={provider} value={provider}>{providerLabel(provider)}</option>
             ))}
           </select>
@@ -1677,10 +1665,7 @@ function buildInsights(input: {
   }
 
   const providerIssues = input.providerReadiness.filter(provider =>
-    provider.status !== 'connected' ||
-    provider.healthStatus === 'stale' ||
-    provider.healthStatus === 'error' ||
-    provider.detail.includes('Needs review'),
+    providerHasIssue(provider),
   )
   if (providerIssues.length > 0) {
     insights.push({
@@ -1755,15 +1740,12 @@ function buildProviderReadiness(integrations: ClientIntegration[]): ProviderRead
 
 function buildIntegrationSummary(providers: ProviderReadiness[]) {
   const connected = providers.filter(provider => provider.status === 'connected').length
-  const issues = providers.filter(provider =>
-    provider.status !== 'connected' ||
-    provider.healthStatus === 'stale' ||
-    provider.healthStatus === 'error' ||
-    provider.detail.includes('Needs review'),
-  ).length
+  const planned = providers.filter(provider => provider.status === 'planned' || provider.status === 'not_connected').length
+  const issues = providers.filter(providerHasIssue).length
   return {
     connected,
     total: providers.length,
+    planned,
     issues,
     lastSync: latestDate(providers.map(provider => provider.lastSync)),
   }
@@ -1772,10 +1754,11 @@ function buildIntegrationSummary(providers: ProviderReadiness[]) {
 function buildFilterOptions(rows: PostRowData[], campaigns: Campaign[]) {
   const platformSet = new Set(rows.map(row => row.provider).filter(Boolean))
   const statusSet = new Set(rows.map(row => statusKind(row.status)).filter(Boolean))
+  const platformOptions = [...new Set([...DEMAND_CONTENT_METRIC_PROVIDERS, ...platformSet])]
   return {
     platforms: [
       { value: 'all', label: 'All platforms' },
-      ...[...platformSet].sort().map(provider => ({ value: provider, label: providerLabel(provider) })),
+      ...platformOptions.sort((a, b) => providerLabel(a).localeCompare(providerLabel(b))).map(provider => ({ value: provider, label: providerLabel(provider) })),
     ],
     campaigns: [
       { value: 'all', label: 'All campaigns' },
@@ -1787,6 +1770,12 @@ function buildFilterOptions(rows: PostRowData[], campaigns: Campaign[]) {
       ...[...statusSet].sort().map(status => ({ value: status, label: statusLabel(status) })),
     ],
   }
+}
+
+function providerHasIssue(provider: ProviderReadiness) {
+  if (provider.status === 'pending' || provider.status === 'error' || provider.status === 'revoked') return true
+  if (provider.healthStatus === 'stale' || provider.healthStatus === 'error') return true
+  return provider.detail.includes('Needs review')
 }
 
 function rowMatchesFilters(
