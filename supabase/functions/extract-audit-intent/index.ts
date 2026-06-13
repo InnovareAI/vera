@@ -25,6 +25,7 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js'
 import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
+import { checkProjectAiBudget, type ProjectAiBudgetWarning } from '../_shared/ai-policy.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { completeText, resolveProjectTextRuntime, textRuntimeUsageMetadata } from '../_shared/text-runtime.ts'
 
@@ -41,9 +42,45 @@ const CANDIDATE_PATHS = ['/', '/about', '/about-us', '/product', '/pricing', '/c
 const PAGE_CHAR_CAP = 12_000  // per page, cap before LLM
 const BLOG_SAMPLE_COUNT = 5    // how many blog posts to sample
 const BLOG_POST_CHAR_CAP = 4_000
+const APPROX_CHARS_PER_TOKEN = 4
 
 // URL paths that suggest a blog post (after the segment, expects a slug)
 const BLOG_URL_PATTERN = /\/(blog|posts?|articles?|insights?|resources?|learn|news|stories|writing|essays?)\//i
+
+type AuditBudgetCheck =
+  | { ok: true; warning: ProjectAiBudgetWarning | null }
+  | { ok: false; response: Response }
+
+function approxTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / APPROX_CHARS_PER_TOKEN))
+}
+
+async function checkAuditBudget(
+  supabase: AdminClient,
+  orgId: string,
+  projectId: string,
+  provider: string,
+  model: string,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+  metadata: Record<string, unknown>,
+): Promise<AuditBudgetCheck> {
+  const budget = await checkProjectAiBudget(supabase, projectId, {
+    orgId,
+    projectId,
+    provider,
+    model,
+    operation: 'audit.intent.extract',
+    inputTokens: approxTokens(`${systemPrompt}\n\n${userPrompt}`),
+    outputTokens: maxTokens,
+    metadata,
+  })
+  if (!budget.ok) {
+    return { ok: false, response: json({ success: false, error: budget.message }, 402) }
+  }
+  return { ok: true, warning: budget.warning }
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -165,16 +202,13 @@ Deno.serve(async (req) => {
     robotsTxt ? `### /robots.txt (often contains a brand comment)\n${robotsTxt.slice(0, 1_500)}` : '',
   ].filter(Boolean).join('\n\n---\n\n')
 
-  // Ask the resolved client/platform text runtime to extract structured audit_intent
-  const startedAt = Date.now()
-  const resp = await completeText(runtime.runtime, {
-    maxTokens: 2000,
-    system: `You are extracting audit context from a B2B company website. Output JSON only — no prose, no markdown fences. Be specific and concrete; vague output produces vague audits.`,
-    json: true,
-    user: `Company: ${org.name}${org.industry ? ` (${org.industry})` : ''}
+  // Ask the resolved client/platform text runtime to extract structured audit_intent.
+  const maxTokens = 2000
+  const systemPrompt = 'You are extracting audit context from a B2B company website. Output JSON only, no prose, no markdown fences. Be specific and concrete; vague output produces vague audits.'
+  const userPrompt = `Company: ${org.name}${org.industry ? ` (${org.industry})` : ''}
 Website: ${websiteUrl}
 
-Each page below carries STRUCTURED METADATA (title, meta description, OpenGraph, Twitter card, JSON-LD, h1/h2) in addition to body text. The metadata is usually the highest-signal source for positioning — that's where SEO/marketing teams compress the message into a few words. Treat it as primary; use the body to corroborate and add specificity (especially named numbers).
+Each page below carries STRUCTURED METADATA (title, meta description, OpenGraph, Twitter card, JSON-LD, h1/h2) in addition to body text. The metadata is usually the highest-signal source for positioning, where SEO/marketing teams compress the message into a few words. Treat it as primary; use the body to corroborate and add specificity (especially named numbers).
 
 If a Blog samples section is present, treat it as verification: marketing pages tell you what the company CLAIMS to be about; the blog tells you what they ACTUALLY write about. When the blog contradicts the marketing claim (e.g., site claims "AI sales" but the blog is mostly generic productivity hot-takes), prefer the blog signal for themes/tone and call out the contradiction in the rationale field.
 
@@ -182,21 +216,41 @@ PAGES:
 
 ${corpus}
 
-Extract the following fields. Each must be specific to THIS company — never generic ("we serve B2B SaaS" alone is too thin; "Series B-C SaaS, $50M-$200M ARR, VP of Sales owning pipeline build" is right). When a field can't be confidently extracted, return null — don't fabricate.
+Extract the following fields. Each must be specific to THIS company, never generic ("we serve B2B SaaS" alone is too thin; "Series B-C SaaS, $50M-$200M ARR, VP of Sales owning pipeline build" is right). When a field can't be confidently extracted, return null, don't fabricate.
 
 Plus a "summary" field: a 60-90 word narrative paragraph that synthesizes the 7 structured fields into a single readable story ("X sells Y to Z; positioning is W; winning looks like V"). This is what the operator reads first and what every downstream audit (BREW360, profile score) echoes back as "Audited against:".
 
 Required output JSON (no other keys):
 {
   "summary":          "<60-90 word narrative paragraph synthesizing the 7 fields into one story. Operator reads this first; audits echo it back. Plain prose, no bullets, no headers.>",
-  "icp_summary":      "<who this offering is for — segment, role, stage, buying trigger>",
+  "icp_summary":      "<who this offering is for, segment, role, stage, buying trigger>",
   "offer":            "<what the company sells/delivers in one specific sentence>",
   "value_prop":       "<the specific measurable outcome / differentiation vs the obvious alternative>",
-  "role_positioning": "<how the operator should be perceived on LinkedIn to credibly sell this — e.g. 'practitioner-founder building authority on HITL outbound for B2B sales' — anchor in the operator's expertise, not vendor pitch language>",
+  "role_positioning": "<how the operator should be perceived on LinkedIn to credibly sell this, e.g. 'practitioner-founder building authority on HITL outbound for B2B sales', anchor in the operator's expertise, not vendor pitch language>",
   "themes":           ["<3-5 concrete content themes that map to the offer + ICP>"],
-  "tone_target":      "<voice profile — e.g. 'sharp, opinion-led practitioner; no buzzwords; data + named examples'>",
-  "success_criteria": "<one sentence — what 'winning' on LinkedIn looks like for this profile in 6 months>"
-}`,
+  "tone_target":      "<voice profile, e.g. 'sharp, opinion-led practitioner; no buzzwords; data + named examples'>",
+  "success_criteria": "<one sentence, what 'winning' on LinkedIn looks like for this profile in 6 months>"
+}`
+  const usageMetadata = textRuntimeUsageMetadata(runtime.runtime, { source_count: fetched.length + blogPosts.length })
+  const budgetCheck = await checkAuditBudget(
+    supabase,
+    org_id,
+    project_id,
+    runtime.runtime.provider,
+    runtime.runtime.model,
+    systemPrompt,
+    userPrompt,
+    maxTokens,
+    usageMetadata,
+  )
+  if (!budgetCheck.ok) return budgetCheck.response
+
+  const startedAt = Date.now()
+  const resp = await completeText(runtime.runtime, {
+    maxTokens,
+    system: systemPrompt,
+    json: true,
+    user: userPrompt,
   })
   await logGenerationUsage(supabase, {
     orgId: org_id,
@@ -207,7 +261,10 @@ Required output JSON (no other keys):
     inputTokens: resp.inputTokens,
     outputTokens: resp.outputTokens,
     durationMs: Date.now() - startedAt,
-    metadata: textRuntimeUsageMetadata(runtime.runtime, { source_count: fetched.length + blogPosts.length }),
+    metadata: {
+      ...usageMetadata,
+      ...(budgetCheck.warning ? { budget_warning: budgetCheck.warning } : {}),
+    },
   })
 
   const text = resp.text
@@ -237,7 +294,12 @@ Required output JSON (no other keys):
     .eq('id', org_id)
   if (updErr) return json({ success: false, error: updErr.message }, 500)
 
-  return json({ success: true, audit_intent, sources: fetched.map(p => p.url) })
+  return json({
+    success: true,
+    audit_intent,
+    sources: fetched.map(p => p.url),
+    ...(budgetCheck.warning ? { budget_warning: budgetCheck.warning } : {}),
+  })
 })
 
 interface ParsedPage {
