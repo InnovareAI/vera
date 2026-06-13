@@ -44,7 +44,7 @@ export function resolveClientLinkedInOrganization(
       return {
         ok: false,
         status: 403,
-        message: "LinkedIn company page is not connected to this client space.",
+        message: "LinkedIn company page is not connected to this space.",
       }
     }
     return { ok: true, asOrganization: allowedOrganization }

@@ -229,7 +229,7 @@ export default function OnboardingAudit() {
     async function run() {
       try {
         if (!session?.access_token || !projectId) {
-          throw new Error('Sign in and open an active client space before running the audit.')
+          throw new Error('Sign in and open an active space before running the audit.')
         }
         const res = await fetch(AUDIT_URL, {
           method: 'POST',
@@ -278,7 +278,7 @@ export default function OnboardingAudit() {
         <h1 className="text-2xl font-bold text-gray-900">Analysing your content</h1>
         <p className="text-sm text-gray-500 mt-1">
           {phase === 'preflight'         && 'Loading…'}
-          {phase === 'awaiting_unipile'  && 'Connect LinkedIn first — that’s where most of your voice lives.'}
+          {phase === 'awaiting_unipile'  && 'LinkedIn is part of this space strategy. Connect it to include those signals, or skip and audit owned sources first.'}
           {phase === 'connecting_unipile'&& 'Opening LinkedIn authentication…'}
           {phase === 'connecting'        && 'Starting audit…'}
           {phase === 'fetching'          && 'Pulling content from each channel.'}
@@ -296,10 +296,10 @@ export default function OnboardingAudit() {
               <span className="text-gray-700 font-bold text-sm">in</span>
             </div>
             <div>
-              <h2 className="text-base font-bold text-gray-900">Connect your LinkedIn</h2>
+              <h2 className="text-base font-bold text-gray-900">Connect LinkedIn for this audit</h2>
               <p className="text-sm text-gray-500 mt-0.5">
-                Unipile's hosted wizard handles the login. Once connected, VERA can read your posts and engagement
-                data to extract your voice — far richer signal than public scraping.
+                Unipile's hosted wizard handles the login. Once connected, VERA can read approved LinkedIn context
+                for this space. Skip this when LinkedIn is not needed for the first strategy pass.
               </p>
             </div>
           </div>
@@ -310,7 +310,7 @@ export default function OnboardingAudit() {
             </button>
             <button onClick={skipUnipileAndAudit}
               className="px-4 py-2.5 text-sm text-gray-600 hover:text-gray-900">
-              Skip for now (audit blog only)
+              Skip for now (audit owned sources)
             </button>
           </div>
         </div>

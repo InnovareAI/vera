@@ -131,13 +131,13 @@ Deno.serve(async (req) => {
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle()
-    if (integrationErr) return jsonError(`Client integration lookup failed: ${integrationErr.message}`, 500)
+    if (integrationErr) return jsonError(`Space integration lookup failed: ${integrationErr.message}`, 500)
 
     const integration = integrationData as ClientIntegrationRow | null
     clientIntegration = integration
     unipileAccountId = getUnipileAccountId(integration)
     if (!unipileAccountId) {
-      return jsonError(`No connected ${channel} Unipile account for this client. Connect it in client integrations first.`, 400)
+      return jsonError(`No connected ${channel} Unipile account for this space. Connect it in space integrations first.`, 400)
     }
     if (integration?.health_status === "stale" || integration?.health_status === "error") {
       return jsonError(`Connected ${channel} account is ${integration.health_status}. Reconnect it before publishing.`, 400)
@@ -152,7 +152,7 @@ Deno.serve(async (req) => {
     unipileAccountId = (org?.unipile_account_id as string | null) ?? null
   }
   if (!unipileAccountId) {
-    return jsonError(`No connected ${channel} account for this client — connect it first.`, 400)
+    return jsonError(`No connected ${channel} account for this space — connect it first.`, 400)
   }
 
   // Instagram posts must carry media — there is no text-only IG post.
@@ -161,7 +161,7 @@ Deno.serve(async (req) => {
   }
 
   // 2. Resolve company URN if needed. Project posts can only publish as a
-  // company page that is explicitly stored on this client's integration.
+  // company page that is explicitly stored on this space's integration.
   // Legacy org-wide posts can still use channel_profiles for auto-detection.
   let asOrganization: string | undefined
   if (channel === "linkedin" && post.project_id) {

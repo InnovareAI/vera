@@ -15,7 +15,7 @@
 /* coloured backgrounds.                                                     */
 /* Variable names preserved so existing components keep working.             */
 :root {
-  --font-scale:   1.18;
+  --font-scale:   1;
 
   /* Surfaces */
   --paper:        #FAFAF9;        /* page background */

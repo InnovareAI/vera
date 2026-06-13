@@ -20,6 +20,18 @@ type FilterState = {
   owner: string
 }
 type DatedPost = { post: Post; date: Date }
+type CalendarOpsSummary = {
+  datedThisMonth: number
+  visible: number
+  total: number
+  unscheduled: number
+  readyToSchedule: number
+  reviewQueue: number
+  overCapacityDays: number
+  selectedDayCapacity: number
+  policyChecks: number
+  highCarePolicyChecks: number
+}
 type GanttRow = {
   id: string
   name: string
@@ -202,6 +214,18 @@ export default function Calendar() {
   const reviewQueueCount = filteredPosts.filter(post => postStatusBucket(post) === 'review').length
   const policySummary = policySummaryForPosts(filteredPosts, businessContext)
   const activeFilterCount = Object.values(filters).filter(value => value !== 'all').length
+  const calendarOpsSummary: CalendarOpsSummary = {
+    datedThisMonth: monthPostCount,
+    visible: filteredPosts.length,
+    total: posts.length,
+    unscheduled: unscheduledPosts.length,
+    readyToSchedule: readyToSchedule.length,
+    reviewQueue: reviewQueueCount,
+    overCapacityDays: overCapacityDays.length,
+    selectedDayCapacity,
+    policyChecks: policySummary.guarded,
+    highCarePolicyChecks: policySummary.highCare,
+  }
   const selectedDateObject = parseIsoDay(selectedDate)
   const weekStart = mondayOf(selectedDateObject)
   const weekDays = Array.from({ length: 7 }, (_, index) => {
@@ -261,6 +285,34 @@ export default function Calendar() {
     setFilters(DEFAULT_FILTERS)
   }
 
+  function focusReadyToSchedule() {
+    setFilters(prev => ({ ...prev, status: 'approved' }))
+    setViewMode('calendar')
+    setCalendarGridMode('month')
+    setDayDrawerOpen(true)
+  }
+
+  function focusReviewQueue() {
+    setFilters(prev => ({ ...prev, status: 'review' }))
+    setViewMode('kanban')
+  }
+
+  function focusCapacity() {
+    setViewMode('workload')
+    const firstHeavyDay = overCapacityDays[0]?.[0]
+    if (firstHeavyDay) {
+      setSelectedDate(firstHeavyDay)
+      const heavyDate = parseIsoDay(firstHeavyDay)
+      setViewDate(new Date(heavyDate.getFullYear(), heavyDate.getMonth(), 1))
+      setDayDrawerOpen(true)
+    }
+  }
+
+  function openReviewQueue() {
+    if (activeProject?.slug) navigate(`/p/${activeProject.slug}/review`)
+    else navigate('/review')
+  }
+
   function draggedPostId(event: React.DragEvent) {
     return event.dataTransfer.getData(DRAG_POST_MIME) || event.dataTransfer.getData('text/plain')
   }
@@ -278,7 +330,7 @@ export default function Calendar() {
         .single()
 
       if (error) throw error
-      if (!data) throw new Error('No post was updated. Check access for this client space.')
+      if (!data) throw new Error('No post was updated. Check access for this space.')
 
       setPosts(prev => prev.map(post => post.id === postId ? data as Post : post))
       setSelectedDate(day)
@@ -302,7 +354,7 @@ export default function Calendar() {
         .single()
 
       if (error) throw error
-      if (!data) throw new Error('No post was updated. Check access for this client space.')
+      if (!data) throw new Error('No post was updated. Check access for this space.')
 
       setPosts(prev => prev.map(post => post.id === postId ? data as Post : post))
     } catch (error) {
@@ -329,7 +381,7 @@ export default function Calendar() {
         })
         const payload = await res.json().catch(() => null) as { post?: Post; error?: string } | null
         if (!res.ok) throw new Error(payload?.error ?? `HTTP ${res.status}`)
-        if (!payload?.post) throw new Error('No post was updated. Check access for this client space.')
+        if (!payload?.post) throw new Error('No post was updated. Check access for this space.')
         setPosts(prev => prev.map(post => post.id === postId ? payload.post as Post : post))
         return
       }
@@ -341,7 +393,7 @@ export default function Calendar() {
         .select()
         .single()
       if (error) throw error
-      if (!data) throw new Error('No post was updated. Check access for this client space.')
+      if (!data) throw new Error('No post was updated. Check access for this space.')
 
       setPosts(prev => prev.map(post => post.id === postId ? data as Post : post))
     } catch (error) {
@@ -415,6 +467,17 @@ export default function Calendar() {
           </div>
         </div>
       </div>
+
+      <CalendarOperationsStrip
+        summary={calendarOpsSummary}
+        periodLabel={periodLabel}
+        onToday={jumpToday}
+        onCreate={createNewPost}
+        onReadyToSchedule={focusReadyToSchedule}
+        onReviewQueue={focusReviewQueue}
+        onOpenReview={openReviewQueue}
+        onCapacity={focusCapacity}
+      />
 
       <CalendarFilters
         filters={filters}
@@ -612,6 +675,113 @@ export default function Calendar() {
         </aside>
       </div>
     </div>
+  )
+}
+
+function CalendarOperationsStrip({
+  summary,
+  periodLabel,
+  onToday,
+  onCreate,
+  onReadyToSchedule,
+  onReviewQueue,
+  onOpenReview,
+  onCapacity,
+}: {
+  summary: CalendarOpsSummary
+  periodLabel: string
+  onToday: () => void
+  onCreate: () => void
+  onReadyToSchedule: () => void
+  onReviewQueue: () => void
+  onOpenReview: () => void
+  onCapacity: () => void
+}) {
+  const scheduleBlocked = summary.readyToSchedule > 0 || summary.overCapacityDays > 0
+  const reviewBlocked = summary.reviewQueue > DAILY_REVIEW_CAPACITY
+  const policyBlocked = summary.highCarePolicyChecks > 0
+  const recommendation = scheduleBlocked
+    ? `${summary.readyToSchedule} approved post${summary.readyToSchedule === 1 ? '' : 's'} need a publishing slot before more content is generated.`
+    : reviewBlocked
+      ? `${summary.reviewQueue} posts are waiting for review. Clear decisions before scheduling the next batch.`
+      : policyBlocked
+        ? `${summary.highCarePolicyChecks} high-care policy check${summary.highCarePolicyChecks === 1 ? '' : 's'} need attention before publishing.`
+        : 'Planner is healthy. Keep the cadence balanced and publish into the strongest learning windows.'
+
+  return (
+    <section
+      className="mb-4 grid grid-cols-[minmax(0,1fr)_auto] gap-4 p-4"
+      style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg }}
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <span className="inline-flex items-center gap-2 text-[12px] font-semibold uppercase" style={{ color: color.ghost, letterSpacing: 0 }}>
+            <Target size={14} />
+            Scheduling cockpit
+          </span>
+          <span className="text-[12px]" style={{ color: color.faint }}>{periodLabel}</span>
+        </div>
+        <div className="grid grid-cols-2 xl:grid-cols-6 gap-2">
+          <CalendarOpsMetric icon={<CalendarDays size={15} />} label="Dated" value={String(summary.datedThisMonth)} detail="this month" tone={summary.datedThisMonth > 0 ? color.accent : color.ghost} />
+          <CalendarOpsMetric icon={<AlertTriangle size={15} />} label="Unscheduled" value={String(summary.unscheduled)} detail={`${summary.readyToSchedule} approved`} tone={summary.readyToSchedule > 0 ? color.danger : color.ghost} />
+          <CalendarOpsMetric icon={<Check size={15} />} label="Review" value={String(summary.reviewQueue)} detail={`capacity ${DAILY_REVIEW_CAPACITY}`} tone={summary.reviewQueue > DAILY_REVIEW_CAPACITY ? color.warn : color.ghost} />
+          <CalendarOpsMetric icon={<Columns3 size={15} />} label="Heavy days" value={String(summary.overCapacityDays)} detail={`limit ${DAILY_POST_CAPACITY}`} tone={summary.overCapacityDays > 0 ? color.warn : color.ghost} />
+          <CalendarOpsMetric icon={<MapPin size={15} />} label="Selected day" value={String(summary.selectedDayCapacity)} detail="posts" tone={summary.selectedDayCapacity > DAILY_POST_CAPACITY ? color.danger : color.ghost} />
+          <CalendarOpsMetric icon={<Filter size={15} />} label="Visible" value={`${summary.visible}/${summary.total}`} detail="posts" tone={summary.visible < summary.total ? color.warn : color.ghost} />
+        </div>
+        <div className="mt-3 flex items-start gap-2 text-[12px] leading-relaxed" style={{ color: scheduleBlocked || reviewBlocked || policyBlocked ? color.ink : color.ghost }}>
+          <AlertTriangle size={14} style={{ color: scheduleBlocked || policyBlocked ? color.danger : reviewBlocked ? color.warn : color.ghost, marginTop: 2, flexShrink: 0 }} />
+          <span>{recommendation}</span>
+        </div>
+      </div>
+      <div className="flex flex-col justify-between gap-3 min-w-[220px]">
+        <div className="grid grid-cols-2 gap-2">
+          <CalendarOpsButton icon={<CalendarPlus size={14} />} label="Schedule ready" onClick={onReadyToSchedule} disabled={summary.readyToSchedule === 0} />
+          <CalendarOpsButton icon={<Check size={14} />} label="Review queue" onClick={onReviewQueue} disabled={summary.reviewQueue === 0} />
+          <CalendarOpsButton icon={<Columns3 size={14} />} label="Capacity" onClick={onCapacity} disabled={summary.overCapacityDays === 0 && summary.selectedDayCapacity <= DAILY_POST_CAPACITY} />
+          <CalendarOpsButton icon={<Clock size={14} />} label="Today" onClick={onToday} />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={onOpenReview} className="h-9 px-3 text-[12px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors hover:bg-[var(--fog)]" style={buttonStyle}>
+            <ListChecks size={14} />
+            Open review
+          </button>
+          <button onClick={onCreate} className="h-9 px-3 text-[12px] font-semibold inline-flex items-center justify-center gap-1.5" style={{ ...buttonStyle, background: color.ink, color: color.surface, borderColor: color.ink }}>
+            <Plus size={14} />
+            New post
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function CalendarOpsMetric({ icon, label, value, detail, tone }: { icon: React.ReactNode; label: string; value: string; detail: string; tone: string }) {
+  return (
+    <div className="min-w-0 p-3" style={{ background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
+      <div className="flex items-center gap-1.5 min-w-0" style={{ color: tone }}>
+        {icon}
+        <span className="text-[11px] uppercase font-semibold truncate" style={{ letterSpacing: 0 }}>{label}</span>
+      </div>
+      <div className="mt-1 flex items-baseline gap-1.5 min-w-0">
+        <span className="text-[22px] leading-none font-semibold" style={{ color: color.ink }}>{value}</span>
+        <span className="text-[11px] truncate" style={{ color: color.ghost }}>{detail}</span>
+      </div>
+    </div>
+  )
+}
+
+function CalendarOpsButton({ icon, label, onClick, disabled }: { icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="h-9 px-2.5 text-[12px] font-medium inline-flex items-center justify-center gap-1.5 transition-colors hover:bg-[var(--fog)] disabled:opacity-45 disabled:cursor-not-allowed"
+      style={buttonStyle}
+    >
+      {icon}
+      <span className="truncate">{label}</span>
+    </button>
   )
 }
 
@@ -1301,7 +1471,7 @@ function CampaignPlannerView({
   if (rows.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <EmptyCalendarState icon={<Target size={20} />} text="No campaigns in this client space." />
+        <EmptyCalendarState icon={<Target size={20} />} text="No campaigns in this space." />
       </div>
     )
   }

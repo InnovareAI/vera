@@ -120,7 +120,7 @@ Deno.serve(async (req) => {
   if (!access.ok) return access.response
   const operatorUserId = access.service ? cleanString(operator_user_id) : access.userId
   const aiPolicy = await loadProjectAiPolicy(supabase, projectId)
-  if (!aiPolicy.imagesEnabled) return jsonError('Image generation is disabled for this client space.', 403)
+  if (!aiPolicy.imagesEnabled) return jsonError('Image generation is disabled for this space.', 403)
   const mediaKeys = await resolveMediaKeys(supabase, projectId, access.orgId)
   if (!mediaKeys.ok) return mediaKeys.response
   const platformOpenRouterAvailable = mediaKeys.platformMediaKeysAllowed && !!OPENROUTER_API_KEY
@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
     )
   }
   if (isPremiumImageModel(model) && !aiPolicy.premiumMediaEnabled) {
-    return jsonError('Premium image models are disabled for this client space. Use nano-banana, Seedream, Qwen, or another standard model.', 402)
+    return jsonError('Premium image models are disabled for this space. Use nano-banana, Seedream, Qwen, or another standard model.', 402)
   }
   if (isPremiumImageModel(model)) {
     const budgetCapError = paidMediaBudgetCapError(aiPolicy, 'premium_media')
@@ -150,7 +150,7 @@ Deno.serve(async (req) => {
   }
 
   // Route by alias: explicit OpenAI premium > supported OpenRouter image
-  // models > FAL. A client OpenRouter key is used only for aliases we know
+  // models > FAL. A space OpenRouter key is used only for aliases we know
   // OpenRouter supports, so FAL-only aliases fail cleanly instead of silently
   // changing model.
   const wantsNanoBanana = model === 'nano-banana'
@@ -174,7 +174,7 @@ Deno.serve(async (req) => {
       : 'client'
 
   if (selectedKeySource === 'client' && !hasClientKeyForRoute) {
-    return jsonError('Image generation requires this client space to use its own OpenRouter, OpenAI, or FAL key for the selected model.', 403)
+    return jsonError('Image generation requires this space to use its own OpenRouter, OpenAI, or FAL key for the selected model.', 403)
   }
 
   const slug = useOpenAI

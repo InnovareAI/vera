@@ -20,9 +20,11 @@ import Knowledge from './pages/Knowledge'
 import Artifacts from './pages/Artifacts'
 import Skills from './pages/Skills'
 import Settings from './pages/Settings'
+import ResetPassword from './pages/ResetPassword'
 // ── Phase 0 surfaces (UX_BLUEPRINT.md): the two-altitude IA ──────────
-import AcrossClients from './pages/AcrossClients'   // "/" — the shelf
+import AcrossClients from './pages/AcrossClients'   // "/" - the shelf
 import VeraThread from './pages/VeraThread'          // /p/:slug/vera
+import VeraBlueprint from './pages/VeraBlueprint'
 import Brain from './pages/Brain'                    // /p/:slug/brain
 import Measure from './pages/Measure'                // /p/:slug/measure, visible label: Performance
 import Learning from './pages/Learning'              // /p/:slug/learning
@@ -47,7 +49,14 @@ export default function App() {
             <RightRailProvider>
             <SentryContextBridge />
             <Routes>
+              {import.meta.env.DEV && (
+                <Route path="/dev" element={<Layout />}>
+                  <Route path="blueprint" element={<VeraBlueprint />} />
+                  <Route path="calendar" element={<Calendar />} />
+                </Route>
+              )}
               <Route path="/login" element={<LoginGuard />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/onboarding/audit/:orgId" element={<OnboardingAudit />} />
               <Route path="/linkedin-score/:orgId" element={<LinkedInScore />} />
@@ -57,16 +66,16 @@ export default function App() {
                 <Route path="invite/:token" element={<AcceptInvite />} />
                 <Route path="approvals/:projectRef" element={<ApprovalIndex />} />
                 <Route path="/" element={<Layout />}>
-                {/* "/" lands you IN your active client — no duplicate client  */}
-                {/* list in the canvas (the rail is the switcher). The "all     */}
-                {/* clients" shelf lives at /clients for when it's needed.      */}
+                {/* "/" lands you in the active space. The switcher handles     */}
+                {/* space changes, and the full shelf lives at /spaces.         */}
                 <Route index element={<RootIndex />} />
 
                 {/* ── The DESK ── one client, the demand-content loop. */}
                 <Route path="p/:projectSlug">
-                  <Route index element={<Navigate to="vera" replace />} />{/* Vera is home-base (SAM-style) */}
-                  <Route path="dashboard"  element={<RedirectFlatToProject section="vera" />} />{/* Home removed → Vera */}
+                  <Route index element={<Navigate to="blueprint" replace />} />{/* Operating desk is home-base; chat is a command layer. */}
+                  <Route path="dashboard"  element={<RedirectFlatToProject section="blueprint" />} />{/* Home removed → Desk */}
                   <Route path="vera"       element={<VeraThread />} />
+                  <Route path="blueprint"  element={<VeraBlueprint />} />
                   <Route path="review"     element={<Review />} />
                   <Route path="review/:id" element={<ReviewDetail />} />
                   <Route path="calendar"   element={<Calendar />} />{/* scheduled posts on a month grid */}
@@ -82,7 +91,8 @@ export default function App() {
                 {/* The rail no longer links to these, but bookmarks + deep    */}
                 {/* links must not 404. Each rewrites into the project frame   */}
                 {/* (or the shelf) per the blueprint's surface-fate table.     */}
-                <Route path="dashboard"  element={<RedirectFlatToProject section="vera" />} />{/* Home removed → Vera */}
+                <Route path="dashboard"  element={<RedirectFlatToProject section="blueprint" />} />{/* Home removed → Desk */}
+                <Route path="blueprint"  element={<RedirectFlatToProject section="blueprint" />} />
                 <Route path="generate"   element={<RedirectFlatToProject section="vera" />} />{/* Generate folds into VERA */}
                 <Route path="review"     element={<RedirectFlatToProject section="review" />} />
                 <Route path="review/:id" element={<RedirectReviewDetailToProject />} />
@@ -93,8 +103,9 @@ export default function App() {
                 <Route path="calendar"   element={<RedirectFlatToProject section="calendar" />} />{/* flat → project calendar */}
                 <Route path="templates"  element={<RedirectFlatToProject section="knowledge" />} />{/* Templates fold into Knowledge */}
                 <Route path="learning"   element={<RedirectFlatToProject section="learning" />} />
-                <Route path="clients"    element={<AcrossClients />} />{/* the "all clients" shelf — reachable, not the default */}
-                <Route path="agency"     element={<AcrossClients />} />{/* Agency → the shelf */}
+                <Route path="spaces"     element={<AcrossClients />} />{/* the full spaces shelf */}
+                <Route path="clients"    element={<Navigate to="/spaces" replace />} />{/* old client shelf URL */}
+                <Route path="agency"     element={<Navigate to="/spaces" replace />} />{/* old agency shelf URL */}
 
                 {/* Workspace-level, kept as-is for Phase 0. */}
                 <Route path="skills"     element={<Skills />} />
@@ -129,33 +140,32 @@ function RequireAuth() {
   return <Outlet />
 }
 
-// Root "/" — land the operator IN their active client's Home. The rail is
-// the client switcher; the canvas should never re-list clients (that was
-// the duplication that made the UI confusing). No project yet → the shelf
-// at /clients, which shows the "add a client" empty state.
+// Root "/" lands the operator in the active space. The rail is the switcher;
+// the canvas should not duplicate the full shelf. No project yet goes to
+// /spaces, which shows the "add a space" empty state.
 function RootIndex() {
   const { loading: orgLoading, isOrgMember } = useOrg()
   const { activeProject, projects, loading } = useProject()
-  if (orgLoading || loading) return null   // wait for both to settle — don't race to /clients
-  // Agency staff (org members) drive generation, so they land on VERA. A client
-  // collaborator invited to a single client space lands on Review, where the
-  // content already generated for them lives, instead of an empty chat.
-  const home = isOrgMember ? 'vera' : 'review'
+  if (orgLoading || loading) return null   // wait for both to settle before routing to /spaces
+  // Agency staff (org members) land on the operating desk. Chat remains a
+  // command layer, but the product should not open as a blank assistant.
+  // Client collaborators land on Review, where the content decisions live.
+  const home = isOrgMember ? 'blueprint' : 'review'
   if (activeProject) return <Navigate to={`/p/${activeProject.slug}/${home}`} replace />
   if (projects.length > 0) return <Navigate to={`/p/${projects[0].slug}/${home}`} replace />
-  return <Navigate to="/clients" replace />
+  return <Navigate to="/spaces" replace />
 }
 
 // Flat-route → project-scoped redirect shim. The rail no longer links to
 // flat routes, but bookmarks + deep links must not 404. Reads the active
-// project and rewrites into /p/:slug/<section>. No project yet → /clients.
+// project and rewrites into /p/:slug/<section>. No project yet goes to /spaces.
 //
 // `section` may carry a query string (e.g. "measure?tab=audit").
 function RedirectFlatToProject({ section }: { section: string }) {
   const { activeProject, loading } = useProject()
   if (loading) return null
   if (activeProject) return <Navigate to={`/p/${activeProject.slug}/${section}`} replace />
-  return <Navigate to="/clients" replace />
+  return <Navigate to="/spaces" replace />
 }
 
 // /review/:id flat → /p/:slug/review/:id. Same idea, preserves the id.

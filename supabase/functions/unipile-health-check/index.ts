@@ -1,10 +1,10 @@
 // Daily Unipile account health check.
 //
-// For every legacy org account and project-scoped client integration account,
+// For every legacy org account and project-scoped space integration account,
 // hit Unipile's GET /accounts/{id}.
 //
 // Legacy org accounts still update organizations.unipile_* columns. New client
-// connections update client_integrations.health_status so each client space can
+// connections update client_integrations.health_status so each space can
 // go stale independently.
 //
 // Network errors and 5xx don't punish the account — they just mark unknown
@@ -351,7 +351,7 @@ async function syncClientIntegrationHealthObservation(
 
   if (!error) return 'opened'
   if (error.code === '23505') return 'already_open'
-  console.warn(`connector_health observation failed for client integration ${row.id}: ${error.message}`)
+  console.warn(`connector_health observation failed for space integration ${row.id}: ${error.message}`)
   return undefined
 }
 
@@ -363,7 +363,7 @@ function integrationName(row: ClientIntegrationRow): string {
 function integrationHealthDetail(row: ClientIntegrationRow, status: HealthStatus, detail?: string): string {
   const provider = providerLabel(row.provider)
   if (status === 'stale') {
-    return `${provider} returned an authentication or not-found response. Reconnect this client integration before VERA uses it for publishing or research. ${detail ?? ''}`.trim()
+    return `${provider} returned an authentication or not-found response. Reconnect this space integration before VERA uses it for publishing or research. ${detail ?? ''}`.trim()
   }
   return `${provider} health is unknown after the scheduled check. The integration may still work, but an operator should inspect it before relying on it. ${detail ?? ''}`.trim()
 }
@@ -382,7 +382,7 @@ function providerLabel(provider: string): string {
 function workspaceResearchHealthDetail(org: OrgUnipileRow, status: HealthStatus, detail?: string): string {
   const workspace = org.name?.trim() || 'this workspace'
   if (status === 'stale') {
-    return `The shared LinkedIn research profile for ${workspace} was revoked or rejected. Reconnect it before VERA runs LinkedIn research across client spaces. ${detail ?? ''}`.trim()
+    return `The shared LinkedIn research profile for ${workspace} was revoked or rejected. Reconnect it before VERA runs LinkedIn research across spaces. ${detail ?? ''}`.trim()
   }
   return `The shared LinkedIn research profile for ${workspace} could not be verified. Research may still work, but an operator should inspect the connection. ${detail ?? ''}`.trim()
 }

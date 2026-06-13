@@ -34,8 +34,8 @@ export default function ApprovalIndex() {
           if (!cancelled) setState(prev => ({ ...prev, loading: true, err: '' }))
           return null
         }
-        if (!projectRef) throw new Error('No client specified.')
-        if (!projectId) throw new Error('Client not found in this workspace.')
+        if (!projectRef) throw new Error('No space specified.')
+        if (!projectId) throw new Error('Space not found in this workspace.')
         if (!cancelled) setState({ posts: [], loading: true, err: '' })
         const { data, error } = await supabase.from('content_posts')
           .select('*')
@@ -80,12 +80,12 @@ export default function ApprovalIndex() {
       <div style={{ maxWidth: 1120, margin: '0 auto' }}>
         <div style={{ marginBottom: space[6] }}>
           <div style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: t.weight.semibold, color: color.accent }}>Content for review</div>
-          <div style={{ fontSize: t.size.h2, color: color.ink, fontWeight: t.weight.semibold, marginTop: 2 }}>{project?.name ?? 'Client'}: {posts.length} {posts.length === 1 ? 'post' : 'posts'}</div>
+          <div style={{ fontSize: t.size.h2, color: color.ink, fontWeight: t.weight.semibold, marginTop: 2 }}>{project?.name ?? 'Space'}: {posts.length} {posts.length === 1 ? 'post' : 'posts'}</div>
           <div style={{ fontSize: t.size.cap, color: color.ghost, marginTop: 4 }}>Open posts with active review links to approve them or leave feedback.</div>
         </div>
 
         {posts.length === 0 ? (
-          <p style={{ color: color.ghost, fontSize: t.size.sm }}>No posts yet for this client.</p>
+          <p style={{ color: color.ghost, fontSize: t.size.sm }}>No posts yet for this space.</p>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: space[5] }}>
             {posts.map(p => {

@@ -81,7 +81,7 @@ export async function loadClientApiKey(
   const row = data as { id?: string; provider?: string; secret_ciphertext?: string | null } | null
   if (!row?.secret_ciphertext || !row.provider) return null
   const key = await decryptClientSecret(row.secret_ciphertext)
-  if (!key) throw new Error(`Could not decrypt ${row.provider} key for this client space.`)
+  if (!key) throw new Error(`Could not decrypt ${row.provider} key for this space.`)
 
   if (row.id) {
     await supabase

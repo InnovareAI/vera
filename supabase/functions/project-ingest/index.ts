@@ -378,10 +378,10 @@ async function resolveIngestRuntimes(
     if (openai?.key) {
       embedding = { provider: 'openai', key: openai.key, model: OPENAI_EMBED_MODEL, keySource: 'client' }
     } else {
-      embeddingUnavailableReason = 'no client OpenAI key configured for semantic embeddings'
+      embeddingUnavailableReason = 'no space OpenAI key configured for semantic embeddings'
     }
   } catch (error) {
-    embeddingUnavailableReason = `client OpenAI key is unavailable: ${errorMessage(error)}`
+    embeddingUnavailableReason = `space OpenAI key is unavailable: ${errorMessage(error)}`
   }
 
   const classifier = await resolveClientClassifierRuntime(supabase, project)
@@ -557,7 +557,7 @@ Suggestion examples:
     if (e instanceof BudgetBlockedError) {
       await supabase.from('project_knowledge').update({
         kind: 'reference',
-        summary: 'Stored as project knowledge. Classification skipped because this request would exceed the client AI monthly budget cap.',
+        summary: 'Stored as project knowledge. Classification skipped because this request would exceed the space AI monthly budget cap.',
         extracted: { classification: 'skipped', reason: e.message } as Json,
         suggestion: 'Review the AI usage cap before asking VERA to classify or synthesize this source.',
         classified_at: new Date().toISOString(),

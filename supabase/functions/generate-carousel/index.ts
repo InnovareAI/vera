@@ -192,7 +192,7 @@ async function resolveCarouselScope(
     const row = post as { org_id?: string | null; project_id?: string | null } | null
     if (!row) return { ok: false, response: jsonError('Post not found', 404) }
     if (!row.org_id || !row.project_id) {
-      return { ok: false, response: jsonError('Carousel generation requires a client-scoped post.', 400) }
+      return { ok: false, response: jsonError('Carousel generation requires a space-scoped post.', 400) }
     }
     if (requestedProjectId && requestedProjectId !== row.project_id) {
       return { ok: false, response: jsonError('Post and project_id do not match.', 403) }

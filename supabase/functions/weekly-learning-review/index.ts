@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
   if (!obs) return json(404, { error: "observation not found" })
   if (obs.kind !== "weekly_learning") return json(400, { error: "observation is not a weekly learning review" })
   if (obs.status !== "open") return json(400, { error: `observation is already ${obs.status}` })
-  if (!obs.project_id) return json(400, { error: "weekly learning review must be tied to a client project" })
+  if (!obs.project_id) return json(400, { error: "weekly learning review must be tied to a space project" })
 
   const now = new Date().toISOString()
   const payload = normalizeWeeklyPayload(obs.action_payload)

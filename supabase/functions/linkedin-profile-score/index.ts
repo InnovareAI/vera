@@ -101,7 +101,7 @@ Deno.serve(async (req) => {
   if (!projectHasLinkedInStrategy(sourceResolution)) {
     return json({
       success: false,
-      error: 'LinkedIn audit is not enabled for this client strategy. Add a LinkedIn source or explicit LinkedIn strategy in the Strategy Brain first.',
+      error: 'LinkedIn audit is not enabled for this space strategy. Add a LinkedIn source or explicit LinkedIn strategy in the Strategy Brain first.',
     }, 400)
   }
 
@@ -128,7 +128,7 @@ Deno.serve(async (req) => {
   if (!resolvedTarget && !sourceResolution.project.is_default) {
     return json({
       success: false,
-      error: 'Add this client LinkedIn profile URL to the Strategy Brain before scoring a profile. Shared research profiles cannot be scored as the client.',
+      error: "Add this space's LinkedIn profile URL to the Strategy Brain before scoring a profile. Shared research profiles cannot be scored as the brand profile.",
     }, 400)
   }
 
@@ -159,9 +159,9 @@ Deno.serve(async (req) => {
   // Optional: LLM-driven qualitative review of the headline (the highest-leverage field).
   // Keep prompt tiny so it returns in well under the edge wall-clock limit.
   let headlineReview: { score: number; observations: string[]; rewrite: string } | null = null
-  let headlineReviewStatus: { status: 'completed' | 'skipped'; reason?: string; budget_warning?: ProjectAiBudgetWarning } = { status: 'skipped', reason: 'No client text runtime configured' }
+  let headlineReviewStatus: { status: 'completed' | 'skipped'; reason?: string; budget_warning?: ProjectAiBudgetWarning } = { status: 'skipped', reason: 'No space text runtime configured' }
   try {
-    if (!textRuntime) throw new Error('No client text runtime configured')
+    if (!textRuntime) throw new Error('No space text runtime configured')
     headlineReviewStatus = { status: 'skipped', reason: 'AI headline review failed' }
     const sys = `You are a LinkedIn headline expert. You score a headline 0-100 and propose one concrete rewrite. Output ONLY valid JSON:
 { "score": <0-100>, "observations": ["3-5 specific observations about the current headline"], "rewrite": "<a single concrete proposed headline, ≤120 chars>" }

@@ -4,10 +4,14 @@ import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowRight,
+  Brain,
+  CalendarDays,
   Check,
+  CheckSquare,
   FolderOpen,
   KeyRound,
   MailPlus,
+  MessageSquare,
   Plus,
   ShieldCheck,
   Sparkles,
@@ -68,6 +72,12 @@ type ProjectInvite = {
   created_at: string
 }
 
+type SpaceStats = {
+  members: number
+  pendingInvites: number
+  activeKeys: number
+}
+
 type ProviderModel = {
   id: string
   display_name?: string
@@ -106,8 +116,8 @@ type ShelfObservation = {
 }
 
 const roleOptions: Array<{ value: ProjectRole; label: string; help: string }> = [
-  { value: 'owner', label: 'Owner', help: 'Manage people, keys, and client settings' },
-  { value: 'editor', label: 'Editor', help: 'Create and edit client work' },
+  { value: 'owner', label: 'Owner', help: 'Manage people, keys, and space settings' },
+  { value: 'editor', label: 'Editor', help: 'Create and edit space work' },
   { value: 'reviewer', label: 'Reviewer', help: 'Review and approve content' },
   { value: 'viewer', label: 'Viewer', help: 'Read only access' },
 ]
@@ -148,6 +158,8 @@ export default function AcrossClients() {
   const [members, setMembers] = useState<ProjectMember[]>([])
   const [invites, setInvites] = useState<ProjectInvite[]>([])
   const [apiKeys, setApiKeys] = useState<ClientApiKey[]>([])
+  const [spaceStats, setSpaceStats] = useState<Record<string, SpaceStats>>({})
+  const [spaceStatsReady, setSpaceStatsReady] = useState(false)
   const [busyAction, setBusyAction] = useState<string | null>(null)
 
   const [inviteEmail, setInviteEmail] = useState('')
@@ -202,6 +214,56 @@ export default function AcrossClients() {
   useEffect(() => {
     void loadObservations()
   }, [loadObservations])
+
+  const loadSpaceStats = useCallback(async () => {
+    const ids = projects.map(project => project.id)
+    if (ids.length === 0) {
+      setSpaceStats({})
+      setSpaceStatsReady(true)
+      return
+    }
+
+    const base = createSpaceStats(projects)
+    setSpaceStatsReady(false)
+    const [membersResult, invitesResult, keysResult] = await Promise.all([
+      supabase
+        .from('project_members')
+        .select('project_id')
+        .in('project_id', ids),
+      supabase
+        .from('project_invites')
+        .select('project_id, status')
+        .in('project_id', ids),
+      supabase
+        .from('client_api_keys')
+        .select('project_id, status')
+        .in('project_id', ids),
+    ])
+
+    const firstError = membersResult.error ?? invitesResult.error ?? keysResult.error
+    if (firstError) {
+      setSpaceStats(base)
+      setSpaceStatsReady(false)
+      return
+    }
+
+    for (const row of (membersResult.data ?? []) as Array<{ project_id: string | null }>) {
+      if (row.project_id && base[row.project_id]) base[row.project_id].members += 1
+    }
+    for (const row of (invitesResult.data ?? []) as Array<{ project_id: string | null; status: string | null }>) {
+      if (row.project_id && base[row.project_id] && row.status === 'pending') base[row.project_id].pendingInvites += 1
+    }
+    for (const row of (keysResult.data ?? []) as Array<{ project_id: string | null; status: string | null }>) {
+      if (row.project_id && base[row.project_id] && row.status === 'active') base[row.project_id].activeKeys += 1
+    }
+
+    setSpaceStats(base)
+    setSpaceStatsReady(true)
+  }, [projects])
+
+  useEffect(() => {
+    void loadSpaceStats()
+  }, [loadSpaceStats])
 
   const orderedProjects = useMemo(() => {
     return [...projects].sort((a, b) => {
@@ -280,8 +342,11 @@ export default function AcrossClients() {
   }, [loadAccess])
 
   const selectedOpenCount = selectedProject ? obsByProject[selectedProject.id] ?? 0 : 0
+  const selectedStats = selectedProject ? spaceStats[selectedProject.id] ?? null : null
   const pendingInvites = invites.filter(invite => invite.status === 'pending')
-  const activeKeys = apiKeys.filter(key => key.status === 'active')
+  const spacesNeedingSetup = spaceStatsReady ? projects.filter(project => (spaceStats[project.id]?.activeKeys ?? 0) === 0).length : null
+  const pendingInviteTotal = spaceStatsReady ? Object.values(spaceStats).reduce((sum, stats) => sum + stats.pendingInvites, 0) : null
+  const activeKeyTotal = spaceStatsReady ? Object.values(spaceStats).reduce((sum, stats) => sum + stats.activeKeys, 0) : null
 
   async function sendInvite() {
     if (!selectedProject || !session?.access_token) return
@@ -407,16 +472,16 @@ export default function AcrossClients() {
   }
 
   async function removeClientSpace(project: Project) {
-    const ok = window.confirm(`Remove ${project.name} from active client spaces? Its history stays archived.`)
+    const ok = window.confirm(`Remove ${project.name} from active spaces? Its history stays archived.`)
     if (!ok) return
     setBusyAction('archive-client')
     const { error } = await supabase.from('projects').update({ is_archived: true }).eq('id', project.id)
     setBusyAction(null)
     if (error) {
-      push({ kind: 'danger', title: 'Client remove failed', body: error.message })
+      push({ kind: 'danger', title: 'Space remove failed', body: error.message })
       return
     }
-    push({ kind: 'success', title: 'Client space removed', body: `${project.name} was archived.` })
+    push({ kind: 'success', title: 'Space removed', body: `${project.name} was archived.` })
     setSelectedProjectId(null)
     refetch()
   }
@@ -492,9 +557,9 @@ export default function AcrossClients() {
       <div style={{ padding: space[8], maxWidth: 940 }}>
         <EmptyState
           icon={<FolderOpen size={22} strokeWidth={1.5} />}
-          title="No clients yet"
-          body="Each client is a project with its own brain, content, approvals, roles, and keys. Add your first client to begin."
-          actions={<Button variant="primary" onClick={() => navigate('/onboarding')}>Add a client</Button>}
+          title="No spaces yet"
+          body="Each space has its own brain, content, approvals, roles, and keys. Add your first space to begin."
+          actions={<Button variant="primary" onClick={() => navigate('/onboarding')}>Add a space</Button>}
         />
       </div>
     )
@@ -504,15 +569,15 @@ export default function AcrossClients() {
     <div style={{ padding: space[8], maxWidth: 1220 }}>
       <PageHeader
         eyebrow={activeOrg?.name ?? 'Workspace'}
-        title="Across clients"
-        subtitle="Triage VERA's open work, then manage client spaces, access, roles, invites, and provider keys."
+        title="Spaces"
+        subtitle="Triage VERA's open work, then manage spaces, access, roles, invites, and provider keys."
         actions={
           <Button
             variant="primary"
             leading={<Plus size={14} />}
             onClick={() => navigate('/onboarding')}
           >
-            Add client
+            Add space
           </Button>
         }
       />
@@ -526,15 +591,16 @@ export default function AcrossClients() {
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: space[4], marginBottom: space[7] }}>
-        <Metric label="Clients" value={projects.length} />
-        <Metric label="Agenda items" value={observations.length} />
-        <Metric label="People" value={accessState === 'ready' ? members.length + pendingInvites.length : 'Setup'} />
-        <Metric label="Active keys" value={accessState === 'ready' ? activeKeys.length : 'Setup'} />
+        <Metric label="Spaces" value={projects.length} />
+        <Metric label="Open agenda" value={observations.length} />
+        <Metric label="Need setup" value={spacesNeedingSetup ?? 'Checking'} tone={spacesNeedingSetup && spacesNeedingSetup > 0 ? 'warn' : 'neutral'} />
+        <Metric label="Pending invites" value={pendingInviteTotal ?? 'Checking'} tone={pendingInviteTotal && pendingInviteTotal > 0 ? 'accent' : 'neutral'} />
+        <Metric label="Active keys" value={activeKeyTotal ?? 'Checking'} />
       </div>
 
       <div style={{ display: 'flex', gap: space[7], alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <aside style={{ flex: '1 1 320px', maxWidth: 390, minWidth: 280 }}>
-          <SectionLabel count={orderedProjects.length} style={{ marginBottom: space[4] }}>Client spaces</SectionLabel>
+          <SectionLabel count={orderedProjects.length} style={{ marginBottom: space[4] }}>Spaces</SectionLabel>
           <div style={panelStyle}>
             {orderedProjects.map(project => (
               <ClientRow
@@ -542,6 +608,8 @@ export default function AcrossClients() {
                 project={project}
                 selected={project.id === selectedProject?.id}
                 openCount={obsByProject[project.id] ?? 0}
+                stats={spaceStats[project.id] ?? null}
+                statsReady={spaceStatsReady}
                 onSelect={() => setSelectedProjectId(project.id)}
               />
             ))}
@@ -552,8 +620,8 @@ export default function AcrossClients() {
           {!selectedProject ? (
             <EmptyState
               icon={<FolderOpen size={22} strokeWidth={1.5} />}
-              title="Select a client"
-              body="Choose a client space to manage its access, invites, roles, and provider keys."
+              title="Select a space"
+              body="Choose a space to manage its access, invites, roles, and provider keys."
             />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: space[5] }}>
@@ -565,16 +633,24 @@ export default function AcrossClients() {
                 onRemove={() => removeClientSpace(selectedProject)}
               />
 
+              <SpaceActionStrip
+                project={selectedProject}
+                openCount={selectedOpenCount}
+                stats={selectedStats}
+                statsReady={spaceStatsReady}
+                onNavigate={path => navigate(path)}
+              />
+
               {accessState === 'missing' && (
                 <SetupPanel error={accessError} />
               )}
 
               {accessState === 'error' && (
-                <ErrorPanel message={accessError ?? 'Client access could not load'} onRetry={loadAccess} />
+                <ErrorPanel message={accessError ?? 'Space access could not load'} onRetry={loadAccess} />
               )}
 
               {accessState === 'loading' && (
-                <div style={{ ...panelStyle, padding: space[6], color: color.ink2, fontSize: t.size.sm }}>Loading client settings...</div>
+                <div style={{ ...panelStyle, padding: space[6], color: color.ink2, fontSize: t.size.sm }}>Loading space settings...</div>
               )}
 
               {accessState === 'ready' && (
@@ -583,12 +659,12 @@ export default function AcrossClients() {
                     <PanelTitle
                       icon={<Users size={16} />}
                       title="People and invitations"
-                      subtitle="Invite clients by email, assign roles, and manage project-level access."
+                      subtitle="Invite people by email, assign roles, and manage space-level access."
                     />
                     <div style={{ padding: space[5], borderTop: `1px solid ${color.line}` }}>
                       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) 150px auto', gap: space[3], alignItems: 'end' }}>
-                        <Field label="Client email">
-                          <Input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} placeholder="client@company.com" />
+                        <Field label="Email">
+                          <Input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} placeholder="person@example.com" />
                         </Field>
                         <Field label="Role">
                           <Select value={inviteRole} onChange={e => setInviteRole(e.target.value as ProjectRole)}>
@@ -613,7 +689,7 @@ export default function AcrossClients() {
                     <div>
                       {members.length === 0 && pendingInvites.length === 0 ? (
                         <p style={{ margin: 0, padding: space[5], borderTop: `1px solid ${color.line}`, color: color.ghost, fontSize: t.size.sm }}>
-                          No client-specific people yet.
+                          No space-specific people yet.
                         </p>
                       ) : (
                         <>
@@ -691,7 +767,7 @@ export default function AcrossClients() {
                     <div>
                       {apiKeys.length === 0 ? (
                         <p style={{ margin: 0, padding: space[5], borderTop: `1px solid ${color.line}`, color: color.ghost, fontSize: t.size.sm }}>
-                          No provider keys saved for this client.
+                          No provider keys saved for this space.
                         </p>
                       ) : apiKeys.map(apiKey => (
                         <ApiKeyRow
@@ -737,7 +813,7 @@ function AgendaPanel({
             <SectionLabel count={observations.length}>VERA agenda</SectionLabel>
           </div>
           <p style={{ margin: 0, maxWidth: 700, color: color.ink2, fontSize: t.size.sm, lineHeight: t.lineHeight.relaxed }}>
-            Open connector issues, learning reviews, knowledge gaps, and draft opportunities across every client space.
+            Open connector issues, learning reviews, knowledge gaps, and draft opportunities across every space.
           </p>
         </div>
         {observations.length > shown.length && (
@@ -747,7 +823,7 @@ function AgendaPanel({
 
       {shown.length === 0 ? (
         <div style={{ borderTop: `1px solid ${color.line}`, padding: space[5], color: color.ghost, fontSize: t.size.sm }}>
-          No open VERA agenda items across client spaces.
+          No open VERA agenda items across spaces.
         </div>
       ) : (
         <div>
@@ -818,7 +894,22 @@ function AgendaPanel({
   )
 }
 
-function ClientRow({ project, selected, openCount, onSelect }: { project: Project; selected: boolean; openCount: number; onSelect: () => void }) {
+function ClientRow({
+  project,
+  selected,
+  openCount,
+  stats,
+  statsReady,
+  onSelect,
+}: {
+  project: Project
+  selected: boolean
+  openCount: number
+  stats: SpaceStats | null
+  statsReady: boolean
+  onSelect: () => void
+}) {
+  const hasKeys = statsReady ? (stats?.activeKeys ?? 0) > 0 : true
   return (
     <button
       onClick={onSelect}
@@ -858,7 +949,27 @@ function ClientRow({ project, selected, openCount, onSelect }: { project: Projec
         <span style={{ display: 'block', fontSize: t.size.cap, color: color.ghost, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {project.description || 'No description'}
         </span>
+        {statsReady && (
+          <span style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', marginTop: space[2] }}>
+            <span style={{ color: hasKeys ? color.success : color.warn, fontSize: t.size.micro, fontWeight: t.weight.medium }}>
+              {stats?.activeKeys ?? 0} active key{(stats?.activeKeys ?? 0) === 1 ? '' : 's'}
+            </span>
+            <span style={{ color: color.faint, fontSize: t.size.micro }}>·</span>
+            <span style={{ color: color.ghost, fontSize: t.size.micro }}>
+              {stats?.members ?? 0} people
+            </span>
+            {(stats?.pendingInvites ?? 0) > 0 && (
+              <>
+                <span style={{ color: color.faint, fontSize: t.size.micro }}>·</span>
+                <span style={{ color: color.accent, fontSize: t.size.micro }}>
+                  {stats?.pendingInvites} pending
+                </span>
+              </>
+            )}
+          </span>
+        )}
       </span>
+      {!hasKeys && <StatusPill tone="warn">Setup</StatusPill>}
       {openCount > 0 && <StatusPill tone="accent">{openCount} open</StatusPill>}
       {selected && <Check size={14} color={color.accent} />}
     </button>
@@ -902,7 +1013,7 @@ function ClientHeader({
             {openCount > 0 && <StatusPill tone="accent">{openCount} proposal{openCount === 1 ? '' : 's'}</StatusPill>}
           </div>
           <p style={{ margin: `${space[1]} 0 0`, color: color.ink2, fontSize: t.size.sm, lineHeight: t.lineHeight.relaxed }}>
-            {project.description || 'Client space settings, access, and provider configuration.'}
+            {project.description || 'Space settings, access, and provider configuration.'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -911,6 +1022,110 @@ function ClientHeader({
         </div>
       </div>
     </section>
+  )
+}
+
+function SpaceActionStrip({
+  project,
+  openCount,
+  stats,
+  statsReady,
+  onNavigate,
+}: {
+  project: Project
+  openCount: number
+  stats: SpaceStats | null
+  statsReady: boolean
+  onNavigate: (path: string) => void
+}) {
+  const base = `/p/${project.slug}`
+  const activeKeys = statsReady ? stats?.activeKeys ?? 0 : null
+  const people = statsReady ? stats?.members ?? 0 : null
+  const pending = statsReady ? stats?.pendingInvites ?? 0 : null
+  const items = [
+    { label: 'Command', detail: 'Research and generate', icon: MessageSquare, path: `${base}/vera` },
+    { label: 'Brain', detail: 'Strategy, tone, assumptions', icon: Brain, path: `${base}/brain` },
+    { label: 'Review', detail: 'Approvals and feedback', icon: CheckSquare, path: `${base}/review` },
+    { label: 'Calendar', detail: 'Schedule and campaigns', icon: CalendarDays, path: `${base}/calendar` },
+    { label: 'Keys', detail: 'Model and media access', icon: KeyRound, path: `${base}/keys` },
+  ]
+
+  return (
+    <section style={{ ...panelStyle, padding: space[4], display: 'grid', gap: space[4] }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: space[3] }}>
+        <SpaceSignal label="Agenda" value={openCount} tone={openCount > 0 ? 'accent' : 'neutral'} />
+        <SpaceSignal label="People" value={people ?? 'Checking'} />
+        <SpaceSignal label="Pending invites" value={pending ?? 'Checking'} tone={pending && pending > 0 ? 'accent' : 'neutral'} />
+        <SpaceSignal label="Active keys" value={activeKeys ?? 'Checking'} tone={activeKeys === 0 ? 'warn' : 'neutral'} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: space[3] }}>
+        {items.map(item => (
+          <SpaceActionButton key={item.label} {...item} onNavigate={onNavigate} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function SpaceSignal({ label, value, tone = 'neutral' }: { label: string; value: string | number; tone?: 'accent' | 'warn' | 'neutral' }) {
+  const valueColor = tone === 'accent' ? color.accent : tone === 'warn' ? color.warn : color.ink
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ color: color.ghost, fontSize: t.size.micro, fontWeight: t.weight.medium, textTransform: 'uppercase', letterSpacing: 0 }}>{label}</div>
+      <div style={{ color: valueColor, fontSize: t.size.h4, lineHeight: t.lineHeight.snug, fontWeight: t.weight.semibold, marginTop: 2 }}>{value}</div>
+    </div>
+  )
+}
+
+function SpaceActionButton({
+  label,
+  detail,
+  icon: Icon,
+  path,
+  onNavigate,
+}: {
+  label: string
+  detail: string
+  icon: React.ElementType
+  path: string
+  onNavigate: (path: string) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onNavigate(path)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: space[3],
+        minHeight: 58,
+        padding: `${space[3]} ${space[4]}`,
+        border: `1px solid ${color.line}`,
+        borderRadius: radius.md,
+        background: color.paper2,
+        cursor: 'pointer',
+        textAlign: 'left',
+        fontFamily: t.family.sans,
+      }}
+    >
+      <span style={{
+        width: 30,
+        height: 30,
+        borderRadius: radius.sm,
+        background: color.surface,
+        color: color.accent,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+      }}>
+        <Icon size={15} />
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: 'block', color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+        <span style={{ display: 'block', color: color.ghost, fontSize: t.size.cap, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{detail}</span>
+      </span>
+    </button>
   )
 }
 
@@ -1043,11 +1258,12 @@ function PanelTitle({ icon, title, subtitle }: { icon: React.ReactNode; title: s
   )
 }
 
-function Metric({ label, value }: { label: string; value: string | number }) {
+function Metric({ label, value, tone = 'neutral' }: { label: string; value: string | number; tone?: 'accent' | 'warn' | 'neutral' }) {
+  const valueColor = tone === 'accent' ? color.accent : tone === 'warn' ? color.warn : color.ink
   return (
     <div style={{ ...panelStyle, padding: space[4] }}>
       <div style={{ fontSize: t.size.cap, color: color.ghost, fontWeight: t.weight.medium }}>{label}</div>
-      <div style={{ marginTop: space[1], fontSize: t.size.h3, lineHeight: t.lineHeight.snug, color: color.ink, fontWeight: t.weight.semibold }}>{value}</div>
+      <div style={{ marginTop: space[1], fontSize: t.size.h3, lineHeight: t.lineHeight.snug, color: valueColor, fontWeight: t.weight.semibold }}>{value}</div>
     </div>
   )
 }
@@ -1058,9 +1274,9 @@ function SetupPanel({ error }: { error: string | null }) {
       <div style={{ display: 'flex', gap: space[3], alignItems: 'flex-start' }}>
         <ShieldCheck size={18} color={color.accent} />
         <div>
-          <h3 style={{ margin: 0, color: color.ink, fontSize: t.size.body, fontWeight: t.weight.semibold }}>Client access schema needed</h3>
+          <h3 style={{ margin: 0, color: color.ink, fontSize: t.size.body, fontWeight: t.weight.semibold }}>Space access schema needed</h3>
           <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.sm, lineHeight: t.lineHeight.relaxed }}>
-            Apply the client access migration to enable client invitations, roles, and API key management.
+            Apply the space access migration to enable invitations, roles, and API key management.
           </p>
           {error && <p style={{ margin: `${space[3]} 0 0`, color: color.faint, fontSize: t.size.cap }}>{error}</p>}
         </div>
@@ -1072,7 +1288,7 @@ function SetupPanel({ error }: { error: string | null }) {
 function ErrorPanel({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <section style={{ ...panelStyle, padding: space[6] }}>
-      <h3 style={{ margin: 0, color: color.ink, fontSize: t.size.body, fontWeight: t.weight.semibold }}>Client settings could not load</h3>
+      <h3 style={{ margin: 0, color: color.ink, fontSize: t.size.body, fontWeight: t.weight.semibold }}>Space settings could not load</h3>
       <p style={{ margin: `${space[2]} 0 ${space[4]}`, color: color.danger, fontSize: t.size.sm }}>{message}</p>
       <Button variant="secondary" onClick={onRetry}>Try again</Button>
     </section>
@@ -1123,6 +1339,12 @@ function StatusPill({ tone, children }: { tone: 'accent' | 'success' | 'warn' | 
   )
 }
 
+function createSpaceStats(projects: Project[]) {
+  return Object.fromEntries(
+    projects.map(project => [project.id, { members: 0, pendingInvites: 0, activeKeys: 0 }]),
+  ) as Record<string, SpaceStats>
+}
+
 function severityRank(severity: string) {
   if (severity === 'high') return 0
   if (severity === 'medium') return 1
@@ -1156,7 +1378,7 @@ function agendaActionLabel(obs: ShelfObservation) {
   if (obs.action_kind === 'review_weekly_learning' || obs.kind === 'weekly_learning') return 'Review learning'
   if (obs.action_kind === 'prompt_knowledge_input') return 'Open brain'
   if (obs.action_kind === 'draft_from_campaign') return 'Open VERA'
-  return obs.proposed_action ? 'Open' : 'Open client'
+  return obs.proposed_action ? 'Open' : 'Open space'
 }
 
 function weeklyLearningRoute(obs: ShelfObservation, projectSlug: string | null) {

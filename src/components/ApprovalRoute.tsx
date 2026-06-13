@@ -13,7 +13,7 @@ function RouteIcon({ route, size = 13 }: { route: ApprovalRoute; size?: number }
   const color = toneVars(route.tone).color
   if (route.label.includes('Legal')) return <ShieldCheck size={size} style={{ color }} />
   if (route.label.includes('All')) return <Users size={size} style={{ color }} />
-  if (route.label.includes('Client')) return <ClipboardCheck size={size} style={{ color }} />
+  if (route.label.includes('Space') || route.label.includes('Client')) return <ClipboardCheck size={size} style={{ color }} />
   if (route.label.includes('Named')) return <UserCheck size={size} style={{ color }} />
   if (route.tone === 'warning' || route.tone === 'danger') return <AlertTriangle size={size} style={{ color }} />
   return <ShieldCheck size={size} style={{ color }} />

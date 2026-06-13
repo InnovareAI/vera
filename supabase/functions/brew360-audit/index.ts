@@ -7,7 +7,7 @@
 //
 // Uses the active project's Strategy Brain LinkedIn profile URL as the audit
 // target. The connected Unipile account is read-only research access, not proof
-// that the connected account itself is the client profile.
+// that the connected account itself is the brand profile.
 //
 // POST { org_id }  →  { success, audit, profile_summary, posts_analyzed }
 
@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
 
   // 1) Get read-only LinkedIn research access + the project's source URLs.
   //    The Unipile account is just a research token. The target to audit must
-  //    come from the client Strategy Brain for client projects.
+  //    come from the client Strategy Brain for space projects.
   const { data: org } = await supabase
     .from('organizations')
     .select('name, settings')
@@ -86,13 +86,13 @@ Deno.serve(async (req) => {
   if (!projectHasLinkedInStrategy(sourceResolution)) {
     return jsonResponse({
       success: false,
-      error: 'LinkedIn audit is not enabled for this client strategy. Add a LinkedIn source or explicit LinkedIn strategy in the Strategy Brain first.',
+      error: 'LinkedIn audit is not enabled for this space strategy. Add a LinkedIn source or explicit LinkedIn strategy in the Strategy Brain first.',
     }, 400)
   }
 
   // Resolve audit target: prefer the project's LinkedIn profile URL. Fall back
   // to /me only for the default workspace project, preserving legacy internal
-  // behavior without letting client projects audit the operator profile.
+  // behavior without letting space projects audit the operator profile.
   let targetSlug: string | null = null
   let targetSource: 'project' | 'legacy_channel' | 'me' = 'me'
   let targetUrl: string | null = null
@@ -110,7 +110,7 @@ Deno.serve(async (req) => {
   if (!targetSlug && !sourceResolution.project.is_default) {
     return jsonResponse({
       success: false,
-      error: 'Add this client LinkedIn profile URL to the Strategy Brain before running a 360Brew audit. Shared research profiles cannot be audited as the client.',
+      error: "Add this space's LinkedIn profile URL to the Strategy Brain before running a 360Brew audit. Shared research profiles cannot be audited as the brand profile.",
     }, 400)
   }
 
@@ -132,7 +132,7 @@ Deno.serve(async (req) => {
         const errText = await profileRes.text()
         return jsonResponse({
           success: false,
-          error: `Client LinkedIn profile lookup failed (${profileRes.status}). Check the Strategy Brain LinkedIn profile URL. ${errText.slice(0, 200)}`,
+          error: `Brand LinkedIn profile lookup failed (${profileRes.status}). Check the Strategy Brain LinkedIn profile URL. ${errText.slice(0, 200)}`,
         }, 502)
       }
       // Slug did not resolve for the legacy default workspace path, preserve
@@ -178,7 +178,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 3) Pull brand_voice if it exists, preferring the active client project and
+  // 3) Pull brand_voice if it exists, preferring the active space project and
   // falling back to the org-level legacy row only when no project row exists.
   const { data: brandRows } = await supabase
     .from('brand_voice')

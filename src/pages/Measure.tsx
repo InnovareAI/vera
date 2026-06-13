@@ -283,7 +283,7 @@ export default function Measure() {
     return () => window.clearTimeout(task)
   }, [activeProject?.id, loadData])
 
-  // Past Reddit listens for this client (newest first).
+  // Past Reddit listens for this space (newest first).
   useEffect(() => {
     const projectId = activeProject?.id
     if (!projectId) { setListens([]); return }
@@ -587,7 +587,7 @@ export default function Measure() {
           )}
 
           <section style={{ marginTop: space[8] }}>
-            <SectionLabel style={{ marginBottom: space[3] }} action="Client site signals">
+            <SectionLabel style={{ marginBottom: space[3] }} action="Site signals">
               Search and analytics
             </SectionLabel>
             <SearchAnalyticsPanel stats={sourceStats} />
@@ -1275,7 +1275,7 @@ function RedditListeningPanel({ topic, onTopic, listening, error, onRun, listens
         </Button>
       </div>
       {disabled && (
-        <p style={{ fontSize: t.size.micro, color: color.faint, marginTop: space[2] }}>Pick a client to run Reddit listening.</p>
+        <p style={{ fontSize: t.size.micro, color: color.faint, marginTop: space[2] }}>Pick a space to run Reddit listening.</p>
       )}
       {error && <div style={{ marginTop: space[3] }}><Notice tone="danger" text={error} /></div>}
 
@@ -1409,7 +1409,7 @@ function ManualMetricsPanel({
         <p style={{ margin: 0, color: color.ghost, fontSize: t.size.cap, lineHeight: 1.45 }}>
           {selected
             ? `Latest source: ${selected.pulledAt ? relativeDate(selected.pulledAt) : 'not measured yet'}. Manual entries create a new lifetime snapshot.`
-            : 'Manual entries create lifetime snapshots for the active client space.'}
+            : 'Manual entries create lifetime snapshots for the active space.'}
         </p>
         <Button
           variant="primary"

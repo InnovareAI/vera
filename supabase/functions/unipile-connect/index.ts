@@ -1,7 +1,7 @@
 // Generate a Unipile hosted-auth URL for LinkedIn, Instagram, or X.
 // If project_id is omitted, the callback attaches the account to the org-level
 // research profile. If project_id is present, the callback attaches it to that
-// client space's publishing integration.
+// space's publishing integration.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js"

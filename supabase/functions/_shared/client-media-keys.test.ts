@@ -11,7 +11,8 @@ class FakeQuery {
     this.rows = [...rows]
   }
 
-  select(_columns: string) {
+  select(columns: string) {
+    void columns
     return this
   }
 
@@ -53,7 +54,7 @@ Deno.test("isPlatformMediaProject allows only an allowlisted master-org project 
   assertEquals(allowed, true)
 })
 
-Deno.test("isPlatformMediaProject denies non-allowlisted client projects even inside the master org", async () => {
+Deno.test("isPlatformMediaProject denies non-allowlisted space projects even inside the master org", async () => {
   const supabase = fakeSupabase({
     projects: [
       project({

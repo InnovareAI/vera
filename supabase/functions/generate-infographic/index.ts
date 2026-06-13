@@ -148,8 +148,8 @@ Deno.serve(async (req) => {
     return jsonError('Invalid JSON body', 400)
   }
 
-  // Omit model to let generate-image load the client space policy. Operators
-  // can explicitly override to an approved model when the client has access.
+  // Omit model to let generate-image load the space policy. Operators
+  // can explicitly override to an approved model when the space has access.
   const { title, subtitle, sections, stats, audience, style = 'editorial' } = body
   const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null
   const projectId = typeof body.project_id === 'string' ? body.project_id.trim() : ''

@@ -5,18 +5,20 @@ import { useProject } from '../lib/projectContext'
 import { useAuth } from '../lib/auth'
 import {
   Settings2, Users, Plug, Building2, Save,
-  CheckCircle2, AlertCircle, Sun, Moon, Monitor, BarChart3, ShieldCheck, RefreshCw, KeyRound, Database, ExternalLink
+  CheckCircle2, AlertCircle, Sun, Moon, Monitor, BarChart3, ShieldCheck, RefreshCw, KeyRound, Database, ExternalLink,
+  Brain, Image, Video, MessageSquareText, Link2
 } from 'lucide-react'
 import { PublishersCard } from '../components/PublishersCard'
 import { ClientIntegrationsCard } from '../components/ClientIntegrationsCard'
 import { useTheme, type Theme } from '../lib/themeContext'
 
-type Tab = 'workspace' | 'team' | 'integrations' | 'usage'
+type Tab = 'workspace' | 'team' | 'integrations' | 'brain' | 'usage'
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'workspace',    label: 'Workspace',    icon: Building2 },
   { id: 'team',         label: 'Access',       icon: Users },
   { id: 'integrations', label: 'Integrations', icon: Plug },
+  { id: 'brain',        label: 'Brain & Models', icon: Brain },
   { id: 'usage',        label: 'Generation Usage', icon: BarChart3 },
 ]
 
@@ -203,7 +205,7 @@ function TeamTab() {
 
   async function sendInvite() {
     const addr = email.trim().toLowerCase()
-    if (!projectId) { setMsg({ kind: 'err', text: 'Pick a client space first.' }); return }
+    if (!projectId) { setMsg({ kind: 'err', text: 'Pick a space first.' }); return }
     if (!addr.includes('@')) { setMsg({ kind: 'err', text: 'Enter a valid email address.' }); return }
     setBusy(true); setMsg(null)
     try {
@@ -215,7 +217,7 @@ function TeamTab() {
       })
       const data = await res.json().catch(() => ({})) as { error?: string }
       if (!res.ok) throw new Error(data.error ?? `Invite failed (HTTP ${res.status})`)
-      const where = projects.find(p => p.id === projectId)?.name ?? 'the client space'
+      const where = projects.find(p => p.id === projectId)?.name ?? 'the space'
       setEmail('')
       setMsg({ kind: 'ok', text: `Invited ${addr} as ${role} to ${where}. An email is on its way.` })
     } catch (e) {
@@ -228,14 +230,14 @@ function TeamTab() {
     <div className="max-w-xl space-y-5">
       <div>
         <h2 className="text-base font-semibold text-gray-900">Access Management</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Invite someone into a client space and set their role. Organisation-wide staff access is coming later. For now, access is scoped per client.</p>
+        <p className="text-sm text-gray-500 mt-0.5">Invite someone into a space and set their role. Organisation-wide staff access is coming later. For now, access is scoped per space.</p>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
         <div className="space-y-1">
-          <label className="text-sm font-medium text-gray-700">Client space</label>
+          <label className="text-sm font-medium text-gray-700">Space</label>
           <select value={projectId} onChange={e => setProjectId(e.target.value)} className={input}>
-            {projects.length === 0 && <option value="">No client spaces yet: add a client first</option>}
+            {projects.length === 0 && <option value="">No spaces yet: add a space first</option>}
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
@@ -258,7 +260,7 @@ function TeamTab() {
             className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors disabled:opacity-50">
             <Users size={14} /> {busy ? 'Sending…' : 'Send invite'}
           </button>
-          <button type="button" onClick={() => { window.location.href = '/clients' }} className="text-sm text-gray-500 hover:text-gray-700">
+          <button type="button" onClick={() => { window.location.href = '/spaces' }} className="text-sm text-gray-500 hover:text-gray-700">
             Manage all access, roles &amp; pending invites →
           </button>
         </div>
@@ -267,7 +269,7 @@ function TeamTab() {
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
         <div className="flex items-start gap-3">
           <AlertCircle size={16} className="text-amber-700 mt-0.5 flex-shrink-0" />
-          <p className="text-xs text-amber-800">Invites are scoped to one client space. To give someone several clients, invite them to each. Organisation-wide staff access is on the roadmap.</p>
+          <p className="text-xs text-amber-800">Invites are scoped to one space. To give someone several spaces, invite them to each. Organisation-wide staff access is on the roadmap.</p>
         </div>
       </div>
     </div>
@@ -277,13 +279,13 @@ function TeamTab() {
 // ─── Integrations Tab ─────────────────────────────────────────────────────────
 function IntegrationsTab() {
   const { activeProject } = useProject()
-  const brainHref = activeProject?.slug ? `/p/${activeProject.slug}/brain` : '/clients'
+  const brainHref = activeProject?.slug ? `/p/${activeProject.slug}/brain` : '/spaces'
 
   return (
     <div className="max-w-5xl space-y-5">
       <div>
         <h2 className="text-base font-semibold text-gray-900">Agentic integrations</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Connect client-owned accounts. Channel strategy and writing rules live inside each client Strategy Brain.</p>
+        <p className="text-sm text-gray-500 mt-0.5">Connect space-owned accounts. Channel strategy and writing rules live inside each Strategy Brain.</p>
       </div>
 
       <ClientIntegrationsCard />
@@ -293,8 +295,8 @@ function IntegrationsTab() {
 
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100">
-          <div className="text-sm font-medium text-gray-800">Client channel policy</div>
-          <div className="text-xs text-gray-400 mt-0.5">Per-client rules prevent one workspace's tone, speaker, approval path, or publishing guard from leaking into another client.</div>
+          <div className="text-sm font-medium text-gray-800">Space channel policy</div>
+          <div className="text-xs text-gray-400 mt-0.5">Per-space rules prevent one workspace's tone, speaker, approval path, or publishing guard from leaking into another space.</div>
         </div>
         <div className="px-4 py-3 space-y-3">
           <p className="text-xs text-gray-500 leading-relaxed">
@@ -306,7 +308,7 @@ function IntegrationsTab() {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 transition-colors"
           >
             <ShieldCheck size={12} />
-            {activeProject?.slug ? 'Open Strategy Brain' : 'Pick a client space'}
+            {activeProject?.slug ? 'Open Strategy Brain' : 'Pick a space'}
           </button>
         </div>
       </div>
@@ -315,19 +317,19 @@ function IntegrationsTab() {
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100">
           <div className="text-sm font-medium text-gray-800">AI model defaults</div>
-          <div className="text-xs text-gray-400 mt-0.5">Model defaults are managed per client space so spend and quality stay tied to the right provider keys.</div>
+          <div className="text-xs text-gray-400 mt-0.5">Model defaults are managed per space so spend and quality stay tied to the right provider keys.</div>
         </div>
         <div className="px-4 py-3 space-y-3">
           <p className="text-xs text-gray-500 leading-relaxed">
-            Open a client space, then go to API keys to set text, image, and video defaults. Premium image and video models require an explicit generation cap before they can run.
+            Open a space, then go to API keys to set text, image, and video defaults. Premium image and video models require an explicit generation cap before they can run.
           </p>
           <button
             type="button"
-            onClick={() => { window.location.href = '/clients' }}
+            onClick={() => { window.location.href = '/spaces' }}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 transition-colors"
           >
             <KeyRound size={12} />
-            Open client spaces
+            Open spaces
           </button>
           <p className="text-[10px] text-gray-400">
             <AlertCircle size={10} className="inline mr-0.5" />
@@ -336,6 +338,182 @@ function IntegrationsTab() {
         </div>
       </div>
     </div>
+  )
+}
+
+// ─── Brain & Models Tab ──────────────────────────────────────────────────────
+function BrainModelsTab() {
+  const { activeProject } = useProject()
+  const keysHref = activeProject?.slug ? `/p/${activeProject.slug}/keys` : '/spaces'
+  const brainHref = activeProject?.slug ? `/p/${activeProject.slug}/brain` : '/spaces'
+
+  return (
+    <div className="max-w-5xl space-y-5">
+      <div>
+        <h2 className="text-base font-semibold text-gray-900">Brain &amp; Models</h2>
+        <p className="text-sm text-gray-500 mt-0.5">Setup lives here so Command, Planner, Review, and Performance stay focused on daily work.</p>
+      </div>
+
+      <div className="grid lg:grid-cols-[1.05fr_0.95fr] gap-4">
+        <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-gray-800">Brain source setup</p>
+              <p className="text-xs text-gray-500 mt-0.5">VERA learns from owned sources first, then optional channel evidence.</p>
+            </div>
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">82% ready</span>
+          </div>
+          <div className="grid md:grid-cols-2 gap-3 p-4">
+            <SetupStatusCard icon={Link2} label="Company URL" status="Required first" detail="Website is the first source for context, offer, SEO headers, and product pages." tone="ok" />
+            <SetupStatusCard icon={Database} label="Documents" status="Upload ready" detail="Briefs, decks, compliance notes, and PDFs can enrich the Brain." tone="neutral" />
+            <SetupStatusCard icon={Brain} label="Assumptions" status="Tracked" detail="Channel fit, tone, ICP, offers, and proof points should carry confidence." tone="ok" />
+            <SetupStatusCard icon={RefreshCw} label="Freshness" status="Needs schedule" detail="Sources need recurring refresh so VERA does not learn from stale content." tone="warn" />
+          </div>
+          <div className="px-4 pb-4">
+            <button
+              type="button"
+              onClick={() => { window.location.href = brainHref }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 transition-colors"
+            >
+              <Brain size={12} />
+              Open Strategy Brain
+            </button>
+          </div>
+        </section>
+
+        <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100">
+            <p className="text-sm font-medium text-gray-800">Model setup</p>
+            <p className="text-xs text-gray-500 mt-0.5">Defaults are selected for quality, speed, and cost. Premium media stays explicit.</p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            <ModelDefaultRow icon={MessageSquareText} kind="Copy and strategy" model="Gemini via OpenRouter" detail="Low-cost default for content, planning, and iteration." />
+            <ModelDefaultRow icon={Image} kind="Image prototyping" model="Nano Banana" detail="Default for fast visual drafts and text-heavy images." />
+            <ModelDefaultRow icon={Image} kind="Premium images" model="OpenAI Image Gen 2" detail="Premium only, never the default." />
+            <ModelDefaultRow icon={Video} kind="Video" model="Storyboard first" detail="Render controls stay gated because video is a cost sink." />
+          </div>
+          <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => { window.location.href = keysHref }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 transition-colors"
+            >
+              <KeyRound size={12} />
+              Open API keys
+            </button>
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700">
+              <AlertCircle size={12} />
+              Video locked by default
+            </span>
+          </div>
+        </section>
+      </div>
+
+      <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <p className="text-sm font-medium text-gray-800">Channel assumptions</p>
+          <p className="text-xs text-gray-500 mt-0.5">Channels are strategy options, not mandatory steps. The Brain should justify each one before production starts.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] border-collapse">
+            <thead>
+              <tr className="border-b border-gray-100">
+                {['Channel', 'Default role', 'When valid', 'Current stance'].map(label => (
+                  <th key={label} className="px-4 py-2 text-left text-[10px] uppercase tracking-[0.05em] font-semibold text-gray-400">{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <ChannelAssumptionRow channel="LinkedIn" role="Authority and demand creation" valid="Buying audience, founder expertise, B2B proof" stance="Optional" tone="neutral" />
+              <ChannelAssumptionRow channel="Instagram" role="Visual proof and trust" valid="Product, lifestyle, culture, founder stories" stance="Active" tone="ok" />
+              <ChannelAssumptionRow channel="YouTube" role="Depth and evergreen search" valid="Demos, explainers, tutorials, search demand" stance="Planned" tone="warn" />
+              <ChannelAssumptionRow channel="Reddit and Quora" role="Market questions and objections" valid="Research-first, non-promotional answers" stance="Research" tone="neutral" />
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function SetupStatusCard({
+  icon: Icon,
+  label,
+  status,
+  detail,
+  tone,
+}: {
+  icon: React.ElementType
+  label: string
+  status: string
+  detail: string
+  tone: 'ok' | 'warn' | 'neutral'
+}) {
+  const toneClass = tone === 'ok'
+    ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+    : tone === 'warn'
+      ? 'bg-amber-50 text-amber-700 border-amber-100'
+      : 'bg-gray-50 text-gray-500 border-gray-100'
+  return (
+    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+      <div className="flex items-start gap-3">
+        <span className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border ${toneClass}`}>
+          <Icon size={15} />
+        </span>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-gray-900">{label}</p>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone === 'ok' ? 'bg-emerald-50 text-emerald-700' : tone === 'warn' ? 'bg-amber-50 text-amber-700' : 'bg-white text-gray-500'}`}>{status}</span>
+          </div>
+          <p className="text-xs text-gray-500 leading-relaxed mt-1">{detail}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ModelDefaultRow({ icon: Icon, kind, model, detail }: { icon: React.ElementType; kind: string; model: string; detail: string }) {
+  return (
+    <div className="px-4 py-3 flex items-start gap-3">
+      <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-600">
+        <Icon size={15} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-medium text-gray-900">{kind}</p>
+          <p className="text-xs font-semibold text-gray-700">{model}</p>
+        </div>
+        <p className="text-xs text-gray-500 leading-relaxed mt-1">{detail}</p>
+      </div>
+    </div>
+  )
+}
+
+function ChannelAssumptionRow({
+  channel,
+  role,
+  valid,
+  stance,
+  tone,
+}: {
+  channel: string
+  role: string
+  valid: string
+  stance: string
+  tone: 'ok' | 'warn' | 'neutral'
+}) {
+  const stanceClass = tone === 'ok'
+    ? 'bg-emerald-50 text-emerald-700'
+    : tone === 'warn'
+      ? 'bg-amber-50 text-amber-700'
+      : 'bg-gray-100 text-gray-600'
+  return (
+    <tr className="border-b border-gray-100">
+      <td className="px-4 py-3 text-sm font-medium text-gray-900">{channel}</td>
+      <td className="px-4 py-3 text-xs text-gray-700">{role}</td>
+      <td className="px-4 py-3 text-xs text-gray-500">{valid}</td>
+      <td className="px-4 py-3"><span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${stanceClass}`}>{stance}</span></td>
+    </tr>
   )
 }
 
@@ -622,7 +800,7 @@ function AiUsageTab() {
         <UsageMetric
           label="Platform key events"
           value={String(summary.platformEvents)}
-          detail={`${riskSummary.platformExposureClients} client spaces exposed`}
+          detail={`${riskSummary.platformExposureClients} spaces exposed`}
           tone={riskSummary.platformExposureClients > 0 ? 'danger' : summary.platformEvents > 0 ? 'warn' : 'neutral'}
         />
         <UsageMetric label="Images" value={String(summary.images)} detail={`${summary.imageEvents} image calls`} />
@@ -675,8 +853,8 @@ function AiUsageTab() {
       <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-gray-800">Client spend controls</p>
-            <p className="text-xs text-gray-500 mt-0.5">Current month by client space, generation cap, media policy, and key source.</p>
+            <p className="text-sm font-medium text-gray-800">Space spend controls</p>
+            <p className="text-xs text-gray-500 mt-0.5">Current month by space, generation cap, media policy, and key source.</p>
           </div>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500">{clientRows.length} spaces</span>
         </div>
@@ -684,14 +862,14 @@ function AiUsageTab() {
           <table className="w-full min-w-[920px] border-collapse">
             <thead>
               <tr className="border-b border-gray-100">
-                {['Client', 'Spend', 'Gen budget', 'Activity', 'Media', 'Key source', 'Status'].map(label => (
+                {['Space', 'Spend', 'Gen budget', 'Activity', 'Media', 'Key source', 'Status'].map(label => (
                   <th key={label} className="px-4 py-2 text-left text-[10px] uppercase tracking-[0.05em] font-semibold text-gray-400">{label}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {clientRows.length === 0 && (
-                <tr><td colSpan={7}><EmptyLine text={loading ? 'Loading client spend...' : 'No client usage found this month.'} /></td></tr>
+                <tr><td colSpan={7}><EmptyLine text={loading ? 'Loading space spend...' : 'No space usage found this month.'} /></td></tr>
               )}
               {clientRows.map(row => {
                 const status = clientUsageStatus(row)
@@ -714,7 +892,7 @@ function AiUsageTab() {
                       <p className="text-xs text-gray-400 mt-0.5">{row.topModel ? `${formatProviderName(row.topProvider)} · ${row.topModel}` : 'No model yet'}</p>
                     </td>
                     <td className="px-4 py-3">
-                      <p className="text-xs text-emerald-700 font-semibold">{row.clientEvents} client</p>
+                      <p className="text-xs text-emerald-700 font-semibold">{row.clientEvents} space</p>
                       <p className={`text-xs mt-0.5 font-semibold ${row.platformEvents > 0 ? 'text-amber-700' : 'text-gray-400'}`}>{row.platformEvents} platform</p>
                     </td>
                     <td className="px-4 py-3">
@@ -837,7 +1015,7 @@ function AiUsageTab() {
           <table className="w-full min-w-[760px] border-collapse">
             <thead>
               <tr className="border-b border-gray-100">
-                {['When', 'Client', 'Operation', 'Provider', 'Model', 'Key', 'Selection', 'Cost'].map(label => (
+                {['When', 'Space', 'Operation', 'Provider', 'Model', 'Key', 'Selection', 'Cost'].map(label => (
                   <th key={label} className="px-4 py-2 text-left text-[10px] uppercase tracking-[0.05em] font-semibold text-gray-400">{label}</th>
                 ))}
               </tr>
@@ -1164,7 +1342,7 @@ function BudgetCell({ cost, budget, guardEnabled, guardMode }: { cost: number; b
     return (
       <div>
         <p className="text-xs font-medium text-gray-500">No cap</p>
-        <p className="text-xs text-gray-400 mt-0.5">Set per client</p>
+        <p className="text-xs text-gray-400 mt-0.5">Set per space</p>
       </div>
     )
   }
@@ -1179,7 +1357,7 @@ function BudgetCell({ cost, budget, guardEnabled, guardMode }: { cost: number; b
       <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mt-1.5">
         <div className={`h-full rounded-full ${barClass}`} style={{ width: `${percent}%` }} />
       </div>
-      <p className="text-xs text-gray-400 mt-1">cap {formatUsageUsd(budget)} · {guardMode === 'enforce' ? 'enforce' : 'warn'}</p>
+      <p className="text-xs text-gray-400 mt-1">cap {formatUsageUsd(budget)} · {guardMode === 'enforce' ? 'production enforce' : 'warn'}</p>
     </div>
   )
 }
@@ -1343,7 +1521,7 @@ function clientUsageStatus(row: ClientUsageSummary) {
       level: 'danger' as const,
       kind: 'platform-key' as const,
       label: 'Platform key used',
-      detail: 'This client should run on client-owned keys.',
+      detail: 'This space should run on space-owned keys.',
       className: 'rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700',
     }
   }
@@ -1352,7 +1530,7 @@ function clientUsageStatus(row: ClientUsageSummary) {
       level: 'danger' as const,
       kind: 'budget' as const,
       label: 'Over cap',
-      detail: 'Generation cap enforcement is active.',
+      detail: 'Production generation enforcement is active.',
       className: 'rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700',
     }
   }
@@ -1361,7 +1539,7 @@ function clientUsageStatus(row: ClientUsageSummary) {
       level: 'warn' as const,
       kind: 'budget' as const,
       label: 'Warn only',
-      detail: 'Generation cap exceeded, workflows continue.',
+      detail: 'Generation cap exceeded, workflow-critical work continues.',
       className: 'rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700',
     }
   }
@@ -1551,7 +1729,7 @@ function formatUsageOperation(value: string | null) {
 
 function formatKeySourceLabel(value: string) {
   if (value === 'platform') return 'Platform'
-  if (value === 'client') return 'Client'
+  if (value === 'client') return 'Space'
   return 'Unknown'
 }
 
@@ -1630,6 +1808,7 @@ export default function Settings() {
           {tab === 'workspace'    && <WorkspaceTab />}
           {tab === 'team'         && <TeamTab />}
           {tab === 'integrations' && <IntegrationsTab />}
+          {tab === 'brain'        && <BrainModelsTab />}
           {tab === 'usage'        && <AiUsageTab />}
         </div>
       </div>

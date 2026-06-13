@@ -156,7 +156,7 @@ export function buildBusinessContextBlock(context: BusinessContext): string {
 
   return [
     BUSINESS_CONTEXT_START,
-    'Business context for this client. Use this before drafting, planning, or answering.',
+    'Business context for this space. Use this before drafting, planning, or answering.',
     ...rows.map(({ label, value }) => `- ${label}: ${encodeBusinessContextValue(value)}`),
     BUSINESS_CONTEXT_END,
   ].join('\n')

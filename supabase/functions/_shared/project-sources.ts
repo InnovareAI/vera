@@ -73,7 +73,7 @@ export async function resolveProjectAuditChannels(
     .maybeSingle()
 
   if (projectError) throw new Error(`Project source lookup failed: ${projectError.message}`)
-  if (!project) throw new Error("Client project not found")
+  if (!project) throw new Error("Space project not found")
 
   const projectRow = project as ProjectSourceResolution["project"]
   if (projectRow.org_id !== orgId) throw new Error("Project does not belong to this workspace")
@@ -86,7 +86,7 @@ export async function resolveProjectAuditChannels(
   }
 
   // Legacy org-wide channels are only safe for the default workspace project.
-  // Client projects must use their own Strategy Brain source URLs.
+  // Space projects must use their own Strategy Brain source URLs.
   if (projectRow.is_default) {
     const legacyChannels = await loadLegacyOrgChannels(supabase, orgId)
     if (legacyChannels.length) {

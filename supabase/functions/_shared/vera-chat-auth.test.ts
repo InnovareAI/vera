@@ -26,7 +26,8 @@ class FakeQuery {
     this.rows = [...rows]
   }
 
-  select(_columns: string) {
+  select(columns: string) {
+    void columns
     return this
   }
 
@@ -70,7 +71,7 @@ Deno.test("authorizeVeraChatMemberRequest rejects missing auth and service role"
   assertResponse(service, 401, "User session required")
 })
 
-Deno.test("authorizeVeraChatMemberRequest allows org members to use org client spaces", async () => {
+Deno.test("authorizeVeraChatMemberRequest allows org members to use org spaces", async () => {
   const supabase = fakeSupabase(baseTables({
     org_members: [{ org_id: ORG_A, user_id: USER_A, role: "owner" }],
   }))

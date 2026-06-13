@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, Calendar as CalendarIcon, CalendarPlus, Check, ExternalLink, Filter, LayoutGrid, LayoutList, Layers, MessageSquare, Search, Send, X } from 'lucide-react'
+import { AlertTriangle, Calendar as CalendarIcon, CalendarPlus, Check, ExternalLink, Filter, LayoutGrid, LayoutList, Layers, MessageSquare, Search, Send, Sparkles, Target, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
@@ -11,6 +11,7 @@ import { approvalRouteForPost } from '../lib/approvalRouting'
 import { PlatformChip, StatusChip } from '../components/Chip'
 import { PlatformPostPreview } from '../components/PlatformPostPreview'
 import { ApprovalRouteChip, ApprovalRouteSection } from '../components/ApprovalRoute'
+import { useRightRail } from '../lib/rightRailContext'
 
 const APPROVAL_WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approval-webhook`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -29,6 +30,17 @@ type ReviewFilters = {
   media: string
   owner: string
   date: string
+}
+type ReviewMetricSummary = {
+  total: number
+  drafts: number
+  pending: number
+  changes: number
+  approved: number
+  scheduled: number
+  needsDate: number
+  posted: number
+  rejected: number
 }
 
 const DEFAULT_REVIEW_FILTERS: ReviewFilters = {
@@ -357,6 +369,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
   }, {} as Record<StatusTab, number>)
   const reviewMetrics = useMemo(() => ({
     total: scoped.length,
+    drafts: scoped.filter(p => tabFor(p) === 'Draft').length,
     pending: scoped.filter(p => tabFor(p) === 'Pending Review').length,
     changes: scoped.filter(p => tabFor(p) === 'Changes Requested').length,
     approved: scoped.filter(p => tabFor(p) === 'Approved').length,
@@ -374,6 +387,23 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
   const selectedCount = selectedIds.size
   const postReviewPath = (postId: string) => activeProject?.slug ? `/p/${activeProject.slug}/review/${postId}` : `/review/${postId}`
   const calendarPath = activeProject?.slug ? `/p/${activeProject.slug}/calendar` : '/calendar'
+
+  useRightRail(
+    <ReviewRightRail
+      post={selected}
+      saving={saving}
+      onClose={() => setSelected(null)}
+      onMove={moveToTab}
+      onRequestChanges={requestChanges}
+      detailPath={selected ? postReviewPath(selected.id) : null}
+      calendarPath={calendarPath}
+      businessContext={businessContext}
+      pendingCount={tabCounts['Pending Review']}
+      changesCount={tabCounts['Changes Requested']}
+    />,
+    [selected, saving, businessContext, tabCounts['Pending Review'], tabCounts['Changes Requested'], calendarPath],
+    '380px',
+  )
 
   useEffect(() => {
     const visibleIds = new Set(scoped.map(post => post.id))
@@ -459,56 +489,16 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
             {scoped.length} of {posts.length} posts, {tabCounts['Pending Review']} pending review, {tabCounts['Changes Requested']} changes requested
           </p>
         </div>
-        <div className="flex items-center gap-3">
-        {/* View switcher */}
-        <div className="inline-flex p-0.5" style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
-          <button
-            onClick={() => setView('list')}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition-all"
-            style={{
-              background: view === 'list' ? 'var(--paper)' : 'transparent',
-              color: view === 'list' ? 'var(--ink)' : 'var(--ghost)',
-              fontWeight: view === 'list' ? 500 : 400,
-              boxShadow: view === 'list' ? '0 1px 3px rgba(14,14,15,0.06)' : 'none',
-              borderRadius: '2px',
-            }}
-          >
-            <LayoutList size={13} /> List
-          </button>
-          {/* Calendar is its own rail surface, only offer the toggle there, */}
-          {/* so plain Review stays a pure pending inbox (list/board). */}
-          {initialView === 'calendar' && (
-          <button
-            onClick={() => setView('calendar')}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition-all"
-            style={{
-              background: view === 'calendar' ? 'var(--paper)' : 'transparent',
-              color: view === 'calendar' ? 'var(--ink)' : 'var(--ghost)',
-              fontWeight: view === 'calendar' ? 500 : 400,
-              boxShadow: view === 'calendar' ? '0 1px 3px rgba(14,14,15,0.06)' : 'none',
-              borderRadius: '2px',
-            }}
-          >
-            <CalendarIcon size={13} /> Calendar
-          </button>
-          )}
-          <button
-            onClick={() => setView('board')}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition-all"
-            style={{
-              background: view === 'board' ? 'var(--paper)' : 'transparent',
-              color: view === 'board' ? 'var(--ink)' : 'var(--ghost)',
-              fontWeight: view === 'board' ? 500 : 400,
-              boxShadow: view === 'board' ? '0 1px 3px rgba(14,14,15,0.06)' : 'none',
-              borderRadius: '2px',
-            }}
-          >
-            <LayoutGrid size={13} /> Board
-          </button>
-        </div>
-        </div>
       </div>
 
+      <ProductionCockpit
+        metrics={reviewMetrics}
+        projectName={activeProject?.name ?? 'this space'}
+        currentView={view}
+        onViewChange={setView}
+        allowCalendar={initialView === 'calendar'}
+        onOpenCalendar={() => navigate(calendarPath)}
+      />
       <ReviewMetrics metrics={reviewMetrics} />
       <ReviewToolbar
         filters={filters}
@@ -559,7 +549,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
         <CalendarView
           posts={scoped}
           loading={loading}
-          onOpen={(p) => navigate(postReviewPath(p.id))}
+          onOpen={(p) => setSelected(p)}
         />
       )}
       {view === 'board' && (
@@ -572,7 +562,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
           campaignsById={campaignsById}
           onMove={moveToTab}
           onRequestChanges={requestChanges}
-          onOpen={(p) => navigate(postReviewPath(p.id))}
+          onOpen={(p) => setSelected(p)}
           postReviewPath={postReviewPath}
           calendarPath={calendarPath}
           selectedIds={selectedIds}
@@ -584,16 +574,185 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
   )
 }
 
-function ReviewMetrics({ metrics }: { metrics: {
-  total: number
-  pending: number
-  changes: number
-  approved: number
-  scheduled: number
-  needsDate: number
-  posted: number
-  rejected: number
-} }) {
+function ProductionCockpit({
+  metrics,
+  projectName,
+  currentView,
+  allowCalendar,
+  onViewChange,
+  onOpenCalendar,
+}: {
+  metrics: ReviewMetricSummary
+  projectName: string
+  currentView: View
+  allowCalendar: boolean
+  onViewChange: (view: View) => void
+  onOpenCalendar: () => void
+}) {
+  const blockers = metrics.changes + metrics.needsDate + metrics.rejected
+  const readyToPublish = metrics.scheduled + metrics.approved
+  const recommendation = metrics.changes > 0
+    ? {
+      label: 'Resolve feedback',
+      title: `${metrics.changes} post${metrics.changes === 1 ? '' : 's'} need edits before they can move forward.`,
+      body: 'Start with requested changes, then return approved work to the calendar.',
+      tone: 'warning' as const,
+    }
+    : metrics.pending > 0
+      ? {
+        label: 'Review next',
+        title: `${metrics.pending} post${metrics.pending === 1 ? '' : 's'} are waiting for a decision.`,
+        body: 'Approve, request changes, or reject before the production queue expands.',
+        tone: 'info' as const,
+      }
+      : metrics.needsDate > 0
+        ? {
+          label: 'Schedule approved work',
+          title: `${metrics.needsDate} approved post${metrics.needsDate === 1 ? '' : 's'} need a publish date.`,
+          body: 'Use Calendar to place them into the channel plan.',
+          tone: 'danger' as const,
+        }
+        : {
+          label: 'Queue healthy',
+          title: metrics.total ? 'Production is moving without obvious blockers.' : 'No production items are visible yet.',
+          body: metrics.total ? 'Keep an eye on scheduled work and learning signals after posts go live.' : 'Ask VERA to draft a campaign or import existing posts to start the loop.',
+          tone: 'success' as const,
+        }
+  const toneColor = recommendation.tone === 'warning'
+    ? 'var(--warn)'
+    : recommendation.tone === 'danger'
+      ? 'var(--danger)'
+      : recommendation.tone === 'success'
+        ? 'var(--success)'
+        : 'var(--info)'
+  return (
+    <section
+      className="mb-3 p-4 flex-shrink-0"
+      style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}
+    >
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.65fr)]">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 mb-2" style={{ color: 'var(--accent)' }}>
+            <Target size={14} />
+            <span className="text-[11px] uppercase font-semibold">Publishing workflow</span>
+          </div>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-[18px] leading-snug font-semibold" style={{ color: 'var(--ink)' }}>
+                {projectName}
+              </h2>
+            </div>
+            <div className="inline-flex p-0.5" style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '8px' }}>
+              <PipelineViewButton active={currentView === 'list'} icon={<LayoutList size={13} />} label="List" onClick={() => onViewChange('list')} />
+              <PipelineViewButton active={currentView === 'board'} icon={<LayoutGrid size={13} />} label="Board" onClick={() => onViewChange('board')} />
+              {allowCalendar && (
+                <PipelineViewButton active={currentView === 'calendar'} icon={<CalendarIcon size={13} />} label="Calendar" onClick={() => onViewChange('calendar')} />
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4">
+            <PipelineStage label="Draft" value={metrics.drafts} detail="creation" tone="neutral" />
+            <PipelineStage label="Review" value={metrics.pending + metrics.changes} detail={`${metrics.changes} changes`} tone={metrics.changes ? 'warning' : 'info'} />
+            <PipelineStage label="Ready" value={readyToPublish} detail={`${metrics.needsDate} need date`} tone={metrics.needsDate ? 'danger' : 'success'} />
+            <PipelineStage label="Live" value={metrics.posted} detail={`${metrics.scheduled} scheduled`} tone="success" />
+          </div>
+        </div>
+
+        <aside style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-md)', padding: '12px' }}>
+          <div className="flex items-center gap-2 text-[11px] uppercase font-semibold mb-2" style={{ color: toneColor }}>
+            <Sparkles size={13} />
+            {recommendation.label}
+          </div>
+          <div className="text-[13px] leading-snug font-semibold" style={{ color: 'var(--ink)' }}>
+            {recommendation.title}
+          </div>
+          <p className="text-[12px] leading-relaxed mt-2" style={{ color: 'var(--ink-quiet)' }}>
+            {recommendation.body}
+          </p>
+          <div className="flex flex-wrap gap-2 mt-3">
+            <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color: blockers ? 'var(--warn)' : 'var(--success)' }}>
+              <span style={{ width: 7, height: 7, borderRadius: 999, background: blockers ? 'var(--warn)' : 'var(--success)' }} />
+              {blockers} blockers
+            </span>
+            <button
+              type="button"
+              onClick={onOpenCalendar}
+              className="inline-flex items-center gap-1.5 ml-auto text-[12px] font-medium"
+              style={{ color: 'var(--ink)', background: 'transparent', border: 'none', cursor: 'pointer' }}
+            >
+              <CalendarPlus size={13} />
+              Calendar
+            </button>
+          </div>
+        </aside>
+      </div>
+    </section>
+  )
+}
+
+function PipelineViewButton({
+  active,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean
+  icon: React.ReactNode
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12px]"
+      style={{
+        background: active ? 'var(--paper-warm)' : 'transparent',
+        color: active ? 'var(--ink)' : 'var(--ghost)',
+        border: 'none',
+        borderRadius: '7px',
+        fontWeight: active ? 600 : 450,
+        cursor: 'pointer',
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  )
+}
+
+function PipelineStage({
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  label: string
+  value: number
+  detail: string
+  tone: 'neutral' | 'warning' | 'success' | 'info' | 'danger'
+}) {
+  const dot =
+    tone === 'warning' ? 'var(--warn)'
+    : tone === 'success' ? 'var(--success)'
+    : tone === 'info' ? 'var(--info)'
+    : tone === 'danger' ? 'var(--danger)'
+    : 'var(--ghost)'
+  return (
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-md)', padding: '10px' }}>
+      <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--ghost)' }}>
+        <span style={{ width: 7, height: 7, borderRadius: 999, background: dot, flexShrink: 0 }} />
+        {label}
+      </div>
+      <div className="text-[20px] leading-tight font-semibold mt-1" style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>
+        {value}
+      </div>
+      <div className="text-[11px] mt-0.5" style={{ color: 'var(--ghost)' }}>{detail}</div>
+    </div>
+  )
+}
+
+function ReviewMetrics({ metrics }: { metrics: ReviewMetricSummary }) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 mb-3 flex-shrink-0">
       <MetricPill label="Visible" value={metrics.total} tone="neutral" />
@@ -874,8 +1033,7 @@ function ListView({
   businessContext: BusinessContext
 }) {
   return (
-    <div className="flex flex-1 gap-6 min-h-0">
-      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+    <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Tabs */}
         <div className="flex gap-1 mb-4 p-0.5 overflow-x-auto" style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
           {STATUS_TABS.map(tab => (
@@ -1009,20 +1167,6 @@ function ListView({
             )
           })}
         </div>
-      </div>
-
-      {/* Detail side panel */}
-      <div className="w-96 flex-shrink-0">
-        {selected ? (
-          <PostDetailPanel post={selected} onClose={() => setSelected(null)} saving={saving} onMove={moveToTab} onRequestChanges={onRequestChanges} detailPath={postReviewPath(selected.id)} calendarPath={calendarPath} businessContext={businessContext} />
-        ) : (
-          <div className="p-8 flex flex-col items-center justify-center text-center h-64"
-            style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}>
-            <span className="text-[13px] font-medium mb-2" style={{ color: 'var(--ink-quiet)' }}>No post selected</span>
-            <p className="text-sm" style={{ color: 'var(--ghost)' }}>Select a post to preview and take action</p>
-          </div>
-        )}
-      </div>
     </div>
   )
 }
@@ -1476,19 +1620,45 @@ function IconActionLink({
   )
 }
 
-// ─── Detail side panel (kept from list view; mostly unchanged for now) ────
-function PostDetailPanel({
-  post, onClose, saving, onMove, onRequestChanges, detailPath, calendarPath, businessContext,
+// ─── Right rail: Sprout-style selected message review ───────────────────
+function ReviewRightRail({
+  post, onClose, saving, onMove, onRequestChanges, detailPath, calendarPath, businessContext, pendingCount, changesCount,
 }: {
-  post: Post
+  post: Post | null
   onClose: () => void
   saving: string | null
   onMove: (postId: string, target: StatusTab, feedback?: string) => void | Promise<void>
   onRequestChanges: (postId: string) => void | Promise<void>
-  detailPath: string
+  detailPath: string | null
   calendarPath: string
   businessContext: BusinessContext
+  pendingCount: number
+  changesCount: number
 }) {
+  if (!post) {
+    return (
+      <div className="p-4 h-full flex flex-col gap-4">
+        <section
+          className="p-5"
+          style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}
+        >
+          <div className="text-[11px] uppercase font-semibold mb-2" style={{ color: 'var(--ghost)' }}>Approval workspace</div>
+          <h2 className="text-[17px] leading-snug font-semibold" style={{ color: 'var(--ink)' }}>Select a message</h2>
+        </section>
+        <section
+          className="p-4"
+          style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}
+        >
+          <div className="text-[11px] uppercase font-semibold mb-3" style={{ color: 'var(--ghost)' }}>Approval inbox</div>
+          <div className="flex flex-col gap-3">
+            <RailStat label="Pending review" value={pendingCount} tone="warning" />
+            <RailStat label="Changes requested" value={changesCount} tone="warning" />
+            <RailStat label="External reviewers" value="Ready" tone="neutral" />
+          </div>
+        </section>
+      </div>
+    )
+  }
   const currentTab = tabFor(post)
   const isDateScheduled = !!(post.scheduled_at || post.publish_date)
   const canApprove = isActionableReview(post.status) && !isPosted(post)
@@ -1497,29 +1667,64 @@ function PostDetailPanel({
   const canReturnToReview = currentTab === 'Draft' || currentTab === 'Changes Requested'
   const approvalRoute = approvalRouteForPost(post, businessContext)
   return (
-    <div className="sticky top-0 p-5"
-      style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-[13px] font-medium" style={{ color: 'var(--ghost)' }}>Preview</h2>
-        <button onClick={onClose} className="p-1 hover:bg-[var(--fog)] transition-colors" style={{ color: 'var(--ghost)', borderRadius: 'var(--radius-sm)' }}>
-          <X size={14} />
-        </button>
-      </div>
-      <PlatformChip channel={post.channel} />
-      <h3 className="text-[17px] font-semibold mt-3 mb-3 leading-snug" style={{ color: 'var(--ink)' }}>
-        {post.title || 'Untitled'}
-      </h3>
-      <div className="mb-4">
-        <PlatformPostPreview post={post} density="compact" autoplayMedia={false} />
-      </div>
-      {post.model_used && (
-        <p className="text-[10px] uppercase tracking-wider font-mono mb-4" style={{ color: 'var(--mist)' }}>Generated by {post.model_used}</p>
+    <div className="p-4 flex flex-col gap-4">
+      <section
+        className="p-4"
+        style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}
+      >
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="min-w-0">
+            <div className="text-[11px] uppercase font-semibold mb-2" style={{ color: 'var(--ghost)' }}>Selected post</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <PlatformChip channel={post.channel} />
+              <StatusChip status={currentTab} />
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-[var(--fog)] transition-colors" style={{ color: 'var(--ghost)', borderRadius: 'var(--radius-sm)' }}>
+            <X size={14} />
+          </button>
+        </div>
+        <h3 className="text-[16px] font-semibold leading-snug" style={{ color: 'var(--ink)' }}>
+          {post.title || 'Untitled'}
+        </h3>
+        <div className="text-[11px] mt-2" style={{ color: 'var(--ghost)' }}>
+          {postOwner(post)} / {mediaKindLabel(mediaKind(post))} / {postMeta(post, null)}
+        </div>
+      </section>
+
+      <PlatformPostPreview post={post} density="compact" autoplayMedia={false} />
+
+      <section
+        className="p-4"
+        style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}
+      >
+        <div className="text-[11px] uppercase font-semibold mb-3" style={{ color: 'var(--ghost)' }}>Approval workflow</div>
+        <ApprovalRouteSection route={approvalRoute} dense />
+        <div className="grid grid-cols-3 gap-2 mt-3">
+          <RailStat label="Status" value={currentTab} tone="neutral" compact />
+          <RailStat label="Reviewer" value={approvalRoute.label} tone="neutral" compact />
+          <RailStat label="Due" value={isDateScheduled ? formatDateOnly(post.scheduled_at || post.publish_date) : 'No date'} tone={isDateScheduled ? 'neutral' : 'warning'} compact />
+        </div>
+      </section>
+
+      {(post.feedback || currentTab === 'Changes Requested') && (
+        <section
+          className="p-4"
+          style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.18)', borderRadius: 'var(--radius-lg)' }}
+        >
+          <div className="text-[11px] uppercase font-semibold mb-2" style={{ color: 'var(--warn)' }}>Feedback</div>
+          <p className="text-[12px] leading-relaxed" style={{ color: 'var(--ink-quiet)' }}>
+            {post.feedback || 'No written feedback yet.'}
+          </p>
+        </section>
       )}
-      <ApprovalRouteSection route={approvalRoute} dense />
+
       {isPosted(post) && (
-        <div className="mb-4 p-3 text-[12px]"
-          style={{ background: 'var(--fog)', border: '1px solid var(--oxblood-rule)', borderRadius: '3px' }}>
-          <div className="font-medium mb-1" style={{ color: 'var(--ink-quiet)' }}>✓ Posted to {post.channel}</div>
+        <section
+          className="p-4 text-[12px]"
+          style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}
+        >
+          <div className="font-medium mb-1" style={{ color: 'var(--ink-quiet)' }}>Posted to {post.channel}</div>
           {post.posted_at && (
             <div className="text-[11px]" style={{ color: 'var(--ink-quiet)' }}>
               {new Date(post.posted_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
@@ -1532,57 +1737,72 @@ function PostDetailPanel({
               {post.posted_url}
             </a>
           )}
-        </div>
+        </section>
       )}
+
       <div className="flex flex-col gap-2">
         {canReturnToReview && (
           <button onClick={() => onMove(post.id, 'Pending Review')} disabled={saving === post.id}
             className="w-full py-2 text-[13px] font-medium transition-colors disabled:opacity-50"
-            style={{ background: currentTab === 'Draft' ? 'var(--ink)' : 'var(--paper)', color: currentTab === 'Draft' ? 'var(--paper)' : 'var(--ink)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
+            style={{ background: currentTab === 'Draft' ? 'var(--ink)' : 'var(--paper-warm)', color: currentTab === 'Draft' ? 'var(--paper)' : 'var(--ink)', border: '1px solid var(--paper-edge)', borderRadius: '8px' }}>
             {saving === post.id ? 'Saving...' : currentTab === 'Draft' ? 'Send to review' : 'Return to review'}
           </button>
         )}
-        {canApprove && (<>
+        {canApprove && (
           <button onClick={() => onMove(post.id, 'Approved')} disabled={saving === post.id}
             className="w-full py-2 text-[13px] font-medium transition-colors disabled:opacity-50"
-            style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '3px' }}>
+            style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '8px' }}>
             {saving === post.id ? 'Saving...' : 'Approve'}
           </button>
-        </>)}
+        )}
         {canRequestChanges && (
           <button onClick={() => onRequestChanges(post.id)} disabled={saving === post.id}
             className="w-full py-2 text-[13px] transition-colors disabled:opacity-50"
-            style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
+            style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '8px' }}>
             Request changes
-          </button>
-        )}
-        {canReject && (
-          <button onClick={() => onMove(post.id, 'Rejected')} disabled={saving === post.id}
-            className="w-full py-2 text-[13px] transition-colors disabled:opacity-50"
-            style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
-            Reject
           </button>
         )}
         {currentTab === 'Approved' && !isDateScheduled && (
           <a href={calendarPath}
             className="w-full py-2 text-[13px] font-medium text-center transition-colors"
-            style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '3px' }}>
+            style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '8px' }}>
             Schedule in calendar
           </a>
         )}
         {currentTab === 'Scheduled' && (
           <a href={calendarPath}
             className="w-full py-2 text-[13px] font-medium text-center transition-colors"
-            style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '3px' }}>
+            style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: '8px' }}>
             Open in calendar
           </a>
         )}
-        <a href={detailPath}
-          className="w-full py-2 text-[13px] text-center transition-colors"
-          style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '3px' }}>
-          Open detail
-        </a>
+        {canReject && (
+          <button onClick={() => onMove(post.id, 'Rejected')} disabled={saving === post.id}
+            className="w-full py-2 text-[13px] transition-colors disabled:opacity-50"
+            style={{ background: 'var(--paper-warm)', color: 'var(--danger)', border: '1px solid var(--paper-edge)', borderRadius: '8px' }}>
+            Reject
+          </button>
+        )}
+        {detailPath && (
+          <a href={detailPath}
+            className="w-full py-2 text-[13px] text-center transition-colors"
+            style={{ background: 'var(--paper-warm)', color: 'var(--ink-quiet)', border: '1px solid var(--paper-edge)', borderRadius: '8px' }}>
+            Open detail
+          </a>
+        )}
       </div>
+    </div>
+  )
+}
+
+function RailStat({ label, value, tone, compact = false }: { label: string; value: React.ReactNode; tone: 'neutral' | 'warning'; compact?: boolean }) {
+  return (
+    <div
+      className={compact ? 'p-2' : 'p-3'}
+      style={{ background: 'var(--paper)', border: '1px solid var(--paper-edge)', borderRadius: '8px' }}
+    >
+      <div className="text-[10px] uppercase font-semibold" style={{ color: tone === 'warning' ? 'var(--warn)' : 'var(--ghost)' }}>{label}</div>
+      <div className={`${compact ? 'text-[11px]' : 'text-[15px]'} font-semibold mt-1 truncate`} style={{ color: 'var(--ink)' }}>{value}</div>
     </div>
   )
 }

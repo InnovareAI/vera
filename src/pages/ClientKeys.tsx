@@ -96,6 +96,11 @@ const DEFAULT_AI_POLICY: AiPolicy = {
   default_image_video_model: 'hailuo-i2v',
 }
 
+const SUCCESS_TINT = 'rgba(45, 122, 59, 0.08)'
+const SUCCESS_LINE = 'rgba(45, 122, 59, 0.28)'
+const WARN_TINT = 'rgba(176, 122, 12, 0.09)'
+const DANGER_TINT = 'rgba(185, 28, 28, 0.08)'
+
 const PROVIDERS = [
   { value: 'openrouter', label: 'OpenRouter (text + images)' },
   { value: 'anthropic', label: 'Anthropic (text)' },
@@ -252,7 +257,7 @@ export default function ClientKeys() {
         push({
           kind: 'warn',
           title: 'Image route is not ready',
-          body: `${modelLabel(aiPolicy.default_image_model)} does not match this client's active keys. Add OpenRouter for Nano Banana, FAL for Seedream/Qwen/FAL routes, or OpenAI for OpenAI Image Gen 2.`,
+          body: `${modelLabel(aiPolicy.default_image_model)} does not match this space's active keys. Add OpenRouter for Nano Banana, FAL for Seedream/Qwen/FAL routes, or OpenAI for OpenAI Image Gen 2.`,
         })
         return
       }
@@ -260,13 +265,13 @@ export default function ClientKeys() {
     if (value && key === 'standard_video_enabled' && !hasFal) {
       push({
         kind: 'warn',
-        title: 'Add client FAL first',
-        body: 'Standard video can only be enabled when this client space has its own active FAL key.',
+        title: 'Add space FAL first',
+        body: 'Standard video can only be enabled when this space has its own active FAL key.',
       })
       return
     }
     if (value && (key === 'standard_video_enabled' || key === 'premium_media_enabled') && !aiPolicy.monthly_budget_usd) {
-      push({ kind: 'warn', title: 'Set a generation cap first', body: 'Video and premium media require an explicit client generation cap.' })
+      push({ kind: 'warn', title: 'Set a generation cap first', body: 'Video and premium media require an explicit space generation cap.' })
       return
     }
     void saveAiPolicy({ ...aiPolicy, [key]: value })
@@ -307,7 +312,7 @@ export default function ClientKeys() {
       push({
         kind: 'warn',
         title: 'Selected image model cannot run',
-        body: `${modelLabel(next.default_image_model)} does not match this client's active keys. Use Nano Banana with OpenRouter, Seedream/Qwen/FAL routes with FAL, or OpenAI Image Gen 2 with OpenAI.`,
+        body: `${modelLabel(next.default_image_model)} does not match this space's active keys. Use Nano Banana with OpenRouter, Seedream/Qwen/FAL routes with FAL, or OpenAI Image Gen 2 with OpenAI.`,
       })
       return
     }
@@ -323,15 +328,15 @@ export default function ClientKeys() {
       push({
         kind: 'warn',
         title: 'Set a generation cap first',
-        body: 'Premium image defaults require an explicit client generation cap.',
+        body: 'Premium image defaults require an explicit space generation cap.',
       })
       return
     }
     if ((next.standard_video_enabled || next.premium_media_enabled) && !hasFal && (next.default_video_model || next.default_image_video_model)) {
       push({
         kind: 'warn',
-        title: 'Video defaults need client FAL',
-        body: 'Real video rendering is client-funded only. Add a client-owned FAL key before saving video defaults for an enabled video policy.',
+        title: 'Video defaults need space FAL',
+        body: 'Real video rendering is space-funded only. Add a space-owned FAL key before saving video defaults for an enabled video policy.',
       })
       return
     }
@@ -376,16 +381,16 @@ export default function ClientKeys() {
         ? 'OpenRouter is active for chat, content generation, and model testing.'
         : hasAnthropic
           ? 'Anthropic is active for chat and content generation.'
-          : 'Add OpenRouter or Anthropic before relying on client-owned text generation.',
+          : 'Add OpenRouter or Anthropic before relying on space-owned text generation.',
     },
     {
       icon: ImagePlus,
       title: 'Image generation',
       ready: defaultImageReady,
       body: !aiPolicy.images_enabled
-        ? 'Locked by policy. Vera will not generate images for this client space.'
+        ? 'Locked by policy. Vera will not generate images for this space.'
         : defaultImageRoute
-          ? `${modelLabel(aiPolicy.default_image_model)} can run through ${imageModelProviderLabel(defaultImageRoute).replace('Client ', 'the client ')} key.`
+          ? `${modelLabel(aiPolicy.default_image_model)} can run through ${imageModelProviderLabel(defaultImageRoute).replace('Client ', 'the space ')} key.`
           : `${modelLabel(aiPolicy.default_image_model)} does not match the active image keys. Add OpenRouter for Nano Banana, FAL for Seedream/Qwen/FAL routes, or OpenAI for OpenAI Image Gen 2.`,
     },
     {
@@ -393,8 +398,8 @@ export default function ClientKeys() {
       title: 'Searchable knowledge',
       ready: hasOpenAI,
       body: hasOpenAI
-        ? 'OpenAI embeddings are active. Uploaded and pasted knowledge can become searchable for this client.'
-        : 'Add a client OpenAI key before ingesting searchable knowledge sources.',
+        ? 'OpenAI embeddings are active. Uploaded and pasted knowledge can become searchable for this space.'
+        : 'Add a space OpenAI key before ingesting searchable knowledge sources.',
     },
     {
       icon: Clapperboard,
@@ -403,8 +408,8 @@ export default function ClientKeys() {
       body: !aiPolicy.standard_video_enabled
         ? 'Locked by policy. Vera will use storyboards and briefs instead of real video renders.'
         : hasFal
-          ? 'Client-owned FAL is active. Video rendering can run from this client budget.'
-        : 'Locked. Real video rendering requires a client-owned FAL key. Vera will use storyboards and briefs instead.',
+          ? 'Space-owned FAL is active. Video rendering can run from this space budget.'
+        : 'Locked. Real video rendering requires a space-owned FAL key. Vera will use storyboards and briefs instead.',
     },
     {
       icon: ShieldCheck,
@@ -412,7 +417,7 @@ export default function ClientKeys() {
       ready: aiPolicy.platform_media_keys_enabled,
       body: aiPolicy.platform_media_keys_enabled
         ? 'Operator-only InnovareAI media fallback is enabled for this project. Keep this limited to internal production work.'
-        : 'Locked. This client cannot use InnovareAI platform media keys, even if an operator has an entitlement.',
+        : 'Locked. This space cannot use InnovareAI platform media keys, even if an operator has an entitlement.',
     },
   ]
   const spendGuard = buildSpendGuard(aiPolicy, activeProviders, usageSummary)
@@ -428,11 +433,19 @@ export default function ClientKeys() {
       <PageHeader
         eyebrow={activeProject.name}
         title="API keys"
-        subtitle="Connect this space to its own AI provider keys. Keys are stored encrypted and used only for this client. OpenRouter covers text and supported image models. OpenAI covers searchable knowledge embeddings. FAL is required for client-owned video generation."
+        subtitle="Connect this space to its own AI provider keys. Keys are stored encrypted and used only for this space. OpenRouter covers text and supported image models. OpenAI covers searchable knowledge embeddings. FAL is required for space-owned video generation."
+      />
+
+      <GenerationControlScopePanel
+        aiPolicy={aiPolicy}
+        hasTextKey={hasOpenRouter || hasAnthropic}
+        hasImageRoute={!!defaultImageRoute}
+        hasFal={hasFal}
+        hasOpenAI={hasOpenAI}
       />
 
       <section style={{ marginBottom: space[8] }}>
-        <SectionLabel style={{ marginBottom: space[3] }}>Client-owned capabilities</SectionLabel>
+        <SectionLabel style={{ marginBottom: space[3] }}>Space-owned capabilities</SectionLabel>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: space[3] }}>
           {clientCapabilities.map(item => (
             <CapabilityCard key={item.title} {...item} />
@@ -474,7 +487,7 @@ export default function ClientKeys() {
             </div>
           </div>
           <p style={{ fontSize: t.size.micro, color: color.faint, margin: `${space[4]} 0 0`, lineHeight: 1.5 }}>
-            Vera should default to cheap and fast prototype paths. Premium media stays locked unless this client has a cap and an explicit policy toggle.{' '}
+            Vera should default to cheap and fast prototype paths. Premium media stays locked unless this space has a cap and an explicit policy toggle.{' '}
             Pricing guide reviewed {pricingReviewDate}. {pricingStatus.label}. Estimates are planning guides and final billing comes from provider usage logs.
           </p>
         </div>
@@ -487,7 +500,7 @@ export default function ClientKeys() {
             <PolicyToggle
               icon={ShieldCheck}
               title="Generation budget guard"
-              body="Warn on content generation, image, video, and future paid social spend. Enforce mode is optional so workflows keep moving by default."
+              body="Warn across paid generation work. Enforce mode blocks over-cap production generation spend, while research, onboarding, analytics, and knowledge workflows keep moving."
               checked={aiPolicy.budget_guard_enabled}
               disabled={policySaving}
               onChange={value => togglePolicy('budget_guard_enabled', value)}
@@ -495,7 +508,7 @@ export default function ClientKeys() {
             <PolicyToggle
               icon={ImagePlus}
               title="Image generation"
-              body="Allow standard image generation through client-owned OpenRouter, FAL, or OpenAI keys."
+              body="Allow standard image generation through space-owned OpenRouter, FAL, or OpenAI keys."
               checked={aiPolicy.images_enabled}
               disabled={policySaving}
               onChange={value => togglePolicy('images_enabled', value)}
@@ -503,7 +516,7 @@ export default function ClientKeys() {
             <PolicyToggle
               icon={Clapperboard}
               title="Standard video"
-              body="Allow real video renders only when this client also has its own active FAL key."
+              body="Allow real video renders only when this space also has its own active FAL key."
               checked={aiPolicy.standard_video_enabled}
               disabled={policySaving}
               onChange={value => togglePolicy('standard_video_enabled', value)}
@@ -511,7 +524,7 @@ export default function ClientKeys() {
             <PolicyToggle
               icon={Crown}
               title="Premium media"
-              body="Allow premium image and video models only for client budgets that explicitly cover them."
+              body="Allow premium image and video models only for space budgets that explicitly cover them."
               checked={aiPolicy.premium_media_enabled}
               disabled={policySaving}
               onChange={value => togglePolicy('premium_media_enabled', value)}
@@ -519,7 +532,7 @@ export default function ClientKeys() {
             />
           </div>
           <p style={{ fontSize: t.size.micro, color: color.faint, margin: `${space[3]} 0 0`, lineHeight: 1.5 }}>
-            Text generation stays available through the selected text provider. Video still requires a client-owned FAL key even when enabled here.
+            Text generation stays available through the selected text provider. Video still requires a space-owned FAL key even when enabled here.
           </p>
           <div style={{ marginTop: space[5], borderTop: `1px solid ${color.line}`, paddingTop: space[4] }}>
             <SectionLabel style={{ marginBottom: space[3] }}>Model defaults</SectionLabel>
@@ -582,7 +595,7 @@ export default function ClientKeys() {
             </Field>
             <Field
               label="Guard mode"
-              helper={aiPolicy.budget_guard_enabled ? 'Warn keeps workflows running. Enforce blocks over-cap requests.' : 'Budget guard is off.'}
+              helper={aiPolicy.budget_guard_enabled ? 'Warn keeps everything running. Enforce blocks over-cap production generation only.' : 'Budget guard is off.'}
             >
               <Select
                 value={aiPolicy.budget_guard_mode}
@@ -599,7 +612,7 @@ export default function ClientKeys() {
             <p style={{ gridColumn: '1 / -1', fontSize: t.size.micro, color: color.faint, margin: 0, lineHeight: 1.5 }}>
               Current month: {formatMoney(usageSummary.currentMonthCost)}
               {aiPolicy.monthly_budget_usd ? ` of ${formatMoney(aiPolicy.monthly_budget_usd)}` : ''}
-              {aiPolicy.budget_guard_enabled ? `, guard ${aiPolicy.budget_guard_mode === 'enforce' ? 'enforces the cap' : 'warns only'}` : ', guard off'}
+              {aiPolicy.budget_guard_enabled ? `, guard ${aiPolicy.budget_guard_mode === 'enforce' ? 'enforces production generation' : 'warns only'}` : ', guard off'}
             </p>
             <p style={{ gridColumn: '1 / -1', fontSize: t.size.micro, color: color.faint, margin: 0, lineHeight: 1.5 }}>
               Connector reads, analytics imports, login, and publishing actions are not governed by this cap unless they invoke paid generation.
@@ -631,7 +644,7 @@ export default function ClientKeys() {
             <UsageMetric icon={BookOpen} label="Knowledge" value={formatNumber(usageSummary.knowledgeEvents)} detail={`${formatNumber(usageSummary.embeddingEvents)} embeds`} tone="info" />
             <UsageMetric icon={ImagePlus} label="Images" value={formatNumber(usageSummary.images)} detail={`${formatNumber(usageSummary.imageEvents)} image events`} tone="warn" />
             <UsageMetric icon={Clapperboard} label="Videos" value={formatNumber(usageSummary.videos)} detail={`${formatNumber(usageSummary.videoEvents)} submits`} tone="danger" />
-            <UsageMetric icon={KeyRound} label="Client key" value={formatNumber(usageSummary.clientKeyEvents)} detail={`${formatNumber(usageSummary.platformKeyEvents)} platform-backed`} tone="success" />
+            <UsageMetric icon={KeyRound} label="Space key" value={formatNumber(usageSummary.clientKeyEvents)} detail={`${formatNumber(usageSummary.platformKeyEvents)} platform-backed`} tone="success" />
             <UsageMetric icon={Clock3} label="Estimated spend" value={formatMoney(usageSummary.knownCost)} detail={usageSummary.hasKnownCost ? `${formatNumber(usageSummary.estimatedCostEvents)} estimated rows` : 'Provider billing pending'} tone="info" />
           </div>
 
@@ -751,6 +764,110 @@ type RoutingRow = {
   tone: 'success' | 'warn' | 'danger' | 'info'
 }
 
+function GenerationControlScopePanel({
+  aiPolicy,
+  hasTextKey,
+  hasImageRoute,
+  hasFal,
+  hasOpenAI,
+}: {
+  aiPolicy: AiPolicy
+  hasTextKey: boolean
+  hasImageRoute: boolean
+  hasFal: boolean
+  hasOpenAI: boolean
+}) {
+  const budgetLabel = !aiPolicy.budget_guard_enabled
+    ? 'Guard off'
+    : aiPolicy.monthly_budget_usd
+      ? `${aiPolicy.budget_guard_mode === 'enforce' ? 'Enforce' : 'Warn'} at ${formatMoney(aiPolicy.monthly_budget_usd)}`
+      : 'Warn, no cap'
+  return (
+    <section style={{ marginBottom: space[8] }}>
+      <SectionLabel style={{ marginBottom: space[3] }}>Project generation control</SectionLabel>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: space[4] }}>
+        <div style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5] }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: space[3], marginBottom: space[4] }}>
+            <span style={{ width: 34, height: 34, borderRadius: radius.pill, background: color.paper2, border: `1px solid ${color.line}`, color: color.ink, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <ShieldCheck size={16} />
+            </span>
+            <div>
+              <h2 style={{ margin: 0, color: color.ink, fontSize: t.size.h4, fontWeight: t.weight.semibold }}>What this page controls</h2>
+              <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.55 }}>
+                These controls are project-level guardrails for paid production generation and future paid social generation spend. They should not stop research, onboarding, analytics, source pulls, knowledge work, login, or publishing actions that do not invoke paid generation.
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: space[3] }}>
+            <ScopeCard
+              icon={Bot}
+              title="Budget can enforce"
+              body="Chat-backed content generation, campaign planning, image generation, video submit, and future paid social or ad generation operations."
+              tone="warn"
+            />
+            <ScopeCard
+              icon={BookOpen}
+              title="Budget should not block"
+              body="Research, onboarding, analytics sync, source ingestion, searchable knowledge, integrations, and publish actions that are not paid generation."
+              tone="success"
+            />
+            <ScopeCard
+              icon={Clapperboard}
+              title="Video is gated"
+              body="Real clips require Standard video on, a monthly generation cap, and this project's own active FAL key. Storyboards stay available."
+              tone={aiPolicy.standard_video_enabled && hasFal ? 'success' : 'info'}
+            />
+            <ScopeCard
+              icon={Crown}
+              title="Premium is never default"
+              body="OpenAI Image Gen 2 and premium video models stay locked until Premium media and a project cap are explicitly enabled."
+              tone={aiPolicy.premium_media_enabled ? 'warn' : 'success'}
+            />
+          </div>
+        </div>
+        <div style={{ background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5] }}>
+          <SectionLabel style={{ marginBottom: space[3] }}>Live policy state</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
+            <ScopeStatusRow label="Budget guard" value={budgetLabel} tone={!aiPolicy.budget_guard_enabled ? 'warn' : aiPolicy.budget_guard_mode === 'enforce' ? 'success' : 'info'} />
+            <ScopeStatusRow label="Text route" value={hasTextKey ? 'Space key ready' : 'Missing text key'} tone={hasTextKey ? 'success' : 'danger'} />
+            <ScopeStatusRow label="Image route" value={!aiPolicy.images_enabled ? 'Locked by policy' : hasImageRoute ? modelLabel(aiPolicy.default_image_model) : 'No matching key'} tone={!aiPolicy.images_enabled ? 'info' : hasImageRoute ? 'success' : 'danger'} />
+            <ScopeStatusRow label="Video route" value={aiPolicy.standard_video_enabled && hasFal ? 'Space FAL ready' : 'Storyboard first'} tone={aiPolicy.standard_video_enabled && hasFal ? 'success' : 'info'} />
+            <ScopeStatusRow label="Knowledge embeddings" value={hasOpenAI ? 'OpenAI key ready' : 'Needs space OpenAI'} tone={hasOpenAI ? 'success' : 'warn'} />
+            <ScopeStatusRow label="Platform media fallback" value={aiPolicy.platform_media_keys_enabled ? 'Operator exception' : 'Locked'} tone={aiPolicy.platform_media_keys_enabled ? 'danger' : 'success'} />
+          </div>
+          <p style={{ margin: `${space[4]} 0 0`, color: color.faint, fontSize: t.size.micro, lineHeight: 1.45 }}>
+            Client spaces should normally run on their own provider keys. Shared InnovareAI media fallback is an exception path, not a default funding route.
+          </p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function ScopeCard({ icon: Icon, title, body, tone }: { icon: LucideIcon; title: string; body: string; tone: 'success' | 'warn' | 'danger' | 'info' }) {
+  const toneColor = tone === 'success' ? color.success : tone === 'warn' ? color.warn : tone === 'danger' ? color.danger : color.info
+  const bg = tone === 'success' ? SUCCESS_TINT : tone === 'warn' ? WARN_TINT : tone === 'danger' ? DANGER_TINT : color.paper2
+  return (
+    <div style={{ background: bg, border: `1px solid ${toneColor === color.info ? color.line : toneColor}`, borderRadius: radius.md, padding: space[4], minHeight: 138 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, marginBottom: space[2] }}>
+        <Icon size={15} style={{ color: toneColor }} />
+        {title}
+      </div>
+      <p style={{ margin: 0, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>{body}</p>
+    </div>
+  )
+}
+
+function ScopeStatusRow({ label, value, tone }: { label: string; value: string; tone: 'success' | 'warn' | 'danger' | 'info' }) {
+  const toneColor = tone === 'success' ? color.success : tone === 'warn' ? color.warn : tone === 'danger' ? color.danger : color.info
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], padding: `${space[3]} 0`, borderBottom: `1px solid ${color.line}` }}>
+      <span style={{ color: color.ink2, fontSize: t.size.cap }}>{label}</span>
+      <span style={{ color: toneColor, fontSize: t.size.micro, fontWeight: t.weight.semibold, textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'right' }}>{value}</span>
+    </div>
+  )
+}
+
 function RecommendationCard({ item }: { item: ModelRecommendation }) {
   const Icon = item.role === 'Text' ? Bot : item.role === 'Image' ? ImagePlus : Clapperboard
   const toneColor = item.tone === 'success' ? color.success : item.tone === 'warn' ? color.warn : item.tone === 'danger' ? color.danger : color.info
@@ -860,15 +977,15 @@ function buildSpendGuard(aiPolicy: AiPolicy, activeProviders: Set<string>, usage
         detail: !aiPolicy.budget_guard_enabled
           ? 'Generation spend is logged, but generation cap warnings and blocks are disabled.'
           : budget
-            ? `${formatMoney(used)} used, ${formatMoney(remaining ?? 0)} left. ${aiPolicy.budget_guard_mode === 'enforce' ? 'Cap enforcement is on.' : 'Warn-only mode keeps workflows running.'}`
+            ? `${formatMoney(used)} used, ${formatMoney(remaining ?? 0)} left. ${aiPolicy.budget_guard_mode === 'enforce' ? 'Production generation enforcement is on.' : 'Warn-only mode keeps workflows running.'}`
             : 'Set a cap before video or premium media.',
         tone: !aiPolicy.budget_guard_enabled ? 'info' : !budget ? 'warn' : budgetPct !== null && budgetPct >= 90 ? 'danger' : budgetPct !== null && budgetPct >= 70 ? 'warn' : 'success',
       },
       {
         icon: KeyRound,
         label: 'Funding route',
-        value: usageSummary.platformKeyEvents > 0 ? 'Mixed' : usageSummary.clientKeyEvents > 0 ? 'Client' : 'Pending',
-        detail: `${formatNumber(usageSummary.clientKeyEvents)} client-backed, ${formatNumber(usageSummary.platformKeyEvents)} platform-backed events.`,
+        value: usageSummary.platformKeyEvents > 0 ? 'Mixed' : usageSummary.clientKeyEvents > 0 ? 'Space' : 'Pending',
+        detail: `${formatNumber(usageSummary.clientKeyEvents)} space-backed, ${formatNumber(usageSummary.platformKeyEvents)} platform-backed events.`,
         tone: usageSummary.platformKeyEvents > 0 ? 'warn' : usageSummary.clientKeyEvents > 0 ? 'success' : 'info',
       },
       {
@@ -883,7 +1000,7 @@ function buildSpendGuard(aiPolicy: AiPolicy, activeProviders: Set<string>, usage
         label: 'Video path',
         value: aiPolicy.standard_video_enabled ? 'Enabled' : 'Briefs',
         detail: aiPolicy.standard_video_enabled
-          ? hasClientVideo ? 'Client FAL key is required and present.' : 'Enabled by policy, but no active client FAL key.'
+          ? hasClientVideo ? 'Space FAL key is required and present.' : 'Enabled by policy, but no active space FAL key.'
           : 'Storyboards and production briefs are the default.',
         tone: aiPolicy.standard_video_enabled ? (hasClientVideo ? 'success' : 'danger') : 'info',
       },
@@ -911,24 +1028,24 @@ function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>, pric
     {
       icon: Bot,
       label: 'Text generation',
-      status: hasClientText ? 'Client' : 'Missing',
+      status: hasClientText ? 'Space' : 'Missing',
       estimate: textSpendEstimate(aiPolicy.default_text_model, !hasClientText ? 'missing' : hasOpenRouter ? 'openrouter' : 'anthropic', pricingCatalog),
       detail: hasOpenRouter
-        ? `Runs through the client OpenRouter key${aiPolicy.default_text_model ? ` using ${aiPolicy.default_text_model}` : ' with provider default routing'}.`
+        ? `Runs through the space OpenRouter key${aiPolicy.default_text_model ? ` using ${aiPolicy.default_text_model}` : ' with provider default routing'}.`
         : hasAnthropic
-          ? `Runs through the client Anthropic key${aiPolicy.default_text_model ? ` using ${aiPolicy.default_text_model}` : ''}.`
-          : 'Add OpenRouter or Anthropic so client chat does not depend on platform keys.',
+          ? `Runs through the space Anthropic key${aiPolicy.default_text_model ? ` using ${aiPolicy.default_text_model}` : ''}.`
+          : 'Add OpenRouter or Anthropic so chat does not depend on platform keys.',
       tone: hasClientText ? 'success' : 'danger',
     },
     {
       icon: ImagePlus,
       label: 'Image generation',
-      status: !aiPolicy.images_enabled ? 'Locked' : hasClientMedia ? 'Client' : 'Missing',
+      status: !aiPolicy.images_enabled ? 'Locked' : hasClientMedia ? 'Space' : 'Missing',
       estimate: imageSpendEstimate(aiPolicy.default_image_model, aiPolicy.images_enabled, hasClientMedia, imageIsPremium, pricingCatalog),
       detail: !aiPolicy.images_enabled
         ? 'Disabled by policy. Vera should provide prompts or briefs only.'
         : imageRoute
-          ? `${modelLabel(aiPolicy.default_image_model)} can use ${imageModelProviderLabel(imageRoute).replace('Client ', 'the client ')} route.`
+          ? `${modelLabel(aiPolicy.default_image_model)} can use ${imageModelProviderLabel(imageRoute).replace('Client ', 'the space ')} route.`
           : `${modelLabel(aiPolicy.default_image_model)} does not match the active image keys. Add OpenRouter, FAL, or OpenAI for the selected model.`,
       tone: !aiPolicy.images_enabled ? 'info' : hasClientMedia ? (imageIsPremium ? 'warn' : 'success') : 'danger',
     },
@@ -944,10 +1061,10 @@ function buildRoutingRows(aiPolicy: AiPolicy, activeProviders: Set<string>, pric
     {
       icon: Clapperboard,
       label: 'Video rendering',
-      status: aiPolicy.standard_video_enabled && hasClientVideo ? 'Client' : 'Storyboard',
+      status: aiPolicy.standard_video_enabled && hasClientVideo ? 'Space' : 'Storyboard',
       estimate: videoSpendEstimate(aiPolicy.default_video_model, aiPolicy.standard_video_enabled && hasClientVideo, aiPolicy.premium_media_enabled, pricingCatalog),
       detail: aiPolicy.standard_video_enabled
-        ? hasClientVideo ? `${modelLabel(aiPolicy.default_video_model)} and ${modelLabel(aiPolicy.default_image_video_model)} run only through the client FAL key.` : 'Policy allows standard video, but Vera still needs a client FAL key.'
+        ? hasClientVideo ? `${modelLabel(aiPolicy.default_video_model)} and ${modelLabel(aiPolicy.default_image_video_model)} run only through the space FAL key.` : 'Policy allows standard video, but Vera still needs a space FAL key.'
         : 'Real clips are locked. Vera should create storyboards, prompts, and production briefs.',
       tone: aiPolicy.standard_video_enabled ? (hasClientVideo ? 'success' : 'danger') : 'info',
     },
@@ -973,7 +1090,7 @@ function PolicyToggle({
 }) {
   const accent = danger ? color.danger : checked ? color.success : color.ghost
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: space[3], background: checked ? 'var(--success-tint)' : color.paper2, border: `1px solid ${checked ? 'var(--success-line)' : color.line}`, borderRadius: radius.md, padding: space[4], minHeight: 154, cursor: disabled ? 'wait' : 'pointer' }}>
+    <label style={{ display: 'flex', flexDirection: 'column', gap: space[3], background: checked ? SUCCESS_TINT : color.paper2, border: `1px solid ${checked ? SUCCESS_LINE : color.line}`, borderRadius: radius.md, padding: space[4], minHeight: 154, cursor: disabled ? 'wait' : 'pointer' }}>
       <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3] }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>
           <Icon size={16} style={{ color: accent }} />
@@ -1274,7 +1391,7 @@ function formatOperation(value: string | null) {
 }
 
 function formatKeySource(value: string) {
-  if (value === 'client') return 'Client'
+  if (value === 'client') return 'Space'
   if (value === 'platform') return 'Platform'
   return 'Unknown'
 }
@@ -1303,7 +1420,7 @@ function CapabilityCard({
   body: string
 }) {
   return (
-    <div style={{ background: ready ? 'var(--success-tint)' : color.surface, border: `1px solid ${ready ? 'var(--success-line)' : color.line}`, borderRadius: radius.lg, padding: space[4], minHeight: 132 }}>
+    <div style={{ background: ready ? SUCCESS_TINT : color.surface, border: `1px solid ${ready ? SUCCESS_LINE : color.line}`, borderRadius: radius.lg, padding: space[4], minHeight: 132 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], marginBottom: space[3] }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>
           <Icon size={16} />

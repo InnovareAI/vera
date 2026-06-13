@@ -39,18 +39,18 @@ function RailItem({
       to={to}
       end={to === '/dashboard'}
       onClick={onClick}
-      className="flex items-center gap-2.5 px-2.5 py-2 mx-2 transition-colors"
+      className="flex items-center gap-2 px-2.5 py-1.5 mx-2 transition-colors"
       style={({ isActive }) => ({
         background: isActive ? 'var(--accent)' : 'transparent',
         color: isActive ? '#fff' : 'var(--ink-quiet)',
         fontWeight: isActive ? 600 : 450,
-        fontSize: 14,
+        fontSize: 13,
         borderRadius: 'var(--radius-md)',
       })}
     >
       {({ isActive }) => (
         <>
-          <Icon size={17} strokeWidth={isActive ? 2.1 : 1.75}
+          <Icon size={16} strokeWidth={isActive ? 2.1 : 1.75}
             style={{ color: isActive ? '#fff' : 'var(--ghost)', flexShrink: 0 }} />
           <span className="flex-1 truncate">{label}</span>
           {typeof badge === 'number' && badge > 0 && (
@@ -81,7 +81,7 @@ function RailItem({
 // row of equal peers, so a new user can see the order of the work.
 function RailLabel({ children }: { children: string }) {
   return (
-    <div style={{ padding: '12px 14px 3px', fontSize: 10, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--ghost)' }}>{children}</div>
+    <div style={{ padding: '10px 14px 3px', fontSize: 9.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ghost)' }}>{children}</div>
   )
 }
 
@@ -211,7 +211,7 @@ function ClientSwitcher() {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [newClientOpen, setNewClientOpen] = useState(false)
-  const name = activeProject?.name ?? 'Select client'
+  const name = activeProject?.name ?? 'Select space'
   const glyph = (s: string) => (s.trim()[0] ?? 'C').toUpperCase()
 
   return (
@@ -240,11 +240,11 @@ function ClientSwitcher() {
             <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
             <button onClick={() => { setOpen(false); setNewClientOpen(true) }}
               style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 'var(--radius-sm)', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontSize: 12.5, color: 'var(--accent)', fontWeight: 600 }}>
-              <Plus size={13} /> New client
+              <Plus size={13} /> New space
             </button>
-            <button onClick={() => { setOpen(false); navigate('/clients') }}
+            <button onClick={() => { setOpen(false); navigate('/spaces') }}
               style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 'var(--radius-sm)', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontSize: 12.5, color: 'var(--ghost)' }}>
-              <LayoutGrid size={13} /> View all clients
+              <LayoutGrid size={13} /> View all spaces
             </button>
           </div>
         </>
@@ -257,14 +257,14 @@ function ClientSwitcher() {
 function clientNameFromUrl(url: string) {
   try {
     const host = new URL(url.includes('://') ? url : `https://${url}`).hostname.replace(/^www\./, '')
-    const base = host.split('.')[0] || 'client'
+    const base = host.split('.')[0] || 'space'
     return base
       .split(/[-_]+/)
       .filter(Boolean)
       .map(part => part.slice(0, 1).toUpperCase() + part.slice(1))
-      .join(' ') || 'Client'
+      .join(' ') || 'Space'
   } catch {
-    return 'Client'
+    return 'Space'
   }
 }
 
@@ -274,10 +274,10 @@ function cleanCompanyUrl(url: string) {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
 }
 
-// New client = a sub-workspace (project) under the current tenant (org). Projects
+// New space = a sub-workspace (project) under the current tenant (org). Projects
 // are writable, so this sidesteps the organizations-RLS wall the old org-per-
-// client wizard hit. (Inviting a client user, or a new tenant owner, is the
-// separate access layer.) Lands in the client's Brain to set it up.
+// project wizard hit. Access invitations are the separate access layer.
+// Lands in the space Brain to set it up.
 function NewClientModal({ onClose }: { onClose: () => void }) {
   const { activeOrg } = useOrg()
   const { refetch } = useProject()
@@ -293,7 +293,7 @@ function NewClientModal({ onClose }: { onClose: () => void }) {
     setSaving(true); setErr(null)
     const clientName = name.trim() || clientNameFromUrl(website)
     const businessContext = { ...context, website, companyName: name.trim() || context.companyName.trim() || clientName }
-    const base = clientName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'client'
+    const base = clientName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'space'
     const slug = `${base}-${Math.random().toString(36).slice(2, 6)}`
     const { error } = await supabase.from('projects').insert({
       org_id: activeOrg.id,
@@ -323,7 +323,7 @@ function NewClientModal({ onClose }: { onClose: () => void }) {
       style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(20,20,22,0.42)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div onClick={e => e.stopPropagation()}
         style={{ width: 'min(560px, 94vw)', maxHeight: '88vh', overflowY: 'auto', background: 'var(--surface)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--line)', boxShadow: 'var(--shadow-modal)', padding: 22 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--ink)', margin: '0 0 4px' }}>New client</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--ink)', margin: '0 0 4px' }}>New space</h2>
         <p style={{ fontSize: 12.5, color: 'var(--ink-2)', margin: '0 0 16px', lineHeight: 1.5 }}>A sub-workspace under {activeOrg?.name ?? 'your workspace'} with its own brain, content, and calendar.</p>
         <label style={labelStyle}>Company URL</label>
         <input autoFocus value={context.website} onChange={e => updateContext('website', e.target.value)} placeholder="https://company.com"
@@ -361,7 +361,7 @@ function NewClientModal({ onClose }: { onClose: () => void }) {
         <label style={labelStyle}>X profile <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
         <input value={context.x} onChange={e => updateContext('x', e.target.value)} placeholder="https://x.com/brand"
           style={{ ...inputStyle, marginBottom: 12 }} />
-        <label style={labelStyle}>Client name <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
+        <label style={labelStyle}>Space name <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
         <input value={name} onChange={e => setName(e.target.value)} placeholder="Acme Corp"
           onKeyDown={e => { if (e.key === 'Enter') create() }} style={{ ...inputStyle, marginBottom: 12 }} />
         <label style={labelStyle}>Industry <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
@@ -380,14 +380,14 @@ function NewClientModal({ onClose }: { onClose: () => void }) {
         <textarea value={context.demandObjective} onChange={e => updateContext('demandObjective', e.target.value)} placeholder="Awareness, trust, traffic, community, leads, sales, recruiting, or education."
           style={{ ...textareaStyle, marginBottom: 12 }} />
         <label style={labelStyle}>Approval model <span style={{ color: 'var(--ghost)' }}>(optional)</span></label>
-        <textarea value={context.approvalModel} onChange={e => updateContext('approvalModel', e.target.value)} placeholder="Operator-only, client lead, all stakeholders, or case-by-case."
+        <textarea value={context.approvalModel} onChange={e => updateContext('approvalModel', e.target.value)} placeholder="Operator-only, owner lead, all stakeholders, or case-by-case."
           style={textareaStyle} />
         {err && <p style={{ fontSize: 12, color: 'var(--danger)', margin: '8px 0 0' }}>{err}</p>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
           <button onClick={onClose} style={{ padding: '8px 14px', fontSize: 13, fontWeight: 500, color: 'var(--ink-2)', background: 'transparent', border: '1px solid var(--line)', borderRadius: 'var(--radius-md)', cursor: 'pointer' }}>Cancel</button>
           <button onClick={create} disabled={saving || !context.website.trim()}
             style={{ padding: '8px 16px', fontSize: 13, fontWeight: 600, color: '#fff', background: 'var(--accent)', border: 'none', borderRadius: 'var(--radius-md)', cursor: saving ? 'wait' : 'pointer', opacity: (!context.website.trim() || saving) ? 0.6 : 1, boxShadow: 'var(--shadow-glow)' }}>
-            {saving ? 'Creating…' : 'Create client'}
+            {saving ? 'Creating…' : 'Create space'}
           </button>
         </div>
       </div>
@@ -437,7 +437,7 @@ export default function Layout() {
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
-  const narrowRail = vw < 1100
+  const narrowRail = vw < 980
   useEffect(() => {
     if (narrowRail) queueMicrotask(() => setRailOpen(false))
     else {
@@ -477,14 +477,15 @@ export default function Layout() {
       {/* ── Left rail (SAM) ── white, narrow, flat nav, user at the bottom */}
       <aside
         className="flex-shrink-0 flex flex-col"
-        style={{ width: 212, background: 'var(--paper-warm)', borderRight: '1px solid var(--paper-edge)' }}
+        style={{ width: 204, background: 'var(--paper-warm)', borderRight: '1px solid var(--paper-edge)' }}
       >
         {/* Active client — top-of-rail switcher (always-visible context). */}
         <ClientSwitcher />
 
         {/* Primary nav grouped around the content strategy loop. */}
         <nav className="pt-1 space-y-0.5">
-          <RailItem to={p('vera')}      icon={MessageSquare}   label="Command" onClick={() => window.dispatchEvent(new CustomEvent('vera:home'))} />
+          <RailItem to={p('blueprint')} icon={LayoutGrid}      label="Desk" />
+          <RailItem to={p('vera')}      icon={MessageSquare}   label="Ask VERA" onClick={() => window.dispatchEvent(new CustomEvent('vera:home'))} />
 
           <RailLabel>Production</RailLabel>
           <RailItem to={p('review')}    icon={CheckSquare}     label="Review" badge={pendingCount} />
@@ -508,10 +509,10 @@ export default function Layout() {
           <RailItem to="/skills" icon={Zap} label="AI Settings" />
           <button
             onClick={() => setSettingsOpen(true)}
-            className="w-full flex items-center gap-2.5 px-2.5 py-2 mx-2 transition-colors hover:bg-[var(--fog)]"
-            style={{ background: 'transparent', color: 'var(--ink-quiet)', fontWeight: 450, fontSize: 14, borderRadius: 'var(--radius-md)', width: 'calc(100% - 1rem)' }}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 mx-2 transition-colors hover:bg-[var(--fog)]"
+            style={{ background: 'transparent', color: 'var(--ink-quiet)', fontWeight: 450, fontSize: 13, borderRadius: 'var(--radius-md)', width: 'calc(100% - 1rem)' }}
           >
-            <Settings size={17} strokeWidth={1.75} style={{ color: 'var(--ghost)', flexShrink: 0 }} />
+            <Settings size={16} strokeWidth={1.75} style={{ color: 'var(--ghost)', flexShrink: 0 }} />
             <span className="flex-1 text-left truncate">Settings</span>
           </button>
         </nav>

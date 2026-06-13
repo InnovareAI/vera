@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
     if (jobError) return jsonError(jobError.message, 500)
     const jobRow = job as { project_id?: string | null; slug?: string | null; key_source?: string | null; operator_user_id?: string | null } | null
     const jobProjectId = jobRow?.project_id
-    if (!jobProjectId) return jsonError('Video job not found for this client space.', 404)
+    if (!jobProjectId) return jsonError('Video job not found for this space.', 404)
 
     const access = await requireProjectMember(req, supabase, SERVICE_KEY, jobProjectId, corsHeaders)
     if (!access.ok) return access.response
@@ -215,10 +215,10 @@ Deno.serve(async (req) => {
   }
 
   if (selectedModel.tier === 'standard' && !tierPolicyAllowed && !tierPlatformAllowed) {
-    return jsonError('Video generation is disabled for this client space. Enable standard video in the client AI usage policy first.', 403)
+    return jsonError('Video generation is disabled for this space. Enable standard video in the space AI usage policy first.', 403)
   }
   if (selectedModel.tier === 'premium' && !tierPolicyAllowed && !tierPlatformAllowed) {
-    return jsonError(`Premium video model "${alias}" is disabled for this client space. Enable premium media only when this client budget explicitly covers it.`, 402)
+    return jsonError(`Premium video model "${alias}" is disabled for this space. Enable premium media only when this space budget explicitly covers it.`, 402)
   }
   if (selectedModel.kind === 'image' && !image_url) {
     return jsonError(`${alias} is an image-to-video model and requires image_url.`, 400)
@@ -553,12 +553,12 @@ async function resolveFalKey(
 
     return {
       ok: false,
-      response: jsonError('Video generation requires this client space to use its own FAL key.', 403),
+      response: jsonError('Video generation requires this space to use its own FAL key.', 403),
     }
   } catch (error) {
     return {
       ok: false,
-      response: jsonError(error instanceof Error ? error.message : 'Could not resolve client FAL key.', 500),
+      response: jsonError(error instanceof Error ? error.message : 'Could not resolve space FAL key.', 500),
     }
   }
 }

@@ -149,7 +149,7 @@ export const DEMAND_PLATFORM_DEFINITIONS: DemandPlatformDefinition[] = [
 export const DEMAND_CHANNEL_OPERATING_POLICIES: Record<DemandPlatformKey, DemandChannelOperatingPolicy> = {
   linkedin: {
     speakerMode: 'Company, founder, or named expert, chosen per post.',
-    approvalMode: 'Named-person content goes to that person. Company posts go to the client owner.',
+    approvalMode: 'Named-person content goes to that person. Company posts go to the assigned space owner.',
     publishGuard: 'Publish only through a project-scoped Unipile profile or company page.',
     measurementFocus: 'Comments, shares, profile visits, qualified visitors, and qualified clicks.',
     samTrigger: 'Relevant commenters, repeated objections, shares by target audiences, or direct questions.',
@@ -181,7 +181,7 @@ export const DEMAND_CHANNEL_OPERATING_POLICIES: Record<DemandPlatformKey, Demand
   },
   reddit: {
     speakerMode: 'Community-safe human voice, usually research-only.',
-    approvalMode: 'No posting without operator and client approval plus community rule check.',
+    approvalMode: 'No posting without operator and space approval plus community rule check.',
     publishGuard: 'Read-first by default. Vera listens, summarizes, and drafts only for human use.',
     measurementFocus: 'Comments, upvotes, objections, language patterns, and traffic intent.',
     samTrigger: 'Repeated pain language, named vendor complaints, research threads, or competitor mentions.',
@@ -190,7 +190,7 @@ export const DEMAND_CHANNEL_OPERATING_POLICIES: Record<DemandPlatformKey, Demand
   x: {
     speakerMode: 'Named person or concise brand POV.',
     approvalMode: 'Manual approval for timely takes, sensitive topics, and threaded POV.',
-    publishGuard: 'Manual-first until API economics and client plan justify deeper integration.',
+    publishGuard: 'Manual-first until API economics and space plan justify deeper integration.',
     measurementFocus: 'Replies, reposts, link clicks, profile visits, and fast topic validation.',
     samTrigger: 'Audience replies, reposts by target profiles, objection clusters, or useful conversation entry points.',
     risk: 'medium',
@@ -205,7 +205,7 @@ export const DEMAND_CHANNEL_OPERATING_POLICIES: Record<DemandPlatformKey, Demand
   },
   facebook: {
     speakerMode: 'Page voice, local community voice, or founder proof.',
-    approvalMode: 'Client owner approval for Page posts and community replies.',
+    approvalMode: 'Space owner approval for Page posts and community replies.',
     publishGuard: 'Publish only through project-scoped Meta Page access.',
     measurementFocus: 'Comments, shares, reach, page actions, and referral traffic.',
     samTrigger: 'Community questions, share spikes, inbound requests, or objection-heavy threads.',
@@ -510,7 +510,7 @@ export const DEMAND_CONTENT_JOBS = [
 export const DEMAND_APPROVAL_MODES = [
   'Single named approver',
   'Operator only',
-  'Client lead',
+  'Space owner',
   'All stakeholders',
   'Legal or compliance',
   'Case based by person, channel, topic, campaign, or claim risk',
@@ -557,8 +557,8 @@ export const DEMAND_LEARNING_LOOP = [
 ]
 
 export const DEMAND_COMMERCIAL_REQUIREMENTS = [
-  'Per-client provider keys and model entitlements',
-  'Shared research profiles that never grant client publishing rights',
+  'Per-space provider keys and model entitlements',
+  'Shared research profiles that never grant publishing rights',
   'Case-based approvals by person, channel, topic, and claim risk',
   'Measured content loops that improve recommendations over time',
 ]
@@ -611,10 +611,10 @@ export const DEFAULT_DEMAND_OPERATING_MODEL: Pick<
   conversionPath: 'Move attention into comments, shares, qualified site traffic, newsletter or event opt-ins, direct messages, purchase or inquiry paths, and follow-up queues.',
   speakerStrategy: 'Choose the speaker case by case: company account for official POV, named founder or expert when lived experience matters, and team voice only when source material supports it.',
   platformToneOfVoice: 'Keep one shared brand core, then adapt only for channels that have source evidence, existing audience, or an explicit strategy assumption in the Brain.',
-  channelStrategy: 'Start with source-backed channels. Add a channel only when the client has evidence there, the audience expects it, or the Brain has saved it as a tested strategy assumption.',
+  channelStrategy: 'Start with source-backed channels. Add a channel only when the space has evidence there, the audience expects it, or the Brain has saved it as a tested strategy assumption.',
   contentFormats: DEMAND_CONTENT_JOBS.join(', '),
   approvalModel: 'Case based. Some posts can be approved by one named owner, sensitive claims, named-person content, or high-risk channels need all required stakeholders.',
-  approvalStakeholders: 'Low-risk drafts can go to one named owner. Named-person posts, sensitive claims, regulated topics, and client-visible publishing need all required stakeholders.',
+  approvalStakeholders: 'Low-risk drafts can go to one named owner. Named-person posts, sensitive claims, regulated topics, and external publishing need all required stakeholders.',
   engagementSignals: DEMAND_OUTCOME_SIGNALS.join(', '),
   samHandoffRules: 'Flag named people or accounts, repeated objections, intent-rich comments, competitor mentions, high-intent clicks, inbound questions, and people asking for examples or pricing.',
   learningCadence: 'Review performance weekly, update what works and what does not from every useful signal, refresh channel-specific tone and platform best practices monthly, and turn repeatable wins into skills.',

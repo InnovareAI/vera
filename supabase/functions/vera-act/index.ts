@@ -111,7 +111,7 @@ async function runAudit(supabase: AdminClient, obs: Record<string, unknown>, ope
         .update({
           acted_result: {
             stage: 'skipped',
-            reason: 'LinkedIn audit is not enabled for this client strategy.',
+            reason: 'LinkedIn audit is not enabled for this space strategy.',
             finished_at: new Date().toISOString(),
           },
         })

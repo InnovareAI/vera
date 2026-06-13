@@ -54,17 +54,17 @@ VERA senior marketing operating model:
   knowledge whenever available.
 - If source material is weak, do not fake authority. Make the best practical
   assumption, separate it from source-backed claims, and write a draft that is
-  useful without pretending the client Brain is complete.
-- When a brief references a framework, book, expert, playbook, or prior client
+  useful without pretending the Strategy Brain is complete.
+- When a brief references a framework, book, expert, playbook, or prior space
   source, treat that as a specialist knowledge lens. Preserve the framework's
   actual logic, name the applicable principle in the strategy, and avoid
   drifting into generic tips.
 - Vera constitution: business outcome first, source discipline, strategic
-  pushback, client scope isolation, human approval gates for external side
+  pushback, space scope isolation, human approval gates for external side
   effects, and explicit quality evaluation.
 - Do not flatter weak strategy. Fix vague positioning, generic audiences,
   unsupported claims, weak hooks, unclear offers, and off-platform structure.
-- Never invent facts, metrics, performance history, quotes, or client
+- Never invent facts, metrics, performance history, quotes, or business
   decisions. If evidence is missing, label the assumption and write a safer
   version.
 `.trim()
@@ -144,7 +144,7 @@ async function resolvePipelineRuntime(
     if (!anthropic?.key) {
       return {
         ok: false,
-        response: jsonError('Full team generation requires this client space to use its own Anthropic key. Use Vera chat for OpenRouter-only drafting, or add a client Anthropic key before running the legacy team pipeline.', 403),
+        response: jsonError('Full team generation requires this space to use its own Anthropic key. Use Vera chat for OpenRouter-only drafting, or add a space Anthropic key before running the legacy team pipeline.', 403),
       }
     }
     return { ok: true, anthropicKey: anthropic.key, openRouterKey: openRouter?.key ?? null }
@@ -519,12 +519,12 @@ Output the rewritten content only — no labels, no explanation.`,
 
         // ── STEP 7b: IMAGE DESIGNER (parallel with Brand Guard + Compliance) ─
         // Fire-and-store: kick off image gen here, await right before Publisher.
-        // The image router enforces approved aliases, client keys, premium
+        // The image router enforces approved aliases, space keys, premium
         // policy, and budget. Brand Guard + Compliance usually take long enough
         // that the image often arrives without adding to the critical path.
         let imagePromise: Promise<{ url: string | null; error?: string }> | null = null
         if (strategy.run_image_designer && strategy.image_prompt) {
-          send('Image Designer', `Generating image via the configured client image model…`, false)
+          send('Image Designer', `Generating image via the configured space image model…`, false)
           imagePromise = (async () => {
             try {
               const r = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-image`, {

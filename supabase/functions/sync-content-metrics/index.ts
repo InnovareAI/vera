@@ -190,7 +190,7 @@ Deno.serve(async (req) => {
     .eq("id", projectId)
     .maybeSingle()
   if (projectError) return jsonError(projectError.message, 500)
-  if (!project) return jsonError("Client not found", 404)
+  if (!project) return jsonError("Space not found", 404)
 
   const allowed = await canManageProject(supabase, auth.user.id, project.id, project.org_id)
   if (!allowed) return jsonError("Forbidden", 403)
@@ -245,7 +245,7 @@ Deno.serve(async (req) => {
         provider,
         status: "skipped",
         metrics: 0,
-        detail: "Provider is not connected for this client space.",
+        detail: "Provider is not connected for this space.",
       })
       continue
     }

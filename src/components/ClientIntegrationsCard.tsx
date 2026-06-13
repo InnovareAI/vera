@@ -200,7 +200,7 @@ const PROVIDERS: IntegrationTemplate[] = [
       workstream: 'LinkedIn',
       adapterState: 'Unipile OAuth Wizard ready for account connection',
       nextBuild: 'Open the Unipile wizard from this card, persist the account ID on callback, then use it for LinkedIn ingestion, audits, and approved publishing.',
-      requirements: ['Unipile API key', 'Hosted auth wizard', 'LinkedIn account consent', 'Client workspace approval'],
+      requirements: ['Unipile API key', 'Hosted auth wizard', 'LinkedIn account consent', 'Space approval'],
     },
     icon: Share2,
     accent: '#0a66c2',
@@ -211,9 +211,9 @@ const PROVIDERS: IntegrationTemplate[] = [
     group: 'Organic social',
     label: 'X',
     eyebrow: 'Later, paid API',
-    description: 'Prepare X posts for manual handoff now. Add official API publishing only when the client plan covers X usage.',
+    description: 'Prepare X posts for manual handoff now. Add official API publishing only when the space plan covers X usage.',
     connectionKind: 'manual',
-    credentialRoute: 'Manual handoff by default. Add X OAuth only when the client plan explicitly covers paid API usage',
+    credentialRoute: 'Manual handoff by default. Add X OAuth only when the space plan explicitly covers paid API usage',
     primaryLabel: 'X handle or profile URL',
     primaryPlaceholder: 'https://x.com/brand',
     scopes: ['manual.publish', 'public.read', 'traffic.review'],
@@ -300,7 +300,7 @@ const PROVIDERS: IntegrationTemplate[] = [
     primaryPlaceholder: 'r/community or u/brand',
     scopes: ['public.read', 'community.rules', 'manual.publish'],
     capabilities: { read: true, ingest: true, analyze: true },
-    setupNote: 'Use Reddit for market listening and draft prep. Final posting stays manual unless a client-specific approved adapter is added later.',
+    setupNote: 'Use Reddit for market listening and draft prep. Final posting stays manual unless a space-specific approved adapter is added later.',
     launch: {
       priority: 'wave_1',
       workstream: 'Content platforms',
@@ -365,7 +365,7 @@ const PROVIDERS: IntegrationTemplate[] = [
     primaryPlaceholder: 'https://www.quora.com/profile/brand-or-person',
     scopes: ['public.read', 'manual.publish', 'answer.research'],
     capabilities: { read: true, ingest: true, analyze: true },
-    setupNote: 'Use Quora as a research and answer-prep source. Final posting stays manual unless a client-specific approved adapter is added later.',
+    setupNote: 'Use Quora as a research and answer-prep source. Final posting stays manual unless a space-specific approved adapter is added later.',
     launch: {
       priority: 'wave_1',
       workstream: 'Content platforms',
@@ -384,7 +384,7 @@ const PROVIDERS: IntegrationTemplate[] = [
     eyebrow: 'Publishing',
     description: 'Publish approved drafts, upload media, update posts, and read taxonomy context.',
     connectionKind: 'app_password',
-    credentialRoute: 'WordPress application password stored as an encrypted client key',
+    credentialRoute: 'WordPress application password stored as an encrypted space key',
     primaryLabel: 'WordPress site URL',
     primaryPlaceholder: 'https://blog.example.com',
     scopes: ['posts.write', 'posts.read', 'media.upload', 'taxonomies.read'],
@@ -408,7 +408,7 @@ const PROVIDERS: IntegrationTemplate[] = [
     eyebrow: 'CMS publishing',
     description: 'Create CMS items, stage drafts, and publish approved long-form content to Webflow.',
     connectionKind: 'api_key',
-    credentialRoute: 'Webflow API token stored as an encrypted client key',
+    credentialRoute: 'Webflow API token stored as an encrypted space key',
     primaryLabel: 'Site or collection ID',
     primaryPlaceholder: 'site_... or collection_...',
     scopes: ['cms.write', 'cms.read'],
@@ -425,7 +425,7 @@ const PROVIDERS: IntegrationTemplate[] = [
     eyebrow: 'Headless CMS',
     description: 'Create entries, attach assets, and route approved articles into a Contentful space.',
     connectionKind: 'api_key',
-    credentialRoute: 'Contentful management token stored as an encrypted client key',
+    credentialRoute: 'Contentful management token stored as an encrypted space key',
     primaryLabel: 'Space and environment',
     primaryPlaceholder: 'space_id / environment',
     scopes: ['entries.write', 'assets.write', 'entries.read'],
@@ -442,7 +442,7 @@ const PROVIDERS: IntegrationTemplate[] = [
     eyebrow: 'Structured content',
     description: 'Write portable text, media references, and article documents into Sanity datasets.',
     connectionKind: 'api_key',
-    credentialRoute: 'Sanity write token stored as an encrypted client key',
+    credentialRoute: 'Sanity write token stored as an encrypted space key',
     primaryLabel: 'Project and dataset',
     primaryPlaceholder: 'project_id / production',
     scopes: ['documents.write', 'assets.write', 'documents.read'],
@@ -459,7 +459,7 @@ const PROVIDERS: IntegrationTemplate[] = [
     eyebrow: 'Self-hosted CMS',
     description: 'Create and publish entries in a Strapi content type with media and metadata.',
     connectionKind: 'api_key',
-    credentialRoute: 'Strapi API token stored as an encrypted client key',
+    credentialRoute: 'Strapi API token stored as an encrypted space key',
     primaryLabel: 'API base and content type',
     primaryPlaceholder: 'https://cms.example.com / articles',
     scopes: ['content.write', 'content.read', 'media.upload'],
@@ -476,7 +476,7 @@ const PROVIDERS: IntegrationTemplate[] = [
     eyebrow: 'Marketing CMS',
     description: 'Create blog posts and campaign content in HubSpot with approval controls.',
     connectionKind: 'api_key',
-    credentialRoute: 'HubSpot private app token stored as an encrypted client key',
+    credentialRoute: 'HubSpot private app token stored as an encrypted space key',
     primaryLabel: 'HubSpot blog ID',
     primaryPlaceholder: '123456789',
     scopes: ['cms.blogs.write', 'cms.blogs.read'],
@@ -493,7 +493,7 @@ const PROVIDERS: IntegrationTemplate[] = [
     eyebrow: 'Editorial publishing',
     description: 'Send approved posts and newsletters into Ghost with tags, authors, and imagery.',
     connectionKind: 'api_key',
-    credentialRoute: 'Ghost Admin API key stored as an encrypted client key',
+    credentialRoute: 'Ghost Admin API key stored as an encrypted space key',
     primaryLabel: 'Ghost Admin URL',
     primaryPlaceholder: 'https://publication.ghost.io',
     scopes: ['posts.write', 'posts.read', 'images.upload'],
@@ -510,7 +510,7 @@ const PROVIDERS: IntegrationTemplate[] = [
     eyebrow: 'Commerce content',
     description: 'Publish SEO articles and product-led content to Shopify blogs.',
     connectionKind: 'api_key',
-    credentialRoute: 'Shopify Admin API token stored as an encrypted client key',
+    credentialRoute: 'Shopify Admin API token stored as an encrypted space key',
     primaryLabel: 'Shop domain and blog ID',
     primaryPlaceholder: 'brand.myshopify.com / blog_id',
     scopes: ['blogs.write', 'blogs.read', 'files.write'],
@@ -525,9 +525,9 @@ const PROVIDERS: IntegrationTemplate[] = [
     group: 'Publishing & CMS',
     label: 'Custom CMS',
     eyebrow: 'Other CMS',
-    description: 'Register a generic publishing route for a client-specific CMS, webhook, or middleware.',
+    description: 'Register a generic publishing route for a space-specific CMS, webhook, or middleware.',
     connectionKind: 'webhook',
-    credentialRoute: 'Webhook secret or API key stored as an encrypted client key',
+    credentialRoute: 'Webhook secret or API key stored as an encrypted space key',
     primaryLabel: 'Endpoint or adapter name',
     primaryPlaceholder: 'https://cms.example.com/api/vera',
     scopes: ['content.write', 'content.read'],
@@ -561,7 +561,7 @@ const DEFAULT_LAUNCH = {
   workstream: 'Other',
   adapterState: 'Backlog',
   nextBuild: 'Defer until a client needs this channel.',
-  requirements: ['Client strategy', 'Adapter brief', 'Permission model'],
+  requirements: ['Space strategy', 'Adapter brief', 'Permission model'],
 } satisfies NonNullable<IntegrationTemplate['launch']>
 
 function launchMeta(template: IntegrationTemplate): NonNullable<IntegrationTemplate['launch']> {
@@ -670,7 +670,7 @@ function integrationUnipileAccountId(row: ClientIntegration | undefined): string
 }
 
 function linkedInScopeHint(row: ClientIntegration | undefined, researchConnected: boolean): string | null {
-  if (row?.status === 'connected' && integrationUnipileAccountId(row)) return 'Client publishing connected'
+  if (row?.status === 'connected' && integrationUnipileAccountId(row)) return 'Space publishing connected'
   if (researchConnected) return 'Research available only'
   return null
 }
@@ -934,7 +934,7 @@ export function ClientIntegrationsCard() {
           unipile_health_status: 'healthy',
         })
         setSelectedProvider('linkedin')
-        setMessage({ type: 'ok', text: 'LinkedIn research profile connected across client spaces.' })
+        setMessage({ type: 'ok', text: 'LinkedIn research profile connected across spaces.' })
         cleanUrl()
         return
       }
@@ -1016,7 +1016,7 @@ export function ClientIntegrationsCard() {
         return exists ? prev.map(row => row.id === saved.id ? saved : row) : [...prev, saved]
       })
       setDraftState({ key: `linkedin:${saved.id}:${saved.updated_at ?? ''}`, draft: makeDraft(template, saved) })
-      setMessage({ type: 'ok', text: 'LinkedIn publishing connected for this client space.' })
+      setMessage({ type: 'ok', text: 'LinkedIn publishing connected for this space.' })
       cleanUrl()
     }
 
@@ -1079,7 +1079,7 @@ export function ClientIntegrationsCard() {
 
   async function removeIntegration() {
     if (!selectedRow) return
-    if (!confirm(`Remove ${selectedRow.display_name}? Vera will stop seeing this integration for this client space.`)) return
+    if (!confirm(`Remove ${selectedRow.display_name}? Vera will stop seeing this integration for this space.`)) return
     setSaving(true)
     setMessage(null)
     const { error } = await supabase.from('client_integrations').delete().eq('id', selectedRow.id)
@@ -1233,7 +1233,7 @@ export function ClientIntegrationsCard() {
 
   async function removeResearchProfile() {
     if (!activeProject || !researchProfile?.unipile_account_id) return
-    if (!confirm('Remove the shared LinkedIn research profile for this workspace? Client publishing integrations are not affected.')) return
+    if (!confirm('Remove the shared LinkedIn research profile for this workspace? Space publishing integrations are not affected.')) return
     setRemovingResearchProfile(true)
     setMessage(null)
 
@@ -1311,7 +1311,7 @@ export function ClientIntegrationsCard() {
     if (!activeProject) return
     const missingTemplates = WAVE_ONE_TEMPLATES.filter(template => !rowByProvider.has(template.provider))
     if (!missingTemplates.length) {
-      setMessage({ type: 'ok', text: 'First-wave integrations are already planned for this client space.' })
+      setMessage({ type: 'ok', text: 'First-wave integrations are already planned for this space.' })
       return
     }
 
@@ -1364,7 +1364,7 @@ export function ClientIntegrationsCard() {
       <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', padding: 18 }}>
         <p style={{ color: 'var(--ink)', fontSize: 'var(--t-body)', fontWeight: 650, margin: 0 }}>Agentic integrations</p>
         <p style={{ color: 'var(--ink-2)', fontSize: 'var(--t-sm)', margin: '4px 0 0' }}>
-          Select a client space before configuring search, analytics, and publishing connections.
+          Select a space before configuring search, analytics, and publishing connections.
         </p>
       </div>
     )
@@ -1403,7 +1403,7 @@ export function ClientIntegrationsCard() {
             Agentic integrations
           </p>
           <p style={{ color: 'var(--ink-2)', fontSize: 'var(--t-sm)', lineHeight: 1.5, margin: '5px 0 0', maxWidth: 680 }}>
-            Register organic social, content platforms, search, analytics, WordPress, and CMS routes per client space. Vera reads these capability records before she analyzes, ingests, or publishes anything.
+            Register organic social, content platforms, search, analytics, WordPress, and CMS routes per space. Vera reads these capability records before she analyzes, ingests, or publishes anything.
           </p>
         </div>
         <div className="grid grid-cols-3 gap-2 min-w-[300px]">
@@ -1436,7 +1436,7 @@ export function ClientIntegrationsCard() {
                 Shared LinkedIn research profile
               </p>
               <p style={{ color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.45, margin: '4px 0 0', maxWidth: 760 }}>
-                Vera uses this only for read-only LinkedIn research: audits, source pulls, profile context, company-page context, and recent-post intelligence. It never grants client publishing, media, spend, or company-page posting rights. Publishing still requires the active client-space LinkedIn integration below.
+                Vera uses this only for read-only LinkedIn research: audits, source pulls, profile context, company-page context, and recent-post intelligence. It never grants publishing, media, spend, or company-page posting rights. Publishing still requires the active space LinkedIn integration below.
               </p>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 <span style={{
@@ -1457,7 +1457,7 @@ export function ClientIntegrationsCard() {
                   <span style={chipStyle}>Workspace profile needs reconnect</span>
                 )}
                 <span style={chipStyle}>Cannot publish</span>
-                <span style={chipStyle}>Cannot spend client credits</span>
+                <span style={chipStyle}>Cannot spend space credits</span>
                 <span style={chipStyle}>Health: {researchHealth}</span>
               </div>
             </div>
@@ -1773,14 +1773,14 @@ export function ClientIntegrationsCard() {
                   {selectedProvider === 'linkedin' ? (
                     <>
                       <p style={{ color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.45, margin: '4px 0 0' }}>
-                        LinkedIn research can use the shared profile. LinkedIn publishing can only use this active client-space integration.
+                        LinkedIn research can use the shared profile. LinkedIn publishing can only use this active space integration.
                       </p>
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         <span style={{ ...chipStyle, color: researchConnected ? '#059669' : '#78716c' }}>
                           Research: {researchConnected && researchAccountId ? `${researchScope} ${maskAccountId(researchAccountId)}` : 'not connected'}
                         </span>
                         <span style={{ ...chipStyle, color: selectedLinkedInPublishingConnected ? '#059669' : '#78716c' }}>
-                          Publishing: {selectedClientUnipileAccountId ? `client ${maskAccountId(selectedClientUnipileAccountId)}` : 'not connected for this client'}
+                          Publishing: {selectedClientUnipileAccountId ? `space ${maskAccountId(selectedClientUnipileAccountId)}` : 'not connected for this space'}
                         </span>
                         <span style={chipStyle}>Shared profile cannot publish</span>
                       </div>
@@ -1788,10 +1788,10 @@ export function ClientIntegrationsCard() {
                   ) : (
                     <>
                       <p style={{ color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.45, margin: '4px 0 0' }}>
-                        This integration belongs to {activeProject.name}. Other client spaces cannot use its credentials, publish rights, or spend path.
+                        This integration belongs to {activeProject.name}. Other spaces cannot use its credentials, publish rights, or spend path.
                       </p>
                       <div className="mt-2 flex flex-wrap gap-1.5">
-                        <span style={chipStyle}>Client scoped</span>
+                        <span style={chipStyle}>Space scoped</span>
                         <span style={chipStyle}>No shared credentials</span>
                         <span style={chipStyle}>Approval required: {draft.approvalRequired ? 'yes' : 'no'}</span>
                       </div>
@@ -2032,7 +2032,7 @@ export function ClientIntegrationsCard() {
                     }}
                   >
                     {connectingUnipile ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
-                    {draft.status === 'connected' ? 'Reconnect client LinkedIn publishing' : 'Connect client LinkedIn publishing'}
+                    {draft.status === 'connected' ? 'Reconnect space LinkedIn publishing' : 'Connect space LinkedIn publishing'}
                   </button>
                 )}
               </div>

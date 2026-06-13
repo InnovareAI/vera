@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, Copy, Pin, X, Target, Share2, Network, KeyRound, Lock, TrendingUp, BarChart3 } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, Copy, Pin, X, Target, Share2, Network, KeyRound, Lock, TrendingUp, BarChart3, Brain } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -118,6 +118,15 @@ type WeeklyLearningPayload = {
   skill_proposals?: Array<{ id?: string; name?: string; confidence?: string | null; created_at?: string }>
   sam_handoff_candidates?: Array<{ post_id?: string; title?: string; channel?: string; score?: number; triggers?: string[] }>
 }
+type CommandStats = {
+  draft: number
+  pending: number
+  approved: number
+  scheduled: number
+  posted: number
+  rejected: number
+  campaigns: number
+}
 type DocumentAttachment = { kind: 'document'; document: DocumentBlock; name: string; mime: string; size: number; truncated?: boolean }
 type ComposerAttachment = ImageAttachment | DocumentAttachment
 type MessageFile = { name: string; mime: string; size: number }
@@ -194,6 +203,15 @@ const DEFAULT_PROVIDER_CAPABILITIES: ProviderCapabilities = {
   budgetGuardEnabled: DEFAULT_CLIENT_AI_POLICY.budgetGuardEnabled,
   budgetGuardMode: DEFAULT_CLIENT_AI_POLICY.budgetGuardMode,
   monthlyBudgetUsd: DEFAULT_CLIENT_AI_POLICY.monthlyBudgetUsd,
+}
+const EMPTY_COMMAND_STATS: CommandStats = {
+  draft: 0,
+  pending: 0,
+  approved: 0,
+  scheduled: 0,
+  posted: 0,
+  rejected: 0,
+  campaigns: 0,
 }
 const PLATFORM_MEDIA_KEYS_ENABLED = import.meta.env.VITE_PLATFORM_MEDIA_KEYS_ENABLED === 'true'
 
@@ -599,7 +617,7 @@ export default function VeraThread() {
   const [approving, setApproving] = useState(false)
   const [observations, setObservations] = useState<ObservationNotice[]>([])
   const [weeklyActionKey, setWeeklyActionKey] = useState<string | null>(null)
-  const [stats, setStats] = useState<{ pending: number; campaigns: number }>({ pending: 0, campaigns: 0 })
+  const [stats, setStats] = useState<CommandStats>(EMPTY_COMMAND_STATS)
   const [sessionId, setSessionId] = useState<string>('')
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
   const [uploading, setUploading] = useState(false)
@@ -638,7 +656,7 @@ export default function VeraThread() {
     // No active-session pointer (new browser, cleared storage, or after a
     // logout/login). Reopen the project's MOST RECENT session instead of a blank
     // new chat, so a refresh never buries the last conversation in history.
-    // Scoped to project_id, so it only ever surfaces this client's own sessions.
+    // Scoped to project_id, so it only ever surfaces this space's own sessions.
     let cancelled = false
     supabase.from('chat_messages')
       .select('session_id')
@@ -682,7 +700,7 @@ export default function VeraThread() {
         // The project-scoped DB query is the source of truth for this
         // (project, session). Keep only still-pending local messages and drop
         // cached content — so a cross-project localStorage cache can never keep
-        // another client's chat on screen when the DB has nothing here. Purge
+        // another space's chat on screen when the DB has nothing here. Purge
         // the stale key so it can't flash on the next load either.
         setMessages(prev => mergeMessages(stored, prev.filter(m => m.pending)))
         if (!stored.length) { try { localStorage.removeItem(key) } catch { /* ignore */ } }
@@ -819,7 +837,7 @@ export default function VeraThread() {
   // Resume any in-flight video renders on load. A render that was still going
   // when the page was refreshed / closed used to be lost forever (its fal
   // request_id only lived in the poll loop). Now it's recorded in video_jobs,
-  // so we pick up every 'rendering' job for this client and keep polling until
+  // so we pick up every 'rendering' job for this space and keep polling until
   // the clip lands — it writes through to the post + the message attachment, so
   // the video appears whether or not the operator is still on the same thread.
   // Age-capped at 30 min so a genuinely stuck job doesn't retry on every load.
@@ -892,15 +910,17 @@ export default function VeraThread() {
     })
   }, [activeOrg?.id, activeProject?.id])
 
-  // Live counts for the launcher quick-action descriptions (SAM-style).
+  // Live counts for the command desk and launcher quick-action descriptions.
   useEffect(() => {
-    if (!activeOrg?.id) { setStats({ pending: 0, campaigns: 0 }); return }
-    let pq = supabase.from('content_posts').select('id', { count: 'exact', head: true })
-      .eq('org_id', activeOrg.id).in('status', ['Pending Review', 'pending', 'Draft', 'draft'])
+    if (!activeOrg?.id) { setStats(EMPTY_COMMAND_STATS); return }
+    let pq = supabase.from('content_posts').select('status').eq('org_id', activeOrg.id).limit(1000)
     if (activeProject?.id) pq = pq.eq('project_id', activeProject.id)
     const cq = supabase.from('campaigns').select('id', { count: 'exact', head: true }).eq('org_id', activeOrg.id)
     Promise.all([pq, cq]).then(([pr, cr]) =>
-      setStats({ pending: pr.error ? 0 : (pr.count ?? 0), campaigns: cr.error ? 0 : (cr.count ?? 0) }))
+      setStats({
+        ...(pr.error ? EMPTY_COMMAND_STATS : commandStatsFromPosts(pr.data as Array<{ status?: string | null }> | null)),
+        campaigns: cr.error ? 0 : (cr.count ?? 0),
+      }))
   }, [activeOrg?.id, activeProject?.id])
 
   // Brain readiness — VERA writes sharper when the client's brain is set up, so
@@ -1261,7 +1281,7 @@ export default function VeraThread() {
         // after refresh where there's no in-memory draft), and reflect it on the
         // open card if it's the same post. BACKSTOP: if we never got a post id
         // (the draft context was lost / out-of-order tool calls), find the most
-        // recent media-less draft for this client and attach the clip there, so
+        // recent media-less draft for this space and attach the clip there, so
         // a rendered video can NEVER end up orphaned in the chat with no post.
         let targetPostId = postId ?? draft?.id ?? null
         if (!targetPostId && activeProject?.id) {
@@ -1563,7 +1583,7 @@ export default function VeraThread() {
   // ─── Draft actions ──────────────────────────────────────────────
   function ensureDraftInActiveProject(post: Post) {
     if (!activeProject?.id || post.project_id !== activeProject.id) {
-      throw new Error('This draft belongs to another client. Reopen the draft in the active client workspace.')
+      throw new Error('This draft belongs to another space. Reopen the draft in the active space.')
     }
   }
 
@@ -1690,6 +1710,10 @@ export default function VeraThread() {
     setInput('Regenerate that draft. Same brief, fresh take.')
     setTimeout(() => taRef.current?.focus(), 0)
   }
+  const openProviderKeys = useCallback(() => {
+    if (activeProject?.slug) navigate(`/p/${activeProject.slug}/keys`)
+    else navigate('/spaces')
+  }, [activeProject?.slug, navigate])
 
   // Push the draft artifact into the right rail
   const draftIdx = draft ? draftHistory.indexOf(draft) : -1
@@ -1718,11 +1742,16 @@ export default function VeraThread() {
         versionTotal={draftHistory.length}
         onPrevVersion={draftIdx > 0 ? () => setDraft(draftHistory[draftIdx - 1]) : undefined}
         onNextVersion={draftIdx >= 0 && draftIdx < draftHistory.length - 1 ? () => setDraft(draftHistory[draftIdx + 1]) : undefined}
+        providerCapabilities={providerCapabilities}
+        pricingCatalog={pricingCatalog}
+        pricingSource={pricingSource}
+        pricingRowCount={pricingRowCount}
+        onAddKey={openProviderKeys}
       />
     ) : campaign ? (
       <CampaignArtifact campaign={campaign} onOpenPost={p => { const post = p as unknown as Post; if (post.id && sessionId) { try { localStorage.setItem(`vera-draft:${sessionId}`, post.id) } catch { /* ignore */ } } setDraft(post) }} />
     ) : <ArtifactEmpty />,
-    [draft?.id, draft?.media_url, draft?.media_metadata, draft?.review_token, draft?.status, approving, sending, campaign?.id, campaign?.posts?.length, draftIdx, draftHistory.length, user?.id, user?.email],
+    [draft?.id, draft?.media_url, draft?.media_metadata, draft?.review_token, draft?.status, approving, sending, campaign?.id, campaign?.posts?.length, draftIdx, draftHistory.length, user?.id, user?.email, providerCapabilities, pricingCatalog, pricingSource, pricingRowCount, openProviderKeys],
     // Wide, readable artifact panel — this is the working surface, not a
     // skinny sidebar. ~42vw, clamped so it stays sane on small + huge screens.
     'clamp(420px, 42vw, 660px)',
@@ -1732,7 +1761,7 @@ export default function VeraThread() {
   const renderComposer = (placement: 'idle' | 'thread') => {
     const idle = placement === 'idle'
     return (
-      <div style={{ maxWidth: idle ? 760 : 720, margin: '0 auto', width: '100%' }}>
+      <div style={{ maxWidth: idle ? '100%' : 720, margin: '0 auto', width: '100%' }}>
         <div onDrop={onComposerDrop} onDragOver={onComposerDragOver} style={{
           display: 'flex',
           flexDirection: 'column',
@@ -1807,15 +1836,19 @@ export default function VeraThread() {
             onOpenIntegrations={openIntegrationObservation}
             onWeeklyReviewAction={runWeeklyLearningAction}
             weeklyActionKey={weeklyActionKey}
-            setup={setup} projectName={activeProject?.name ?? 'this client'}
+            setup={setup} projectName={activeProject?.name ?? 'this space'}
             onOpenBrain={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/brain`) }}
             onOpenLearning={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/learning`) }}
+            onOpenReview={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/review`) }}
+            onOpenCalendar={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/calendar`) }}
+            onOpenPerformance={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/measure`) }}
             onOpenSkills={() => navigate('/skills?view=skills&scope=client&q=learning-proposal')}
             providerCapabilities={providerCapabilities}
-            onAddKey={() => activeProject?.slug ? navigate(`/p/${activeProject.slug}/keys`) : navigate('/clients')}
+            onAddKey={openProviderKeys}
             pricingCatalog={pricingCatalog}
             pricingSource={pricingSource}
             pricingRowCount={pricingRowCount}
+            stats={stats}
             demandPlan={demandPlan}
             composer={renderComposer('idle')} />
         ) : (
@@ -1946,14 +1979,21 @@ function Bubble({ m, onPin }: { m: Message; onPin?: (content: string) => void })
 // ─── right rail: a FULL preview of the post, as it will appear once live ──
 // A realistic LinkedIn-style card (author, body, media, reaction bar) so the
 // operator sees the actual post — plus the approve / tweak / regenerate bar.
-function DraftArtifact({ draft, approving, sending, onApprove, onSendForApproval, onCopyShareLink, onTweak, onRegenerate, onBack, versionIdx, versionTotal, onPrevVersion, onNextVersion }: {
+function DraftArtifact({ draft, approving, sending, onApprove, onSendForApproval, onCopyShareLink, onTweak, onRegenerate, onBack, versionIdx, versionTotal, onPrevVersion, onNextVersion, providerCapabilities, pricingCatalog, pricingSource, pricingRowCount, onAddKey }: {
   draft: Post; approving: boolean; sending: boolean; onApprove: () => void; onSendForApproval: () => void; onCopyShareLink: () => Promise<void>; onTweak: () => void; onRegenerate: () => void; onBack?: () => void
   versionIdx: number; versionTotal: number; onPrevVersion?: () => void; onNextVersion?: () => void
+  providerCapabilities: ProviderCapabilities
+  pricingCatalog?: ModelPricingGuide[]
+  pricingSource?: ModelPricingCatalogSource
+  pricingRowCount?: number
+  onAddKey?: () => void
 }) {
   const isApproved = (draft.status ?? '').toLowerCase() === 'approved'
   const channel = (draft.channel ?? 'LinkedIn') as string
-  // "Generate sharing link" — just copy the public, no-login review URL. No
-  // status change, no opening the page; purely "give me the link to share".
+  const spec = draftCreativeSpec(draft)
+  const status = draftProductionStatus(draft)
+  const schedule = draftScheduleLabel(draft)
+  const hasMedia = !!draft.media_url || draftMediaFrames(draft).length > 0
   const [linkCopied, setLinkCopied] = useState(false)
   const copyShareLink = async () => {
     if (!draft.id) return
@@ -1964,17 +2004,19 @@ function DraftArtifact({ draft, approving, sending, onApprove, onSendForApproval
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Toolbar — label + the decision actions, always in reach. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: space[2], padding: `${space[5]} ${space[5]} ${space[3]}`, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: space[2], padding: `${space[5]} ${space[5]} ${space[3]}`, flexShrink: 0, borderBottom: `1px solid ${color.line}`, background: color.paper }}>
         {onBack && (
           <button onClick={onBack} title="Back to the campaign calendar" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 9px', fontSize: t.size.cap, fontWeight: t.weight.medium, color: color.ink2, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.pill, cursor: 'pointer' }}>
-            ← Calendar
+            Calendar
           </button>
         )}
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: isApproved ? color.success : color.accent }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: isApproved ? color.success : color.accent }} />
-          {isApproved ? 'Approved' : 'Awaiting approval'} · {channel}
-        </span>
+        <div style={{ minWidth: 0 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold, color: status.color }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: status.color }} />
+            Production room
+          </span>
+          <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{draft.title || `${channel} draft`}</div>
+        </div>
         {versionTotal > 1 && versionIdx >= 0 && (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: space[2] }}>
             <button onClick={onPrevVersion} disabled={!onPrevVersion} title="Previous version"
@@ -1992,30 +2034,288 @@ function DraftArtifact({ draft, approving, sending, onApprove, onSendForApproval
         )}
       </div>
 
-      {/* The post preview card. */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: `0 ${space[5]} ${space[5]}` }}>
-        <PlatformPostPreview post={draft} density="standard" autoplayMedia />
+      <div style={{ flex: 1, overflowY: 'auto', padding: `${space[4]} ${space[5]} ${space[5]}`, display: 'grid', gap: space[4], alignContent: 'start' }}>
+        <section style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[4], display: 'grid', gap: space[3] }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], justifyContent: 'space-between', flexWrap: 'wrap' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>
+              <Target size={12} />
+              Draft controls
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: status.color, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: status.color }} />
+              {status.label}
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 120px), 1fr))', gap: space[2] }}>
+            <DraftControlTile label="Channel" value={channel} detail={draft.format || 'Post'} />
+            <DraftControlTile label="Spec" value={spec.dimensions} detail={spec.label} />
+            <DraftControlTile label="Schedule" value={schedule.value} detail={schedule.detail} />
+            <DraftControlTile label="Model" value={draft.model_used || 'Not recorded'} detail={hasMedia ? 'Media attached' : 'No media yet'} />
+          </div>
+        </section>
 
-        {/* secondary actions under the preview */}
-        <div style={{ display: 'flex', gap: space[2], marginTop: space[4] }}>
+        <section style={{ display: 'grid', gap: space[3] }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3] }}>
+            <span style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>Platform preview</span>
+            <span style={{ color: color.ghost, fontSize: t.size.micro }}>{spec.label}</span>
+          </div>
+        <PlatformPostPreview post={draft} density="standard" autoplayMedia />
+        </section>
+
+        <DraftMediaStoryboard draft={draft} spec={spec} />
+
+        <DraftModelPanel
+          capabilities={providerCapabilities}
+          pricingCatalog={pricingCatalog}
+          pricingSource={pricingSource}
+          pricingRowCount={pricingRowCount}
+          onAddKey={onAddKey}
+        />
+
+        <DraftApprovalPath
+          status={status}
+          isApproved={isApproved}
+          hasReviewToken={!!draft.review_token}
+          linkCopied={linkCopied}
+          onCopyShareLink={copyShareLink}
+          onApprove={onApprove}
+          approving={approving}
+        />
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))', gap: space[2] }}>
           <button onClick={onTweak} style={{ ...btn(color.paper2, color.ink, false), flex: 1, justifyContent: 'center', border: `1px solid ${color.line}` }}><Pencil size={12} /> Tweak</button>
           <button onClick={onRegenerate} style={{ ...btn(color.paper2, color.ink, false), flex: 1, justifyContent: 'center', border: `1px solid ${color.line}` }}><RefreshCw size={12} /> Regenerate</button>
         </div>
-        {draft.id && (
-          <button onClick={copyShareLink} title="Copy a public, no-login link to this post for sharing"
-            style={{ ...btn(color.paper2, linkCopied ? color.success : color.ink, false), width: '100%', justifyContent: 'center', border: `1px solid ${linkCopied ? color.success : color.line}`, marginTop: space[2] }}>
-            {linkCopied ? <><Check size={12} /> Sharing link copied</> : <><Link2 size={12} /> Generate sharing link</>}
+      </div>
+    </div>
+  )
+}
+
+type DraftSpec = { label: string; dimensions: string; aspect: string }
+
+function DraftControlTile({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div style={{ minWidth: 0, background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[3] }}>
+      <div style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium, marginBottom: 4 }}>{label}</div>
+      <div style={{ color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</div>
+      <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{detail}</div>
+    </div>
+  )
+}
+
+function DraftMediaStoryboard({ draft, spec }: { draft: Post; spec: DraftSpec }) {
+  const frames = draftMediaFrames(draft)
+  const prompt = draftMediaPrompt(draft)
+  if (!draft.media_url && frames.length === 0 && !prompt) {
+    return (
+      <section style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[4] }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold, marginBottom: space[2] }}>
+          <ImagePlus size={12} />
+          Media
+        </div>
+        <p style={{ margin: 0, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>
+          No media attached yet. Ask VERA for a platform prompt, carousel, or storyboard before rendering paid media.
+        </p>
+      </section>
+    )
+  }
+  return (
+    <section style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[4], display: 'grid', gap: space[3] }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3] }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>
+          <ImagePlus size={12} />
+          Media and storyboard
+        </span>
+        <span style={{ color: color.ghost, fontSize: t.size.micro }}>{spec.dimensions}</span>
+      </div>
+      {frames.length > 0 ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 130px), 1fr))', gap: space[2] }}>
+          {frames.slice(0, 6).map((frame, index) => (
+            <figure key={`${frame.url}-${index}`} style={{ margin: 0, border: `1px solid ${color.line}`, borderRadius: radius.md, overflow: 'hidden', background: color.paper2 }}>
+              <img src={frame.url} alt={frame.text || `Storyboard frame ${index + 1}`} style={{ width: '100%', aspectRatio: spec.aspect, objectFit: 'cover', display: 'block' }} />
+              <figcaption style={{ padding: space[2], color: color.ghost, fontSize: t.size.micro, lineHeight: 1.35 }}>
+                {frame.text || `Frame ${index + 1}`}
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      ) : draft.media_url ? (
+        <div style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, overflow: 'hidden', background: color.paper2 }}>
+          {draft.media_type === 'video'
+            ? <video src={draft.media_url} controls playsInline style={{ width: '100%', aspectRatio: spec.aspect, objectFit: 'cover', display: 'block' }} />
+            : <img src={draft.media_url} alt={draft.title || 'Draft media'} style={{ width: '100%', aspectRatio: spec.aspect, objectFit: 'cover', display: 'block' }} />}
+        </div>
+      ) : null}
+      {prompt && (
+        <div style={{ color: color.ink2, fontSize: t.size.micro, lineHeight: 1.45, background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[3] }}>
+          {prompt}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function DraftModelPanel({ capabilities, pricingCatalog, pricingSource, pricingRowCount, onAddKey }: {
+  capabilities: ProviderCapabilities
+  pricingCatalog?: ModelPricingGuide[]
+  pricingSource?: ModelPricingCatalogSource
+  pricingRowCount?: number
+  onAddKey?: () => void
+}) {
+  const routes = capabilities.loaded ? modelRouteRecommendations(capabilities, pricingCatalog).slice(0, 3) : []
+  const pricingStatus = pricingCatalogBadge(pricingSource, pricingRowCount)
+  return (
+    <section style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[4], display: 'grid', gap: space[3] }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3] }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>
+          <KeyRound size={12} />
+          Model and spend
+        </span>
+        <span style={{ color: pricingStatus.color, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>{pricingStatus.label}</span>
+      </div>
+      {routes.length > 0 ? (
+        <div style={{ display: 'grid', gap: space[2] }}>
+          {routes.map(route => {
+            const Icon = route.icon
+            const tone = routeToneStyle(route.tone)
+            return (
+              <div key={route.label} style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr) auto', alignItems: 'center', gap: space[2], padding: space[3], border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2 }}>
+                <Icon size={13} style={{ color: tone.fg }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{route.label}: {route.status}</div>
+                  <div style={{ color: color.ghost, fontSize: t.size.micro, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{route.cost}</div>
+                </div>
+                <span style={{ color: tone.fg, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>{route.estimate.label}</span>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <p style={{ margin: 0, color: color.ghost, fontSize: t.size.cap, lineHeight: 1.5 }}>Model routing is loading.</p>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap', color: color.ghost, fontSize: t.size.micro }}>
+        <Lock size={12} style={{ color: color.warn }} />
+        <span>Space keys first. Premium media never defaults.</span>
+        {onAddKey && (
+          <button onClick={onAddKey} style={{ marginLeft: 'auto', padding: '5px 9px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.paper2, color: color.ink2, fontSize: t.size.micro, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
+            Keys
           </button>
         )}
+      </div>
+    </section>
+  )
+}
+
+function DraftApprovalPath({ status, isApproved, hasReviewToken, linkCopied, onCopyShareLink, onApprove, approving }: {
+  status: { label: string; color: string }
+  isApproved: boolean
+  hasReviewToken: boolean
+  linkCopied: boolean
+  onCopyShareLink: () => void
+  onApprove: () => void
+  approving: boolean
+}) {
+  return (
+    <section style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[4], display: 'grid', gap: space[3] }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3] }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>
+          <Check size={12} />
+          Approval path
+        </span>
+        <span style={{ color: status.color, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>{status.label}</span>
+      </div>
+      <div style={{ display: 'grid', gap: space[2] }}>
+        <DraftApprovalStep done label="Draft generated" detail="Ready for review, comments, or model comparison." />
+        <DraftApprovalStep done={hasReviewToken || isApproved} label="Shareable review link" detail={hasReviewToken ? 'Public review token exists.' : 'Generate a link for reviewer access.'} />
+        <DraftApprovalStep done={isApproved} label="Approved for schedule" detail={isApproved ? 'Approved status is saved.' : 'Approve directly or send to the queue.'} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))', gap: space[2] }}>
+        <button onClick={onCopyShareLink} title="Copy a public, no-login link to this post for sharing"
+          style={{ ...btn(color.paper2, linkCopied ? color.success : color.ink, false), justifyContent: 'center', border: `1px solid ${linkCopied ? color.success : color.line}` }}>
+          {linkCopied ? <><Check size={12} /> Link copied</> : <><Link2 size={12} /> Review link</>}
+        </button>
         {!isApproved && (
           <button onClick={onApprove} disabled={approving} title="Skip the reviewer and approve this yourself"
-            style={{ ...btn(color.paper2, color.ink2, approving), width: '100%', justifyContent: 'center', border: `1px solid ${color.line}`, marginTop: space[2] }}>
+            style={{ ...btn(color.paper2, color.ink2, approving), justifyContent: 'center', border: `1px solid ${color.line}` }}>
             {approving ? '…' : <><Check size={12} /> Approve directly</>}
           </button>
         )}
       </div>
+    </section>
+  )
+}
+
+function DraftApprovalStep({ done, label, detail }: { done: boolean; label: string; detail: string }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: space[2], alignItems: 'start' }}>
+      <span style={{ width: 18, height: 18, borderRadius: radius.pill, background: done ? color.success : color.paper2, color: done ? '#fff' : color.ghost, border: `1px solid ${done ? color.success : color.line}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>
+        <Check size={11} />
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: 'block', color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold }}>{label}</span>
+        <span style={{ display: 'block', color: color.ghost, fontSize: t.size.micro, lineHeight: 1.4, marginTop: 1 }}>{detail}</span>
+      </span>
     </div>
   )
+}
+
+function draftProductionStatus(post: Post) {
+  const status = (post.status ?? '').toLowerCase()
+  if (status.includes('posted')) return { label: 'Posted', color: color.success }
+  if (status.includes('scheduled')) return { label: 'Scheduled', color: color.success }
+  if (status.includes('approved')) return { label: 'Approved', color: color.success }
+  if (status.includes('reject') || status.includes('changes')) return { label: 'Needs changes', color: color.danger }
+  if (status.includes('review') || status.includes('pending')) return { label: 'Pending review', color: color.warn }
+  return { label: 'Draft', color: color.accent }
+}
+
+function draftScheduleLabel(post: Post) {
+  const raw = post.scheduled_at || post.publish_date || post.posted_at || post.published_at
+  if (!raw) return { value: 'Unscheduled', detail: 'Needs a calendar slot' }
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) return { value: 'Scheduled', detail: raw }
+  return {
+    value: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    detail: date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+  }
+}
+
+function draftCreativeSpec(post: Post): DraftSpec {
+  const descriptor = `${post.channel ?? ''} ${post.format ?? ''} ${post.title ?? ''} ${post.media_type ?? ''}`.toLowerCase()
+  const channel = (post.channel ?? '').toLowerCase()
+  const isVertical = /reel|story|short|tiktok|vertical/.test(descriptor)
+  const isCarousel = post.media_type === 'carousel' || /carousel/.test(descriptor)
+  const isVideo = post.media_type === 'video'
+  if (channel.includes('instagram')) {
+    if (isVertical || isVideo) return { aspect: '9 / 16', dimensions: '1080 x 1920', label: 'Instagram Reel or Story' }
+    if (isCarousel) return { aspect: '1 / 1', dimensions: '1080 x 1080', label: 'Instagram carousel' }
+    return { aspect: '4 / 5', dimensions: '1080 x 1350', label: 'Instagram feed portrait' }
+  }
+  if (channel.includes('youtube') || descriptor.includes('short')) return { aspect: isVertical ? '9 / 16' : '16 / 9', dimensions: isVertical ? '1080 x 1920' : '1920 x 1080', label: isVertical ? 'YouTube Short' : 'YouTube video' }
+  if (channel.includes('linkedin')) return { aspect: isVideo ? '16 / 9' : '1.91 / 1', dimensions: isVideo ? '1920 x 1080' : '1200 x 627', label: isVideo ? 'LinkedIn video' : 'LinkedIn feed image' }
+  if (channel.includes('facebook')) return { aspect: '4 / 5', dimensions: '1080 x 1350', label: 'Facebook feed portrait' }
+  if (channel.includes('medium') || channel.includes('blog')) return { aspect: '16 / 9', dimensions: '1600 x 900', label: 'Article hero image' }
+  if (channel.includes('tiktok')) return { aspect: '9 / 16', dimensions: '1080 x 1920', label: 'TikTok vertical video' }
+  return { aspect: '16 / 9', dimensions: '1200 x 675', label: 'Post media' }
+}
+
+function draftMediaFrames(post: Post): Array<{ url: string; text?: string | null }> {
+  const meta = post.media_metadata as { frames?: Array<{ url?: unknown; text?: unknown }> } | null | undefined
+  if (!Array.isArray(meta?.frames)) return []
+  return meta.frames.filter((frame): frame is { url: string; text?: string | null } => (
+    !!frame &&
+    typeof frame === 'object' &&
+    typeof frame.url === 'string' &&
+    frame.url.length > 0
+  )).map(frame => ({ url: frame.url, text: typeof frame.text === 'string' ? frame.text : null }))
+}
+
+function draftMediaPrompt(post: Post) {
+  const meta = post.media_metadata as { prompt?: unknown; image_prompt?: unknown } | null | undefined
+  if (typeof post.image_prompt === 'string' && post.image_prompt.trim()) return post.image_prompt.trim()
+  if (typeof meta?.prompt === 'string' && meta.prompt.trim()) return meta.prompt.trim()
+  if (typeof meta?.image_prompt === 'string' && meta.image_prompt.trim()) return meta.image_prompt.trim()
+  return ''
 }
 
 function btn(bg: string, fg: string, busy: boolean): React.CSSProperties {
@@ -2092,18 +2392,36 @@ type LaunchAction = { icon: React.ElementType; title: string; sub: string; promp
 // SAM-clean: a tight, fixed set of six core content jobs. State-aware subtexts,
 // no overflowing grid. Less-common moves (variations, repurpose, hooks-to-post,
 // add-knowledge) are reachable by just typing in the composer.
-function buildLaunchActions(stats: { pending: number; campaigns: number }): LaunchAction[] {
+function commandStatusBucket(status?: string | null): keyof Omit<CommandStats, 'campaigns'> {
+  const normalized = (status ?? '').trim().toLowerCase()
+  if (normalized.includes('reject')) return 'rejected'
+  if (normalized.includes('post') || normalized.includes('publish') || normalized.includes('live')) return 'posted'
+  if (normalized.includes('sched')) return 'scheduled'
+  if (normalized.includes('approv')) return 'approved'
+  if (normalized.includes('review') || normalized.includes('pending')) return 'pending'
+  return 'draft'
+}
+
+function commandStatsFromPosts(rows: Array<{ status?: string | null }> | null): CommandStats {
+  const stats: CommandStats = { ...EMPTY_COMMAND_STATS }
+  for (const row of rows ?? []) {
+    stats[commandStatusBucket(row.status)] += 1
+  }
+  return stats
+}
+
+function buildLaunchActions(stats: CommandStats): LaunchAction[] {
   const a: LaunchAction[] = []
   a.push(stats.campaigns > 0
-    ? { icon: Megaphone, title: 'Improve Campaign', sub: `${stats.campaigns} active campaign${stats.campaigns === 1 ? '' : 's'}`, prompt: "Review this client's active campaigns and suggest the highest-impact improvement to audience, problem, offer, CTA, cadence, and channel mix. Prioritize measurable audience response." }
-    : { icon: Megaphone, title: 'Plan Campaign', sub: 'Audience-led series', prompt: 'Plan a top-of-funnel content campaign for this client. Define audience, problem, offer, campaign goal, channels, success metric, and draft the first content batch.' })
-  a.push({ icon: PenLine, title: 'LinkedIn Post', sub: 'Audience, hook, CTA', prompt: 'Draft a LinkedIn post that creates useful audience engagement. Include audience, problem, market insight, proof angle, soft CTA, and the follow-up signal to watch for.' })
+    ? { icon: Megaphone, title: 'Improve Campaign', sub: `${stats.campaigns} active campaign${stats.campaigns === 1 ? '' : 's'}`, prompt: "Review this space's active campaigns and suggest the highest-impact improvement to audience, problem, offer, CTA, cadence, and channel mix. Prioritize measurable audience response." }
+    : { icon: Megaphone, title: 'Plan Campaign', sub: 'Audience-led series', prompt: 'Plan a content campaign for this space. Define audience, problem, offer, campaign goal, valid channels, success metric, and draft the first content batch.' })
+  a.push({ icon: PenLine, title: 'Platform Post', sub: 'Channel, hook, CTA', prompt: 'Draft one platform-native post for the best valid channel in this space. Use Brain context to choose the channel, audience, hook, proof angle, CTA, and follow-up signal. Do not default to LinkedIn unless it is a valid strategy channel.' })
   a.push({ icon: ImagePlus, title: 'Visual Asset', sub: 'Carousel or image', prompt: 'Create a platform-native visual asset for a campaign post. Recommend carousel, infographic, quote card, or custom image, then build the prompt and ask before rendering.' })
   a.push({ icon: Clapperboard, title: 'Video Storyboard', sub: 'Scenes and cost', prompt: 'Create a storyboard for a short campaign video. Include scene beats, timing, camera notes, caption, model recommendation, and estimated prototype cost. Do not render until I explicitly approve the paid generation.' })
   a.push({ icon: Zap, title: 'Repurpose Across Channels', sub: 'YT, Medium, Quora, Reddit, X', prompt: 'Turn one core content idea into platform-native versions for LinkedIn, YouTube, Medium, Quora, Reddit, Instagram, Facebook, blog, email, and X where relevant. Keep each version native to the channel and identify which ones should be manual, connected, or read-only.' })
   a.push(stats.campaigns > 0
     ? { icon: Lightbulb, title: 'Follow-Up Angles', sub: 'Comments, shares, traffic', prompt: 'Find content topics and engagement signals that deserve follow-up. Turn comments, shares, clicks, and objections into research, reply, or next-content angles.' }
-    : { icon: Lightbulb, title: 'Content Angles', sub: 'Fresh market hooks', prompt: "Give me 5 content angles grounded in this client's offer, audience, customer problems, proof points, and current market conversations." })
+    : { icon: Lightbulb, title: 'Content Angles', sub: 'Fresh market hooks', prompt: "Give me 5 content angles grounded in this space's offer, audience, customer problems, proof points, and current market conversations." })
   return a.slice(0, 6)
 }
 
@@ -2158,16 +2476,16 @@ function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: Pr
   const videoLocked = !capabilities.videoReady
   const title = needsText ? 'Provider key needed' : imageLocked ? 'Media rendering locked' : 'Video rendering locked'
   const notes: string[] = []
-  if (needsText) notes.push('Add OpenRouter or Anthropic before Vera can run client text generation in this space.')
+  if (needsText) notes.push('Add OpenRouter or Anthropic before Vera can run text generation in this space.')
   if (imageLocked) {
     notes.push(capabilities.imagesEnabled
-      ? 'Image and carousel rendering needs a client OpenRouter, OpenAI, or FAL key. Platform media also requires an operator entitlement and this exact project policy to allow it.'
-      : 'Image and carousel rendering is disabled in this client AI policy.')
+      ? 'Image and carousel rendering needs a space OpenRouter, OpenAI, or FAL key. Platform media also requires an operator entitlement and this exact project policy to allow it.'
+      : 'Image and carousel rendering is disabled in this space AI policy.')
   }
   if (videoLocked) {
     notes.push(capabilities.hasFal
-      ? 'Video rendering is disabled in this client AI policy.'
-      : 'Video rendering requires a client-owned FAL key. Platform video only applies when the operator is entitled and this exact project policy allows platform media.')
+      ? 'Video rendering is disabled in this space AI policy.'
+      : 'Video rendering requires a space-owned FAL key. Platform video only applies when the operator is entitled and this exact project policy allows platform media.')
   }
   const textBody = notes.join(' ')
   const rows = [
@@ -2216,78 +2534,7 @@ function pricingCatalogBadge(source: ModelPricingCatalogSource = 'loading', rowC
   return { label: 'Loading guide', color: color.ghost, border: color.line }
 }
 
-function ModelRoutingPanel({ capabilities, onAddKey, pricingCatalog, pricingSource, pricingRowCount }: {
-  capabilities: ProviderCapabilities
-  onAddKey?: () => void
-  pricingCatalog?: ModelPricingGuide[]
-  pricingSource?: ModelPricingCatalogSource
-  pricingRowCount?: number
-}) {
-  const routes = modelRouteRecommendations(capabilities, pricingCatalog)
-  const reviewedOn = latestPricingReviewDate(pricingCatalog)
-  const pricingStatus = pricingCatalogBadge(pricingSource, pricingRowCount)
-  const budget = capabilities.monthlyBudgetUsd
-    ? `Generation cap: $${capabilities.monthlyBudgetUsd.toFixed(0)} (${capabilities.budgetGuardEnabled ? capabilities.budgetGuardMode : 'off'})`
-    : capabilities.budgetGuardEnabled ? 'No generation cap set' : 'Generation guard off'
-
-  return (
-    <section style={{ width: '100%', maxWidth: 760, marginTop: space[4], padding: space[4], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, textAlign: 'left' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: space[3], marginBottom: space[3] }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: color.accent, fontSize: t.size.micro, fontWeight: t.weight.semibold, textTransform: 'uppercase', letterSpacing: 0 }}>
-            <KeyRound size={12} />
-            Model routing
-          </div>
-          <div style={{ color: color.ghost, fontSize: t.size.cap, lineHeight: 1.45, marginTop: 3 }}>
-            Client keys first. Standard models by default. Premium, generated media, and paid social spend need explicit approval.
-            <br />
-            Pricing guide reviewed {reviewedOn}. {pricingStatus.label}. Estimates are planning guides.
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          <span style={{ padding: '4px 8px', borderRadius: radius.pill, background: color.paper2, border: `1px solid ${pricingStatus.border}`, color: pricingStatus.color, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>
-            {pricingStatus.label}
-          </span>
-          <span style={{ padding: '4px 8px', borderRadius: radius.pill, background: color.paper2, border: `1px solid ${color.line}`, color: color.ghost, fontSize: t.size.micro, fontWeight: t.weight.medium }}>
-            {budget}
-          </span>
-          {onAddKey && (
-            <button onClick={onAddKey} style={{ padding: '6px 10px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.paper2, color: color.ink2, fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
-              Provider keys
-            </button>
-          )}
-        </div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: space[2] }}>
-        {routes.map(route => {
-          const Icon = route.icon
-          const tone = routeToneStyle(route.tone)
-          return (
-            <div key={route.label} style={{ padding: space[3], borderRadius: radius.md, background: tone.bg, border: `1px solid ${tone.border}` }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
-                <Icon size={13} style={{ color: tone.fg, flexShrink: 0 }} />
-                <span style={{ color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold }}>{route.label}</span>
-                <span style={{ marginLeft: 'auto', color: tone.fg, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>{route.status}</span>
-              </div>
-              <div style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 7px', borderRadius: radius.pill, background: color.paper2, border: `1px solid ${color.line}`, color: color.ghost, fontSize: t.size.micro, fontWeight: t.weight.medium, marginBottom: 6 }}>
-                {route.cost}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 6 }}>
-                <span style={{ color: color.ink, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>{route.estimate.label}</span>
-                <span style={{ color: color.ghost, fontSize: t.size.micro, lineHeight: 1.35 }}>{route.estimate.detail}</span>
-              </div>
-              <div style={{ color: color.ink2, fontSize: t.size.micro, lineHeight: 1.45 }}>
-                {route.body}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </section>
-  )
-}
-
-function Idle({ onRun, observations, actions, onDismiss, onOpenIntegrations, onWeeklyReviewAction, weeklyActionKey, setup, projectName, onOpenBrain, onOpenLearning, onOpenSkills, providerCapabilities, onAddKey, pricingCatalog, pricingSource, pricingRowCount, demandPlan, composer }: {
+function Idle({ onRun, observations, actions, onDismiss, onOpenIntegrations, onWeeklyReviewAction, weeklyActionKey, setup, projectName, onOpenBrain, onOpenLearning, onOpenReview, onOpenCalendar, onOpenPerformance, onOpenSkills, providerCapabilities, onAddKey, pricingCatalog, pricingSource, pricingRowCount, stats, demandPlan, composer }: {
   onRun: (prompt: string) => void
   observations: ObservationNotice[]
   actions: LaunchAction[]
@@ -2299,100 +2546,649 @@ function Idle({ onRun, observations, actions, onDismiss, onOpenIntegrations, onW
   projectName: string
   onOpenBrain: () => void
   onOpenLearning: () => void
+  onOpenReview: () => void
+  onOpenCalendar: () => void
+  onOpenPerformance: () => void
   onOpenSkills: () => void
   providerCapabilities: ProviderCapabilities
   onAddKey?: () => void
   pricingCatalog?: ModelPricingGuide[]
   pricingSource?: ModelPricingCatalogSource
   pricingRowCount?: number
+  stats: CommandStats
   demandPlan: DemandPlanSnapshot
   composer: ReactNode
 }) {
   const setupDone = !!setup && setup.business && setup.audience && setup.voice && setup.categories && setup.knowledge
-  // Persona-first, SAM-clean: when the brain is thin, the FIRST card is "set up
-  // the client" (routes to Brain). No separate checklist block.
   const setupCard: LaunchAction = { icon: Sparkles, title: `Set up ${projectName}`, sub: 'URL, audience, offer, proof', prompt: '', action: 'brain' }
   const grid = (setup && !setupDone ? [setupCard, ...actions] : actions).slice(0, 6)
   const weeklyObservations = observations.filter(o => o.kind === 'weekly_learning')
   const otherObservations = observations.filter(o => o.kind !== 'weekly_learning')
+  const primaryObservation = otherObservations[0]
+  const ready = demandPlan.completeness >= 70
+  const channels = demandPlan.channels.slice(0, 6)
+  const firstAction = grid.find(action => action.action !== 'brain') ?? actions[0]
+  const recommendation = !setupDone
+    ? {
+      label: 'Setup needed',
+      title: `Complete the Strategy Brain for ${projectName}.`,
+      body: demandPlan.missing.length
+        ? `Missing: ${demandPlan.missing.join(', ')}. Add these before scaling content production.`
+        : 'Add the company URL, audience, offer, proof, tone, and source material before scaling content production.',
+      primary: 'Open Strategy Brain',
+      secondary: firstAction?.title ?? 'Plan campaign',
+    }
+    : primaryObservation
+      ? {
+        label: 'VERA recommends',
+        title: primaryObservation.title,
+        body: primaryObservation.detail || primaryObservation.proposed_action || 'This space has an operating signal ready for review.',
+        primary: primaryObservation.action_kind === 'open_integrations' ? 'Open integrations' : 'Handle this',
+        secondary: firstAction?.title ?? 'Plan campaign',
+      }
+      : {
+        label: 'VERA recommends',
+        title: ready ? 'Turn the saved strategy into the next content move.' : 'Strengthen the strategy model before scaling output.',
+        body: ready
+          ? 'Use the active channels, approval model, and learning signals to brief the next campaign or draft.'
+          : 'The baseline model is usable, but VERA will produce stronger work once the missing context is saved in Brain.',
+        primary: firstAction?.title ?? 'Plan campaign',
+        secondary: ready ? 'Open Brain' : 'Complete Brain',
+      }
+  const runPrimaryRecommendation = () => {
+    if (!setupDone) {
+      onOpenBrain()
+      return
+    }
+    if (primaryObservation) {
+      if (primaryObservation.action_kind === 'open_integrations') onOpenIntegrations(primaryObservation)
+      else onRun(primaryObservation.proposed_action || primaryObservation.title)
+      return
+    }
+    if (firstAction?.action === 'brain') onOpenBrain()
+    else if (firstAction?.prompt) onRun(firstAction.prompt)
+  }
+  const runSecondaryRecommendation = () => {
+    if (!setupDone || recommendation.secondary.includes('Brain')) onOpenBrain()
+    else if (firstAction?.prompt) onRun(firstAction.prompt)
+  }
+  const modelWarning = providerCapabilities.loaded && (providerCapabilities.needsTextKey || !providerCapabilities.imageReady || !providerCapabilities.videoReady)
+  const reviewQueue = stats.pending + stats.rejected
+  const readyToSchedule = stats.approved
+  const productionTotal = stats.draft + stats.pending + stats.approved + stats.scheduled + stats.posted + stats.rejected
+  const spendState = !providerCapabilities.loaded
+    ? 'Checking keys'
+    : providerCapabilities.monthlyBudgetUsd
+      ? `$${providerCapabilities.monthlyBudgetUsd.toFixed(0)} ${providerCapabilities.budgetGuardEnabled ? providerCapabilities.budgetGuardMode : 'guard off'}`
+      : providerCapabilities.budgetGuardEnabled ? 'Guard on, no cap' : 'Guard off'
+  const commandFocus = !setupDone
+    ? {
+      label: 'Build the Brain',
+      title: 'Save the company context before scaling output.',
+      detail: 'Start with the website, sources, audience, proof, and channel assumptions.',
+      action: onOpenBrain,
+      actionLabel: 'Open Brain',
+    }
+    : reviewQueue > 0
+      ? {
+        label: 'Review queue',
+        title: `${reviewQueue} item${reviewQueue === 1 ? '' : 's'} need a decision.`,
+        detail: 'Clear pending or rejected content before Vera schedules more work.',
+        action: onOpenReview,
+        actionLabel: 'Open Review',
+      }
+      : readyToSchedule > 0
+        ? {
+          label: 'Schedule next',
+          title: `${readyToSchedule} approved item${readyToSchedule === 1 ? '' : 's'} can move to the calendar.`,
+          detail: 'Put approved content into the right day, channel, and publishing cadence.',
+          action: onOpenCalendar,
+          actionLabel: 'Open Planner',
+        }
+        : primaryObservation
+          ? {
+            label: 'Learning signal',
+            title: primaryObservation.title,
+            detail: primaryObservation.detail || primaryObservation.proposed_action || 'A saved signal is ready for action.',
+            action: () => {
+              if (primaryObservation.action_kind === 'open_integrations') onOpenIntegrations(primaryObservation)
+              else onRun(primaryObservation.proposed_action || primaryObservation.title)
+            },
+            actionLabel: primaryObservation.action_kind === 'open_integrations' ? 'Open Integrations' : 'Act on Signal',
+          }
+          : {
+            label: 'Create next',
+            title: productionTotal ? 'Plan the next useful content move.' : 'Start with one concrete content brief.',
+            detail: 'Use Brain context and current channels to generate a useful draft, not generic output.',
+            action: () => firstAction?.prompt ? onRun(firstAction.prompt) : onOpenBrain(),
+            actionLabel: firstAction?.title ?? 'Plan Content',
+          }
   return (
-    <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: space[8] }}>
-      <span style={{ marginBottom: space[5], display: 'inline-flex' }}><VeraAvatar size={56} hero /></span>
-      <h1 style={{ fontSize: t.size.h2, fontWeight: t.weight.semibold, color: color.ink, marginBottom: space[2], textAlign: 'center' }}>
-        Create content that works for {projectName}
-      </h1>
-      <p style={{ fontSize: t.size.body, color: color.ghost, marginBottom: space[5], textAlign: 'center', maxWidth: '44ch' }}>
-        Turn client knowledge into campaigns, posts, visuals, storyboards, and measurable audience signals.
-      </p>
+    <div style={{ minHeight: '100%', padding: `clamp(${space[6]}, 3vw, ${space[8]})`, paddingBottom: space[10], display: 'flex', justifyContent: 'center' }}>
+      <div style={{ width: '100%', maxWidth: 1180, display: 'grid', gap: space[5], alignContent: 'start' }}>
+        <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: space[5], alignItems: 'center' }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: space[3], marginBottom: space[2] }}>
+              <VeraAvatar size={38} hero />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>VERA Command</div>
+                <h1 style={{ margin: 0, color: color.ink, fontSize: t.size.h3, fontWeight: t.weight.semibold, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{projectName}</h1>
+              </div>
+            </div>
+            <p style={{ margin: 0, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.5, maxWidth: 680 }}>
+              Operating desk for strategy, production, approvals, publishing, and learning.
+            </p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <CommandStatusPill tone={ready ? 'success' : 'warn'} label={`${demandPlan.completeness}% Brain ready`} />
+            <CommandStatusPill tone={providerCapabilities.loaded && providerCapabilities.textReady ? 'success' : 'warn'} label={providerCapabilities.loaded && providerCapabilities.textReady ? 'Text ready' : 'Text setup'} />
+            <CommandStatusPill tone={modelWarning ? 'warn' : 'success'} label={modelWarning ? 'Media guarded' : 'Models guarded'} />
+          </div>
+        </section>
 
-      {providerCapabilities.loaded && (providerCapabilities.needsTextKey || !providerCapabilities.imageReady || !providerCapabilities.videoReady) && (
+        <CommandDailyBrief
+          focus={commandFocus}
+          brainReadiness={demandPlan.completeness}
+          reviewQueue={reviewQueue}
+          readyToSchedule={readyToSchedule}
+          scheduled={stats.scheduled}
+          posted={stats.posted}
+          productionTotal={productionTotal}
+          spendState={spendState}
+          guardTone={modelWarning ? 'warn' : 'success'}
+          onOpenBrain={onOpenBrain}
+          onOpenReview={onOpenReview}
+          onOpenCalendar={onOpenCalendar}
+          onOpenPerformance={onOpenPerformance}
+          onOpenLearning={onOpenLearning}
+        />
+
+        <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: space[5], alignItems: 'stretch' }}>
+          <article style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[6], boxShadow: 'var(--shadow-pop)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold, marginBottom: space[4] }}>
+              <Sparkles size={13} />
+              {recommendation.label}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: space[5], alignItems: 'stretch' }}>
+              <div style={{ minWidth: 0 }}>
+                <h2 style={{ margin: 0, color: color.ink, fontSize: t.size.h2, fontWeight: t.weight.semibold, lineHeight: 1.2 }}>{recommendation.title}</h2>
+                <p style={{ margin: `${space[3]} 0 0`, color: color.ink2, fontSize: t.size.body, lineHeight: 1.6, maxWidth: '60ch' }}>{recommendation.body}</p>
+                <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', marginTop: space[5] }}>
+                  <button onClick={runPrimaryRecommendation} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: radius.pill, border: 'none', background: color.accent, color: '#fff', fontSize: t.size.sm, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
+                    <ArrowUp size={14} style={{ transform: 'rotate(45deg)' }} />
+                    {recommendation.primary}
+                  </button>
+                  <button onClick={runSecondaryRecommendation} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.paper2, color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.medium, cursor: 'pointer' }}>
+                    <Target size={14} />
+                    {recommendation.secondary}
+                  </button>
+                </div>
+              </div>
+              <div style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2, padding: space[4], minWidth: 0 }}>
+                <div style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium, marginBottom: space[2] }}>Learning signal</div>
+                <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.4 }}>
+                  {weeklyObservations[0]?.detail || demandPlan.learning[0] || 'Weekly performance review is active.'}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: color.success, fontSize: t.size.micro, fontWeight: t.weight.semibold, marginTop: space[3] }}>
+                  <TrendingUp size={12} />
+                  Self-learning loop
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <aside style={{ display: 'grid', gap: space[3] }}>
+            <CommandMetric icon={Target} label="Objective" value={demandPlan.objective} detail={demandPlan.conversionPath} />
+            <CommandMetric icon={Network} label="Active channels" value={channels.length ? channels.join(', ') : 'Set in Brain'} detail={`${demandPlan.sourceCount}/${demandPlan.sourceTotal} sources connected`} />
+          </aside>
+        </section>
+
+        <section style={{ display: 'grid', gap: space[3] }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
+            <span style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>Active channels</span>
+            {channels.map(channel => <ChannelPill key={channel} label={channel} />)}
+            {demandPlan.channels.length > channels.length && <ChannelPill label={`+${demandPlan.channels.length - channels.length}`} muted />}
+          </div>
+          {composer}
+        </section>
+
+        {providerCapabilities.loaded && modelWarning && (
         <ProviderCapabilityNotice capabilities={providerCapabilities} onAddKey={onAddKey} />
       )}
 
-      {composer}
-
       {providerCapabilities.loaded && (
-        <ModelRoutingPanel capabilities={providerCapabilities} onAddKey={onAddKey} pricingCatalog={pricingCatalog} pricingSource={pricingSource} pricingRowCount={pricingRowCount} />
+        <ModelSpendStrip capabilities={providerCapabilities} onAddKey={onAddKey} pricingCatalog={pricingCatalog} pricingSource={pricingSource} pricingRowCount={pricingRowCount} />
       )}
 
-      <DemandPlanPanel plan={demandPlan} projectName={projectName} onRun={onRun} onOpenBrain={onOpenBrain} />
+        <CommandOperatingLanes
+          stats={stats}
+          plan={demandPlan}
+          setupDone={setupDone}
+          modelWarning={modelWarning}
+          learningSignal={weeklyObservations[0]?.detail || demandPlan.learning[0] || 'Learning starts once published content returns engagement, traffic, and follow-up signals.'}
+          onOpenBrain={onOpenBrain}
+          onOpenReview={onOpenReview}
+          onOpenCalendar={onOpenCalendar}
+          onOpenLearning={onOpenLearning}
+          onRun={onRun}
+        />
 
-      {/* "VERA wants to" — proactive observations (moved from the old Home). */}
-      {observations.length > 0 && (
-        <div style={{ width: '100%', maxWidth: 760, marginTop: space[6], marginBottom: space[5] }}>
-          <div style={{ fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: t.weight.semibold, color: color.accent, marginBottom: space[3] }}>VERA wants to</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: space[3] }}>
-            {weeklyObservations.map(o => (
-              <WeeklyLearningNoticeCard
-                key={o.id}
-                observation={o}
-                projectName={projectName}
-                onRun={onRun}
-                onOpenLearning={onOpenLearning}
-                onOpenSkills={onOpenSkills}
-                onReviewAction={onWeeklyReviewAction}
-                busyActionKey={weeklyActionKey}
-                onDismiss={() => onDismiss(o)}
-              />
-            ))}
-            {otherObservations.map(o => (
-              <div key={o.id} style={{ display: 'flex', alignItems: 'stretch', background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.md, overflow: 'hidden' }}>
-                <button onClick={() => o.action_kind === 'open_integrations' ? onOpenIntegrations(o) : onRun(o.proposed_action || o.title)} title={o.action_kind === 'open_integrations' ? 'Open integrations' : 'Ask VERA to handle this'}
-                  style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: space[3], textAlign: 'left', padding: `${space[3]} ${space[4]}`, background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: t.family.sans, color: color.ink, fontSize: t.size.sm }}>
-                  <Sparkles size={15} style={{ color: color.accent, flexShrink: 0 }} />
-                  <span style={{ flex: 1, minWidth: 0 }}>{o.title}</span>
-                  <ArrowUp size={13} style={{ color: color.accent, transform: 'rotate(45deg)', flexShrink: 0 }} />
-                </button>
-                <button onClick={() => onDismiss(o)} title="Dismiss"
-                  style={{ flexShrink: 0, padding: `0 ${space[3]}`, background: 'transparent', border: 'none', borderLeft: `1px solid var(--accent-line)`, cursor: 'pointer', color: color.ghost, display: 'flex', alignItems: 'center' }}>
-                  <X size={14} />
-                </button>
+        <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: space[5], alignItems: 'start' }}>
+          <DemandPlanPanel plan={demandPlan} projectName={projectName} onRun={onRun} onOpenBrain={onOpenBrain} />
+
+          <aside style={{ display: 'grid', gap: space[4] }}>
+            <div style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5] }}>
+              <div style={{ color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold, marginBottom: space[3] }}>Quick actions</div>
+              <div style={{ display: 'grid', gap: space[2] }}>
+                {grid.map(c => {
+                  const Icn = c.icon
+                  return (
+                    <button key={c.title} onClick={() => c.action === 'brain' ? onOpenBrain() : onRun(c.prompt)}
+                      style={{ width: '100%', minHeight: 48, display: 'flex', alignItems: 'center', gap: space[3], textAlign: 'left', padding: `${space[3]} ${space[4]}`, background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, cursor: 'pointer', fontFamily: t.family.sans, transition: 'border-color 120ms, box-shadow 120ms' }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-line)'; e.currentTarget.style.boxShadow = 'var(--shadow-pop)' }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--line)'; e.currentTarget.style.boxShadow = 'none' }}>
+                      <span style={{ width: 30, height: 30, borderRadius: radius.pill, background: 'var(--accent-tint)', color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <Icn size={16} strokeWidth={1.9} />
+                      </span>
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: 'block', fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink }}>{c.title}</span>
+                        <span style={{ display: 'block', fontSize: t.size.cap, color: color.ghost, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.sub}</span>
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: space[3], width: '100%', maxWidth: 760, marginTop: observations.length > 0 ? 0 : space[5] }}>
-        {grid.map(c => {
-          const Icn = c.icon
-          return (
-            <button key={c.title} onClick={() => c.action === 'brain' ? onOpenBrain() : onRun(c.prompt)}
-              style={{ flex: '1 1 220px', maxWidth: 248, minHeight: 50, display: 'inline-flex', alignItems: 'center', gap: space[3], textAlign: 'left', padding: `${space[3]} ${space[4]}`, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.pill, cursor: 'pointer', fontFamily: t.family.sans, transition: 'border-color 120ms, box-shadow 120ms' }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-line)'; e.currentTarget.style.boxShadow = 'var(--shadow-pop)' }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--line)'; e.currentTarget.style.boxShadow = 'none' }}>
-              <span style={{ width: 32, height: 32, borderRadius: radius.pill, background: 'var(--accent-tint)', color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Icn size={17} strokeWidth={1.9} />
-              </span>
-              <span style={{ minWidth: 0 }}>
-                <span style={{ display: 'block', fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink }}>{c.title}</span>
-                <span style={{ display: 'block', fontSize: t.size.cap, color: color.ghost, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.sub}</span>
-              </span>
-            </button>
-          )
-        })}
+            {observations.length > 0 && (
+              <div style={{ display: 'grid', gap: space[3] }}>
+                <div style={{ color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>VERA wants to</div>
+                {weeklyObservations.map(o => (
+                  <WeeklyLearningNoticeCard
+                    key={o.id}
+                    observation={o}
+                    projectName={projectName}
+                    onRun={onRun}
+                    onOpenLearning={onOpenLearning}
+                    onOpenSkills={onOpenSkills}
+                    onReviewAction={onWeeklyReviewAction}
+                    busyActionKey={weeklyActionKey}
+                    onDismiss={() => onDismiss(o)}
+                  />
+                ))}
+                {otherObservations.map(o => (
+                  <div key={o.id} style={{ display: 'flex', alignItems: 'stretch', background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.md, overflow: 'hidden' }}>
+                    <button onClick={() => o.action_kind === 'open_integrations' ? onOpenIntegrations(o) : onRun(o.proposed_action || o.title)} title={o.action_kind === 'open_integrations' ? 'Open integrations' : 'Ask VERA to handle this'}
+                      style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: space[3], textAlign: 'left', padding: `${space[3]} ${space[4]}`, background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: t.family.sans, color: color.ink, fontSize: t.size.sm }}>
+                      <Sparkles size={15} style={{ color: color.accent, flexShrink: 0 }} />
+                      <span style={{ flex: 1, minWidth: 0 }}>{o.title}</span>
+                      <ArrowUp size={13} style={{ color: color.accent, transform: 'rotate(45deg)', flexShrink: 0 }} />
+                    </button>
+                    <button onClick={() => onDismiss(o)} title="Dismiss"
+                      style={{ flexShrink: 0, padding: `0 ${space[3]}`, background: 'transparent', border: 'none', borderLeft: `1px solid var(--accent-line)`, cursor: 'pointer', color: color.ghost, display: 'flex', alignItems: 'center' }}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </aside>
+        </section>
       </div>
     </div>
+  )
+}
+
+function CommandDailyBrief({
+  focus,
+  brainReadiness,
+  reviewQueue,
+  readyToSchedule,
+  scheduled,
+  posted,
+  productionTotal,
+  spendState,
+  guardTone,
+  onOpenBrain,
+  onOpenReview,
+  onOpenCalendar,
+  onOpenPerformance,
+  onOpenLearning,
+}: {
+  focus: { label: string; title: string; detail: string; action: () => void; actionLabel: string }
+  brainReadiness: number
+  reviewQueue: number
+  readyToSchedule: number
+  scheduled: number
+  posted: number
+  productionTotal: number
+  spendState: string
+  guardTone: 'success' | 'warn'
+  onOpenBrain: () => void
+  onOpenReview: () => void
+  onOpenCalendar: () => void
+  onOpenPerformance: () => void
+  onOpenLearning: () => void
+}) {
+  const stats = [
+    { label: 'Brain', value: `${brainReadiness}%`, detail: 'context ready', tone: brainReadiness >= 70 ? 'success' : 'warn' },
+    { label: 'Review', value: String(reviewQueue), detail: 'needs decision', tone: reviewQueue ? 'warn' : 'success' },
+    { label: 'Schedule', value: String(readyToSchedule), detail: 'approved items', tone: readyToSchedule ? 'info' : 'neutral' },
+    { label: 'Live', value: String(posted), detail: `${scheduled} scheduled`, tone: posted || scheduled ? 'success' : 'neutral' },
+    { label: 'Spend', value: spendState, detail: 'generation only', tone: guardTone },
+  ] as const
+  const actions = [
+    { label: 'Brain', icon: Brain, onClick: onOpenBrain },
+    { label: 'Review', icon: Check, onClick: onOpenReview },
+    { label: 'Planner', icon: CalendarDays, onClick: onOpenCalendar },
+    { label: 'Performance', icon: BarChart3, onClick: onOpenPerformance },
+    { label: 'Learning', icon: TrendingUp, onClick: onOpenLearning },
+  ]
+
+  return (
+    <section style={{ background: `linear-gradient(135deg, ${color.surface} 0%, ${color.paper2} 100%)`, border: `1px solid ${color.line}`, borderRadius: radius.lg, boxShadow: 'var(--shadow-pop)', overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 0 }}>
+        <div style={{ padding: space[6], minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap', marginBottom: space[3] }}>
+            <span style={{ color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>{focus.label}</span>
+            <span style={{ color: color.ghost, fontSize: t.size.micro }}>{productionTotal} items in loop</span>
+          </div>
+          <h2 style={{ margin: 0, color: color.ink, fontSize: t.size.h2, fontWeight: t.weight.semibold, lineHeight: 1.16 }}>{focus.title}</h2>
+          <p style={{ margin: `${space[3]} 0 0`, color: color.ink2, fontSize: t.size.body, lineHeight: 1.55, maxWidth: 720 }}>{focus.detail}</p>
+          <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', marginTop: space[5] }}>
+            <button onClick={focus.action} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minHeight: 34, padding: '8px 13px', borderRadius: radius.pill, border: 'none', background: color.accent, color: '#fff', fontSize: t.size.sm, fontWeight: t.weight.semibold, cursor: 'pointer', boxShadow: 'var(--shadow-glow)' }}>
+              <ArrowUp size={14} style={{ transform: 'rotate(45deg)' }} />
+              {focus.actionLabel}
+            </button>
+            {actions.map(action => {
+              const Icon = action.icon
+              return (
+                <button key={action.label} onClick={action.onClick} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 34, padding: '8px 11px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: color.ink2, fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
+                  <Icon size={13} />
+                  {action.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+        <div style={{ padding: space[5], display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: space[3], alignContent: 'center', minWidth: 0 }}>
+          {stats.map(stat => (
+            <CommandBriefStat key={stat.label} label={stat.label} value={stat.value} detail={stat.detail} tone={stat.tone} />
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function CommandBriefStat({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: 'success' | 'warn' | 'info' | 'neutral' }) {
+  const toneColor = tone === 'success' ? color.success : tone === 'warn' ? color.warn : tone === 'info' ? color.info : color.ghost
+  return (
+    <div style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.surface, padding: space[3], minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium, marginBottom: 5 }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: toneColor, flexShrink: 0 }} />
+        {label}
+      </div>
+      <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</div>
+      <div style={{ color: color.ghost, fontSize: t.size.micro, lineHeight: 1.35, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</div>
+    </div>
+  )
+}
+
+function CommandOperatingLanes({
+  stats,
+  plan,
+  setupDone,
+  modelWarning,
+  learningSignal,
+  onOpenBrain,
+  onOpenReview,
+  onOpenCalendar,
+  onOpenLearning,
+  onRun,
+}: {
+  stats: CommandStats
+  plan: DemandPlanSnapshot
+  setupDone: boolean
+  modelWarning: boolean
+  learningSignal: string
+  onOpenBrain: () => void
+  onOpenReview: () => void
+  onOpenCalendar: () => void
+  onOpenLearning: () => void
+  onRun: (prompt: string) => void
+}) {
+  const productionTotal = stats.draft + stats.pending + stats.approved + stats.scheduled + stats.posted + stats.rejected
+  const needsAttention = stats.pending + stats.rejected
+  const planPrompt = `Use the current Strategy Brain to recommend the next best content move. Return the channel, format, audience, core angle, approval path, expected signal, and whether any paid media generation should be avoided.`
+  const learningPrompt = `Review what VERA should learn next from the current content queue. Focus on comments, shares, traffic, objections, qualified follow-up signals, and what should become a reusable skill.`
+  return (
+    <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: space[4] }}>
+      <CommandLane
+        icon={Brain}
+        label="Brain"
+        title={setupDone ? 'Strategy model is ready to guide production.' : 'Strategy Brain needs more context.'}
+        body={setupDone
+          ? `${plan.sourceCount}/${plan.sourceTotal} source groups connected. ${plan.customPolicyCount} channel policies are active.`
+          : (plan.missing.length ? `Missing ${plan.missing.join(', ')} before scaling output.` : 'Add company URL, offer, audience, proof, and channel strategy before scaling output.')}
+        actionLabel={setupDone ? 'Review Brain' : 'Complete Brain'}
+        onAction={onOpenBrain}
+      >
+        <CommandLaneRow label="Objective" value={plan.objective} />
+        <CommandLaneRow label="Channels" value={plan.channels.slice(0, 4).join(', ') || 'Set in Brain'} />
+        <CommandLaneRow label="Approval care" value={plan.highCareCount ? `${plan.highCareCount} high-care channels` : 'Standard review'} />
+      </CommandLane>
+
+      <CommandLane
+        icon={CalendarDays}
+        label="Production"
+        title={productionTotal ? `${productionTotal} content items in the operating loop.` : 'No content in production yet.'}
+        body={needsAttention
+          ? `${needsAttention} item${needsAttention === 1 ? '' : 's'} need review or correction before publishing.`
+          : 'Use the queue and calendar to keep approvals, schedules, and platform previews separate.'}
+        actionLabel={stats.pending ? 'Open Review' : 'Open Calendar'}
+        onAction={stats.pending ? onOpenReview : onOpenCalendar}
+      >
+        <CommandStatusBars stats={stats} />
+      </CommandLane>
+
+      <CommandLane
+        icon={TrendingUp}
+        label="Learning"
+        title="Signals should improve the next brief."
+        body={learningSignal}
+        actionLabel="Open Learning"
+        onAction={onOpenLearning}
+      >
+        <CommandLaneRow label="Guardrail" value={modelWarning ? 'Media spend needs review' : 'Model routes are controlled'} />
+        <CommandLaneRow label="Budget scope" value="Generation and paid social only" />
+        <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', marginTop: space[2] }}>
+          <button onClick={() => onRun(planPrompt)} style={commandLaneButtonStyle('secondary')}>
+            <Target size={12} />
+            Next move
+          </button>
+          <button onClick={() => onRun(learningPrompt)} style={commandLaneButtonStyle('secondary')}>
+            <Sparkles size={12} />
+            Learn
+          </button>
+        </div>
+      </CommandLane>
+    </section>
+  )
+}
+
+function CommandLane({
+  icon: Icon,
+  label,
+  title,
+  body,
+  actionLabel,
+  onAction,
+  children,
+}: {
+  icon: React.ElementType
+  label: string
+  title: string
+  body: string
+  actionLabel: string
+  onAction: () => void
+  children: ReactNode
+}) {
+  return (
+    <article style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5], display: 'grid', gap: space[4], minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3] }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>
+          <Icon size={13} />
+          {label}
+        </span>
+        <button onClick={onAction} style={commandLaneButtonStyle('primary')}>
+          {actionLabel}
+        </button>
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <h3 style={{ margin: 0, color: color.ink, fontSize: t.size.h4, fontWeight: t.weight.semibold, lineHeight: 1.25 }}>{title}</h3>
+        <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>{body}</p>
+      </div>
+      <div style={{ display: 'grid', gap: space[2] }}>
+        {children}
+      </div>
+    </article>
+  )
+}
+
+function CommandLaneRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(86px, auto) minmax(0, 1fr)', gap: space[3], alignItems: 'baseline', minWidth: 0 }}>
+      <span style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium }}>{label}</span>
+      <span style={{ color: color.ink, fontSize: t.size.cap, lineHeight: 1.35, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+    </div>
+  )
+}
+
+function CommandStatusBars({ stats }: { stats: CommandStats }) {
+  const rows = [
+    { label: 'Draft', value: stats.draft, dot: color.ghost },
+    { label: 'Review', value: stats.pending, dot: color.warn },
+    { label: 'Approved', value: stats.approved, dot: color.success },
+    { label: 'Scheduled', value: stats.scheduled, dot: color.info },
+    { label: 'Posted', value: stats.posted, dot: color.success },
+    { label: 'Rejected', value: stats.rejected, dot: color.danger },
+  ]
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: space[2] }}>
+      {rows.map(row => (
+        <div key={row.label} style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2, padding: space[3], minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: color.ghost, fontSize: t.size.micro, marginBottom: 5 }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: row.dot, flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</span>
+          </div>
+          <div style={{ color: color.ink, fontSize: t.size.h4, fontWeight: t.weight.semibold, lineHeight: 1 }}>{row.value}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function commandLaneButtonStyle(tone: 'primary' | 'secondary'): React.CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 28,
+    padding: '5px 9px',
+    borderRadius: radius.pill,
+    border: `1px solid ${tone === 'primary' ? 'var(--accent-line)' : color.line}`,
+    background: tone === 'primary' ? 'var(--accent-tint)' : color.paper2,
+    color: tone === 'primary' ? color.accent : color.ink2,
+    fontSize: t.size.micro,
+    fontWeight: t.weight.semibold,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  }
+}
+
+function CommandStatusPill({ label, tone }: { label: string; tone: 'success' | 'warn' }) {
+  const fg = tone === 'success' ? color.success : color.warn
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 28, padding: '4px 9px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: color.ink2, fontSize: t.size.micro, fontWeight: t.weight.semibold, whiteSpace: 'nowrap' }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: fg, flexShrink: 0 }} />
+      {label}
+    </span>
+  )
+}
+
+function ChannelPill({ label, muted = false }: { label: string; muted?: boolean }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', minHeight: 28, padding: '4px 10px', borderRadius: radius.pill, border: `1px solid ${muted ? color.line : 'var(--accent-line)'}`, background: muted ? color.paper2 : 'var(--accent-tint)', color: muted ? color.ghost : color.ink, fontSize: t.size.cap, fontWeight: t.weight.medium, maxWidth: 170, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      {label}
+    </span>
+  )
+}
+
+function CommandMetric({ icon: Icon, label, value, detail }: { icon: React.ElementType; label: string; value: string; detail: string }) {
+  return (
+    <div style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5], minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium, marginBottom: space[3] }}>
+        <Icon size={13} />
+        {label}
+      </div>
+      <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{value}</div>
+      <div style={{ color: color.ghost, fontSize: t.size.cap, lineHeight: 1.45, marginTop: space[2], display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{detail}</div>
+    </div>
+  )
+}
+
+function ModelSpendStrip({ capabilities, onAddKey, pricingCatalog, pricingSource, pricingRowCount }: {
+  capabilities: ProviderCapabilities
+  onAddKey?: () => void
+  pricingCatalog?: ModelPricingGuide[]
+  pricingSource?: ModelPricingCatalogSource
+  pricingRowCount?: number
+}) {
+  const routes = modelRouteRecommendations(capabilities, pricingCatalog)
+  const reviewedOn = latestPricingReviewDate(pricingCatalog)
+  const pricingStatus = pricingCatalogBadge(pricingSource, pricingRowCount)
+  const budget = capabilities.monthlyBudgetUsd
+    ? `$${capabilities.monthlyBudgetUsd.toFixed(0)} ${capabilities.budgetGuardEnabled ? capabilities.budgetGuardMode : 'guard off'}`
+    : capabilities.budgetGuardEnabled ? 'No cap set' : 'Guard off'
+  return (
+    <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))', gap: space[3], padding: space[4], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg }}>
+      {routes.map(route => {
+        const Icon = route.icon
+        const tone = routeToneStyle(route.tone)
+        return (
+          <div key={route.label} style={{ minWidth: 0, display: 'grid', gap: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium }}>
+              <Icon size={12} style={{ color: tone.fg }} />
+              {route.label}
+            </div>
+            <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{route.status}</div>
+            <div style={{ color: color.ghost, fontSize: t.size.micro, lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{route.cost}</div>
+          </div>
+        )
+      })}
+      <div style={{ minWidth: 0, display: 'grid', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium }}>
+          <Lock size={12} style={{ color: capabilities.budgetGuardEnabled ? color.warn : color.ghost }} />
+          Generation guard
+        </div>
+        <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>{budget}</div>
+        <div style={{ color: color.ghost, fontSize: t.size.micro, lineHeight: 1.35 }}>Premium media never defaults.</div>
+      </div>
+      <div style={{ minWidth: 0, display: 'grid', gap: 4 }}>
+        <div style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium }}>Pricing guide</div>
+        <div style={{ color: pricingStatus.color, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>{pricingStatus.label}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ color: color.ghost, fontSize: t.size.micro }}>Reviewed {reviewedOn}</span>
+          {onAddKey && (
+            <button onClick={onAddKey} style={{ marginLeft: 'auto', padding: '4px 8px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.paper2, color: color.ink2, fontSize: t.size.micro, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
+              Keys
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -2630,7 +3426,7 @@ function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {
           <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, marginTop: space[2], lineHeight: 1.4 }}>{plan.objective}</div>
           <div style={{ color: color.ghost, fontSize: t.size.cap, lineHeight: 1.5, marginTop: 3 }}>{plan.conversionPath}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: space[3] }}>
-            <PlanPill tone={ready ? 'accent' : 'neutral'}>{ready ? 'Client model active' : 'Demand baseline active'}</PlanPill>
+            <PlanPill tone={ready ? 'accent' : 'neutral'}>{ready ? 'Strategy model active' : 'Demand baseline active'}</PlanPill>
             <PlanPill>{plan.sourceCount}/{plan.sourceTotal} sources connected</PlanPill>
             <PlanPill>{plan.customPolicyCount} custom channel policies</PlanPill>
             {plan.highCareCount > 0 && <PlanPill tone="accent">{plan.highCareCount} high-care channels</PlanPill>}

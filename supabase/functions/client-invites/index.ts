@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
 })
 
 async function createInvite(supabase: SupabaseAdminClient, actorUserId: string, body: InviteBody, req: Request) {
-  if (!POSTMARK_SERVER_TOKEN) return jsonError("Postmark is not configured for client invitations", 500)
+  if (!POSTMARK_SERVER_TOKEN) return jsonError("Postmark is not configured for space invitations", 500)
 
   const projectId = body.project_id?.trim()
   const email = normalizeEmail(body.email)
@@ -81,7 +81,7 @@ async function createInvite(supabase: SupabaseAdminClient, actorUserId: string, 
     .eq("id", projectId)
     .maybeSingle()
   if (projectError) return jsonError(projectError.message, 500)
-  if (!project) return jsonError("Client not found", 404)
+  if (!project) return jsonError("Space not found", 404)
 
   const allowed = await canManageProject(supabase, actorUserId, project.id, project.org_id)
   if (!allowed) return jsonError("Forbidden", 403)

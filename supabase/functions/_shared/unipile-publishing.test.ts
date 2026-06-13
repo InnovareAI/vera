@@ -14,7 +14,7 @@ Deno.test("getUnipileAccountId reads project-scoped account ids from integration
   assertEquals(accountId, "client-account")
 })
 
-Deno.test("linkedInOrganizationForIntegration reads the connected company page from client integration metadata", () => {
+Deno.test("linkedInOrganizationForIntegration reads the connected company page from space integration metadata", () => {
   const orgId = linkedInOrganizationForIntegration({
     external_ref: { linkedin_company_id: "urn:li:organization:12345" },
     config: {},
@@ -23,7 +23,7 @@ Deno.test("linkedInOrganizationForIntegration reads the connected company page f
   assertEquals(orgId, "urn:li:organization:12345")
 })
 
-Deno.test("resolveClientLinkedInOrganization auto-selects only the client integration company page", () => {
+Deno.test("resolveClientLinkedInOrganization auto-selects only the space integration company page", () => {
   const result = resolveClientLinkedInOrganization({
     external_ref: { linkedin_organization_id: "urn:li:organization:12345" },
   })
@@ -32,7 +32,7 @@ Deno.test("resolveClientLinkedInOrganization auto-selects only the client integr
   assertEquals(result.asOrganization, "urn:li:organization:12345")
 })
 
-Deno.test("resolveClientLinkedInOrganization accepts explicit org ids only when they match the client integration", () => {
+Deno.test("resolveClientLinkedInOrganization accepts explicit org ids only when they match the space integration", () => {
   const result = resolveClientLinkedInOrganization({
     external_ref: { linkedin_organization_id: "urn:li:organization:12345" },
   }, "urn:linkedin:organization:12345")
@@ -48,10 +48,10 @@ Deno.test("resolveClientLinkedInOrganization rejects cross-client company page i
 
   assert(!result.ok)
   assertEquals(result.status, 403)
-  assertEquals(result.message, "LinkedIn company page is not connected to this client space.")
+  assertEquals(result.message, "LinkedIn company page is not connected to this space.")
 })
 
-Deno.test("resolveClientLinkedInOrganization rejects explicit company posting without a client integration company id", () => {
+Deno.test("resolveClientLinkedInOrganization rejects explicit company posting without a space integration company id", () => {
   const result = resolveClientLinkedInOrganization({
     external_ref: { unipile_account_id: "client-account" },
   }, "urn:li:organization:12345")

@@ -340,7 +340,7 @@ export default function Learning() {
       return
     }
     setHandoffActions(prev => [data as SamHandoffAction, ...prev])
-    push({ kind: 'success', title: 'Follow-up queued', body: 'The signal is now tracked for this client.' })
+    push({ kind: 'success', title: 'Follow-up queued', body: 'The signal is now tracked for this space.' })
   }
 
   async function updateHandoffAction(id: string, patch: Partial<SamHandoffAction>, toast: { title: string; body: string }) {
@@ -416,7 +416,7 @@ export default function Learning() {
   return (
     <div style={{ padding: `${space[8]} ${space[8]} 0`, maxWidth: 1180 }}>
       <PageHeader
-        eyebrow={activeProject?.name ?? 'Client'}
+        eyebrow={activeProject?.name ?? 'Space'}
         title="Learning Loop"
         subtitle="What VERA has learned from approvals, publishing, engagement, shares, clicks, and traffic signals."
         actions={
@@ -497,7 +497,7 @@ export default function Learning() {
             {operatingRows.length ? operatingRows.map(row => (
               <OperatingRow key={row.label} label={row.label} value={row.value} />
             )) : (
-              <LearningState>Add a strategy model in the Strategy Brain so VERA knows what traction, approval, and follow-up mean for this client.</LearningState>
+              <LearningState>Add a strategy model in the Strategy Brain so VERA knows what traction, approval, and follow-up mean for this space.</LearningState>
             )}
           </div>
         </Panel>
@@ -507,7 +507,7 @@ export default function Learning() {
         <Panel>
           <SectionLabel action={`${measuredChannels}/${channelRows.length} measured`}>Channel learning coverage</SectionLabel>
           <p style={{ margin: `${space[4]} 0`, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.5 }}>
-            Each client can use all channels, but Vera should only scale the channels where source context, approval rules, and performance evidence exist.
+            Each space can use all channels, but Vera should only scale the channels where source context, approval rules, and performance evidence exist.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 230px), 1fr))', gap: space[3] }}>
             {channelRows.map(row => <ChannelLearningCard key={row.key} row={row} />)}
@@ -624,7 +624,7 @@ export default function Learning() {
             </button>
           </div>
           <p style={{ margin: `0 0 ${space[4]}`, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.5 }}>
-            These are inactive client skills generated from measured evidence. Save them as proposals, inspect the recipe, then enable the ones VERA should use.
+            These are inactive space skills generated from measured evidence. Save them as proposals, inspect the recipe, then enable the ones VERA should use.
           </p>
           {skillMessage && (
             <div style={{ marginBottom: space[4], padding: space[3], border: `1px solid ${skillMessage.tone === 'success' ? color.success : color.danger}`, borderRadius: radius.md, color: skillMessage.tone === 'success' ? color.success : color.danger, background: color.paper2, fontSize: t.size.cap }}>
@@ -1115,13 +1115,13 @@ function buildHandoffCandidates(posts: Post[], metrics: Map<string, LearningMetr
       const prompt = [
         `Create a follow-up brief for this VERA content signal.`,
         ``,
-        `Client: ${context.companyName || 'current client'}`,
+        `Space: ${context.companyName || 'current space'}`,
         `Asset: ${title}`,
         `Channel: ${channel}`,
         `Triggers: ${triggers.join(', ')}`,
         `Demand score: ${score}`,
-        context.engagementSignals ? `Client-defined engagement signals: ${context.engagementSignals}` : '',
-        context.samHandoffRules ? `Client-defined follow-up rules: ${context.samHandoffRules}` : '',
+        context.engagementSignals ? `Space-defined engagement signals: ${context.engagementSignals}` : '',
+        context.samHandoffRules ? `Space-defined follow-up rules: ${context.samHandoffRules}` : '',
         context.approvalModel ? `Approval model: ${context.approvalModel}` : '',
         context.approvalStakeholders ? `Approval stakeholders: ${context.approvalStakeholders}` : '',
         context.speakerStrategy ? `Speaker strategy: ${context.speakerStrategy}` : '',
@@ -1327,7 +1327,7 @@ function buildExperiments(
   channels: ChannelLearningRow[],
 ): Experiment[] {
   const top = buildTopRows(posts, metrics)[0]
-  const base = top?.title ?? 'the current strongest client proof point'
+  const base = top?.title ?? 'the current strongest space proof point'
   const bestChannel = channels
     .filter(channel => channel.measured > 0)
     .sort((a, b) => b.score - a.score)[0]
@@ -1336,7 +1336,7 @@ function buildExperiments(
   const tone = context.platformToneOfVoice || 'Keep the brand core, then adapt structure and tone to the selected medium.'
   const approvals = context.approvalStakeholders || context.approvalModel || 'Use case-based approval routing before publishing.'
   const commonContext = [
-    `Client: ${context.companyName || 'current client'}`,
+    `Space: ${context.companyName || 'current space'}`,
     `Content objective: ${context.demandObjective || 'create measurable audience response'}`,
     `Speaker strategy: ${speaker}`,
     `Platform tone of voice: ${tone}`,
@@ -1405,7 +1405,7 @@ function buildSkillProposals(
   const bestChannel = channels
     .filter(channel => channel.measured > 0)
     .sort((a, b) => b.score - a.score)[0]
-  const company = context.companyName || 'this client'
+  const company = context.companyName || 'this space'
   const platform = bestChannel?.label ?? top?.channel ?? 'the strongest measured channel'
   const topTitle = top?.title ?? 'the strongest measured asset'
   const evidenceLine = top && topMetric

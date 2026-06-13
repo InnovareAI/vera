@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
 
         // 2. Fetch project-scoped channels + research account. A workspace
         // research account wins; an InnovareAI operator can fall back to the
-        // shared research profile. Client projects never read org-wide channel
+        // shared research profile. Space projects never read org-wide channel
         // profiles, which may belong to a different client in the same org.
         const [sourceResolution, unipile] = await Promise.all([
           resolveProjectAuditChannels(supabase, org_id, project_id),
@@ -108,7 +108,7 @@ Deno.serve(async (req) => {
         const channels = sourceResolution.channels
         const itemsPerChannel = sourcePullItemsPerChannel(sourceResolution.sourcePullDepth)
         if (!channels?.length) {
-          throw new Error('No client source URLs configured. Add the website, LinkedIn, Medium, YouTube, or X source in this client Strategy Brain before running the content audit.')
+          throw new Error('No space source URLs configured. Add the website, LinkedIn, Medium, YouTube, or X source in this space Strategy Brain before running the content audit.')
         }
         const unipileAccountId = unipile.ok ? unipile.accountId : null
         send('channels_loaded', {

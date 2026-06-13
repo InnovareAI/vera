@@ -16,7 +16,8 @@ class FakeQuery {
     this.rows = [...rows]
   }
 
-  select(_columns: string) {
+  select(columns: string) {
+    void columns
     return this
   }
 

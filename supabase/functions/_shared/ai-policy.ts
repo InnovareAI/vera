@@ -64,13 +64,13 @@ export function parseProjectAiPolicy(value: Json | null | undefined): ProjectAiP
 export function paidMediaBudgetCapError(policy: ProjectAiPolicy, mediaKind: "video" | "premium_media"): string | null {
   if (policy.monthlyBudgetUsd && policy.monthlyBudgetUsd > 0) return null
   return mediaKind === "video"
-    ? "Set a monthly generation cap before enabling client-paid video rendering."
+    ? "Set a monthly generation cap before enabling space-paid video rendering."
     : "Set a monthly generation cap before enabling premium media models."
 }
 
 export type ProjectAiBudgetWarning = {
   level: "warn"
-  code: "budget_guard_disabled" | "missing_budget_cap" | "unknown_request_cost" | "near_budget_cap" | "request_nears_budget_cap" | "over_budget_cap"
+  code: "missing_budget_cap" | "unknown_request_cost" | "near_budget_cap" | "request_nears_budget_cap" | "over_budget_cap"
   message: string
   budgetUsd: number | null
   usedUsd: number
@@ -93,6 +93,17 @@ export async function checkProjectAiBudget(
   const policy = await loadProjectAiPolicy(supabase, projectId)
   const budgetUsd = policy.monthlyBudgetUsd
   const requestedUsd = usage ? (await estimateGenerationUsageCostWithCatalog(supabase, usage))?.costUsd ?? null : null
+  const enforceOperation = shouldEnforceBudgetForOperation(usage?.operation)
+  if (!enforceOperation) {
+    return {
+      ok: true,
+      budgetUsd,
+      usedUsd: 0,
+      requestedUsd,
+      remainingUsd: budgetUsd,
+      warning: null,
+    }
+  }
   if (!policy.budgetGuardEnabled) {
     return {
       ok: true,
@@ -114,8 +125,8 @@ export async function checkProjectAiBudget(
         level: "warn",
         code: "missing_budget_cap",
         message: requestedUsd !== null
-          ? `No monthly generation budget cap is set for this client space. This request is estimated at ${formatUsd(requestedUsd)}.`
-          : "No monthly generation budget cap is set for this client space, and this request cost cannot be estimated before submission.",
+          ? `No monthly generation budget cap is set for this space. This request is estimated at ${formatUsd(requestedUsd)}.`
+          : "No monthly generation budget cap is set for this space, and this request cost cannot be estimated before submission.",
         budgetUsd: null,
         usedUsd: 0,
         requestedUsd,
@@ -149,7 +160,7 @@ export async function checkProjectAiBudget(
       }
     }
     const parts = [
-      `Generation budget reached for this client space.`,
+      `Generation budget reached for this space.`,
       `Budget: ${formatUsd(budgetUsd)}.`,
       `Used: ${formatUsd(usedUsd)}.`,
     ]
@@ -174,13 +185,31 @@ export async function checkProjectAiBudget(
   }
 }
 
-function overBudgetMessage(budgetUsd: number, usedUsd: number, requestedUsd: number | null): string {
+export function shouldEnforceBudgetForOperation(operation: string | null | undefined): boolean {
+  const normalized = (operation ?? "").trim().toLowerCase()
+  if (!normalized) return false
+  if (normalized === "campaign.plan") return true
+  if (normalized === "image.generate") return true
+  if (normalized === "video.submit") return true
+  if (normalized.startsWith("content.")) return true
+  if (normalized.startsWith("paid_social.")) return true
+  if (normalized.startsWith("ad.")) return true
+  if (normalized.startsWith("ads.")) return true
+  return false
+}
+
+function overBudgetMessage(
+  budgetUsd: number,
+  usedUsd: number,
+  requestedUsd: number | null,
+): string {
   const parts = [
-    `This client space is over its monthly generation cap, but the budget guard is set to warn only.`,
+    `This space is over its monthly generation cap.`,
     `Budget: ${formatUsd(budgetUsd)}.`,
     `Used: ${formatUsd(usedUsd)}.`,
   ]
   if (requestedUsd !== null) parts.push(`Requested: ${formatUsd(requestedUsd)}.`)
+  parts.push("The budget guard is set to warn only.")
   return parts.join(" ")
 }
 
@@ -213,7 +242,7 @@ function budgetWarning(
     return {
       ...base,
       code: "near_budget_cap",
-      message: `This client space has used ${formatUsd(usedUsd)} of its ${formatUsd(budgetUsd)} monthly generation cap. Remaining: ${formatUsd(remainingUsd)}.`,
+      message: `This space has used ${formatUsd(usedUsd)} of its ${formatUsd(budgetUsd)} monthly generation cap. Remaining: ${formatUsd(remainingUsd)}.`,
     }
   }
   if (afterRatio >= BUDGET_WARNING_THRESHOLD) {

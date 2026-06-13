@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
     .eq("id", projectId)
     .maybeSingle()
   if (projectError) return jsonError(projectError.message, 500)
-  if (!project) return jsonError("Client not found", 404)
+  if (!project) return jsonError("Space not found", 404)
 
   const allowed = await canManageProject(supabase, auth.user.id, project.id, project.org_id)
   if (!allowed) return jsonError("Forbidden", 403)

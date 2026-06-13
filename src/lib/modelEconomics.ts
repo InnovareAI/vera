@@ -170,9 +170,9 @@ export function imageModelProvider(model: string | null | undefined, availabilit
 }
 
 export function imageModelProviderLabel(provider: ImageRouteProvider | null | undefined) {
-  if (provider === 'openrouter') return 'Client OpenRouter'
-  if (provider === 'openai') return 'Client OpenAI'
-  if (provider === 'fal') return 'Client FAL'
+  if (provider === 'openrouter') return 'Space OpenRouter'
+  if (provider === 'openai') return 'Space OpenAI'
+  if (provider === 'fal') return 'Space FAL'
   return 'No matching key'
 }
 
@@ -241,7 +241,7 @@ export function latestPricingReviewDate(catalog?: ModelPricingGuide[]) {
 
 export function textSpendEstimate(model: string | null | undefined, provider: TextEstimateProvider, catalog?: ModelPricingGuide[]): SpendEstimate {
   if (provider === 'missing') {
-    return { label: 'No spend', detail: 'No paid text generation until a client key is added.' }
+    return { label: 'No spend', detail: 'No paid text generation until a space key is added.' }
   }
   if (provider === 'platform') {
     return { label: 'Platform metered', detail: 'Allowed only for approved InnovareAI workspaces.' }
@@ -265,7 +265,7 @@ export function textSpendEstimate(model: string | null | undefined, provider: Te
 }
 
 export function imageSpendEstimate(model: string, enabled: boolean, ready: boolean, premium: boolean, catalog?: ModelPricingGuide[]): SpendEstimate {
-  if (!enabled) return { label: 'No spend', detail: 'Image generation is disabled for this client space.' }
+  if (!enabled) return { label: 'No spend', detail: 'Image generation is disabled for this space.' }
   if (!ready) return { label: 'No spend', detail: 'VERA will keep this as a prompt or production brief.' }
   const guide = findPricingGuide(pricingCatalog(catalog), 'image.generate', model)
   if (guide) return { label: guide.estimateLabel, detail: guide.estimateDetail }
@@ -308,11 +308,11 @@ export function buildModelRecommendations(input: ModelRecommendationInput, catal
         role: 'Text',
         task: 'High-volume content drafts',
         model: 'Gemini Flash class',
-        provider: 'Client key required',
+        provider: 'Space key required',
         status: 'Locked',
         estimate: textSpendEstimate(input.defaultTextModel, 'missing', catalog),
-        reason: 'Text generation should not run on platform spend for client work.',
-        escalation: 'Add client OpenRouter first. Use Anthropic only when the client prefers that provider.',
+        reason: 'Text generation should not run on platform spend for this space.',
+        escalation: 'Add space OpenRouter first. Use Anthropic only when this space prefers that provider.',
         tone: 'danger',
         requiresApproval: false,
       }
@@ -320,12 +320,12 @@ export function buildModelRecommendations(input: ModelRecommendationInput, catal
         role: 'Text',
         task: 'High-volume content drafts',
         model: modelLabel(recommendedTextModel),
-        provider: textProvider === 'openrouter' ? 'Client OpenRouter' : textProvider === 'anthropic' ? 'Client Anthropic' : 'Platform approved',
+        provider: textProvider === 'openrouter' ? 'Space OpenRouter' : textProvider === 'anthropic' ? 'Space Anthropic' : 'Platform approved',
         status: textProvider === 'platform' ? 'Operator only' : 'Recommended',
         estimate: textSpendEstimate(recommendedTextModel, textProvider, catalog),
         reason: textProvider === 'openrouter'
           ? 'Gemini Flash class is the default recommendation for inexpensive drafts, rewrites, variants, summaries, and non-critical content planning.'
-          : 'Use the available client text provider and keep the model visible before generation.',
+          : 'Use the available space text provider and keep the model visible before generation.',
         escalation: 'Use Sonnet-class reasoning for positioning, final copy judgment, synthesis across sources, or high-stakes strategy.',
         tone: textProvider === 'platform' ? 'warn' : 'success',
         requiresApproval: textProvider === 'platform',
@@ -339,8 +339,8 @@ export function buildModelRecommendations(input: ModelRecommendationInput, catal
         provider: 'Policy locked',
         status: 'Prompt only',
         estimate: imageSpendEstimate(recommendedImageModel, false, false, false, catalog),
-        reason: 'Image generation is disabled for this client space.',
-        escalation: 'Keep output as prompts, storyboards, or production briefs until the client enables images.',
+        reason: 'Image generation is disabled for this space.',
+        escalation: 'Keep output as prompts, storyboards, or production briefs until the space enables images.',
         tone: 'info',
         requiresApproval: false,
       }
@@ -352,8 +352,8 @@ export function buildModelRecommendations(input: ModelRecommendationInput, catal
           provider: imageModelProviderLabel(imageProvider),
           status: 'Locked',
           estimate: imageSpendEstimate(recommendedImageModel, true, false, false, catalog),
-          reason: `${modelLabel(recommendedImageModel)} needs a matching client image route. OpenAI keys only cover OpenAI image models.`,
-          escalation: 'Add client OpenRouter for Nano Banana, or client FAL for Seedream, Qwen, Ideogram, Recraft, Imagen, and other FAL-routed models.',
+          reason: `${modelLabel(recommendedImageModel)} needs a matching space image route. OpenAI keys only cover OpenAI image models.`,
+          escalation: 'Add space OpenRouter for Nano Banana, or space FAL for Seedream, Qwen, Ideogram, Recraft, Imagen, and other FAL-routed models.',
           tone: 'danger',
           requiresApproval: false,
         }
@@ -366,7 +366,7 @@ export function buildModelRecommendations(input: ModelRecommendationInput, catal
           estimate: imageSpendEstimate(recommendedImageModel, true, true, false, catalog),
           reason: imageProvider
             ? 'Nano Banana should remain the default for strong text-in-image, editing, and fast content prototypes. Seedream is the bulk alternate when FAL is available.'
-            : 'Approved platform media can support operator-only image work, but normal client work should still move to client-owned keys.',
+            : 'Approved platform media can support operator-only image work, but normal work should still move to space-owned keys.',
           escalation: 'Use OpenAI Image Gen 2, Imagen, Ideogram, or Recraft only for approved premium production needs.',
           tone: defaultImagePremium ? 'warn' : 'success',
           requiresApproval: false,
@@ -377,11 +377,11 @@ export function buildModelRecommendations(input: ModelRecommendationInput, catal
         role: 'Video',
         task: 'Storyboards before renders',
         model: 'Storyboard only',
-        provider: input.hasFal ? 'Client FAL policy locked' : 'Client FAL required',
+        provider: input.hasFal ? 'Space FAL policy locked' : 'Space FAL required',
         status: 'No render',
         estimate: videoSpendEstimate(input.defaultVideoModel, false, false, catalog),
         reason: 'Video is the cost sink. Vera should storyboard, frame, prompt, and estimate before any real clip is rendered.',
-        escalation: 'Enable standard video only with a client FAL key and a monthly cap.',
+        escalation: 'Enable standard video only with a space FAL key and a monthly cap.',
         tone: 'warn',
         requiresApproval: false,
       }
@@ -389,7 +389,7 @@ export function buildModelRecommendations(input: ModelRecommendationInput, catal
         role: 'Video',
         task: 'Approved prototype clip',
         model: `${modelLabel(input.defaultVideoModel)} / ${modelLabel(input.defaultImageVideoModel)}`,
-        provider: input.hasFal ? 'Client FAL' : 'Platform approved',
+        provider: input.hasFal ? 'Space FAL' : 'Platform approved',
         status: input.premiumMediaEnabled ? 'Approval gated' : 'Recommended',
         estimate: videoSpendEstimate(input.defaultVideoModel, true, input.premiumMediaEnabled, catalog),
         reason: 'Use Hailuo-class standard video for prototypes after storyboard approval. Do not default to Kling or other premium models.',

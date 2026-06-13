@@ -1,4 +1,4 @@
-// LinkedIn audit. Answers ONE question: "How is this client's surface scoring?"
+// LinkedIn audit. Answers ONE question: "How is this space's surface scoring?"
 //
 // Applied the UX declutter skill:
 //   · Cut eyebrow + H1 + 2-line subtitle (rail labels the page; scores
@@ -116,11 +116,11 @@ export default function LinkedInScore() {
   const runProfile = useCallback(async () => {
     if (!orgId) return
     if (!session?.access_token || !projectId) {
-      setError('Open this audit from an active client space and sign in again.')
+      setError('Open this audit from an active space and sign in again.')
       return
     }
     if (strategyGate !== 'valid') {
-      setError('LinkedIn audit is not enabled for this client strategy.')
+      setError('LinkedIn audit is not enabled for this space strategy.')
       return
     }
     setProfileLoading(true)
@@ -142,11 +142,11 @@ export default function LinkedInScore() {
   const runBrew = useCallback(async () => {
     if (!orgId) return
     if (!session?.access_token || !projectId) {
-      setError('Open this audit from an active client space and sign in again.')
+      setError('Open this audit from an active space and sign in again.')
       return
     }
     if (strategyGate !== 'valid') {
-      setError('LinkedIn audit is not enabled for this client strategy.')
+      setError('LinkedIn audit is not enabled for this space strategy.')
       return
     }
     setBrewLoading(true)
@@ -183,14 +183,14 @@ export default function LinkedInScore() {
   useEffect(() => {
     if (!orgId || !projectId || activeProject?.org_id !== orgId) {
       setStrategyGate('invalid')
-      setStrategyGateDetail('Open this audit from an active client space.')
+      setStrategyGateDetail('Open this audit from an active space.')
       return
     }
     let cancelled = false
     const context = parseProjectInstructions(activeProject?.instructions ?? '').businessContext
     if (demandPlatformHasStrategyEvidence('linkedin', context)) {
       setStrategyGate('valid')
-      setStrategyGateDetail('LinkedIn is configured in this client Strategy Brain.')
+      setStrategyGateDetail('LinkedIn is configured in this Strategy Brain.')
       return
     }
     setStrategyGate('loading')
@@ -212,7 +212,7 @@ export default function LinkedInScore() {
       const hasLinkedInContent = !postRes.error && (postRes.count ?? 0) > 0
       if (hasLinkedInConnection || hasLinkedInContent) {
         setStrategyGate('valid')
-        setStrategyGateDetail(hasLinkedInConnection ? 'LinkedIn is connected for this client.' : 'This client already has LinkedIn content history.')
+        setStrategyGateDetail(hasLinkedInConnection ? 'LinkedIn is connected for this space.' : 'This space already has LinkedIn content history.')
       } else {
         setStrategyGate('invalid')
         setStrategyGateDetail('Add a LinkedIn source or explicit LinkedIn strategy in the client Strategy Brain first.')
@@ -317,8 +317,8 @@ export default function LinkedInScore() {
           </p>
           <p className="text-sm mt-2 leading-relaxed" style={{ color: 'var(--ink-quiet)' }}>
             {strategyGate === 'loading'
-              ? 'Checking whether LinkedIn belongs in this client strategy.'
-              : strategyGateDetail || 'LinkedIn is not currently part of this client strategy.'}
+              ? 'Checking whether LinkedIn belongs in this space strategy.'
+              : strategyGateDetail || 'LinkedIn is not currently part of this space strategy.'}
           </p>
           {strategyGate !== 'loading' && (
             <div className="flex gap-2 mt-4">
@@ -642,7 +642,7 @@ function AuditContextCard({ orgId, projectId, accessToken }: { orgId: string; pr
     setExtracting(true)
     setError(null)
     if (!projectId || !accessToken) {
-      setError('Open this audit from an active client space and sign in again.')
+      setError('Open this audit from an active space and sign in again.')
       setExtracting(false)
       return
     }

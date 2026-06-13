@@ -109,7 +109,7 @@ export function selectImageModel(input: {
     return {
       alias: policyDefault,
       source: "policy_default",
-      reason: "Using the client policy default because it is standard and matches an available image route.",
+      reason: "Using the space policy default because it is standard and matches an available image route.",
     }
   }
 
@@ -154,7 +154,7 @@ export function selectVideoModel(input: {
     return {
       alias: policyDefault,
       source: "policy_default",
-      reason: "Using the client policy default because it is a standard video model for this request type.",
+      reason: "Using the space policy default because it is a standard video model for this request type.",
     }
   }
 
@@ -188,7 +188,7 @@ export function selectTextModel(input: {
     return {
       alias: policyDefault,
       source: "policy_default",
-      reason: "Using the client policy default because it matches the selected text provider.",
+      reason: "Using the space policy default because it matches the selected text provider.",
     }
   }
 

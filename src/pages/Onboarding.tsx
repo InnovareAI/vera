@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
+import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, ArrowLeft, Check, Sparkles, Loader2 } from 'lucide-react'
+import { ArrowRight, ArrowLeft, Check, Sparkles, Loader2, Globe2, Link2, Target, FileText, Network } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
@@ -12,35 +13,65 @@ import {
 } from '../lib/businessContext'
 import { applyDemandDefaults } from '../lib/demandModel'
 
-// Wizard step definitions. Two required org fields (name + website) then optional channels.
-type IntroStepDef    = { id: 'welcome'; type: 'intro' }
-type ReviewStepDef   = { id: 'review';  type: 'review' }
-type OrgFieldStepDef = { id: string; type: 'org_field'; field: string; title: string; subtitle: string; placeholder: string; required?: boolean }
-type ChannelStepDef  = { id: string; type: 'channel'; channel: string; field: string; title: string; subtitle: string; placeholder: string }
-type Step = IntroStepDef | ReviewStepDef | OrgFieldStepDef | ChannelStepDef
+type IntroStepDef = { id: 'welcome'; type: 'intro' }
+type WebsiteStepDef = { id: 'website'; type: 'website' }
+type EssentialsStepDef = { id: 'essentials'; type: 'essentials' }
+type SourcesStepDef = { id: 'sources'; type: 'sources' }
+type StrategyStepDef = { id: 'strategy'; type: 'strategy' }
+type ReviewStepDef = { id: 'review'; type: 'review' }
+type Step = IntroStepDef | WebsiteStepDef | EssentialsStepDef | SourcesStepDef | StrategyStepDef | ReviewStepDef
 
 const STEPS: Step[] = [
   { id: 'welcome', type: 'intro' },
-  { id: 'company',             type: 'org_field', field: 'company_name', title: 'Company name',         subtitle: "What should we call your company?",                                 placeholder: 'Acme Inc.',                              required: true },
-  { id: 'website',             type: 'org_field', field: 'website',      title: 'Website',              subtitle: "Your company's main website.",                                      placeholder: 'https://acme.com',                       required: true },
-  { id: 'linkedin_personal',   type: 'channel', channel: 'linkedin_personal',   field: 'linkedin_personal',   title: 'LinkedIn - personal',     subtitle: "Your own LinkedIn profile. This is where your personal voice lives and often the strongest signal for VERA.", placeholder: 'https://linkedin.com/in/person-name' },
-  { id: 'linkedin_company',    type: 'channel', channel: 'linkedin_company',    field: 'linkedin_company',    title: 'LinkedIn - company',      subtitle: "Your company page on LinkedIn.",                                            placeholder: 'https://linkedin.com/company/company-name' },
-  { id: 'instagram',           type: 'channel', channel: 'instagram',           field: 'instagram',           title: 'Instagram',               subtitle: 'Your Instagram profile, if it carries audience or voice signal.',            placeholder: 'https://instagram.com/brand' },
-  { id: 'blog',                type: 'channel', channel: 'blog',                field: 'blog',                title: 'Website blog',            subtitle: 'Your company blog or thought-leadership content.',                          placeholder: 'https://acme.com/blog' },
-  { id: 'linkedin_newsletter', type: 'channel', channel: 'linkedin_newsletter', field: 'linkedin_newsletter', title: 'LinkedIn newsletter',     subtitle: 'If you publish a LinkedIn newsletter, paste its URL. VERA uses it as source material for platform tone and topic depth.',                      placeholder: 'https://linkedin.com/newsletters/newsletter-name' },
-  { id: 'medium',              type: 'channel', channel: 'medium',              field: 'medium',              title: 'Medium',                  subtitle: 'Your Medium profile or publication.',                                       placeholder: '@handle  or  https://medium.com/@handle' },
-  { id: 'youtube',             type: 'channel', channel: 'youtube',             field: 'youtube',             title: 'YouTube channel',         subtitle: 'Your YouTube channel for videos, podcasts, Shorts, and proof assets.',                              placeholder: 'https://youtube.com/@channel' },
-  { id: 'quora',               type: 'channel', channel: 'quora',               field: 'quora',               title: 'Quora',                   subtitle: 'Profiles, Spaces, or topics that reveal audience questions and content angles.', placeholder: 'https://www.quora.com/profile/brand-or-person' },
-  { id: 'reddit',              type: 'channel', channel: 'reddit',              field: 'reddit',              title: 'Reddit',                  subtitle: 'Target subreddits or profile URLs for market listening and objection mining.', placeholder: 'r/marketing or https://reddit.com/r/marketing' },
-  { id: 'facebook',            type: 'channel', channel: 'facebook',            field: 'facebook',            title: 'Facebook page',           subtitle: 'Your Facebook Page, if it is active for community or local trust.',          placeholder: 'https://facebook.com/brand' },
-  { id: 'twitter',             type: 'channel', channel: 'twitter',             field: 'twitter',             title: 'X / Twitter',             subtitle: 'Only fill if you post here weekly or more. Otherwise the signal is too thin to be worth fetching.', placeholder: '@handle  or  https://x.com/handle' },
+  { id: 'website', type: 'website' },
+  { id: 'essentials', type: 'essentials' },
+  { id: 'sources', type: 'sources' },
+  { id: 'strategy', type: 'strategy' },
   { id: 'review', type: 'review' },
 ]
 
 const TOTAL_NON_INTRO = STEPS.filter(s => s.type !== 'intro').length
 
+const SOURCE_FIELDS = [
+  { field: 'blog', title: 'Website blog', placeholder: 'https://company.com/blog', helper: 'Articles, SEO pages, and thought leadership.' },
+  { field: 'linkedin_company', title: 'LinkedIn company page', placeholder: 'https://linkedin.com/company/company-name', helper: 'Only useful when LinkedIn is a valid channel.' },
+  { field: 'linkedin_personal', title: 'LinkedIn profile', placeholder: 'https://linkedin.com/in/person-name', helper: 'Use for founder, expert, or named-person voice.' },
+  { field: 'linkedin_events', title: 'LinkedIn events', placeholder: 'https://linkedin.com/events/event-name', helper: 'Events can reveal topics, audiences, and recurring proof points.' },
+  { field: 'linkedin_newsletter', title: 'LinkedIn newsletter', placeholder: 'https://linkedin.com/newsletters/name', helper: 'Optional source for depth and recurring themes.' },
+  { field: 'instagram', title: 'Instagram', placeholder: 'https://instagram.com/brand', helper: 'Visual proof, product, community, or creator signal.' },
+  { field: 'youtube', title: 'YouTube', placeholder: 'https://youtube.com/@brand', helper: 'Videos, Shorts, demos, podcasts, and evergreen search.' },
+  { field: 'medium', title: 'Medium', placeholder: 'https://medium.com/@handle', helper: 'Manual-first long-form publishing and source material.' },
+  { field: 'quora', title: 'Quora', placeholder: 'https://quora.com/profile/person-or-brand', helper: 'Audience questions and problem language.' },
+  { field: 'reddit', title: 'Reddit', placeholder: 'r/category or https://reddit.com/r/category', helper: 'Market listening, objections, and community language.' },
+  { field: 'facebook', title: 'Facebook page', placeholder: 'https://facebook.com/brand', helper: 'Community, local trust, and Meta organic signals.' },
+  { field: 'twitter', title: 'X profile', placeholder: 'https://x.com/handle', helper: 'Lower priority unless the channel already matters.' },
+] as const
+
+const STRATEGY_FIELDS = [
+  { field: 'content_goals', title: 'Content goals', placeholder: 'Awareness, trust, traffic, community, leads, sales, education, recruiting.', multiline: true },
+  { field: 'active_channels', title: 'Likely channels', placeholder: 'LinkedIn, Instagram, YouTube, Medium, Reddit, Quora, Email, Website.', multiline: false },
+  { field: 'approval_model', title: 'Approval model', placeholder: 'Operator-only, owner lead, all stakeholders, or case by case.', multiline: false },
+  { field: 'conversion_path', title: 'Conversion path', placeholder: 'Comments, shares, qualified traffic, newsletter, checkout, demos, DMs, or SAM handoff.', multiline: true },
+  { field: 'engagement_signals', title: 'Engagement signals', placeholder: 'Comments, shares, saves, clicks, qualified traffic, buyer questions, objections.', multiline: true },
+  { field: 'learning_cadence', title: 'Learning cadence', placeholder: 'Weekly review, monthly strategy refresh, campaign-based retrospectives.', multiline: false },
+] as const
+
 function slugify(s: string) {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)
+}
+
+function companyNameFromWebsite(value: string) {
+  try {
+    const host = new URL(normalizeUrl(value)).hostname.replace(/^www\./, '')
+    const base = host.split('.')[0] || 'space'
+    return base
+      .split(/[-_]+/)
+      .filter(Boolean)
+      .map(part => part.slice(0, 1).toUpperCase() + part.slice(1))
+      .join(' ') || 'Space'
+  } catch {
+    return 'Space'
+  }
 }
 
 export default function Onboarding() {
@@ -68,9 +99,11 @@ export default function Onboarding() {
       .then(({ data }) => {
         if (cancelled) return
         if (data) {
+          const savedStep = typeof data.current_step === 'number' ? data.current_step : 0
+          const safeStep = Math.min(Math.max(savedStep, 0), STEPS.length - 1)
           setSessionId(data.id)
           setCollected((data.collected as Record<string, string>) ?? {})
-          setStepIndex(data.current_step ?? 0)
+          setStepIndex(safeStep)
         } else {
           // Create a fresh session
           supabase.from('onboarding_sessions').insert({ org_id: activeOrg.id }).select('id').single()
@@ -97,9 +130,9 @@ export default function Onboarding() {
 
   async function goNext() {
     setError(null)
-    if (step.type === 'org_field' && step.required) {
-      const value = (collected[step.field] ?? '').trim()
-      if (!value) { setError(`${step.title} is required.`); return }
+    if (step.type === 'website') {
+      const value = (collected.website ?? '').trim()
+      if (!value) { setError('Company URL is required.'); return }
     }
     const next = stepIndex + 1
     setStepIndex(next)
@@ -113,30 +146,20 @@ export default function Onboarding() {
     await persist(prev, collected)
   }
 
-  async function skipChannel() {
-    if (step.type !== 'channel') return
-    const nextCollected = { ...collected }
-    delete nextCollected[step.field]
-    setCollected(nextCollected)
-    const next = stepIndex + 1
-    setStepIndex(next)
-    await persist(next, nextCollected)
-  }
-
   async function submitWizard() {
     setSubmitting(true)
     setError(null)
 
-    const name = (collected.company_name ?? '').trim()
     const website = (collected.website ?? '').trim()
-    if (!name || !website) {
-      setError('Company name and website are required.')
+    const name = (collected.company_name ?? '').trim() || companyNameFromWebsite(website)
+    if (!website) {
+      setError('Company URL is required.')
       setSubmitting(false)
       return
     }
 
     if (!activeOrg?.id) {
-      setError('No active workspace is available. Open Vera from an agency workspace before adding a client.')
+      setError('No active workspace is available. Open Vera from a workspace before adding a space.')
       setSubmitting(false)
       return
     }
@@ -147,7 +170,7 @@ export default function Onboarding() {
 
     // Create the client as a project under the current workspace. The old
     // onboarding flow created a whole organization and org-scoped channel rows;
-    // client spaces now live in projects with their source model in Strategy Brain.
+    // spaces now live in projects with their source model in Strategy Brain.
     const { data: project, error: projectErr } = await supabase
       .from('projects')
       .insert({
@@ -164,7 +187,7 @@ export default function Onboarding() {
       .single()
 
     if (projectErr || !project) {
-      setError(`Could not create client space: ${projectErr?.message ?? 'unknown'}`)
+      setError(`Could not create space: ${projectErr?.message ?? 'unknown'}`)
       setSubmitting(false)
       return
     }
@@ -204,21 +227,37 @@ export default function Onboarding() {
       {/* Step content */}
       {step.type === 'intro' && <IntroStep onStart={goNext} />}
 
-      {(step.type === 'org_field' || step.type === 'channel') && (
-        <FieldStep
-          title={step.title}
-          subtitle={step.subtitle}
-          placeholder={step.placeholder}
-          value={collected[step.field] ?? ''}
-          onChange={v => setField(step.field, v)}
-          optional={step.type === 'channel' || !step.required}
+      {step.type === 'website' && (
+        <WebsiteStep
+          website={collected.website ?? ''}
+          onChange={v => setField('website', v)}
+        />
+      )}
+
+      {step.type === 'essentials' && (
+        <EssentialsStep
+          collected={collected}
+          onChange={setField}
+        />
+      )}
+
+      {step.type === 'sources' && (
+        <SourcesStep
+          collected={collected}
+          onChange={setField}
+        />
+      )}
+
+      {step.type === 'strategy' && (
+        <StrategyStep
+          collected={collected}
+          onChange={setField}
         />
       )}
 
       {step.type === 'review' && (
         <ReviewStep
           collected={collected}
-          steps={STEPS}
           onEdit={(idx) => setStepIndex(idx)}
         />
       )}
@@ -232,12 +271,6 @@ export default function Onboarding() {
           </button>
 
           <div className="flex items-center gap-3">
-            {step.type === 'channel' && (
-              <button onClick={skipChannel}
-                className="text-sm text-gray-500 hover:text-gray-700">
-                Skip
-              </button>
-            )}
             {step.type === 'review' ? (
               <button onClick={submitWizard} disabled={submitting}
                 className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white rounded-lg text-sm font-semibold">
@@ -270,10 +303,11 @@ function normalizeUrl(value: string) {
 function buildBusinessContextFromCollected(collected: Record<string, string>): BusinessContext {
   const context: BusinessContext = {
     ...EMPTY_BUSINESS_CONTEXT,
-    companyName: (collected.company_name ?? '').trim(),
+    companyName: (collected.company_name ?? '').trim() || companyNameFromWebsite(collected.website ?? ''),
     website: normalizeUrl(collected.website ?? ''),
     linkedinProfile: normalizeUrl(collected.linkedin_personal ?? ''),
     linkedinCompany: normalizeUrl(collected.linkedin_company ?? ''),
+    linkedinEvents: normalizeUrl(collected.linkedin_events ?? ''),
     linkedinNewsletter: normalizeUrl(collected.linkedin_newsletter ?? ''),
     instagram: normalizeUrl(collected.instagram ?? ''),
     youtube: normalizeUrl(collected.youtube ?? ''),
@@ -282,6 +316,15 @@ function buildBusinessContextFromCollected(collected: Record<string, string>): B
     reddit: normalizeUrl(collected.reddit ?? ''),
     facebook: normalizeUrl(collected.facebook ?? ''),
     x: normalizeUrl(collected.twitter ?? ''),
+    industry: (collected.industry ?? '').trim(),
+    offer: (collected.offer ?? '').trim(),
+    audience: (collected.audience ?? '').trim(),
+    contentGoals: (collected.content_goals ?? '').trim(),
+    activeChannels: (collected.active_channels ?? '').trim(),
+    approvalModel: (collected.approval_model ?? '').trim(),
+    conversionPath: (collected.conversion_path ?? '').trim(),
+    engagementSignals: (collected.engagement_signals ?? '').trim(),
+    learningCadence: (collected.learning_cadence ?? '').trim(),
   }
   const blog = normalizeUrl(collected.blog ?? '')
   const withDefaults = applyDemandDefaults(context)
@@ -297,86 +340,246 @@ function IntroStep({ onStart }: { onStart: () => void }) {
       <div className="inline-flex w-14 h-14 rounded-2xl bg-gray-100 items-center justify-center mb-6">
         <Sparkles className="w-7 h-7 text-gray-700" />
       </div>
-      <h1 className="text-3xl font-bold text-gray-900 mb-3">Welcome to VERA</h1>
+      <h1 className="text-3xl font-bold text-gray-900 mb-3">Set up Vera&apos;s Brain</h1>
       <p className="text-base text-gray-600 max-w-md mx-auto mb-8">
-        We'll ask for the company URL first, then the channels VERA should learn from. Takes about 2 minutes.
-        You can skip anything you do not have.
+        Start with the company URL, then add only the sources and strategy assumptions Vera should use. You can refine everything in the Brain after setup.
       </p>
       <button onClick={onStart}
         className="inline-flex items-center gap-1.5 px-6 py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-sm font-semibold">
-        Get started <ArrowRight className="w-4 h-4" />
+        Start with URL <ArrowRight className="w-4 h-4" />
       </button>
     </div>
   )
 }
 
-function FieldStep({ title, subtitle, placeholder, value, onChange, optional }:
-  { title: string; subtitle: string; placeholder: string; value: string; onChange: (v: string) => void; optional: boolean }
-) {
+function WebsiteStep({ website, onChange }: { website: string; onChange: (v: string) => void }) {
   return (
     <div>
-      <div className="flex items-baseline gap-2 mb-2">
-        <h2 className="text-2xl font-bold text-gray-900">{title}</h2>
-        {optional && <span className="text-xs text-gray-400 font-medium">optional</span>}
-      </div>
-      <p className="text-sm text-gray-500 mb-6">{subtitle}</p>
-      <input type="text" value={value} placeholder={placeholder}
+      <StepHeader
+        icon={<Globe2 className="w-5 h-5 text-gray-700" />}
+        eyebrow="Required first"
+        title="Company URL"
+        body="Vera uses the website as the primary source for extraction, verification, positioning, product pages, SEO headers, and owned content."
+      />
+      <input
+        type="text"
+        value={website}
+        placeholder="https://company.com"
         onChange={e => onChange(e.target.value)}
         autoFocus
-        className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:border-gray-400 focus:ring-2 focus:ring-violet-100" />
+        className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-100"
+      />
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <HintCard title="Extract" body="Company facts, offers, pages, proof, and constraints." />
+        <HintCard title="Plan" body="Channel fit, audience assumptions, and content jobs." />
+        <HintCard title="Learn" body="Performance signals update the Brain after publishing." />
+      </div>
     </div>
   )
 }
 
-function ReviewStep({ collected, steps, onEdit }:
-  { collected: Record<string, string>; steps: Step[]; onEdit: (idx: number) => void }
-) {
-  const orgFields = steps.map((s, i) => ({ s, i })).filter(x => x.s.type === 'org_field')
-  const channels  = steps.map((s, i) => ({ s, i })).filter(x => x.s.type === 'channel')
-  const provided  = channels.filter(({ s }) => s.type === 'channel' && (collected[s.field] ?? '').trim())
-  const skipped   = channels.filter(({ s }) => s.type === 'channel' && !(collected[s.field] ?? '').trim())
+function EssentialsStep({ collected, onChange }: { collected: Record<string, string>; onChange: (field: string, value: string) => void }) {
+  return (
+    <div>
+      <StepHeader
+        icon={<FileText className="w-5 h-5 text-gray-700" />}
+        eyebrow="Optional facts"
+        title="Business context"
+        body="Add what you already know. If you leave this light, Vera can extract more from the website and uploaded documents in the Brain."
+      />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <InputField label="Space name" value={collected.company_name ?? ''} onChange={v => onChange('company_name', v)} placeholder="Acme Inc." />
+        <InputField label="Industry" value={collected.industry ?? ''} onChange={v => onChange('industry', v)} placeholder="Fashion, hospitality, SaaS, healthcare" />
+        <TextareaField label="Offer" value={collected.offer ?? ''} onChange={v => onChange('offer', v)} placeholder="What do they sell, teach, or promote?" />
+        <TextareaField label="Audience" value={collected.audience ?? ''} onChange={v => onChange('audience', v)} placeholder="Who should care and why?" />
+      </div>
+    </div>
+  )
+}
+
+function SourcesStep({ collected, onChange }: { collected: Record<string, string>; onChange: (field: string, value: string) => void }) {
+  const provided = SOURCE_FIELDS.filter(field => (collected[field.field] ?? '').trim()).length
+  return (
+    <div>
+      <StepHeader
+        icon={<Link2 className="w-5 h-5 text-gray-700" />}
+        eyebrow={`${provided} sources added`}
+        title="Source channels"
+        body="Add sources only when they matter. LinkedIn audit and profile scoring are optional, and should run only when LinkedIn is a valid strategy channel."
+      />
+      <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
+        <div className="flex items-start gap-3">
+          <FileText className="w-5 h-5 text-gray-500 mt-0.5" />
+          <div>
+            <div className="text-sm font-semibold text-gray-900">Document extraction lives in the Brain</div>
+            <p className="text-sm text-gray-500 mt-1">
+              After setup, upload a PDF, DOCX, proposal, brand deck, or brief in Strategy Brain. Vera extracts fields for review before saving.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {SOURCE_FIELDS.map(field => (
+          <InputField
+            key={field.field}
+            label={field.title}
+            helper={field.helper}
+            value={collected[field.field] ?? ''}
+            onChange={v => onChange(field.field, v)}
+            placeholder={field.placeholder}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function StrategyStep({ collected, onChange }: { collected: Record<string, string>; onChange: (field: string, value: string) => void }) {
+  return (
+    <div>
+      <StepHeader
+        icon={<Target className="w-5 h-5 text-gray-700" />}
+        eyebrow="Assumptions"
+        title="Strategy starting point"
+        body="These are not permanent rules. They help Vera avoid generic output until the Brain has source and performance evidence."
+      />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {STRATEGY_FIELDS.map(field => field.multiline ? (
+          <TextareaField
+            key={field.field}
+            label={field.title}
+            value={collected[field.field] ?? ''}
+            onChange={v => onChange(field.field, v)}
+            placeholder={field.placeholder}
+          />
+        ) : (
+          <InputField
+            key={field.field}
+            label={field.title}
+            value={collected[field.field] ?? ''}
+            onChange={v => onChange(field.field, v)}
+            placeholder={field.placeholder}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ReviewStep({ collected, onEdit }: { collected: Record<string, string>; onEdit: (idx: number) => void }) {
+  const companyName = (collected.company_name ?? '').trim() || companyNameFromWebsite(collected.website ?? '')
+  const sourceRows = SOURCE_FIELDS.map(field => ({
+    label: field.title,
+    value: collected[field.field] ?? '',
+  }))
+  const strategyRows = STRATEGY_FIELDS.map(field => ({
+    label: field.title,
+    value: collected[field.field] ?? '',
+  }))
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-gray-900 mb-2">Review your setup</h2>
-      <p className="text-sm text-gray-500 mb-6">Click any row to edit. We'll create this client space when you finish.</p>
-
-      <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100 mb-4">
-        {orgFields.map(({ s, i }) => s.type !== 'intro' && s.type !== 'review' && (
-          <Row key={s.id} label={s.title} value={collected[s.field] ?? '-'} onClick={() => onEdit(i)} />
+      <StepHeader
+        icon={<Check className="w-5 h-5 text-gray-700" />}
+        eyebrow="Review"
+        title="Create this space"
+        body="Click a section to edit. Vera will save this to the Strategy Brain and open the Brain so sources and documents can be pulled next."
+      />
+      <ReviewGroup title="Required start" onEdit={() => onEdit(1)}>
+        <Row label="Company URL" value={collected.website ?? 'Not provided'} />
+      </ReviewGroup>
+      <ReviewGroup title="Business context" onEdit={() => onEdit(2)}>
+        <Row label="Space name" value={companyName} />
+        <Row label="Industry" value={collected.industry || 'Not provided'} muted={!collected.industry} />
+        <Row label="Offer" value={collected.offer || 'Not provided'} muted={!collected.offer} />
+        <Row label="Audience" value={collected.audience || 'Not provided'} muted={!collected.audience} />
+      </ReviewGroup>
+      <ReviewGroup title={`Sources (${sourceRows.filter(row => row.value.trim()).length})`} onEdit={() => onEdit(3)}>
+        {sourceRows.map(row => (
+          <Row key={row.label} label={row.label} value={row.value || 'Not provided'} muted={!row.value} />
         ))}
-      </div>
-
-      {provided.length > 0 && (
-        <>
-          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Channels to audit ({provided.length})</p>
-          <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100 mb-4">
-            {provided.map(({ s, i }) => s.type === 'channel' && (
-              <Row key={s.id} label={s.title} value={collected[s.field]} onClick={() => onEdit(i)} />
-            ))}
-          </div>
-        </>
-      )}
-
-      {skipped.length > 0 && (
-        <>
-          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Skipped ({skipped.length})</p>
-          <div className="bg-gray-50 border border-gray-200 rounded-xl divide-y divide-gray-100">
-            {skipped.map(({ s, i }) => s.type === 'channel' && (
-              <Row key={s.id} label={s.title} value="Not provided" onClick={() => onEdit(i)} muted />
-            ))}
-          </div>
-        </>
-      )}
+      </ReviewGroup>
+      <ReviewGroup title="Strategy assumptions" onEdit={() => onEdit(4)}>
+        {strategyRows.map(row => (
+          <Row key={row.label} label={row.label} value={row.value || 'Not provided'} muted={!row.value} />
+        ))}
+      </ReviewGroup>
     </div>
   )
 }
 
-function Row({ label, value, onClick, muted }: { label: string; value: string; onClick: () => void; muted?: boolean }) {
+function StepHeader({ icon, eyebrow, title, body }: { icon: ReactNode; eyebrow: string; title: string; body: string }) {
   return (
-    <button onClick={onClick} className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center justify-between gap-4">
+    <div className="mb-6">
+      <div className="inline-flex items-center gap-2 mb-3">
+        <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center">{icon}</div>
+        <span className="text-xs uppercase tracking-wider font-semibold text-gray-500">{eyebrow}</span>
+      </div>
+      <h2 className="text-2xl font-bold text-gray-900 mb-2">{title}</h2>
+      <p className="text-sm text-gray-500 leading-relaxed max-w-2xl">{body}</p>
+    </div>
+  )
+}
+
+function HintCard({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-3">
+      <div className="text-sm font-semibold text-gray-900">{title}</div>
+      <div className="text-xs text-gray-500 mt-1 leading-relaxed">{body}</div>
+    </div>
+  )
+}
+
+function InputField({ label, value, onChange, placeholder, helper }: { label: string; value: string; onChange: (v: string) => void; placeholder: string; helper?: string }) {
+  return (
+    <label className="block">
+      <span className="block text-sm font-semibold text-gray-900 mb-1">{label}</span>
+      {helper && <span className="block text-xs text-gray-500 mb-2 leading-relaxed">{helper}</span>}
+      <input
+        type="text"
+        value={value}
+        placeholder={placeholder}
+        onChange={e => onChange(e.target.value)}
+        className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-100"
+      />
+    </label>
+  )
+}
+
+function TextareaField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder: string }) {
+  return (
+    <label className="block sm:col-span-2">
+      <span className="block text-sm font-semibold text-gray-900 mb-1">{label}</span>
+      <textarea
+        value={value}
+        placeholder={placeholder}
+        onChange={e => onChange(e.target.value)}
+        rows={3}
+        className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-100 resize-y"
+      />
+    </label>
+  )
+}
+
+function ReviewGroup({ title, onEdit, children }: { title: string; onEdit: () => void; children: ReactNode }) {
+  return (
+    <section className="mb-4">
+      <button type="button" onClick={onEdit} className="mb-2 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-700">
+        <Network className="w-3.5 h-3.5" />
+        {title}
+      </button>
+      <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
+        {children}
+      </div>
+    </section>
+  )
+}
+
+function Row({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
+  return (
+    <div className="w-full px-4 py-3 flex items-center justify-between gap-4">
       <span className="text-sm font-medium text-gray-900">{label}</span>
       <span className={`text-sm truncate max-w-[60%] ${muted ? 'text-gray-400' : 'text-gray-600'}`}>{value}</span>
-    </button>
+    </div>
   )
 }

@@ -125,16 +125,16 @@ function validatePublisherScope(
   if (postProjectId && publisherProjectId !== postProjectId) {
     return {
       ok: false,
-      message: "Publisher is not connected to this client space.",
-      recoveryAction: "Reconnect the CMS/blog publisher inside this client space before publishing.",
+      message: "Publisher is not connected to this space.",
+      recoveryAction: "Reconnect the CMS/blog publisher inside this space before publishing.",
     }
   }
 
   if (!postProjectId && publisherProjectId) {
     return {
       ok: false,
-      message: "Publisher is client-scoped and cannot publish workspace-level posts.",
-      recoveryAction: "Use a workspace-level publisher or move the post into the matching client space.",
+      message: "Publisher is space-scoped and cannot publish workspace-level posts.",
+      recoveryAction: "Use a workspace-level publisher or move the post into the matching space.",
     }
   }
 

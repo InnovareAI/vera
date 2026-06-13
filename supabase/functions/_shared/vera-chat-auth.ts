@@ -44,7 +44,7 @@ export async function authorizeVeraChatMemberRequest(
       .eq("id", projectId)
       .maybeSingle()
     if (projectError) return { ok: false, response: jsonError(projectError.message, 500, corsHeaders) }
-    if (!project) return { ok: false, response: jsonError("Client not found", 404, corsHeaders) }
+    if (!project) return { ok: false, response: jsonError("Space not found", 404, corsHeaders) }
     if ((project as { org_id: string }).org_id !== orgId) {
       return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
     }

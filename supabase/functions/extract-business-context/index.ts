@@ -270,7 +270,7 @@ Deno.serve(async (req) => {
     .eq("id", projectId)
     .maybeSingle()
   if (projectError) return jsonError(projectError.message, 500)
-  if (!project) return jsonError("Client not found", 404)
+  if (!project) return jsonError("Space not found", 404)
 
   const allowed = await canManageProject(supabase, auth.user.id, project.id, project.org_id)
   if (!allowed) return jsonError("Forbidden", 403)
@@ -400,7 +400,7 @@ async function resolveExtractionRuntime(
     openRouter = results[0]
     anthropic = results[1]
   } catch (error) {
-    return { ok: false, response: jsonError(`Client API key for business context extraction is unavailable: ${errorMessage(error)}`, 403) }
+    return { ok: false, response: jsonError(`Space API key for business context extraction is unavailable: ${errorMessage(error)}`, 403) }
   }
 
   if (openRouter?.key) {
@@ -432,8 +432,8 @@ async function resolveExtractionRuntime(
     ok: false,
     response: jsonError(
       requiresAnthropicDocuments
-        ? "Business context PDF extraction requires this client space to use its own Anthropic key."
-        : "Business context extraction requires this client space to use its own OpenRouter or Anthropic key.",
+        ? "Business context PDF extraction requires this space to use its own Anthropic key."
+        : "Business context extraction requires this space to use its own OpenRouter or Anthropic key.",
       403,
     ),
   }
@@ -482,7 +482,7 @@ async function runOpenRouterExtraction(
       : "")
     .join("\n\n")
     .trim()
-  if (!prompt) throw new Error("OpenRouter extraction requires text content. For PDFs, add a client Anthropic key.")
+  if (!prompt) throw new Error("OpenRouter extraction requires text content. For PDFs, add a space Anthropic key.")
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -1001,9 +1001,9 @@ async function resolveSourceKnowledgeEmbeddingRuntime(
       return { ok: true, runtime: { provider: "openai", key: openai.key, model: OPENAI_EMBED_MODEL, keySource: "client" } }
     }
   } catch (error) {
-    return { ok: false, message: `Client OpenAI key for semantic source indexing is unavailable: ${errorMessage(error)}` }
+    return { ok: false, message: `Space OpenAI key for semantic source indexing is unavailable: ${errorMessage(error)}` }
   }
-  return { ok: false, message: "Add a client OpenAI key to make pulled source knowledge semantic-searchable." }
+  return { ok: false, message: "Add a space OpenAI key to make pulled source knowledge semantic-searchable." }
 }
 
 async function embedSourceKnowledge(
@@ -1140,7 +1140,7 @@ function buildPrompt(input: {
 }) {
   return `Extract business context for a content generation workspace.
 
-Project/client name: ${input.projectName}
+Project/space name: ${input.projectName}
 Source file: ${input.fileName}
 
 Existing context, preserve it when the document is silent:
@@ -1156,12 +1156,12 @@ Rules:
 - Treat "website" as the primary company URL when present.
 - Extract LinkedIn company pages, LinkedIn personal profiles, LinkedIn events, LinkedIn newsletters, Instagram profiles, YouTube channels, Medium pages, Quora profiles, Reddit profiles or communities, Facebook pages, and X profiles only when explicitly present.
 - "sourcePullDepth" should be "light", "standard", or "deep" only when the source explicitly says how much source history to inspect. Otherwise return an empty string.
-- "activeChannels" should list only the channels the source makes strategy-valid for this client. Use comma-separated platform keys from: linkedin, youtube, medium, quora, reddit, x, instagram, facebook, blog, email. If the source is only a URL list with no strategic intent, infer from the provided source URLs. If the source says a channel is not part of strategy, omit it even if a URL exists.
+- "activeChannels" should list only the channels the source makes strategy-valid for this space. Use comma-separated platform keys from: linkedin, youtube, medium, quora, reddit, x, instagram, facebook, blog, email. If the source is only a URL list with no strategic intent, infer from the provided source URLs. If the source says a channel is not part of strategy, omit it even if a URL exists.
 - Use source posts, events, and newsletters to infer positioning, recurring topics, proof points, and content goals, but keep URLs in their own fields.
 - "offer" should capture products, services, or core value proposition.
 - "audience" should capture target customers, users, communities, industries, or decision makers.
-- "customerProblems" should capture pains the client solves.
-- "differentiators" should capture positioning and why the client is different.
+- "customerProblems" should capture pains the business solves.
+- "differentiators" should capture positioning and why the business is different.
 - "proofPoints" should capture facts, numbers, case studies, credentials, or named evidence.
 - "contentGoals" should capture messaging goals, campaign goals, themes, or calls to action.
 - "speakerStrategy" should capture who VERA may write as, including brand account, founder, named person, internal expert, or team voice, and when each should be used.

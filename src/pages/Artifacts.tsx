@@ -399,8 +399,8 @@ export default function Artifacts() {
       <div style={{ padding: `${space[8]} ${space[8]} 0`, maxWidth: 860 }}>
         <EmptyState
           icon={<FolderOpen size={22} strokeWidth={1.5} />}
-          title="No active client"
-          body="Pick a client space to see its generated work, media, logos, guidelines, and briefs."
+          title="No active space"
+          body="Pick a space to see its generated work, media, logos, guidelines, and briefs."
         />
       </div>
     )
@@ -420,7 +420,7 @@ export default function Artifacts() {
       <PageHeader
         eyebrow={activeProject.name}
         title="Studio"
-        subtitle="Everything VERA produces or reuses for this client: campaigns, posts, media, logos, guidelines, briefs, and content assets."
+        subtitle="Everything VERA produces or reuses for this space: campaigns, posts, media, logos, guidelines, briefs, and content assets."
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: space[3], marginBottom: space[5] }}>
@@ -495,7 +495,7 @@ export default function Artifacts() {
         <EmptyState
           icon={<LayoutGrid size={22} strokeWidth={1.5} />}
           title="Nothing here yet"
-          body="Brief a post, plan a campaign, or upload brand-kit files. Everything for this client will live here."
+          body="Brief a post, plan a campaign, or upload brand-kit files. Everything for this space will live here."
         />
       )}
 
@@ -503,7 +503,7 @@ export default function Artifacts() {
         <EmptyState
           icon={<Search size={22} strokeWidth={1.5} />}
           title="No matching artifacts"
-          body="Clear the search or switch filters to see more of this client's library."
+          body="Clear the search or switch filters to see more of this space's library."
         />
       )}
 
@@ -529,7 +529,7 @@ export default function Artifacts() {
 
       {cat === 'images' && (
         filteredImages.length === 0 ? (
-          <EmptyState icon={<ImageIcon size={22} strokeWidth={1.5} />} title="No images yet" body="Images Vera generates for this client's posts show up here." />
+          <EmptyState icon={<ImageIcon size={22} strokeWidth={1.5} />} title="No images yet" body="Images Vera generates for this space's posts show up here." />
         ) : (
           <MediaGrid posts={filteredImages} type="image" onOpen={open} />
         )
@@ -537,7 +537,7 @@ export default function Artifacts() {
 
       {cat === 'videos' && (
         filteredVideos.length === 0 ? (
-          <EmptyState icon={<Clapperboard size={22} strokeWidth={1.5} />} title="No videos yet" body="Clips Vera renders for this client show up here." />
+          <EmptyState icon={<Clapperboard size={22} strokeWidth={1.5} />} title="No videos yet" body="Clips Vera renders for this space show up here." />
         ) : (
           <MediaGrid posts={filteredVideos} type="video" onOpen={open} />
         )

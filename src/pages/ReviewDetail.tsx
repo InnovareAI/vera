@@ -164,12 +164,12 @@ export default function ReviewDetail() {
       setLinkedInPublishReady(!!accountId && healthyEnough)
       setLinkedInPublishDetail(
         !row
-          ? 'Connect LinkedIn publishing in client integrations first.'
+          ? 'Connect LinkedIn publishing in integrations first.'
           : !accountId
             ? 'LinkedIn publishing is connected, but the Unipile account ID is missing.'
             : !healthyEnough
               ? `LinkedIn publishing is ${health}. Reconnect it before publishing.`
-              : 'LinkedIn publishing is connected for this client space.',
+              : 'LinkedIn publishing is connected for this space.',
       )
     }
 
@@ -283,7 +283,7 @@ export default function ReviewDetail() {
   }
 
   // Post directly to LinkedIn via Unipile. Available for LinkedIn only when
-  // this client space has its own connected publishing integration. Shared
+  // this space has its own connected publishing integration. Shared
   // research profiles are intentionally excluded here.
   async function postToLinkedIn() {
     if (!post) return

@@ -25,7 +25,7 @@ interface OrgContextType {
   loading: boolean
   // True when the user has a real org_members row (agency staff). False when the
   // workspace was derived from project memberships only (a client collaborator
-  // invited to a single client space). Drives where they land on entry.
+  // invited to a single space). Drives where they land on entry.
   isOrgMember: boolean
   switchOrg: (orgId: string) => void
   refetch: () => void

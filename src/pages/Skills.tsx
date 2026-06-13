@@ -555,7 +555,7 @@ export default function Skills() {
               Workspace skill
             </Button>
             <Button variant="primary" leading={<Plus size={14} />} onClick={() => openNew('client')} disabled={!activeProject}>
-              Client skill
+              Space skill
             </Button>
           </div>
         }
@@ -576,7 +576,7 @@ export default function Skills() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: space[3], marginBottom: space[5] }}>
         <Metric icon={Sparkles} label="Global Vera" value={counts.global} tone={color.accent} />
         <Metric icon={Layers} label="Workspace" value={counts.workspace} tone={color.dotBlue} />
-        <Metric icon={BookOpen} label={activeProject ? 'Active client' : 'Client'} value={counts.client} tone={color.dotGreen} />
+        <Metric icon={BookOpen} label={activeProject ? 'Active space' : 'Space'} value={counts.client} tone={color.dotGreen} />
         <Metric icon={BarChart3} label="With signal" value={learningStats.trackedSkills} tone={color.dotViolet} />
       </div>
 
@@ -980,7 +980,7 @@ function SkillRow({
         <button onClick={onToggle} style={{ border: 0, background: 'transparent', padding: 0, textAlign: 'left', cursor: 'pointer', minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: space[2], marginBottom: space[2], flexWrap: 'wrap' }}>
             <Badge dot={typeDot[skill.type]}>{skill.type}</Badge>
-            <Badge>{scope === 'global' ? 'Global Vera' : scope === 'client' ? 'Client' : 'Workspace'}</Badge>
+            <Badge>{scope === 'global' ? 'Global Vera' : scope === 'client' ? 'Space' : 'Workspace'}</Badge>
             <Badge dot={confidenceColor[conf]}>{conf}</Badge>
             {!skill.is_active && <Badge>Inactive</Badge>}
             {skill.parent_id && <Badge>Forked</Badge>}
@@ -1160,7 +1160,7 @@ function SkillForm({
             <Field label="Scope">
               <Select value={form.scope} onChange={e => setForm(prev => ({ ...prev, scope: e.target.value as FormScope }))}>
                 <option value="workspace">Workspace skill</option>
-                <option value="client" disabled={!canUseClientScope}>Client skill{activeProjectName ? `: ${activeProjectName}` : ''}</option>
+                <option value="client" disabled={!canUseClientScope}>Space skill{activeProjectName ? `: ${activeProjectName}` : ''}</option>
               </Select>
             </Field>
             <Field label="Confidence">
@@ -1188,11 +1188,11 @@ function SkillForm({
           </div>
 
           <Field label="Description" helper="This is for the model. Describe when Vera should use the skill, not just what it is.">
-            <Textarea rows={3} value={form.description} onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))} placeholder="Use when reviewing LinkedIn posts for hook strength, proof, voice, and platform fit." />
+            <Textarea rows={3} value={form.description} onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))} placeholder="Use when reviewing platform-native posts for hook strength, proof, voice, and channel fit." />
           </Field>
 
           <Field label="Trigger guidance">
-            <Textarea rows={3} value={form.trigger_description} onChange={e => setForm(prev => ({ ...prev, trigger_description: e.target.value }))} placeholder="Trigger when the operator asks for a LinkedIn audit, founder voice check, or post rewrite." />
+            <Textarea rows={3} value={form.trigger_description} onChange={e => setForm(prev => ({ ...prev, trigger_description: e.target.value }))} placeholder="Trigger when the operator asks for a channel audit, named-person voice check, or post rewrite." />
           </Field>
 
           <Field label="Prompt module">
@@ -1212,7 +1212,7 @@ function SkillForm({
             </Field>
           </div>
 
-          <Field label="Sources" helper="One per line. Example: General Vera KB: LinkedIn audit rules.">
+          <Field label="Sources" helper="One per line. Example: General Vera KB: platform-specific review rules.">
             <Textarea rows={4} value={form.source_refs} onChange={e => setForm(prev => ({ ...prev, source_refs: e.target.value }))} />
           </Field>
 

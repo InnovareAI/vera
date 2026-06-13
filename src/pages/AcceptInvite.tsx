@@ -37,12 +37,12 @@ export default function AcceptInvite() {
         const projectSlug = data.project_slug ?? null
         setState({
           status: 'success',
-          message: data.project_name ? `You now have access to ${data.project_name}.` : 'You now have access to this client space.',
+          message: data.project_name ? `You now have access to ${data.project_name}.` : 'You now have access to this space.',
           projectSlug,
         })
         window.setTimeout(() => {
           if (projectSlug) window.location.assign(`/p/${projectSlug}/vera`)
-          else window.location.assign('/clients')
+          else window.location.assign('/spaces')
         }, 900)
       } catch (error) {
         if (!cancelled) setState({ status: 'error', message: error instanceof Error ? error.message : 'Invite accept failed' })
@@ -81,14 +81,14 @@ export default function AcceptInvite() {
           {isLoading ? <Loader2 size={23} className="animate-spin" /> : isSuccess ? <Check size={23} /> : <XCircle size={23} />}
         </span>
         <h1 style={{ margin: `${space[5]} 0 ${space[2]}`, color: color.ink, fontSize: t.size.h2, fontWeight: t.weight.semibold }}>
-          {isLoading ? 'Joining client space' : isSuccess ? 'Invite accepted' : 'Invite could not be accepted'}
+          {isLoading ? 'Joining space' : isSuccess ? 'Invite accepted' : 'Invite could not be accepted'}
         </h1>
         <p style={{ margin: 0, color: color.ink2, fontSize: t.size.sm, lineHeight: t.lineHeight.relaxed }}>
           {state.message}
         </p>
         {state.status === 'error' && (
           <div style={{ marginTop: space[6], display: 'flex', justifyContent: 'center' }}>
-            <Button variant="secondary" onClick={() => navigate('/clients')}>Back to clients</Button>
+            <Button variant="secondary" onClick={() => navigate('/spaces')}>Back to spaces</Button>
           </div>
         )}
       </div>

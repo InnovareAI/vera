@@ -130,12 +130,12 @@ function contextText(context?: BusinessContext) {
 function stakeholderText(context?: BusinessContext) {
   const explicit = context?.approvalStakeholders?.trim()
   if (explicit) return explicit
-  return 'Client lead, subject owner, and operator'
+  return 'Space owner, subject owner, and operator'
 }
 
 function baseChecklist(post: Post, context?: BusinessContext, policy?: DemandChannelOperatingPolicy | null) {
   const checks = [
-    'Message fits the client positioning',
+    'Message fits the saved positioning',
     'Platform format and CTA are clear',
     'Comments, shares, and traffic goal are explicit',
   ]
@@ -182,7 +182,7 @@ export function approvalRouteForPost(post: Post, context?: BusinessContext): App
       label: 'Legal or compliance',
       tone: 'danger',
       risk: 'high',
-      reason: 'The copy or client context includes claims, regulated topics, or compliance-sensitive language.',
+      reason: 'The copy or saved context includes claims, regulated topics, or compliance-sensitive language.',
       checklist: [
         'Verify claims, numbers, and proof points',
         'Check legal, compliance, and brand constraints',
@@ -212,7 +212,7 @@ export function approvalRouteForPost(post: Post, context?: BusinessContext): App
 
   if (manualFirstChannels.has(channel)) {
     return {
-      label: 'Client lead',
+      label: 'Space owner',
       tone: 'info',
       risk: 'medium',
       reason: policy?.publishGuard || 'This channel is manual-first or community-sensitive, so a human should own posting context.',
@@ -221,7 +221,7 @@ export function approvalRouteForPost(post: Post, context?: BusinessContext): App
         'Confirm the post is helpful before it is promotional',
         ...checklist,
       ],
-      approverHint: context?.approvalStakeholders?.trim() || 'Client lead or operator',
+      approverHint: context?.approvalStakeholders?.trim() || 'Space owner or operator',
       ...policyRouteFields(policy),
     }
   }

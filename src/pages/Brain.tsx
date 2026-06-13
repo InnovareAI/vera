@@ -2,23 +2,23 @@
 //
 // · Custom instructions — per project; vera-chat reads them EVERY turn. The
 //   single highest-leverage per-client lever.
-// · Brand voice — tone, rules, forbidden phrases, persona (client-scoped, with
+// · Brand voice — tone, rules, forbidden phrases, persona (space-scoped, with
 //   a workspace fallback only as a starter draft).
-// · Audiences — who VERA writes toward for this client.
-// · Knowledge — link to the client's searchable sources (managed in Knowledge;
+// · Audiences — who VERA writes toward for this space.
+// · Knowledge — link to the space's searchable sources (managed in Knowledge;
 //   brand-kit files live in Artifacts).
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ElementType } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, Brain as BrainIcon, BookOpen, Check, Link2, Plus, ShieldCheck, Target, X, Loader2, Trash2, Sparkles, Upload, FileText, RefreshCw, ExternalLink } from 'lucide-react'
+import { Brain as BrainIcon, BookOpen, Check, Link2, Plus, Target, X, Loader2, Trash2, Sparkles, Upload, FileText, RefreshCw, ExternalLink } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { BrandVoice, Audience, ContentMetricSnapshot, Post } from '../lib/supabase'
 import { useProject } from '../lib/projectContext'
 import { useOrg } from '../lib/orgContext'
 import { useAuth } from '../lib/auth'
 import { useRightRail } from '../lib/rightRailContext'
-import { PageHeader, SectionLabel, Field, Input, Textarea, Select, Button, EmptyState, Chip, color, space, type as t, radius } from '../design'
+import { SectionLabel, Field, Input, Textarea, Select, Button, EmptyState, Chip, color, space, type as t, radius } from '../design'
 import {
   EMPTY_BUSINESS_CONTEXT,
   compactProjectDescription,
@@ -295,13 +295,13 @@ function cleanAuditSkillProposals(raw: unknown): AuditSkillProposal[] {
       const name = cleanText(source.name)
       const description = cleanMultilineText(source.description)
       const promptModule = cleanMultilineText(source.prompt_module) || [
-        `Apply this Brain skill: ${name || 'Client-specific content skill'}.`,
+        `Apply this Brain skill: ${name || 'Space-specific content skill'}.`,
         description || 'Use the client audit evidence to improve content quality, platform fit, and campaign performance.',
       ].join('\n')
       return {
         name,
         type: cleanAuditSkillType(source.type),
-        description: description || `Client-specific ${cleanAuditSkillType(source.type)} skill drafted from the content audit.`,
+        description: description || `Space-specific ${cleanAuditSkillType(source.type)} skill drafted from the content audit.`,
         prompt_module: promptModule,
         injected_into: cleanAuditSkillAgent(source.injected_into),
       }
@@ -765,6 +765,7 @@ function formatLearningDate(value: string | null) {
 }
 
 function BrainReadinessPanel({
+  projectName,
   context,
   policies,
   sourceCount,
@@ -773,7 +774,17 @@ function BrainReadinessPanel({
   channelEvidence,
   learningLoading,
   learningError,
+  sourceKnowledgeCount,
+  onDraft,
+  drafting,
+  draftStatus,
+  onPullSources,
+  pullingSources,
+  onSave,
+  saving,
+  saved,
 }: {
+  projectName: string
   context: BusinessContext
   policies: Record<DemandPlatformKey, DemandChannelOperatingPolicy>
   sourceCount: number
@@ -782,14 +793,21 @@ function BrainReadinessPanel({
   channelEvidence: Map<DemandPlatformKey, BrainChannelEvidence>
   learningLoading: boolean
   learningError: string | null
+  sourceKnowledgeCount: number
+  onDraft: () => void
+  drafting: boolean
+  draftStatus: string
+  onPullSources: () => void
+  pullingSources: boolean
+  onSave: () => void
+  saving: boolean
+  saved: boolean
 }) {
   const evidenceValues = Array.from(channelEvidence.values())
   const activeEvidenceKeys = new Set(evidenceValues.filter(item => item.posts > 0).map(item => item.key))
   const activePlatforms = DEMAND_PLATFORM_DEFINITIONS.filter(platform => (
     activeEvidenceKeys.has(platform.key) || activeDemandPlatforms(context).some(activePlatform => activePlatform.key === platform.key)
   ))
-  const plannedChannels = activePlatforms.filter(platform => !demandPlatformSourceValue(platform, context) && demandPlatformIsMentioned(platform, context)).length
-  const highCareChannels = activePlatforms.filter(platform => (policies[platform.key] ?? DEMAND_CHANNEL_OPERATING_POLICIES[platform.key]).risk === 'high').length
   const customPolicies = demandChannelPolicyOverrideCount(policies)
   const gaps = sourceGapPlatforms(context)
   const totalPosts = evidenceValues.reduce((sum, item) => sum + item.posts, 0)
@@ -812,60 +830,160 @@ function BrainReadinessPanel({
   const totalFields = DEMAND_FACT_KEYS.length + Object.keys(DEFAULT_DEMAND_OPERATING_MODEL).length + DEMAND_SOURCE_KEYS.length
   const filledFields = factCount + operatingCount + sourceCount
   const readiness = Math.round((filledFields / totalFields) * 100)
+  const activeKeys = new Set(activePlatforms.map(platform => platform.key))
+  const sourceRows = DEMAND_PLATFORM_DEFINITIONS
+    .filter(platform => (
+      activeKeys.has(platform.key) ||
+      demandPlatformSourceValue(platform, context) ||
+      demandPlatformIsMentioned(platform, context) ||
+      (channelEvidence.get(platform.key)?.posts ?? 0) > 0
+    ))
+    .slice(0, 8)
+  const sourceDisplay = sourceRows.length ? sourceRows : DEMAND_PLATFORM_DEFINITIONS.slice(0, 6)
+  const toneItems = cleanTextList(context.platformToneOfVoice).slice(0, 4)
+  const recommendation = sourceCount === 0
+    ? {
+      title: 'Start with the company URL.',
+      body: 'Add the website first, then pull owned and social sources so VERA can build strategy from evidence instead of guesses.',
+      tone: color.warn,
+    }
+    : readiness < 70
+      ? {
+        title: 'Close the strategy gaps before scaling generation.',
+        body: gaps.length ? `Add source context for ${gaps.map(platform => platform.label).join(', ')} and save the missing strategy fields.` : 'Fill the missing audience, offer, proof, approval, and learning fields before scaling content production.',
+        tone: color.warn,
+      }
+      : measuredPosts === 0
+        ? {
+          title: 'Create or import measured content next.',
+          body: 'The strategy model is usable. VERA now needs content and performance signals to learn what works for this space.',
+          tone: color.accent,
+        }
+        : {
+          title: strongestPlatform ? `Use ${strongestPlatform.label} learning to brief the next move.` : 'Turn learning evidence into the next content move.',
+          body: strongestEvidence?.demandSignals.length ? `Recent demand signals: ${strongestEvidence.demandSignals.slice(0, 3).join(', ')}.` : 'Use the measured posts and channel policies to decide what to create, repurpose, or hand off next.',
+          tone: color.success,
+        }
+  const assumptionRows = [
+    { label: 'Goal', value: context.demandObjective || context.contentGoals || DEFAULT_DEMAND_OPERATING_MODEL.demandObjective },
+    { label: 'Audience', value: context.audience || 'Audience needs review.' },
+    { label: 'Tone by medium', value: toneItems[0] || DEFAULT_DEMAND_OPERATING_MODEL.platformToneOfVoice },
+    { label: 'Follow-up rule', value: context.samHandoffRules || DEFAULT_DEMAND_OPERATING_MODEL.samHandoffRules },
+  ]
 
   return (
-    <section style={{ marginBottom: space[8], padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: space[4], flexWrap: 'wrap', marginBottom: space[4] }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.ink, fontSize: t.size.body, fontWeight: t.weight.semibold }}>
-            <Target size={16} color={color.accent} />
-            Strategy readiness
+    <section style={{ marginBottom: space[8], display: 'grid', gap: space[4] }}>
+      <div style={{ padding: space[6], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, boxShadow: 'var(--shadow-pop)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: space[6], alignItems: 'start' }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold, marginBottom: space[3] }}>
+              <BrainIcon size={14} />
+              Strategy Canvas
+            </div>
+            <h1 style={{ margin: 0, color: color.ink, fontSize: t.size.h2, fontWeight: t.weight.semibold, lineHeight: 1.18 }}>
+              {projectName}
+            </h1>
+            <p style={{ margin: `${space[3]} 0 0`, maxWidth: 720, color: color.ink2, fontSize: t.size.body, lineHeight: 1.58 }}>
+              This is the strategy model VERA uses to choose channels, adapt tone by medium, route approvals, measure traction, and decide which assumptions deserve follow-up.
+            </p>
+            <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', marginTop: space[4] }}>
+              <Chip tone={readiness >= 70 ? 'accent' : 'default'} size="md">{readiness}% ready</Chip>
+              <Chip dot={sourceKnowledgeCount ? color.success : color.warn}>{sourceKnowledgeCount} indexed sources</Chip>
+              <Chip dot={measuredPosts ? color.success : color.warn}>{measuredPosts} measured posts</Chip>
+              <Chip dot={customPolicies ? color.accent : color.ghost}>{customPolicies} custom policies</Chip>
+            </div>
           </div>
-          <p style={{ margin: `${space[2]} 0 0`, maxWidth: 720, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.5 }}>
-            This is the client model VERA uses to plan content, route approvals, measure traction, and decide which assumptions need follow-up.
-          </p>
+
+          <aside style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2, padding: space[4], display: 'grid', gap: space[3] }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: recommendation.tone, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>
+              <Sparkles size={13} />
+              VERA recommendation
+            </div>
+            <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.4 }}>{recommendation.title}</div>
+            <p style={{ margin: 0, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>{recommendation.body}</p>
+            <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap' }}>
+              <Button variant="secondary" size="sm" onClick={onDraft} disabled={drafting}>
+                {drafting ? <><Loader2 size={13} className="animate-spin" /> Drafting...</> : <><Sparkles size={13} /> Draft with VERA</>}
+              </Button>
+              <Button variant="secondary" size="sm" onClick={onPullSources} disabled={pullingSources || sourceCount === 0}>
+                {pullingSources ? <Loader2 size={13} /> : <RefreshCw size={13} />}
+                {pullingSources ? 'Pulling...' : 'Pull sources'}
+              </Button>
+              <Button variant="primary" size="sm" onClick={onSave} disabled={saving} style={{ background: color.ink, color: color.surface }}>
+                {saving ? <Loader2 size={13} /> : <Check size={13} />}
+                {saved ? 'Saved' : 'Save'}
+              </Button>
+            </div>
+            {draftStatus && <p style={{ margin: 0, color: color.ghost, fontSize: t.size.micro, lineHeight: 1.45 }}>{draftStatus}</p>}
+          </aside>
         </div>
-        <Chip tone={readiness >= 70 ? 'accent' : 'default'} size="md">{readiness}% ready</Chip>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: space[3] }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: space[3] }}>
         <ReadinessTile icon={Link2} label="Sources" value={`${sourceCount}/${DEMAND_SOURCE_KEYS.length}`} detail="Website and channel evidence" tone={sourceCount ? color.success : color.warn} />
         <ReadinessTile icon={BrainIcon} label="Context" value={`${factCount}/${DEMAND_FACT_KEYS.length}`} detail="Offer, audience, proof, constraints" tone={factCount >= 6 ? color.success : color.warn} />
         <ReadinessTile icon={Sparkles} label="Operating fields" value={`${operatingCount}/${Object.keys(DEFAULT_DEMAND_OPERATING_MODEL).length}`} detail="Objectives, formats, signals, learning" tone={operatingCount >= 5 ? color.success : color.warn} />
-        <ReadinessTile icon={ShieldCheck} label="Custom policies" value={customPolicies} detail="Channel rules beyond defaults" tone={customPolicies ? color.accent : color.ghost} />
-        <ReadinessTile icon={AlertTriangle} label="High-care channels" value={highCareChannels} detail="Approval-sensitive surfaces" tone={highCareChannels ? color.danger : color.success} />
-        <ReadinessTile icon={Target} label="Planned channels" value={plannedChannels} detail="Mentioned but no source URL yet" tone={plannedChannels ? color.info : color.ghost} />
-        <ReadinessTile icon={BookOpen} label="Content assets" value={totalPosts} detail="Posts available for learning" tone={totalPosts ? color.success : color.ghost} />
         <ReadinessTile icon={RefreshCw} label="Measured assets" value={`${measuredPosts}/${totalPosts || 0}`} detail="Posts with metric signals" tone={measuredPosts ? color.success : color.warn} />
-        <ReadinessTile icon={Target} label="Learning channels" value={measuredChannels} detail={strongestPlatform ? `Strongest: ${strongestPlatform.label}` : 'No channel has measured traction'} tone={measuredChannels ? color.accent : color.ghost} />
-        <ReadinessTile icon={Sparkles} label="Signal score" value={signalScore} detail="Weighted demand signal total" tone={signalScore ? color.accent : color.ghost} />
       </div>
 
-      <div style={{ marginTop: space[4], display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
-        <span style={{ color: color.ghost, fontSize: t.size.cap, marginRight: space[1] }}>Source gaps</span>
-        {gaps.length ? gaps.map(platform => (
-          <Chip key={platform.key} dot={demandPlatformIsMentioned(platform, context) ? color.info : color.ghost}>{platform.label}</Chip>
-        )) : <Chip dot={color.success}>All source channels configured</Chip>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: space[4], alignItems: 'start' }}>
+        <section style={{ padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: space[3], marginBottom: space[4], flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>Knowledge and source map</div>
+              <p style={{ margin: `${space[1]} 0 0`, color: color.ghost, fontSize: t.size.micro, lineHeight: 1.45 }}>Website, social channels, and content hubs VERA can use as evidence.</p>
+            </div>
+            <Chip dot={gaps.length ? color.warn : color.success}>{gaps.length ? `${gaps.length} source gaps` : 'Sources covered'}</Chip>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))', gap: space[2] }}>
+            {sourceDisplay.map(platform => (
+              <StrategySourceCard
+                key={platform.key}
+                platform={platform}
+                context={context}
+                evidence={channelEvidence.get(platform.key)}
+                active={activeKeys.has(platform.key)}
+              />
+            ))}
+          </div>
+        </section>
+
+        <section style={{ display: 'grid', gap: space[4] }}>
+          <div style={{ padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg }}>
+            <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, marginBottom: space[3] }}>Current assumptions</div>
+            <div style={{ display: 'grid', gap: space[2] }}>
+              {assumptionRows.map(row => <StrategyAssumption key={row.label} label={row.label} value={row.value} />)}
+            </div>
+          </div>
+
+          <div style={{ padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], flexWrap: 'wrap', marginBottom: space[3] }}>
+              <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>Active channels</div>
+              <Chip dot={measuredChannels ? color.success : color.ghost}>{measuredChannels} learning</Chip>
+            </div>
+            <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap' }}>
+              {activePlatforms.length ? activePlatforms.slice(0, 8).map(platform => (
+                <StrategyChannelPill key={platform.key} platform={platform} evidence={channelEvidence.get(platform.key)} policy={policies[platform.key] ?? DEMAND_CHANNEL_OPERATING_POLICIES[platform.key]} />
+              )) : <Chip dot={color.warn}>No active channel selected</Chip>}
+            </div>
+          </div>
+        </section>
       </div>
 
-      <div style={{ marginTop: space[4], padding: space[4], background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
+      <div style={{ padding: space[4], background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.lg }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], flexWrap: 'wrap', marginBottom: space[3] }}>
           <div>
             <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>Learning evidence</div>
-            <p style={{ margin: `${space[1]} 0 0`, color: color.ghost, fontSize: t.size.micro, lineHeight: 1.4 }}>
-              Posts and metrics VERA can use to improve channel strategy and decide which assumptions deserve follow-up.
-            </p>
+            <p style={{ margin: `${space[1]} 0 0`, color: color.ghost, fontSize: t.size.micro, lineHeight: 1.4 }}>Posts and metrics VERA can use to improve channel strategy.</p>
           </div>
-          <Chip dot={measuredPosts ? color.success : color.warn}>{measuredPosts} measured</Chip>
+          <Chip dot={signalScore ? color.accent : color.ghost}>signal score {signalScore}</Chip>
         </div>
         {learningLoading ? (
           <p style={{ margin: 0, color: color.ink2, fontSize: t.size.cap }}>Loading learning evidence...</p>
         ) : learningError ? (
           <p style={{ margin: 0, color: color.danger, fontSize: t.size.cap }}>{learningError}</p>
         ) : totalPosts === 0 ? (
-          <p style={{ margin: 0, color: color.ink2, fontSize: t.size.cap }}>
-            No channel posts found yet. Once content is created or imported, this panel will show where VERA has evidence.
-          </p>
+          <p style={{ margin: 0, color: color.ink2, fontSize: t.size.cap }}>No channel posts found yet. Once content is created or imported, this panel will show where VERA has evidence.</p>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))', gap: space[3] }}>
             {evidenceRows.map(({ platform, evidence }) => (
@@ -890,6 +1008,117 @@ function BrainReadinessPanel({
         )}
       </div>
     </section>
+  )
+}
+
+function BrainStudioNav({
+  sourceCount,
+  indexedCount,
+  activeChannelCount,
+  audienceCount,
+  categoryCount,
+  voiceReady,
+}: {
+  sourceCount: number
+  indexedCount: number
+  activeChannelCount: number
+  audienceCount: number
+  categoryCount: number
+  voiceReady: boolean
+}) {
+  const items = [
+    { id: 'brain-context', icon: Target, label: 'Context', meta: 'Business facts' },
+    { id: 'brain-sources', icon: Link2, label: 'Sources', meta: `${sourceCount} URLs` },
+    { id: 'brain-channels', icon: RefreshCw, label: 'Channels', meta: `${activeChannelCount} active` },
+    { id: 'brain-assumptions', icon: Sparkles, label: 'Assumptions', meta: 'Operating model' },
+    { id: 'brain-voice', icon: BrainIcon, label: 'Voice', meta: voiceReady ? 'Ready' : 'Needs tone' },
+    { id: 'brain-audiences', icon: Target, label: 'Audiences', meta: `${audienceCount}` },
+    { id: 'brain-categories', icon: FileText, label: 'Taxonomy', meta: `${categoryCount} categories` },
+    { id: 'brain-knowledge', icon: BookOpen, label: 'Knowledge', meta: `${indexedCount} indexed` },
+  ]
+  return (
+    <nav aria-label="Brain sections" style={{ position: 'sticky', top: 0, zIndex: 6, margin: `-${space[2]} 0 ${space[5]}`, padding: `${space[2]} 0`, background: color.paper }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: space[2], overflowX: 'auto', padding: `${space[2]} ${space[1]}`, border: `1px solid ${color.line}`, borderRadius: radius.lg, background: color.surface }}>
+        {items.map(item => {
+          const Icon = item.icon
+          return (
+            <a
+              key={item.id}
+              href={`#${item.id}`}
+              style={{
+                minWidth: 132,
+                minHeight: 44,
+                display: 'grid',
+                gridTemplateColumns: '18px minmax(0, 1fr)',
+                gap: space[2],
+                alignItems: 'center',
+                padding: `${space[2]} ${space[3]}`,
+                borderRadius: radius.md,
+                color: color.ink,
+                textDecoration: 'none',
+                background: color.paper2,
+                border: `1px solid ${color.line}`,
+                flexShrink: 0,
+              }}
+            >
+              <Icon size={15} style={{ color: color.accent }} />
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold, lineHeight: 1.2, whiteSpace: 'nowrap' }}>{item.label}</span>
+                <span style={{ display: 'block', color: color.ghost, fontSize: t.size.micro, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.meta}</span>
+              </span>
+            </a>
+          )
+        })}
+      </div>
+    </nav>
+  )
+}
+
+function StrategySourceCard({ platform, context, evidence, active }: {
+  platform: DemandPlatformDefinition
+  context: BusinessContext
+  evidence?: BrainChannelEvidence
+  active: boolean
+}) {
+  const source = demandPlatformSourceValue(platform, context)
+  const mentioned = demandPlatformIsMentioned(platform, context)
+  const posts = evidence?.posts ?? 0
+  const measured = evidence?.measured ?? 0
+  const state = source ? 'Source' : posts ? 'Content' : mentioned ? 'Planned' : 'Candidate'
+  const tone = source ? color.success : posts ? color.accent : mentioned ? color.info : color.ghost
+  return (
+    <div style={{ padding: space[3], border: `1px solid ${active ? color.line2 : color.line}`, borderRadius: radius.md, background: active ? color.paper : color.paper2, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: space[2], marginBottom: space[2] }}>
+        <span style={{ width: 26, height: 26, borderRadius: radius.xs, background: active ? color.accentSoft : color.surface, color: active ? color.accent : color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: t.size.micro, fontWeight: t.weight.semibold }}>{platform.initials}</span>
+        <span style={{ minWidth: 0, color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{platform.label}</span>
+      </div>
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: space[2] }}>
+        <Chip dot={tone}>{state}</Chip>
+        {measured > 0 ? <Chip dot={color.success}>{measured} measured</Chip> : posts > 0 ? <Chip>{posts} posts</Chip> : null}
+      </div>
+      <div title={source || platform.workflow} style={{ color: color.ghost, fontSize: t.size.micro, lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {source || platform.publishing}
+      </div>
+    </div>
+  )
+}
+
+function StrategyAssumption({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '96px minmax(0, 1fr)', gap: space[3], alignItems: 'start', padding: `${space[2]} 0`, borderBottom: `1px solid ${color.line}` }}>
+      <span style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium }}>{label}</span>
+      <span style={{ color: color.ink2, fontSize: t.size.cap, lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{value}</span>
+    </div>
+  )
+}
+
+function StrategyChannelPill({ platform, evidence, policy }: { platform: DemandPlatformDefinition; evidence?: BrainChannelEvidence; policy: DemandChannelOperatingPolicy }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minHeight: 30, padding: '5px 9px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.paper2, color: color.ink2, fontSize: t.size.cap, fontWeight: t.weight.medium }}>
+      <span style={{ color: color.accent, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>{platform.initials}</span>
+      {platform.label}
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: evidence?.measured ? color.success : riskTone(policy.risk), flexShrink: 0 }} />
+    </span>
   )
 }
 
@@ -952,7 +1181,7 @@ function ActiveChannelSelector({
         <div>
           <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>Active channels</div>
           <p style={{ margin: `${space[1]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.45, maxWidth: 680 }}>
-            These are the channels Vera can treat as strategy-valid for this client. If none are saved, Vera infers from source URLs, strategy text, and content history.
+            These are the channels Vera can treat as strategy-valid for this space. If none are saved, Vera infers from source URLs, strategy text, and content history.
           </p>
         </div>
         <div style={{ display: 'flex', gap: space[2], alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1145,7 +1374,7 @@ function DemandChannelPolicyEditor({
         <div>
           <div style={{ fontSize: t.size.sm, color: color.ink, fontWeight: t.weight.semibold }}>Channel policy editor</div>
           <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `${space[2]} 0 0`, maxWidth: 700 }}>
-            These rules become part of this client's Strategy Brain. Vera uses them when choosing a speaker, routing approval, deciding whether work can publish, and deciding which signals need follow-up.
+            These rules become part of this Strategy Brain. Vera uses them when choosing a speaker, routing approval, deciding whether work can publish, and deciding which signals need follow-up.
           </p>
         </div>
         <div style={{ display: 'flex', gap: space[2], alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1267,7 +1496,7 @@ export default function Brain() {
   const [sourceKnowledge, setSourceKnowledge] = useState<SourceKnowledgeRow[]>([])
   const [sourceKnowledgeLoading, setSourceKnowledgeLoading] = useState(false)
   const [sourceKnowledgeError, setSourceKnowledgeError] = useState<string | null>(null)
-  const [selectedPolicyKey, setSelectedPolicyKey] = useState<DemandPlatformKey>('linkedin')
+  const [selectedPolicyKey, setSelectedPolicyKey] = useState<DemandPlatformKey>('blog')
   const [learningPosts, setLearningPosts] = useState<Post[]>([])
   const [learningSnapshots, setLearningSnapshots] = useState<ContentMetricSnapshot[]>([])
   const [learningLoading, setLearningLoading] = useState(false)
@@ -1622,7 +1851,7 @@ export default function Brain() {
       name: proposal.name,
       description: proposal.description,
       injected_into: proposal.injected_into,
-      trigger_description: 'Use when generating, refining, reviewing, or publishing content for this client.',
+      trigger_description: 'Use when generating, refining, reviewing, or publishing content for this space.',
       trigger_when: {
         source: 'demand_brain_audit',
         client_id: activeProject.id,
@@ -1631,7 +1860,7 @@ export default function Brain() {
       gotchas: [],
       good_examples: [],
       bad_examples: [],
-      source_refs: [{ label: 'Brain audit', text: 'Drafted from client source audit.' }],
+      source_refs: [{ label: 'Brain audit', text: 'Drafted from space source audit.' }],
       confidence: 'medium',
       performance_notes: 'Created from Brain audit proposal. Validate against future content outcomes.',
       tags: ['strategy-brain', 'audit-proposal'],
@@ -1654,7 +1883,7 @@ export default function Brain() {
       setDraftStatus('Sign in again before drafting the Strategy Brain.')
       return
     }
-    setDrafting(true); setDraftStatus("Reading this client's content...")
+    setDrafting(true); setDraftStatus("Reading this space's content...")
     setDraftAudienceProposals([])
     setDraftSkillProposals([])
     setProposalStatus('')
@@ -1676,7 +1905,7 @@ export default function Brain() {
           const json = line.slice(6).trim(); if (!json) continue
           let ev: { event?: string; message?: string; proposal?: { brand_voice?: Record<string, string[] | string>; business_context?: unknown; personas?: unknown[]; skills?: unknown[] } }
           try { ev = JSON.parse(json) } catch { continue }
-          if (ev.event === 'started' || ev.event === 'fetching') setDraftStatus("Reading this client's content...")
+          if (ev.event === 'started' || ev.event === 'fetching') setDraftStatus("Reading this space's content...")
           else if (ev.event === 'synthesising') setDraftStatus('Drafting the Strategy Brain...')
           else if (ev.event === 'done') {
             const v = ev.proposal?.brand_voice ?? {}
@@ -1697,7 +1926,7 @@ export default function Brain() {
             setDraftAudienceProposals(audienceProposals)
             setDraftSkillProposals(skillProposals)
             setBvInherited(false)
-            setDraftStatus(`Drafted from this client's content. Review the Strategy Brain and Save.${contextCount ? ` ${contextCount} strategy field${contextCount === 1 ? '' : 's'} updated.` : ''}${n ? ` ${n} audience proposal${n === 1 ? '' : 's'} ready.` : ''}${skillCount ? ` ${skillCount} skill proposal${skillCount === 1 ? '' : 's'} ready.` : ''}`)
+            setDraftStatus(`Drafted from this space's content. Review the Strategy Brain and Save.${contextCount ? ` ${contextCount} strategy field${contextCount === 1 ? '' : 's'} updated.` : ''}${n ? ` ${n} audience proposal${n === 1 ? '' : 's'} ready.` : ''}${skillCount ? ` ${skillCount} skill proposal${skillCount === 1 ? '' : 's'} ready.` : ''}`)
           }
           else if (ev.event === 'error') throw new Error(ev.message ?? 'audit failed')
         }
@@ -1742,7 +1971,7 @@ export default function Brain() {
   }
 
   if (!activeProject) {
-    return <div style={{ padding: space[8], maxWidth: 760 }}><EmptyState icon={<BrainIcon size={22} strokeWidth={1.5} />} title="No active project" body="Pick a client in the left rail to set its brain: instructions, voice, audiences." /></div>
+    return <div style={{ padding: space[8], maxWidth: 760 }}><EmptyState icon={<BrainIcon size={22} strokeWidth={1.5} />} title="No active project" body="Pick a space in the left rail to set its brain: instructions, voice, audiences." /></div>
   }
 
   const sourceCount = DEMAND_SOURCE_KEYS
@@ -1752,17 +1981,24 @@ export default function Brain() {
   const operatingKeys = Object.keys(DEFAULT_DEMAND_OPERATING_MODEL) as BusinessContextKey[]
   const factCount = DEMAND_FACT_KEYS.filter(key => business[key].trim()).length
   const operatingCount = operatingKeys.filter(key => business[key].trim()).length
+  const activeBrainChannelCount = Math.max(
+    activeDemandPlatforms(business).length,
+    Array.from(channelEvidence.values()).filter(item => item.posts > 0).length,
+  )
+  const voiceReady = Boolean(
+    (bv.system_prompt ?? '').trim() ||
+    ((bv.tone as string[] | undefined)?.length ?? 0) > 0 ||
+    ((bv.writing_rules as string[] | undefined)?.length ?? 0) > 0,
+  )
   const applyStrategyDefaults = () => {
     setBusiness(prev => applyDemandDefaults(prev))
     setSourceStatus('Neutral strategy defaults added. Review and save.')
   }
 
   return (
-    <div style={{ padding: `${space[8]} ${space[8]} 0`, maxWidth: 1040 }}>
-      <PageHeader eyebrow={activeProject.name} title="Strategy Brain"
-        subtitle="The working assumptions VERA uses every turn: audience, offer, problems, proof, voice, sources, channels, and constraints." />
-
+    <div style={{ padding: `clamp(${space[6]}, 3vw, ${space[8]})`, paddingBottom: 0, maxWidth: 1180, width: '100%' }}>
       <BrainReadinessPanel
+        projectName={activeProject.name}
         context={business}
         policies={channelPolicies}
         sourceCount={sourceCount}
@@ -1771,18 +2007,25 @@ export default function Brain() {
         channelEvidence={channelEvidence}
         learningLoading={learningLoading}
         learningError={learningError}
+        sourceKnowledgeCount={sourceKnowledge.length}
+        onDraft={runDraft}
+        drafting={drafting}
+        draftStatus={draftStatus}
+        onPullSources={pullBusinessSources}
+        pullingSources={pullingSources}
+        onSave={saveInstr}
+        saving={instrSaving}
+        saved={instrSaved}
       />
 
-      {/* Agentic-first: let Vera draft the brain from the client's content
-          instead of starting blank. Prefills the brand voice for review. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: space[3], flexWrap: 'wrap', marginBottom: space[8], padding: `${space[4]} ${space[5]}`, background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg }}>
-        <Button variant="secondary" size="sm" onClick={runDraft} disabled={drafting || !activeOrg}>
-          {drafting ? <><Loader2 size={14} className="animate-spin" /> Drafting...</> : <><Sparkles size={14} /> Draft this brain with Vera</>}
-        </Button>
-        <span style={{ flex: 1, minWidth: 200, fontSize: t.size.cap, color: draftStatus ? color.ink2 : color.ghost, lineHeight: 1.5 }}>
-          {draftStatus || "Vera reads this client's content and drafts the Strategy Brain. You review and save."}
-        </span>
-      </div>
+      <BrainStudioNav
+        sourceCount={sourceCount}
+        indexedCount={sourceKnowledge.length}
+        activeChannelCount={activeBrainChannelCount}
+        audienceCount={audiences.length}
+        categoryCount={categories.length}
+        voiceReady={voiceReady}
+      />
 
       {(draftAudienceProposals.length > 0 || draftSkillProposals.length > 0 || proposalStatus || proposalError) && (
         <AuditProposalPanel
@@ -1799,7 +2042,7 @@ export default function Brain() {
       )}
 
       {/* Business context */}
-      <section style={{ marginBottom: space[9] }}>
+      <section id="brain-context" style={{ marginBottom: space[9], scrollMarginTop: space[12] }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: space[4], flexWrap: 'wrap', marginBottom: space[3] }}>
           <div>
             <SectionLabel>Demand context</SectionLabel>
@@ -1860,7 +2103,7 @@ export default function Brain() {
             </div>
           </div>
 
-          <div style={{ padding: space[5], background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, display: 'flex', flexDirection: 'column', gap: space[4] }}>
+          <div id="brain-sources" style={{ padding: space[5], background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, display: 'flex', flexDirection: 'column', gap: space[4], scrollMarginTop: space[12] }}>
             <input
               ref={businessFileRef}
               type="file"
@@ -1931,25 +2174,27 @@ export default function Brain() {
           </div>
         </div>
 
-        <DemandChannelMatrix
-          context={business}
-          policies={channelPolicies}
-          channelEvidence={channelEvidence}
-          onEditPolicy={key => setSelectedPolicyKey(key)}
-        />
+        <div id="brain-channels" style={{ scrollMarginTop: space[12] }}>
+          <DemandChannelMatrix
+            context={business}
+            policies={channelPolicies}
+            channelEvidence={channelEvidence}
+            onEditPolicy={key => setSelectedPolicyKey(key)}
+          />
 
-        <DemandChannelPolicyEditor
-          policies={channelPolicies}
-          selected={selectedPolicyKey}
-          onSelect={setSelectedPolicyKey}
-          onChange={updateChannelPolicy}
-          onReset={resetChannelPolicy}
-          onSave={saveInstr}
-          saving={instrSaving}
-          saved={instrSaved}
-        />
+          <DemandChannelPolicyEditor
+            policies={channelPolicies}
+            selected={selectedPolicyKey}
+            onSelect={setSelectedPolicyKey}
+            onChange={updateChannelPolicy}
+            onReset={resetChannelPolicy}
+            onSave={saveInstr}
+            saving={instrSaving}
+            saved={instrSaved}
+          />
+        </div>
 
-        <div style={{ marginTop: space[4], padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
+        <div id="brain-assumptions" style={{ marginTop: space[4], padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, scrollMarginTop: space[12] }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], marginBottom: space[4] }}>
             <div>
               <div style={{ fontSize: t.size.sm, color: color.ink, fontWeight: t.weight.semibold }}>Business facts</div>
@@ -1968,7 +2213,7 @@ export default function Brain() {
               <Textarea value={business.customerProblems} onChange={e => updateBusiness('customerProblems', e.target.value)} rows={3} placeholder="Pain points, unmet needs, intent triggers, risks, objections." />
             </Field>
             <Field label="Differentiators">
-              <Textarea value={business.differentiators} onChange={e => updateBusiness('differentiators', e.target.value)} rows={3} placeholder="Positioning, category, why this client is different, proof of advantage." />
+              <Textarea value={business.differentiators} onChange={e => updateBusiness('differentiators', e.target.value)} rows={3} placeholder="Positioning, category, why this space is different, proof of advantage." />
             </Field>
             <Field label="Competitors">
               <Textarea value={business.competitors} onChange={e => updateBusiness('competitors', e.target.value)} rows={2} placeholder="Named competitors, alternatives, comparison points." />
@@ -2034,13 +2279,13 @@ export default function Brain() {
               <Textarea value={business.conversionPath} onChange={e => updateBusiness('conversionPath', e.target.value)} rows={3} placeholder="Where attention should go next: comments, DMs, landing page, newsletter, event, product page, store, booking, community, or follow-up queue." />
             </Field>
             <Field label="Channel strategy">
-              <Textarea value={business.channelStrategy} onChange={e => updateBusiness('channelStrategy', e.target.value)} rows={3} placeholder="Role of each channel: LinkedIn for authority, YouTube for depth, Instagram and TikTok for visual reach, Medium for essays, Quora and Reddit for questions, X for speed." />
+              <Textarea value={business.channelStrategy} onChange={e => updateBusiness('channelStrategy', e.target.value)} rows={3} placeholder="Role of each valid channel: website and blog for owned depth, YouTube for explanation, Instagram and TikTok for visual reach, Medium for essays, Quora and Reddit for questions, LinkedIn for authority when evidence supports it, X for speed." />
             </Field>
             <Field label="Content formats">
               <Textarea value={business.contentFormats} onChange={e => updateBusiness('contentFormats', e.target.value)} rows={3} placeholder="Posts, carousels, video storyboards, Shorts, long-form articles, answers, comments, founder POV, case breakdowns." />
             </Field>
             <Field label="Approval model">
-              <Textarea value={business.approvalModel} onChange={e => updateBusiness('approvalModel', e.target.value)} rows={3} placeholder="Who approves what: operator-only, client lead, legal, all stakeholders, or case-by-case based on topic, claim, or channel." />
+              <Textarea value={business.approvalModel} onChange={e => updateBusiness('approvalModel', e.target.value)} rows={3} placeholder="Who approves what: operator-only, space owner, legal, all stakeholders, or case-by-case based on topic, claim, or channel." />
             </Field>
             <Field label="Engagement signals">
               <Textarea value={business.engagementSignals} onChange={e => updateBusiness('engagementSignals', e.target.value)} rows={3} placeholder="What counts: comments, shares, saves, clicks, traffic quality, objections, intent signals, purchases, inquiries, community joins, meeting requests." />
@@ -2062,7 +2307,7 @@ export default function Brain() {
       </section>
 
       {/* Custom instructions */}
-      <section style={{ marginBottom: space[9] }}>
+      <section id="brain-instructions" style={{ marginBottom: space[9], scrollMarginTop: space[12] }}>
         <SectionLabel style={{ marginBottom: space[2] }}>Custom instructions</SectionLabel>
         <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `0 0 ${space[3]}` }}>
           The standing brief VERA reads <strong style={{ color: color.ink }}>every turn</strong> for {activeProject.name}: tone, do/don't, positioning, recurring CTAs, in plain language.
@@ -2078,13 +2323,13 @@ export default function Brain() {
       </section>
 
       {/* Brand voice */}
-      <section style={{ marginBottom: space[9] }}>
+      <section id="brain-voice" style={{ marginBottom: space[9], scrollMarginTop: space[12] }}>
         <SectionLabel style={{ marginBottom: space[2] }}>Brand voice</SectionLabel>
         <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `0 0 ${space[4]}` }}>
           The persona, tone, and rules VERA writes by for {activeProject.name}.{' '}
           {bvInherited
-            ? <span style={{ color: color.ghost }}>Showing the workspace default. Saving creates a voice specific to this client.</span>
-            : <span style={{ color: color.ghost }}>Specific to this client.</span>}
+            ? <span style={{ color: color.ghost }}>Showing the workspace default. Saving creates a voice specific to this space.</span>
+            : <span style={{ color: color.ghost }}>Specific to this space.</span>}
         </p>
         <div style={{ display: 'grid', gap: space[4] }}>
           <Field label="Persona name"><Input value={bv.persona_name ?? ''} onChange={e => setBv(f => ({ ...f, persona_name: e.target.value }))} placeholder="e.g. Alex" /></Field>
@@ -2105,7 +2350,7 @@ export default function Brain() {
       </section>
 
       {/* Audiences (editable) */}
-      <section style={{ marginBottom: space[9] }}>
+      <section id="brain-audiences" style={{ marginBottom: space[9], scrollMarginTop: space[12] }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: space[2] }}>
           <SectionLabel>Audiences</SectionLabel>
           {activeOrg?.id && activeProject?.id && !addingAudience && (
@@ -2127,10 +2372,10 @@ export default function Brain() {
       </section>
 
       {/* Content categories */}
-      <section style={{ marginBottom: space[9] }}>
+      <section id="brain-categories" style={{ marginBottom: space[9], scrollMarginTop: space[12] }}>
         <SectionLabel style={{ marginBottom: space[2] }}>Content categories</SectionLabel>
         <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `0 0 ${space[3]}` }}>
-          Reusable buckets for this client's content. Vera tags every post with one; Calendar &amp; Artifacts filter by them.
+          Reusable buckets for this space's content. Vera tags every post with one; Calendar &amp; Artifacts filter by them.
         </p>
         {categories.length === 0 ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: space[3], marginBottom: space[3] }}>
@@ -2156,7 +2401,7 @@ export default function Brain() {
       </section>
 
       {/* Knowledge link */}
-      <section style={{ marginBottom: space[8] }}>
+      <section id="brain-knowledge" style={{ marginBottom: space[8], scrollMarginTop: space[12] }}>
         <SectionLabel style={{ marginBottom: space[3] }}>Knowledge sources</SectionLabel>
         <Link to={`/p/${activeProject.slug}/knowledge`} style={{ display: 'flex', alignItems: 'center', gap: space[3], padding: space[4], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, textDecoration: 'none' }}>
           <BookOpen size={18} style={{ color: color.accent, flexShrink: 0 }} />
@@ -2203,7 +2448,7 @@ function AuditProposalPanel({
             Audit proposals
           </div>
           <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>
-            Add useful findings to this client's Brain. Dismiss anything that does not fit the saved strategy.
+            Add useful findings to this Brain. Dismiss anything that does not fit the saved strategy.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>

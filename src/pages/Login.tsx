@@ -39,7 +39,8 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [localMode, setLocalMode] = useState<'magic' | 'password'>('magic')
   const [sent, setSent] = useState(false)
-  const [loading, setLoading] = useState<null | 'google' | 'azure' | 'apple' | 'email' | 'password'>(null)
+  const [resetSent, setResetSent] = useState(false)
+  const [loading, setLoading] = useState<null | 'google' | 'azure' | 'apple' | 'email' | 'password' | 'reset'>(null)
   const [error, setError] = useState('')
   const from = typeof (location.state as { from?: unknown } | null)?.from === 'string'
     ? (location.state as { from: string }).from
@@ -87,6 +88,20 @@ export default function Login() {
     navigate(from, { replace: true })
   }
 
+  async function sendPasswordReset() {
+    if (!email.trim()) {
+      setError('Enter your email first.')
+      return
+    }
+    setError(''); setResetSent(false); setLoading('reset')
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/reset-password`,
+    })
+    if (error) setError(error.message)
+    else setResetSent(true)
+    setLoading(null)
+  }
+
   const ssoBtn: React.CSSProperties = {
     width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
     height: 44, borderRadius: 'var(--radius-md)', border: '1px solid var(--line-2)',
@@ -118,7 +133,7 @@ export default function Login() {
           ) : (
             <>
               <h2 style={{ fontSize: 17, fontWeight: 600, color: 'var(--ink)', margin: '0 0 4px' }}>Sign in to VERA</h2>
-              <p style={{ fontSize: 13.5, color: 'var(--ghost)', margin: '0 0 22px' }}>InnovareAI Agentic System</p>
+              <p style={{ fontSize: 13.5, color: 'var(--ghost)', margin: '0 0 22px' }}>Content strategy, production, and publishing.</p>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <button onClick={() => oauth('google')} disabled={!!loading} style={{ ...ssoBtn, opacity: loading && loading !== 'google' ? 0.5 : 1 }}>
@@ -184,7 +199,7 @@ export default function Login() {
                   <Mail size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--faint)' }} />
                   <input
                     type="email" value={email} onChange={e => setEmail(e.target.value)}
-                    placeholder="you@company.com" required
+                    placeholder="you@example.com" required
                     style={{ width: '100%', height: 44, paddingLeft: 36, paddingRight: 14, fontSize: 14, fontFamily: 'var(--font-body)', color: 'var(--ink)', background: 'var(--paper)', border: '1px solid var(--line-2)', borderRadius: 'var(--radius-md)', outline: 'none', boxSizing: 'border-box' }}
                   />
                 </div>
@@ -197,6 +212,21 @@ export default function Login() {
                       autoComplete="current-password"
                       style={{ width: '100%', height: 44, paddingLeft: 36, paddingRight: 14, fontSize: 14, fontFamily: 'var(--font-body)', color: 'var(--ink)', background: 'var(--paper)', border: '1px solid var(--line-2)', borderRadius: 'var(--radius-md)', outline: 'none', boxSizing: 'border-box' }}
                     />
+                  </div>
+                )}
+                {localMode === 'password' && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: 20 }}>
+                    <span style={{ fontSize: 12, color: resetSent ? 'var(--success)' : 'var(--ghost)' }}>
+                      {resetSent ? 'Reset email sent.' : 'Need a new password?'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={sendPasswordReset}
+                      disabled={!!loading}
+                      style={{ border: 'none', background: 'transparent', color: 'var(--ink)', fontSize: 12, fontWeight: 600, cursor: loading ? 'default' : 'pointer', padding: 0 }}
+                    >
+                      {loading === 'reset' ? 'Sending...' : 'Forgot password?'}
+                    </button>
                   </div>
                 )}
                 <button type="submit" disabled={!!loading} style={{ height: 44, borderRadius: 'var(--radius-md)', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 600, fontFamily: 'var(--font-body)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, boxShadow: 'var(--shadow-glow)' }}>
@@ -213,7 +243,7 @@ export default function Login() {
         </div>
 
         <p style={{ textAlign: 'center', fontSize: 11.5, color: 'var(--faint)', marginTop: 18 }}>
-          One sign-in across InnovareAI, SAM &amp; VERA.
+          One sign-in for VERA and InnovareAI apps.
         </p>
       </div>
     </div>

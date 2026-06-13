@@ -115,7 +115,7 @@ export async function resolveProjectTextRuntime(
   return {
     ok: false,
     status: 403,
-    message: `${purpose} requires this client space to use its own OpenRouter or Anthropic key.`,
+    message: `${purpose} requires this space to use its own OpenRouter or Anthropic key.`,
   }
 }
 

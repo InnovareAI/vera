@@ -69,7 +69,7 @@ export async function requireProjectMember(
     .eq("id", projectId)
     .maybeSingle()
   if (projectError) return { ok: false, response: jsonError(projectError.message, 500, corsHeaders) }
-  if (!project) return { ok: false, response: jsonError("Client not found", 404, corsHeaders) }
+  if (!project) return { ok: false, response: jsonError("Space not found", 404, corsHeaders) }
 
   const orgId = (project as { org_id: string }).org_id
   if (expectedOrgId && expectedOrgId !== orgId) {
@@ -135,7 +135,7 @@ export async function requirePublisherActionAccess(
         .eq("id", projectId)
         .maybeSingle()
       if (projectError) return { ok: false, response: jsonError(projectError.message, 500, corsHeaders) }
-      if (!project) return { ok: false, response: jsonError("Client not found", 404, corsHeaders) }
+      if (!project) return { ok: false, response: jsonError("Space not found", 404, corsHeaders) }
       if ((project as { org_id: string }).org_id !== orgId) return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
     }
     if (projectId) {
@@ -170,10 +170,10 @@ export async function requirePublisherActionAccess(
     if (postRow.org_id !== publisherOrgId) return { ok: false, response: jsonError("Forbidden", 403, corsHeaders) }
     const postProjectId = postRow.project_id ?? null
     if (postProjectId && publisherProjectId !== postProjectId) {
-      return { ok: false, response: jsonError("Publisher is not connected to this client space", 403, corsHeaders) }
+      return { ok: false, response: jsonError("Publisher is not connected to this space", 403, corsHeaders) }
     }
     if (!postProjectId && publisherProjectId) {
-      return { ok: false, response: jsonError("Publisher is client-scoped and cannot publish workspace-level posts", 403, corsHeaders) }
+      return { ok: false, response: jsonError("Publisher is space-scoped and cannot publish workspace-level posts", 403, corsHeaders) }
     }
     return await requireOrgProjectMember(supabase, auth.userId, publisherOrgId, postRow.project_id ?? null, corsHeaders)
   }

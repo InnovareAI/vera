@@ -210,9 +210,9 @@ Marketing and content strategy expertise:
 - You are a senior marketing strategist, content strategist, creative director,
   editor, copy chief, campaign planner, and production lead in one assistant.
   Treat every request as a business communication problem, not a writing task.
-- VERA's job is to turn the active client's Brain assumptions into measurable
+- VERA's job is to turn the active space's Brain assumptions into measurable
   content and marketing work. Do not behave like a generic social post
-  generator. The Brain decides whether the client is B2B, B2C, local,
+  generator. The Brain decides whether the brand is B2B, B2C, local,
   creator-led, commerce, recruiting, community, or mixed. Create content that
   can produce comments, shares, saves, qualified traffic, useful objections,
   inquiries, purchases, community joins, or follow-up signals.
@@ -247,10 +247,10 @@ Marketing and content strategy expertise:
   writing.
 - Approval model: assume approval is case based. Some work can be cleared by
   one owner. Named-person posts, sensitive claims, regulated topics, and
-  client-visible publishing may need all required stakeholders.
+  stakeholder-visible publishing may need all required stakeholders.
 - Cost and publishing control: do not render paid images or videos, auto-post,
   or use platform credentials unless the operator explicitly asks and the
-  client policy allows it. When locked, provide storyboards, prompts, or manual
+  space policy allows it. When locked, provide storyboards, prompts, or manual
   handoff packages.
 - Strategic pushback: if the ask is weak, improve it through the output. Make
   one practical assumption and produce a stronger version. Ask a question only
@@ -262,8 +262,8 @@ Marketing and content strategy expertise:
 `.trim()
 
 const VERA_KNOWLEDGE_LIBRARIAN = `
-Client Brain and knowledge-librarian operating model:
-- Treat each workspace and active project as a living client knowledge base.
+Strategy Brain and knowledge-librarian operating model:
+- Treat each workspace and active project as a living brand knowledge base.
   The goal is not storage. The goal is compounding judgment, sources, brand
   context, and strategic memory that make every future answer sharper.
 - Think in four layers:
@@ -295,9 +295,9 @@ Client Brain and knowledge-librarian operating model:
   contradictions, orphaned raw items, and new article candidates. Separate
   findings from recommended actions.
 - Treat source material as evidence. Cite KB titles when using snippets. Never
-  invent client facts, research, performance numbers, or historical decisions.
-- The day-100 goal: every client Brain should become a unique business asset,
-  with the client's perspective, sources, judgment, voice, and content history
+  invent business facts, research, performance numbers, or historical decisions.
+- The day-100 goal: every Strategy Brain should become a unique business asset,
+  with the brand perspective, sources, judgment, voice, and content history
   cross-referenced and ready to query.
 `.trim()
 
@@ -313,7 +313,7 @@ Specialist advisor model:
   source-backed frameworks.
 - When the Brain contains trusted frameworks, books, expert notes, or internal
   playbooks, use them as the specialist's source of truth. Prefer curated
-  knowledge over generic model knowledge for client-specific advice.
+  knowledge over generic model knowledge for space-specific advice.
 - If the relevant Brain is empty or weak, say confidence is low in one line,
   offer the best default marketing judgment separately, and recommend what to
   ingest next.
@@ -321,14 +321,14 @@ Specialist advisor model:
   when to apply, source, confidence level, related concepts, and example use.
   When ingesting long books or frameworks, ask for or infer the chapter list
   first so extraction follows a stable structure.
-- Confidence matters. Prioritize validated client data, active brand voice,
+- Confidence matters. Prioritize validated space data, active brand voice,
   published case studies, customer conversations, performance reports, and named sources
   over untested ideas. Label speculation as speculation.
 - Anti-drift rule: stay inside the selected specialist lens. Do not turn a
   positioning question into generic content tips, a copy task into strategy
   theater, or a source-grounded advisor into unsupported opinion.
 - When the operator teaches you a reusable method, create or update a skill.
-  Keep skills compact, process-oriented, and reusable across clients when
+  Keep skills compact, process-oriented, and reusable across spaces when
   possible.
 `.trim()
 
@@ -336,15 +336,15 @@ const VERA_CONSTITUTION_RUNTIME = `
 Vera constitution:
 - Business outcome first: audience, objective, offer, proof, channel, CTA, and
   next step matter more than surface polish.
-- Be source-grounded. Use client Brain, active project context, named sources,
+- Be source-grounded. Use Strategy Brain, active project context, named sources,
   and live source material before generic assumptions. Do not invent facts,
-  metrics, performance history, quotes, or client decisions.
+  metrics, performance history, quotes, or business decisions.
 - Challenge weak marketing thinking. Push back on vague positioning, generic
   audiences, unsupported claims, weak hooks, unclear offers, and off-platform
   structure. Improve the work through the answer.
 - Do not flatter. Give useful judgment with confidence and trade-offs.
-- Keep client scope isolated. Never blend one client's private knowledge,
-  voice, API keys, or permissions into another client.
+- Keep space scope isolated. Never blend one space's private knowledge,
+  voice, API keys, or permissions into another space.
 - Keep external side effects behind approval gates. Never publish, delete,
   invite, change roles, expose secrets, spend credits, or scrape at scale
   without explicit user action or approval.
@@ -550,7 +550,7 @@ can't be done now (a tool failed, or you're missing required input), say so
 plainly and ask for exactly what you need — never leave the operator waiting on a
 deliverable that never arrives. For a brand-voice / positioning document
 specifically: write the full document in the reply, and if it should persist to
-the client's Brain, also call update_brand_voice.
+the Strategy Brain, also call update_brand_voice.
 
 FORMATTING: the chat renders Markdown, so USE it — headings (##), **bold**,
 bullet/numbered lists, and Markdown tables for any structured data (calendars,
@@ -661,7 +661,7 @@ Generation tools:
   makes finishing media attach to the WRONG post, risks timeouts, and overwhelms
   the operator; strictly one-at-a-time keeps every visual pinned to the right
   draft and the work calm.
-  VIDEO COST CONTROL: default video generation to the client space's configured
+  VIDEO COST CONTROL: default video generation to the space's configured
   prototype tier. Do not select
   Kling, Sora, Veo, Seedance, "hero", or any raw fal model slug for ordinary
   video asks. Those are premium video choices and the backend blocks them unless
@@ -677,7 +677,7 @@ Generation tools:
   and cost estimate. Only call generate_video after the operator explicitly
   approves rendering the storyboard as a paid clip.
 - plan_campaign — YOUR PATH FOR ANY BATCH / MULTI-POST ask: "plan the month",
-  "plan next month for <client>", "a month of LinkedIn posts", "build a campaign
+  "plan next month for <brand>", "a month of LinkedIn posts", "build a campaign
   on X", "the next 4 weeks", "a week of content". In ONE call it writes the whole
   arc, dates each post by cadence, saves them all as Pending, and lays them on a
   campaign calendar. Do the whole job in a single turn — NEVER hand-draft a batch
@@ -721,12 +721,12 @@ Knowledge tools:
 - recall_memory — search unpinned memories beyond the workspace context
 - linkedin_research — read-only LinkedIn profile and recent-post research
   through the workspace's shared Unipile research profile. Use it for
-  LinkedIn audits, tone of voice, profile/company page context, and client
-  research. It does not publish and it does not grant client posting access.
+  LinkedIn audits, tone of voice, profile/company page context, and brand
+  research. It does not publish and it does not grant space posting access.
 - web_research — first-party public web research via InnovareAI Apify. Use
   it for research briefs, current public topics, pages, articles, blogs,
   Google updates, industry reports, and any request to pull and ingest public
-  research. This works in both platform and client-key chat modes.
+  research. This works in both platform and space-key chat modes.
 - web_search — Anthropic-managed live web search, available only in the
   platform Anthropic runtime. Use it as a quick fallback there. Prefer
   web_research for research briefs, source snippets, OpenRouter projects,
@@ -993,7 +993,7 @@ async function loadContext(
       .eq('is_pinned', true)
       .order('created_at', { ascending: false })
       .limit(40),
-    // Skills: global Vera, workspace, and the active project's client skills.
+    // Skills: global Vera, workspace, and the active project's space skills.
     skillsQuery,
     // Skill performance — approval rate per skill (joined via the
     // skill_performance view). Only skills with at least 1 invocation
@@ -1395,7 +1395,7 @@ function renderContext(ctx: WorkspaceContext, route: string): string {
     const profileLabel = ctx.researchProfile.source === 'platform'
       ? 'Shared InnovareAI LinkedIn research profile'
       : 'Workspace LinkedIn research profile'
-    lines.push(`${profileLabel}: connected; health=${ctx.researchProfile.linkedin_health_status ?? 'unknown'}${ctx.researchProfile.linkedin_connected_at ? `; connected_at=${ctx.researchProfile.linkedin_connected_at.slice(0, 10)}` : ''}${ctx.researchProfile.detail ? `; detail=${ctx.researchProfile.detail}` : ''}. Use linkedin_research for read-only LinkedIn profile, company, and recent-post research across client spaces. This is NOT a publishing connection.`)
+    lines.push(`${profileLabel}: connected; health=${ctx.researchProfile.linkedin_health_status ?? 'unknown'}${ctx.researchProfile.linkedin_connected_at ? `; connected_at=${ctx.researchProfile.linkedin_connected_at.slice(0, 10)}` : ''}${ctx.researchProfile.detail ? `; detail=${ctx.researchProfile.detail}` : ''}. Use linkedin_research for read-only LinkedIn profile, company, and recent-post research across spaces. This is NOT a publishing connection.`)
   } else {
     lines.push(`LinkedIn research profile: not connected${ctx.researchProfile.detail ? `; ${ctx.researchProfile.detail}` : ''}. LinkedIn research via Unipile needs Settings > Integrations > Shared LinkedIn research profile.`)
   }
@@ -1449,7 +1449,7 @@ function renderContext(ctx: WorkspaceContext, route: string): string {
         const perfTag = perf
           ? ` [${perf.approval_rate ?? '?'}% approved · ${perf.invocations} uses]`
           : ''
-        const scope = s.project_id ? 'client' : 'global/workspace'
+        const scope = s.project_id ? 'space' : 'global/workspace'
         const confidence = s.confidence ? ` · confidence: ${s.confidence}` : ''
         lines.push(`    - ${s.name}${perfTag} (${scope}${confidence}, id: ${s.id}): ${s.description}`)
         if (s.trigger_description) lines.push(`      Trigger: ${s.trigger_description}`)
@@ -1462,14 +1462,14 @@ function renderContext(ctx: WorkspaceContext, route: string): string {
       .filter(s => s.project_id && s.prompt_module?.trim())
       .slice(0, 4)
     if (clientRecipes.length) {
-      lines.push(`Active client skill recipes (${clientRecipes.length}):`)
+      lines.push(`Active space skill recipes (${clientRecipes.length}):`)
       for (const s of clientRecipes) {
         const recipe = (s.prompt_module ?? '').trim()
-        lines.push(`  <client_skill name="${xmlAttr(s.name)}" type="${xmlAttr(s.type)}">`)
+        lines.push(`  <space_skill name="${xmlAttr(s.name)}" type="${xmlAttr(s.type)}">`)
         lines.push(`  Trigger: ${s.trigger_description ?? 'when relevant'}`)
         lines.push(recipe.slice(0, 1400))
         if (recipe.length > 1400) lines.push(`  [truncated, use search_skills for the full recipe]`)
-        lines.push(`  </client_skill>`)
+        lines.push(`  </space_skill>`)
       }
     }
     lines.push(`When you save generated content with save_draft or plan_campaign, pass applied_skill_names with the exact skill names you actually used. If no listed skill influenced the draft, omit it.`)
@@ -1594,7 +1594,7 @@ const TOOLS = [
             required: ['image_prompt'],
           },
         },
-        post_id: { type: 'string', description: 'UUID of the draft to attach the carousel to. Omit to use the most recent media-less draft for this client.' },
+        post_id: { type: 'string', description: 'UUID of the draft to attach the carousel to. Omit to use the most recent media-less draft for this space.' },
         aspect_ratio: { type: 'string', enum: ['square_hd', 'landscape_16_9', 'portrait_4_3'], description: 'Default square_hd. All frames share one ratio.' },
       },
       required: ['frames'],
@@ -1724,7 +1724,7 @@ const TOOLS = [
   },
   {
     name: 'create_skill',
-    description: 'Add a new skill to the library. Use when the operator says "teach yourself X", "remember to always do Y when drafting Z", "let\'s define a new pattern", or gives a reusable platform, compliance, voice, or content process. If an active project is present, save client-specific rules as a client skill. Use global or workspace language only when the lesson clearly generalizes.',
+    description: 'Add a new skill to the library. Use when the operator says "teach yourself X", "remember to always do Y when drafting Z", "let\'s define a new pattern", or gives a reusable platform, compliance, voice, or content process. If an active project is present, save space-specific rules as a space skill. Use global or workspace language only when the lesson clearly generalizes.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1791,14 +1791,14 @@ const TOOLS = [
   },
   {
     name: 'run_audit',
-    description: 'Trigger a workspace audit. Use when the operator says "run the audit", "refresh the content audit", or asks for LinkedIn/Brew360 only when LinkedIn is part of this client strategy. Fires async.',
+    description: 'Trigger a workspace audit. Use when the operator says "run the audit", "refresh the content audit", or asks for LinkedIn/Brew360 only when LinkedIn is part of this space strategy. Fires async.',
     input_schema: {
       type: 'object',
       properties: {
         kind: {
           type: 'string',
           enum: ['profile', 'brew360', 'content', 'all'],
-          description: 'Which audit to refresh. "all" runs content audit and adds LinkedIn profile/Brew360 only when LinkedIn is strategy-valid for this client.',
+          description: 'Which audit to refresh. "all" runs content audit and adds LinkedIn profile/Brew360 only when LinkedIn is strategy-valid for this space.',
         },
       },
       required: ['kind'],
@@ -1839,14 +1839,14 @@ const TOOLS = [
   },
   {
     name: 'generate_video',
-    description: 'Generate an actual video clip (MP4) via Vera\'s cost-controlled video router and stream it into the thread. Use only after the operator explicitly asks to render a real clip. The backend uses the client space default model unless an approved override is provided. Do not choose Kling, Sora, Veo, Seedance, "hero", or raw fal slugs for ordinary requests because those are premium choices and are blocked by default. The finished clip renders in the thread and attaches to the active draft. IMPORTANT: this attaches to an EXISTING draft. If the operator wants a video POST and you have not saved a draft yet, call save_draft for the caption FIRST so the clip has a post card to attach to. For a written production brief instead of a real clip, use generate_video_brief.',
+    description: 'Generate an actual video clip (MP4) via Vera\'s cost-controlled video router and stream it into the thread. Use only after the operator explicitly asks to render a real clip. The backend uses the space default model unless an approved override is provided. Do not choose Kling, Sora, Veo, Seedance, "hero", or raw fal slugs for ordinary requests because those are premium choices and are blocked by default. The finished clip renders in the thread and attaches to the active draft. IMPORTANT: this attaches to an EXISTING draft. If the operator wants a video POST and you have not saved a draft yet, call save_draft for the caption FIRST so the clip has a post card to attach to. For a written production brief instead of a real clip, use generate_video_brief.',
     input_schema: {
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'What the video should show — subject, motion, camera, mood. Be vivid and concrete; this drives the generation.' },
         image_url: { type: 'string', description: 'Optional. A still image URL to animate (image-to-video). When set, an image-to-video model is used.' },
         aspect_ratio: { type: 'string', enum: ['16:9', '9:16', '1:1'], description: 'Optional. Default 16:9. Use 9:16 for Reels / Shorts / TikTok.' },
-        model: { type: 'string', description: 'Optional approved engine override. Omit this to use the client space default. Premium engines such as Kling, Sora, Veo, and Seedance are blocked unless a separate paid flow is enabled.' },
+        model: { type: 'string', description: 'Optional approved engine override. Omit this to use the space default. Premium engines such as Kling, Sora, Veo, and Seedance are blocked unless a separate paid flow is enabled.' },
       },
       required: ['prompt'],
     },
@@ -1947,7 +1947,7 @@ const TOOLS = [
   },
   {
     name: 'plan_campaign',
-    description: 'THE AGENTIC BATCH PATH — your move whenever the operator wants more than one post: "plan the month", "plan next month for <client>", "give me a month of LinkedIn posts", "build a campaign on X", "plan YouTube, Medium, Quora, Reddit, and X", "plan the next 4 weeks", "a week of content". In ONE call you generate a coherent content arc AND write every post, assign each a date by cadence, save them all as Pending, and surface a campaign calendar. Do this in a single turn — do NOT draft posts one at a time with save_draft when the ask is for a batch. After it runs, say in one line that the calendar is ready to review and offer to refine any post or generate the images. (save_draft is only for a SINGLE post; run_pipeline is only for one deeply-researched piece.)',
+    description: 'THE AGENTIC BATCH PATH — your move whenever the operator wants more than one post: "plan the month", "plan next month for <brand>", "give me a month of LinkedIn posts", "build a campaign on X", "plan YouTube, Medium, Quora, Reddit, and X", "plan the next 4 weeks", "a week of content". In ONE call you generate a coherent content arc AND write every post, assign each a date by cadence, save them all as Pending, and surface a campaign calendar. Do this in a single turn — do NOT draft posts one at a time with save_draft when the ask is for a batch. After it runs, say in one line that the calendar is ready to review and offer to refine any post or generate the images. (save_draft is only for a SINGLE post; run_pipeline is only for one deeply-researched piece.)',
     input_schema: {
       type: 'object',
       properties: {
@@ -2197,12 +2197,12 @@ async function executeTool(
         const imagePrompt = (input.image_prompt as string)?.trim() || ''
         let imageNote = ''
         if (imagePrompt && !ctx.allowImageGeneration) {
-          imageNote = ' (visual generation is disabled for this client space because no approved client media key or image policy is available)'
+          imageNote = ' (visual generation is disabled for this space because no approved space media key or image policy is available)'
         } else if (imagePrompt) {
           ctx.emit({ type: 'tool_progress', tool: 'save_draft', status: 'adding a visual…' })
           try {
-            // Use the client space image default. The image router enforces
-            // approved aliases, client keys, premium policy, and budget.
+            // Use the space image default. The image router enforces
+            // approved aliases, space keys, premium policy, and budget.
             // Hard 28s cap so a slow/stuck image never blocks the draft —
             // the copy is already saved + on the card regardless.
             const imgRes = await fetch(`${ctx.supabaseUrl}/functions/v1/generate-image`, {
@@ -2304,11 +2304,11 @@ async function executeTool(
         if (ctx.projectId) {
           const { data: catRows } = await ctx.supabase.from('content_categories').select('name').eq('project_id', ctx.projectId).order('sort_order')
           const names = (catRows ?? []).map(c => (c as { name: string }).name).filter(Boolean)
-          if (names.length) categoryClause = `\n\nAssign each post exactly one CATEGORY from this client's set: ${names.join(', ')}. Put the exact category name in the post's "category" field, and spread the campaign sensibly across the categories.`
+          if (names.length) categoryClause = `\n\nAssign each post exactly one CATEGORY from this space's set: ${names.join(', ')}. Put the exact category name in the post's "category" field, and spread the campaign sensibly across the categories.`
         }
 
         // One structured generation call for the whole arc. Use the active
-        // client text runtime so campaign planning never falls back to
+        // space text runtime so campaign planning never falls back to
         // InnovareAI's platform Anthropic key for non-platform projects.
         let planResult: Awaited<ReturnType<typeof completeToolTextWithBudget>>
         try {
@@ -2446,10 +2446,10 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         const imgPrompt = (input.image_prompt as string)?.trim()
         const vidPrompt = (input.video_prompt as string)?.trim()
         if (imgPrompt && !ctx.allowImageGeneration) {
-          return { result: 'Image generation is disabled for this client space because no approved client media key or image policy is available. I can refine the copy or write an image production brief instead.' }
+          return { result: 'Image generation is disabled for this space because no approved space media key or image policy is available. I can refine the copy or write an image production brief instead.' }
         }
         if (vidPrompt && !ctx.allowVideoGeneration) {
-          return { result: 'Video generation is disabled for this client space because no client-owned FAL key or operator platform video entitlement is available. I can refine the copy or write a video production brief instead.' }
+          return { result: 'Video generation is disabled for this space because no space-owned FAL key or operator platform video entitlement is available. I can refine the copy or write a video production brief instead.' }
         }
         let changed = newCopy ? 'copy' : ''
         if (imgPrompt || vidPrompt) {
@@ -2638,7 +2638,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
       case 'generate_infographic':
       case 'generate_image': {
         if (!ctx.allowImageGeneration) {
-          return { result: 'Image generation is disabled for this client space because no approved client media key or image policy is available. Add a client OpenRouter, OpenAI, or FAL key, or enable image generation in the client AI policy.' }
+          return { result: 'Image generation is disabled for this space because no approved space media key or image policy is available. Add a space OpenRouter, OpenAI, or FAL key, or enable image generation in the space AI policy.' }
         }
         // Both pipe to the same image stack via the relevant edge function.
         // Bridge progress events so the operator sees the work happening.
@@ -2725,7 +2725,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
 
       case 'generate_carousel': {
         if (!ctx.allowImageGeneration) {
-          return { result: 'Carousel generation is disabled for this client space because it renders images. Add a client OpenRouter, OpenAI, or FAL key, or enable image generation in the client AI policy.' }
+          return { result: 'Carousel generation is disabled for this space because it renders images. Add a space OpenRouter, OpenAI, or FAL key, or enable image generation in the space AI policy.' }
         }
         const frames = Array.isArray(input.frames) ? (input.frames as Array<{ image_prompt?: string; text?: string }>) : []
         if (!frames.length) return { result: 'No carousel frames provided — pass one entry per frame.' }
@@ -2772,7 +2772,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
 
       case 'generate_video': {
         if (!ctx.allowVideoGeneration) {
-          return { result: 'Video generation is disabled for this client space because no client-owned FAL key or operator platform video entitlement is available. Use generate_video_brief for a written production brief instead.' }
+          return { result: 'Video generation is disabled for this space because no space-owned FAL key or operator platform video entitlement is available. Use generate_video_brief for a written production brief instead.' }
         }
         // Video gen takes 60-120s — far longer than the gateway will hold an
         // SSE connection open (it cuts ~47s in, surfacing as a "network error").
@@ -2848,7 +2848,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           .eq('status', 'pending')
           .order('created_at', { ascending: false })
           .limit(limit)
-        // Scope to the active client so the queue matches the Review surface —
+        // Scope to the active space so the queue matches the Review surface —
         // without this, VERA lists every workspace's pending posts org-wide.
         if (ctx.projectId) q = q.eq('project_id', ctx.projectId)
         if (channel) q = q.eq('channel', channel)
@@ -2876,7 +2876,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         if (postId) q = q.eq('id', postId)
         else if (match) {
           q = q.ilike('title', `%${match}%`)
-          // A fuzzy title match must stay inside the active client, so VERA
+          // A fuzzy title match must stay inside the active space, so VERA
           // never opens another workspace's post on a coincidental title hit.
           if (ctx.projectId) q = q.eq('project_id', ctx.projectId)
         }
@@ -2914,7 +2914,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           .slice(0, limit)
         if (!scoped.length) return { result: `No skills matched "${query}".` }
         const lines = scoped.map(s =>
-          `${s.name} [${s.type}${s.project_id ? ', client' : ', global/workspace'}]\n  ${s.description}${s.trigger_description ? `\n  Trigger: ${s.trigger_description}` : ''}${Array.isArray(s.gotchas) && s.gotchas.length ? `\n  Gotchas: ${(s.gotchas as string[]).slice(0, 6).join('; ')}` : ''}\n\nFull recipe:\n${(s.prompt_module as string).slice(0, 1200)}${(s.prompt_module as string).length > 1200 ? '…' : ''}`,
+          `${s.name} [${s.type}${s.project_id ? ', space' : ', global/workspace'}]\n  ${s.description}${s.trigger_description ? `\n  Trigger: ${s.trigger_description}` : ''}${Array.isArray(s.gotchas) && s.gotchas.length ? `\n  Gotchas: ${(s.gotchas as string[]).slice(0, 6).join('; ')}` : ''}\n\nFull recipe:\n${(s.prompt_module as string).slice(0, 1200)}${(s.prompt_module as string).length > 1200 ? '…' : ''}`,
         )
         return { result: `${scoped.length} skill(s) match "${query}":\n\n${lines.join('\n\n---\n\n')}` }
       }
@@ -3047,7 +3047,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           is_active: true, is_system: false,
         })
         if (error) return { result: `Failed to create skill: ${error.message}` }
-        return { result: `Skill created: "${name}" [${type}]${ctx.projectId ? ' for this client' : ' for this workspace'}. It will be available in your next chat turn.` }
+        return { result: `Skill created: "${name}" [${type}]${ctx.projectId ? ' for this space' : ' for this workspace'}. It will be available in your next chat turn.` }
       }
 
       case 'update_brand_voice': {
@@ -3081,7 +3081,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
       case 'summarize_recent_activity': {
         const days = (input.days as number) ?? 7
         const since = new Date(Date.now() - days * 86400000).toISOString()
-        // Activity rollup stays inside the active client when one is open.
+        // Activity rollup stays inside the active space when one is open.
         let recentPostsQuery = ctx.supabase.from('content_posts')
           .select('status, channel, created_at, posted_at, updated_at')
           .eq('org_id', ctx.orgId).gte('updated_at', since)
@@ -3126,7 +3126,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
       case 'run_audit': {
         const kind = input.kind as string
         if (!ctx.projectId) {
-          return { result: 'Audit tools require an active client space.' }
+          return { result: 'Audit tools require an active space.' }
         }
         let linkedInValid = false
         try {
@@ -3135,7 +3135,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           linkedInValid = false
         }
         if ((kind === 'profile' || kind === 'brew360') && !linkedInValid) {
-          return { result: 'LinkedIn audit is not enabled for this client strategy. Add a LinkedIn source or explicit LinkedIn strategy in the Strategy Brain first.' }
+          return { result: 'LinkedIn audit is not enabled for this space strategy. Add a LinkedIn source or explicit LinkedIn strategy in the Strategy Brain first.' }
         }
         if (kind === 'all') {
           const functions = linkedInValid
@@ -3150,8 +3150,8 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           }
           return {
             result: linkedInValid
-              ? 'Content and LinkedIn audits queued for this client space.'
-              : 'Content audit queued. LinkedIn profile and Brew360 were skipped because LinkedIn is not part of this client strategy.',
+              ? 'Content and LinkedIn audits queued for this space.'
+              : 'Content audit queued. LinkedIn profile and Brew360 were skipped because LinkedIn is not part of this space strategy.',
           }
         }
         // Single audit kind: hit the corresponding edge function async
@@ -3168,7 +3168,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.serviceKey}`, 'apikey': ctx.serviceKey },
           body: JSON.stringify({ org_id: ctx.orgId, project_id: ctx.projectId, operator_user_id: ctx.userId }),
         }).catch(() => {})
-        return { result: kind === 'content' ? 'Content audit queued for this client space.' : `${kind} audit queued for this client space.` }
+        return { result: kind === 'content' ? 'Content audit queued for this space.' : `${kind} audit queued for this space.` }
       }
 
       case 'generate_video_storyboard': {
@@ -3181,7 +3181,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         const audience = input.audience as string | undefined
         const renderGuidance = ctx.allowVideoGeneration
           ? 'Next: review the storyboard and brief with the operator. Only call generate_video after they explicitly approve a paid render.'
-          : 'Next: keep this as a production brief or storyboard. Real video rendering is locked until this client has its own FAL key, or an approved platform operator entitlement is active for this exact project.'
+          : 'Next: keep this as a production brief or storyboard. Real video rendering is locked until this space has its own FAL key, or an approved platform operator entitlement is active for this exact project.'
         const skillNameMap: Record<string, string> = {
           youtube_long: 'YouTube long-form video script',
           short_form_vertical: 'Short-form vertical video script',
@@ -3467,7 +3467,7 @@ Do NOT fabricate claims. If sources contradict, surface the contradiction.`,
         }
 
         const lines = [
-          `Client Brain health check:`,
+          `Strategy Brain health check:`,
           `  Raw items: ${rawRes.count ?? 0}`,
           `  Articles: ${articlesRes.count ?? 0} (${Object.entries(byStatus).map(([s, n]) => `${n} ${s}`).join(', ') || 'none'})`,
           `  Pending revisions: ${revisions.length}`,
@@ -4202,7 +4202,7 @@ const MAX_TOOL_ROUNDS = 5  // safety cap so a tool loop can't run forever
 
 // Text model used when a project runs its chat on its own OpenRouter key.
 // Default to a Gemini-class route for cost control. Override per deployment or
-// per client policy when a stronger model is justified.
+// per space policy when a stronger model is justified.
 const OPENROUTER_TEXT_MODEL = Deno.env.get('OPENROUTER_TEXT_MODEL') ?? 'google/gemini-2.5-flash'
 type EmbeddingRuntime = { key: string; model: string; keySource: 'platform' | 'client' }
 
@@ -4411,7 +4411,7 @@ Deno.serve(async (req) => {
     return jsonError(error instanceof Error ? error.message : 'Could not verify workspace AI billing scope', 500)
   }
   if (!orgIsMaster && !projectId) {
-    return jsonError('Client chat requires an active client space with its own OpenRouter or Anthropic key.', 403)
+    return jsonError('Space chat requires an active space with its own OpenRouter or Anthropic key.', 403)
   }
   const platformTextAllowed = orgIsMaster && (!projectId || platformTextProject)
   const embeddingRuntime = await resolveEmbeddingRuntime(supabase, projectId, platformTextAllowed)
@@ -4483,9 +4483,9 @@ Deno.serve(async (req) => {
 
   // Model + key selection per workspace:
   //   • the platform project -> Sonnet on the InnovareAI key
-  //   • client space with its own OpenRouter key -> OpenRouter on their key
-  //   • client space with its own Anthropic key -> Sonnet on their key
-  //   • client spaces without BYOK text keys are blocked, never routed onto
+  //   • space with its own OpenRouter key -> OpenRouter on their key
+  //   • space with its own Anthropic key -> Sonnet on their key
+  //   • spaces without BYOK text keys are blocked, never routed onto
   //     the InnovareAI platform key.
   let aiPolicy = DEFAULT_AI_POLICY
   if (projectId) {
@@ -4513,7 +4513,7 @@ Deno.serve(async (req) => {
   let effectiveApiKey = platformTextAllowed ? anthropicKey : ''
   let clientAnthropicKey: string | null = null
 
-  // Per-client OpenRouter text routing: a project with its own active OpenRouter
+  // Per-space OpenRouter text routing: a project with its own active OpenRouter
   // key runs its chat/LLM through OpenRouter on that key, off the platform key
   // (same trigger as its image routing). null = use the Anthropic path.
   let clientOpenRouterKey: string | null = null
@@ -4525,10 +4525,10 @@ Deno.serve(async (req) => {
       const cipher = (orRow as { secret_ciphertext?: string } | null)?.secret_ciphertext
       if (cipher) {
         clientOpenRouterKey = await decryptClientSecret(cipher)
-        if (!clientOpenRouterKey) return jsonError('Could not decrypt OpenRouter key for this client space.', 500)
+        if (!clientOpenRouterKey) return jsonError('Could not decrypt OpenRouter key for this space.', 500)
       }
     } catch (error) {
-      return jsonError(error instanceof Error ? error.message : 'Could not load OpenRouter key for this client space.', 500)
+      return jsonError(error instanceof Error ? error.message : 'Could not load OpenRouter key for this space.', 500)
     }
   }
   if (clientOpenRouterKey) effectiveApiKey = clientOpenRouterKey
@@ -4540,13 +4540,13 @@ Deno.serve(async (req) => {
       const cipher = (ownAnthropic as { secret_ciphertext?: string } | null)?.secret_ciphertext
       if (cipher) {
         clientAnthropicKey = await decryptClientSecret(cipher)
-        if (!clientAnthropicKey) return jsonError('Could not decrypt Anthropic key for this client space.', 500)
+        if (!clientAnthropicKey) return jsonError('Could not decrypt Anthropic key for this space.', 500)
       }
     } catch (error) {
-      return jsonError(error instanceof Error ? error.message : 'Could not load Anthropic key for this client space.', 500)
+      return jsonError(error instanceof Error ? error.message : 'Could not load Anthropic key for this space.', 500)
     }
     if (!clientAnthropicKey) {
-      return jsonError('Client chat requires this client space to use its own OpenRouter or Anthropic key.', 403)
+      return jsonError('Space chat requires this space to use its own OpenRouter or Anthropic key.', 403)
     }
     effectiveApiKey = clientAnthropicKey
   }
@@ -4624,8 +4624,8 @@ Deno.serve(async (req) => {
       text: [
         '<image_capabilities>',
         aiPolicy.imagesEnabled
-          ? 'Image and carousel generation is unavailable in this client space because no approved client OpenRouter, OpenAI, or FAL key is configured for media, or the operator lacks platform image entitlement inside an approved InnovareAI media project.'
-          : 'Image and carousel generation is unavailable in this client space because the client AI usage policy disables image generation.',
+          ? 'Image and carousel generation is unavailable in this space because no approved space OpenRouter, OpenAI, or FAL key is configured for media, or the operator lacks platform image entitlement inside an approved InnovareAI media project.'
+          : 'Image and carousel generation is unavailable in this space because the space AI usage policy disables image generation.',
         'Do not offer, promise, or call generate_image, generate_infographic, or generate_carousel. If the operator asks for images, write a production brief or image prompt for manual use instead.',
         '</image_capabilities>',
       ].join('\n'),
@@ -4639,8 +4639,8 @@ Deno.serve(async (req) => {
         videoPolicyBudgetError
           ? videoPolicyBudgetError
           : clientHasFalKey
-          ? 'Real video generation is unavailable in this client space because the client AI usage policy disables video generation.'
-          : 'Real video generation is unavailable in this client space because no client-owned FAL key is configured. Platform video entitlements are limited to approved platform media projects.',
+          ? 'Real video generation is unavailable in this space because the space AI usage policy disables video generation.'
+          : 'Real video generation is unavailable in this space because no space-owned FAL key is configured. Platform video entitlements are limited to approved platform media projects.',
         'Do not offer, promise, or call generate_video. If the operator asks for video, create a written production brief with generate_video_brief instead.',
         '</media_capabilities>',
       ].join('\n'),

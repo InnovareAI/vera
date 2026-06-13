@@ -728,7 +728,7 @@ export default function Knowledge() {
                           loading={applyingThisRow}
                           disabled={appliedToBrain || (!!applyingBrainId && !applyingThisRow)}
                           onClick={() => { void applyKnowledgeToBrain(k) }}
-                          title={appliedToBrain ? 'Already applied to this client Brain' : 'Apply extracted fields to this client Brain'}
+                          title={appliedToBrain ? 'Already applied to this Strategy Brain' : 'Apply extracted fields to this Strategy Brain'}
                         >
                           {appliedToBrain ? 'In Brain' : 'Apply to Brain'}
                         </Button>
