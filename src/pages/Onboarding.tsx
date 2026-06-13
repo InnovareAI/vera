@@ -2,6 +2,15 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowRight, ArrowLeft, Check, Sparkles, Loader2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useOrg } from '../lib/orgContext'
+import { useProject } from '../lib/projectContext'
+import {
+  EMPTY_BUSINESS_CONTEXT,
+  compactProjectDescription,
+  mergeProjectInstructions,
+  type BusinessContext,
+} from '../lib/businessContext'
+import { applyDemandDefaults } from '../lib/demandModel'
 
 // Wizard step definitions. Two required org fields (name + website) then optional channels.
 type IntroStepDef    = { id: 'welcome'; type: 'intro' }
@@ -14,17 +23,17 @@ const STEPS: Step[] = [
   { id: 'welcome', type: 'intro' },
   { id: 'company',             type: 'org_field', field: 'company_name', title: 'Company name',         subtitle: "What should we call your company?",                                 placeholder: 'Acme Inc.',                              required: true },
   { id: 'website',             type: 'org_field', field: 'website',      title: 'Website',              subtitle: "Your company's main website.",                                      placeholder: 'https://acme.com',                       required: true },
-  { id: 'linkedin_personal',   type: 'channel', channel: 'linkedin_personal',   field: 'linkedin_personal',   title: 'LinkedIn — personal',     subtitle: "Your own LinkedIn profile. This is where your personal voice lives — the most valuable signal for the audit.", placeholder: 'https://linkedin.com/in/…' },
-  { id: 'linkedin_company',    type: 'channel', channel: 'linkedin_company',    field: 'linkedin_company',    title: 'LinkedIn — company',      subtitle: "Your company page on LinkedIn.",                                            placeholder: 'https://linkedin.com/company/…' },
+  { id: 'linkedin_personal',   type: 'channel', channel: 'linkedin_personal',   field: 'linkedin_personal',   title: 'LinkedIn - personal',     subtitle: "Your own LinkedIn profile. This is where your personal voice lives and often the strongest signal for VERA.", placeholder: 'https://linkedin.com/in/person-name' },
+  { id: 'linkedin_company',    type: 'channel', channel: 'linkedin_company',    field: 'linkedin_company',    title: 'LinkedIn - company',      subtitle: "Your company page on LinkedIn.",                                            placeholder: 'https://linkedin.com/company/company-name' },
   { id: 'instagram',           type: 'channel', channel: 'instagram',           field: 'instagram',           title: 'Instagram',               subtitle: 'Your Instagram profile, if it carries audience or voice signal.',            placeholder: 'https://instagram.com/brand' },
   { id: 'blog',                type: 'channel', channel: 'blog',                field: 'blog',                title: 'Website blog',            subtitle: 'Your company blog or thought-leadership content.',                          placeholder: 'https://acme.com/blog' },
-  { id: 'linkedin_newsletter', type: 'channel', channel: 'linkedin_newsletter', field: 'linkedin_newsletter', title: 'LinkedIn newsletter',     subtitle: 'If you publish a LinkedIn newsletter, paste its URL. Requires the author\'s personal or company LinkedIn channel above to be configured too — we fetch newsletter issues from their posts feed.',                      placeholder: 'https://linkedin.com/newsletters/…' },
+  { id: 'linkedin_newsletter', type: 'channel', channel: 'linkedin_newsletter', field: 'linkedin_newsletter', title: 'LinkedIn newsletter',     subtitle: 'If you publish a LinkedIn newsletter, paste its URL. VERA uses it as source material for platform tone and topic depth.',                      placeholder: 'https://linkedin.com/newsletters/newsletter-name' },
   { id: 'medium',              type: 'channel', channel: 'medium',              field: 'medium',              title: 'Medium',                  subtitle: 'Your Medium profile or publication.',                                       placeholder: '@handle  or  https://medium.com/@handle' },
-  { id: 'youtube',             type: 'channel', channel: 'youtube',             field: 'youtube',             title: 'YouTube channel',         subtitle: 'Your YouTube channel — videos, podcast, etc.',                              placeholder: 'https://youtube.com/@channel' },
+  { id: 'youtube',             type: 'channel', channel: 'youtube',             field: 'youtube',             title: 'YouTube channel',         subtitle: 'Your YouTube channel for videos, podcasts, Shorts, and proof assets.',                              placeholder: 'https://youtube.com/@channel' },
   { id: 'quora',               type: 'channel', channel: 'quora',               field: 'quora',               title: 'Quora',                   subtitle: 'Profiles, Spaces, or topics that reveal buyer questions and demand angles.', placeholder: 'https://www.quora.com/profile/brand-or-person' },
   { id: 'reddit',              type: 'channel', channel: 'reddit',              field: 'reddit',              title: 'Reddit',                  subtitle: 'Target subreddits or profile URLs for market listening and objection mining.', placeholder: 'r/marketing or https://reddit.com/r/marketing' },
   { id: 'facebook',            type: 'channel', channel: 'facebook',            field: 'facebook',            title: 'Facebook page',           subtitle: 'Your Facebook Page, if it is active for community or local trust.',          placeholder: 'https://facebook.com/brand' },
-  { id: 'twitter',             type: 'channel', channel: 'twitter',             field: 'twitter',             title: 'X / Twitter',             subtitle: 'Only fill if you post here weekly or more — otherwise the signal is too thin to be worth fetching.', placeholder: '@handle  or  https://x.com/handle' },
+  { id: 'twitter',             type: 'channel', channel: 'twitter',             field: 'twitter',             title: 'X / Twitter',             subtitle: 'Only fill if you post here weekly or more. Otherwise the signal is too thin to be worth fetching.', placeholder: '@handle  or  https://x.com/handle' },
   { id: 'review', type: 'review' },
 ]
 
@@ -36,6 +45,8 @@ function slugify(s: string) {
 
 export default function Onboarding() {
   const navigate = useNavigate()
+  const { activeOrg, loading: orgLoading } = useOrg()
+  const { refetch } = useProject()
   const [stepIndex, setStepIndex] = useState(0)
   const [collected, setCollected] = useState<Record<string, string>>({})
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -44,24 +55,30 @@ export default function Onboarding() {
 
   // Resume any in-progress session on mount
   useEffect(() => {
+    if (orgLoading) return
+    if (!activeOrg?.id) return
+    let cancelled = false
     supabase.from('onboarding_sessions')
       .select('*')
+      .eq('org_id', activeOrg.id)
       .eq('status', 'in_progress')
       .order('started_at', { ascending: false })
       .limit(1)
       .maybeSingle()
       .then(({ data }) => {
+        if (cancelled) return
         if (data) {
           setSessionId(data.id)
           setCollected((data.collected as Record<string, string>) ?? {})
           setStepIndex(data.current_step ?? 0)
         } else {
           // Create a fresh session
-          supabase.from('onboarding_sessions').insert({}).select('id').single()
-            .then(({ data }) => { if (data) setSessionId(data.id) })
+          supabase.from('onboarding_sessions').insert({ org_id: activeOrg.id }).select('id').single()
+            .then(({ data }) => { if (!cancelled && data) setSessionId(data.id) })
         }
       })
-  }, [])
+    return () => { cancelled = true }
+  }, [activeOrg?.id, orgLoading])
 
   const step = STEPS[stepIndex]
   const progress = step.type === 'intro' ? 0 : STEPS.slice(0, stepIndex + 1).filter(s => s.type !== 'intro').length
@@ -107,7 +124,6 @@ export default function Onboarding() {
   }
 
   async function submitWizard() {
-    if (!sessionId) return
     setSubmitting(true)
     setError(null)
 
@@ -119,41 +135,55 @@ export default function Onboarding() {
       return
     }
 
-    // 1) Create the org
-    const { data: org, error: orgErr } = await supabase
-      .from('organizations')
-      .insert({ name, slug: `${slugify(name)}-${Math.random().toString(36).slice(2, 6)}`, website })
-      .select('id')
-      .single()
-
-    if (orgErr || !org) {
-      setError(`Couldn't create org: ${orgErr?.message ?? 'unknown'}`)
+    if (!activeOrg?.id) {
+      setError('No active workspace is available. Open Vera from an agency workspace before adding a client.')
       setSubmitting(false)
       return
     }
 
-    // 2) Insert one channel_profiles row per provided URL
-    const channelRows = STEPS
-      .filter((s): s is ChannelStepDef => s.type === 'channel')
-      .map(s => ({ org_id: org.id, channel: s.channel, url: (collected[s.field] ?? '').trim() }))
-      .filter(r => r.url.length > 0)
+    const context = buildBusinessContextFromCollected(collected)
+    const slugBase = slugify(name) || 'client'
+    const slug = `${slugBase}-${Math.random().toString(36).slice(2, 6)}`
 
-    if (channelRows.length) {
-      const { error: chErr } = await supabase.from('channel_profiles').insert(channelRows)
-      if (chErr) {
-        setError(`Org created but channels failed: ${chErr.message}`)
-        setSubmitting(false)
-        return
-      }
+    // Create the client as a project under the current workspace. The old
+    // onboarding flow created a whole organization and org-scoped channel rows;
+    // client spaces now live in projects with their source model in Demand Brain.
+    const { data: project, error: projectErr } = await supabase
+      .from('projects')
+      .insert({
+        org_id: activeOrg.id,
+        name,
+        slug,
+        description: compactProjectDescription(context),
+        instructions: mergeProjectInstructions('', context),
+        is_default: false,
+        is_starred: false,
+        is_archived: false,
+      })
+      .select('id, slug')
+      .single()
+
+    if (projectErr || !project) {
+      setError(`Could not create client space: ${projectErr?.message ?? 'unknown'}`)
+      setSubmitting(false)
+      return
     }
 
-    // 3) Mark session as completed
-    await supabase.from('onboarding_sessions')
-      .update({ status: 'completed', completed_at: new Date().toISOString(), org_id: org.id, current_step: stepIndex, collected })
-      .eq('id', sessionId)
+    if (sessionId) {
+      await supabase.from('onboarding_sessions')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          org_id: activeOrg.id,
+          current_step: stepIndex,
+          collected: { ...collected, project_id: project.id },
+        })
+        .eq('id', sessionId)
+    }
 
     setSubmitting(false)
-    navigate(`/onboarding/audit/${org.id}`)
+    refetch()
+    navigate(`/p/${project.slug}/brain`)
   }
 
   return (
@@ -211,7 +241,7 @@ export default function Onboarding() {
             {step.type === 'review' ? (
               <button onClick={submitWizard} disabled={submitting}
                 className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white rounded-lg text-sm font-semibold">
-                {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : <>Finish setup <Check className="w-4 h-4" /></>}
+                {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</> : <>Finish setup <Check className="w-4 h-4" /></>}
               </button>
             ) : (
               <button onClick={goNext}
@@ -230,6 +260,37 @@ export default function Onboarding() {
   )
 }
 
+function normalizeUrl(value: string) {
+  const raw = value.trim()
+  if (!raw) return ''
+  if (/^(https?:\/\/|r\/|@)/i.test(raw)) return raw
+  return `https://${raw}`
+}
+
+function buildBusinessContextFromCollected(collected: Record<string, string>): BusinessContext {
+  const context: BusinessContext = {
+    ...EMPTY_BUSINESS_CONTEXT,
+    companyName: (collected.company_name ?? '').trim(),
+    website: normalizeUrl(collected.website ?? ''),
+    linkedinProfile: normalizeUrl(collected.linkedin_personal ?? ''),
+    linkedinCompany: normalizeUrl(collected.linkedin_company ?? ''),
+    linkedinNewsletter: normalizeUrl(collected.linkedin_newsletter ?? ''),
+    instagram: normalizeUrl(collected.instagram ?? ''),
+    youtube: normalizeUrl(collected.youtube ?? ''),
+    medium: normalizeUrl(collected.medium ?? ''),
+    quora: normalizeUrl(collected.quora ?? ''),
+    reddit: normalizeUrl(collected.reddit ?? ''),
+    facebook: normalizeUrl(collected.facebook ?? ''),
+    x: normalizeUrl(collected.twitter ?? ''),
+  }
+  const blog = normalizeUrl(collected.blog ?? '')
+  const withDefaults = applyDemandDefaults(context)
+  if (blog) {
+    withDefaults.channelStrategy = `${withDefaults.channelStrategy}\nWebsite blog source: ${blog}`
+  }
+  return withDefaults
+}
+
 function IntroStep({ onStart }: { onStart: () => void }) {
   return (
     <div className="text-center py-16">
@@ -238,8 +299,8 @@ function IntroStep({ onStart }: { onStart: () => void }) {
       </div>
       <h1 className="text-3xl font-bold text-gray-900 mb-3">Welcome to VERA</h1>
       <p className="text-base text-gray-600 max-w-md mx-auto mb-8">
-        We'll ask a few questions about your company and where you publish content. Takes about 2 minutes.
-        You can skip anything you don't have.
+        We'll ask for the company URL first, then the channels VERA should learn from. Takes about 2 minutes.
+        You can skip anything you do not have.
       </p>
       <button onClick={onStart}
         className="inline-flex items-center gap-1.5 px-6 py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-sm font-semibold">
@@ -278,11 +339,11 @@ function ReviewStep({ collected, steps, onEdit }:
   return (
     <div>
       <h2 className="text-2xl font-bold text-gray-900 mb-2">Review your setup</h2>
-      <p className="text-sm text-gray-500 mb-6">Click any row to edit. We'll create your workspace when you finish.</p>
+      <p className="text-sm text-gray-500 mb-6">Click any row to edit. We'll create this client space when you finish.</p>
 
       <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100 mb-4">
         {orgFields.map(({ s, i }) => s.type !== 'intro' && s.type !== 'review' && (
-          <Row key={s.id} label={s.title} value={collected[s.field] ?? '—'} onClick={() => onEdit(i)} />
+          <Row key={s.id} label={s.title} value={collected[s.field] ?? '-'} onClick={() => onEdit(i)} />
         ))}
       </div>
 

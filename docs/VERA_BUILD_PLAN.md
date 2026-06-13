@@ -242,6 +242,7 @@ Current state:
 - `ops/verify-media-key-scope.sh` now provides a no-spend production regression check that a client space without a FAL key cannot call a FAL-only image model through `generate-image`.
 - Shared text runtimes now use the same model-selection audit metadata, including requested model, policy default, selection source, and selection reason.
 - Client OpenRouter text defaults now fall back to Gemini Flash class when no client policy default is set.
+- The legacy onboarding route now creates a client project under the active workspace instead of creating a new organization. It seeds the project Demand Brain with company URL, channels, default demand operating model, approval model, engagement signals, and SAM handoff rules, then lands the user in that client's Brain.
 - AI Usage settings now filters current-month usage by model selection source: recommended, policy default, explicit override, fallback, or unknown historical events.
 - Image and video generation now emit structured AI budget warnings before a paid provider call when a cap is missing, the request cost is unknown, or the request moves a client space near its monthly cap.
 - Command surfaces those budget warnings as operator toasts, while usage logs keep the warning metadata for audits.
