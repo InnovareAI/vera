@@ -9,8 +9,9 @@
 //   brand-kit files live in Artifacts).
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import type { ElementType } from 'react'
 import { Link } from 'react-router-dom'
-import { Brain as BrainIcon, BookOpen, Check, Plus, X, Loader2, Trash2, Sparkles, Upload, FileText, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Brain as BrainIcon, BookOpen, Check, Link2, Plus, ShieldCheck, Target, X, Loader2, Trash2, Sparkles, Upload, FileText, RefreshCw } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { BrandVoice, Audience } from '../lib/supabase'
 import { useProject } from '../lib/projectContext'
@@ -70,6 +71,20 @@ const BUSINESS_DOC_ACCEPT = [
 ].join(',')
 const MAX_BUSINESS_DOC_BYTES = 20 * 1024 * 1024
 type SourcePullReport = { label?: string; ok?: boolean; items?: number; error?: string }
+
+const DEMAND_FACT_KEYS: BusinessContextKey[] = [
+  'offer',
+  'audience',
+  'customerProblems',
+  'differentiators',
+  'competitors',
+  'proofPoints',
+  'contentGoals',
+  'speakerStrategy',
+  'platformToneOfVoice',
+  'approvalStakeholders',
+  'constraints',
+]
 
 function fileExtension(name: string) {
   const dot = name.lastIndexOf('.')
@@ -199,6 +214,100 @@ function orderedDemandPlatforms(context: BusinessContext) {
     if (aMention !== bMention) return bMention - aMention
     return a.label.localeCompare(b.label)
   })
+}
+
+function activeDemandPlatforms(context: BusinessContext) {
+  const active = DEMAND_PLATFORM_DEFINITIONS.filter(platform => (
+    Boolean(platformSourceValue(platform, context)) || platformIsMentioned(platform, context)
+  ))
+  return active.length ? active : DEMAND_PLATFORM_DEFINITIONS
+}
+
+function sourceGapPlatforms(context: BusinessContext) {
+  return DEMAND_PLATFORM_DEFINITIONS
+    .filter(platform => platform.sourceKey && !platformSourceValue(platform, context))
+    .slice(0, 6)
+}
+
+function BrainReadinessPanel({
+  context,
+  policies,
+  sourceCount,
+  factCount,
+  operatingCount,
+}: {
+  context: BusinessContext
+  policies: Record<DemandPlatformKey, DemandChannelOperatingPolicy>
+  sourceCount: number
+  factCount: number
+  operatingCount: number
+}) {
+  const activePlatforms = activeDemandPlatforms(context)
+  const plannedChannels = activePlatforms.filter(platform => !platformSourceValue(platform, context) && platformIsMentioned(platform, context)).length
+  const highCareChannels = activePlatforms.filter(platform => (policies[platform.key] ?? DEMAND_CHANNEL_OPERATING_POLICIES[platform.key]).risk === 'high').length
+  const customPolicies = demandChannelPolicyOverrideCount(policies)
+  const gaps = sourceGapPlatforms(context)
+  const totalFields = DEMAND_FACT_KEYS.length + Object.keys(DEFAULT_DEMAND_OPERATING_MODEL).length + DEMAND_SOURCE_KEYS.length
+  const filledFields = factCount + operatingCount + sourceCount
+  const readiness = Math.round((filledFields / totalFields) * 100)
+
+  return (
+    <section style={{ marginBottom: space[8], padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: space[4], flexWrap: 'wrap', marginBottom: space[4] }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.ink, fontSize: t.size.body, fontWeight: t.weight.semibold }}>
+            <Target size={16} color={color.accent} />
+            Demand operating readiness
+          </div>
+          <p style={{ margin: `${space[2]} 0 0`, maxWidth: 720, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.5 }}>
+            This is the client model VERA uses to plan content, route approvals, measure traction, and decide what should move to SAM.
+          </p>
+        </div>
+        <Chip tone={readiness >= 70 ? 'accent' : 'default'} size="md">{readiness}% ready</Chip>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: space[3] }}>
+        <ReadinessTile icon={Link2} label="Sources" value={`${sourceCount}/${DEMAND_SOURCE_KEYS.length}`} detail="Website and channel evidence" tone={sourceCount ? color.success : color.warn} />
+        <ReadinessTile icon={BrainIcon} label="Context" value={`${factCount}/${DEMAND_FACT_KEYS.length}`} detail="Offer, ICP, proof, constraints" tone={factCount >= 6 ? color.success : color.warn} />
+        <ReadinessTile icon={Sparkles} label="Operating fields" value={`${operatingCount}/${Object.keys(DEFAULT_DEMAND_OPERATING_MODEL).length}`} detail="Demand, formats, signals, learning" tone={operatingCount >= 5 ? color.success : color.warn} />
+        <ReadinessTile icon={ShieldCheck} label="Custom policies" value={customPolicies} detail="Channel rules beyond defaults" tone={customPolicies ? color.accent : color.ghost} />
+        <ReadinessTile icon={AlertTriangle} label="High-care channels" value={highCareChannels} detail="Approval-sensitive surfaces" tone={highCareChannels ? color.danger : color.success} />
+        <ReadinessTile icon={Target} label="Planned channels" value={plannedChannels} detail="Mentioned but no source URL yet" tone={plannedChannels ? color.info : color.ghost} />
+      </div>
+
+      <div style={{ marginTop: space[4], display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
+        <span style={{ color: color.ghost, fontSize: t.size.cap, marginRight: space[1] }}>Source gaps</span>
+        {gaps.length ? gaps.map(platform => (
+          <Chip key={platform.key} dot={platformIsMentioned(platform, context) ? color.info : color.ghost}>{platform.label}</Chip>
+        )) : <Chip dot={color.success}>All demand sources configured</Chip>}
+      </div>
+    </section>
+  )
+}
+
+function ReadinessTile({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  icon: ElementType
+  label: string
+  value: string | number
+  detail: string
+  tone: string
+}) {
+  return (
+    <div style={{ padding: space[4], background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, minHeight: 104 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3] }}>
+        <span style={{ color: color.ghost, fontSize: t.size.cap, fontWeight: t.weight.medium }}>{label}</span>
+        <Icon size={15} color={tone} />
+      </div>
+      <div style={{ marginTop: space[2], color: color.ink, fontSize: t.size.h3, fontWeight: t.weight.semibold, lineHeight: 1.1 }}>{value}</div>
+      <p style={{ margin: `${space[2]} 0 0`, color: color.ghost, fontSize: t.size.micro, lineHeight: 1.4 }}>{detail}</p>
+    </div>
+  )
 }
 
 function DemandChannelMatrix({
@@ -727,8 +836,7 @@ export default function Brain() {
   const sourceCount = DEMAND_SOURCE_KEYS
     .filter(key => business[key].trim()).length
   const operatingKeys = Object.keys(DEFAULT_DEMAND_OPERATING_MODEL) as BusinessContextKey[]
-  const factCount = (['offer', 'audience', 'customerProblems', 'differentiators', 'competitors', 'proofPoints', 'contentGoals', 'speakerStrategy', 'platformToneOfVoice', 'approvalStakeholders', 'constraints'] as BusinessContextKey[])
-    .filter(key => business[key].trim()).length
+  const factCount = DEMAND_FACT_KEYS.filter(key => business[key].trim()).length
   const operatingCount = operatingKeys.filter(key => business[key].trim()).length
   const applyLeadGenDefaults = () => {
     setBusiness(prev => applyDemandDefaults(prev))
@@ -739,6 +847,14 @@ export default function Brain() {
     <div style={{ padding: `${space[8]} ${space[8]} 0`, maxWidth: 1040 }}>
       <PageHeader eyebrow={activeProject.name} title="Demand Brain"
         subtitle="The client demand intelligence VERA uses every turn: ICP, offer, buyer pains, proof, voice, sources, and constraints." />
+
+      <BrainReadinessPanel
+        context={business}
+        policies={channelPolicies}
+        sourceCount={sourceCount}
+        factCount={factCount}
+        operatingCount={operatingCount}
+      />
 
       {/* Agentic-first: let Vera draft the brain from the client's content
           instead of starting blank. Prefills the brand voice for review. */}
