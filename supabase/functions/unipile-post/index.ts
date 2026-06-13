@@ -30,6 +30,10 @@ import {
   markPublishClaimError,
   releasePublishClaim,
 } from "../_shared/publish-claims.ts"
+import {
+  getUnipileAccountId,
+  resolveClientLinkedInOrganization,
+} from "../_shared/unipile-publishing.ts"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -161,15 +165,9 @@ Deno.serve(async (req) => {
   // Legacy org-wide posts can still use channel_profiles for auto-detection.
   let asOrganization: string | undefined
   if (channel === "linkedin" && post.project_id) {
-    const allowedOrganization = linkedInOrganizationForIntegration(clientIntegration)
-    if (explicitOrgUrn) {
-      if (!allowedOrganization || normalizeLinkedInOrgId(explicitOrgUrn) !== normalizeLinkedInOrgId(allowedOrganization)) {
-        return jsonError("LinkedIn company page is not connected to this client space.", 403)
-      }
-      asOrganization = allowedOrganization
-    } else {
-      asOrganization = allowedOrganization ?? undefined
-    }
+    const orgResolution = resolveClientLinkedInOrganization(clientIntegration, explicitOrgUrn)
+    if (!orgResolution.ok) return jsonError(orgResolution.message, orgResolution.status)
+    asOrganization = orgResolution.asOrganization
   } else {
     asOrganization = explicitOrgUrn
   }
@@ -325,38 +323,6 @@ function integrationProviderForChannel(channel: string): string {
   if (channel === "linkedin") return "linkedin"
   if (channel === "instagram") return "meta_instagram"
   return channel
-}
-
-function getUnipileAccountId(integration: ClientIntegrationRow | null): string | null {
-  return firstString(
-    integration?.external_ref?.unipile_account_id,
-    integration?.config?.unipile_account_id,
-    integration?.external_ref?.account_id,
-  )
-}
-
-function linkedInOrganizationForIntegration(integration: ClientIntegrationRow | null): string | null {
-  return firstString(
-    integration?.external_ref?.linkedin_organization_id,
-    integration?.external_ref?.linkedin_company_id,
-    integration?.external_ref?.as_organization,
-    integration?.external_ref?.organization_id,
-    integration?.config?.linkedin_organization_id,
-    integration?.config?.linkedin_company_id,
-    integration?.config?.as_organization,
-    integration?.config?.organization_id,
-  )
-}
-
-function normalizeLinkedInOrgId(value: string): string {
-  return value.trim().replace(/^urn:li:organization:/i, "").replace(/^urn:linkedin:organization:/i, "")
-}
-
-function firstString(...values: unknown[]): string | null {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) return value.trim()
-  }
-  return null
 }
 
 // Unipile's response field names aren't documented for POST /api/v1/posts.
