@@ -26,6 +26,7 @@ import type { Database, Json } from '../_shared/database.types.ts'
 import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
 import { isPlatformMediaProject, loadClientApiKey } from '../_shared/client-media-keys.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
+import { checkProjectAiBudget, type ProjectAiBudgetWarning } from '../_shared/ai-policy.ts'
 import { extractText, getDocumentProxy } from 'npm:unpdf@0.12.1'
 import mammoth from 'npm:mammoth@1.8.0'
 
@@ -36,6 +37,7 @@ const ANTHROPIC_CLASSIFY_MODEL = Deno.env.get('ANTHROPIC_CLASSIFY_MODEL') ?? 'cl
 const OPENROUTER_CLASSIFY_MODEL = Deno.env.get('OPENROUTER_CLASSIFY_MODEL') ?? 'google/gemini-2.5-flash'
 const SUPABASE_URL      = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY       = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const APPROX_CHARS_PER_TOKEN = 4
 
 const cors = {
   'Access-Control-Allow-Origin':  '*',
@@ -62,6 +64,8 @@ type IngestRuntimes = {
   embeddingUnavailableReason: string | null
 }
 
+class BudgetBlockedError extends Error {}
+
 // ─── helpers ─────────────────────────────────────────────────────────
 function chunkText(text: string, max = 1200, overlap = 150): string[] {
   const out: string[] = []
@@ -74,11 +78,42 @@ function chunkText(text: string, max = 1200, overlap = 150): string[] {
   return out.filter(c => c.trim().length > 50)
 }
 
+function approxTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / APPROX_CHARS_PER_TOKEN))
+}
+
+async function checkIngestBudget(
+  supabase: AdminClient,
+  project: ProjectScope,
+  input: {
+    provider: string
+    model: string
+    operation: string
+    inputTokens: number
+    outputTokens?: number | null
+    metadata?: Record<string, unknown>
+  },
+): Promise<ProjectAiBudgetWarning | null> {
+  const budget = await checkProjectAiBudget(supabase, project.id, {
+    orgId: project.org_id,
+    projectId: project.id,
+    provider: input.provider,
+    model: input.model,
+    operation: input.operation,
+    inputTokens: input.inputTokens,
+    outputTokens: input.outputTokens ?? 0,
+    metadata: input.metadata,
+  })
+  if (!budget.ok) throw new BudgetBlockedError(budget.message)
+  return budget.warning
+}
+
 async function embed(
   supabase: AdminClient,
   project: ProjectScope,
   runtime: EmbedRuntime,
   text: string,
+  budgetWarning: ProjectAiBudgetWarning | null,
 ): Promise<number[]> {
   const startedAt = Date.now()
   const res = await fetch('https://api.openai.com/v1/embeddings', {
@@ -106,7 +141,7 @@ async function embed(
     inputTokens: data.usage?.prompt_tokens ?? data.usage?.total_tokens ?? null,
     outputTokens: 0,
     durationMs: Date.now() - startedAt,
-    metadata: { key_source: runtime.keySource },
+    metadata: { key_source: runtime.keySource, ...(budgetWarning ? { budget_warning: budgetWarning } : {}) },
   })
   return data.data[0].embedding
 }
@@ -465,20 +500,30 @@ Suggestion examples:
   · "Want me to update the audit context with this positioning?"
   · "Keep as reference — I'll pull it in when relevant."`
 
+  const userContent = `Document content (first 4000 chars):\n\n${content.slice(0, 4000)}`
+  const maxTokens = 1024
   const body = {
     model: runtime.model,
-    max_tokens: 1024,
+    max_tokens: maxTokens,
     system: sys,
     messages: [{
       role: 'user',
-      content: `Document content (first 4000 chars):\n\n${content.slice(0, 4000)}`,
+      content: userContent,
     }],
   }
 
   try {
+    const budgetWarning = await checkIngestBudget(supabase, project, {
+      provider: runtime.provider,
+      model: runtime.model,
+      operation: 'knowledge.classify',
+      inputTokens: approxTokens(`${sys}\n\n${userContent}`),
+      outputTokens: maxTokens,
+      metadata: classifierUsageMetadata(runtime),
+    })
     const startedAt = Date.now()
     const result = runtime.provider === 'openrouter'
-      ? await classifyWithOpenRouter(runtime, sys, body.messages[0].content)
+      ? await classifyWithOpenRouter(runtime, sys, userContent)
       : await classifyWithAnthropic(runtime, body)
     const text = result.text
     // Strip markdown fences if Claude wrapped JSON
@@ -506,9 +551,19 @@ Suggestion examples:
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
       durationMs: Date.now() - startedAt,
-      metadata: classifierUsageMetadata(runtime),
+      metadata: { ...classifierUsageMetadata(runtime), ...(budgetWarning ? { budget_warning: budgetWarning } : {}) },
     })
   } catch (e) {
+    if (e instanceof BudgetBlockedError) {
+      await supabase.from('project_knowledge').update({
+        kind: 'reference',
+        summary: 'Stored as project knowledge. Classification skipped because this request would exceed the client AI monthly budget cap.',
+        extracted: { classification: 'skipped', reason: e.message } as Json,
+        suggestion: 'Review the AI usage cap before asking VERA to classify or synthesize this source.',
+        classified_at: new Date().toISOString(),
+      }).eq('id', knowledgeId).is('classified_at', null)
+      return
+    }
     console.warn(`classify: ${e instanceof Error ? e.message : String(e)}`)
     await supabase.from('project_knowledge').update({
       kind: 'reference',
@@ -603,14 +658,32 @@ async function ingestText(
 
   // We store ONE row per document with the full content + an embedding of the
   // head (first ~1200 chars). For larger docs, future revision can split rows.
-  const headEmbedding = runtimes.embedding
-    ? await embed(supabase, project, runtimes.embedding, chunks[0])
-    : null
+  let budgetSkipReason: string | null = null
+  let headEmbedding: number[] | null = null
+  if (runtimes.embedding) {
+    try {
+      const budgetWarning = await checkIngestBudget(supabase, project, {
+        provider: runtimes.embedding.provider,
+        model: runtimes.embedding.model,
+        operation: 'knowledge.embed',
+        inputTokens: approxTokens(chunks[0].slice(0, 8000)),
+        outputTokens: 0,
+        metadata: { key_source: runtimes.embedding.keySource },
+      })
+      headEmbedding = await embed(supabase, project, runtimes.embedding, chunks[0], budgetWarning)
+    } catch (error) {
+      if (error instanceof BudgetBlockedError) {
+        budgetSkipReason = error.message
+      } else {
+        throw error
+      }
+    }
+  }
   const indexed = Boolean(headEmbedding)
   const classifiedAt = runtimes.classifier ? null : new Date().toISOString()
   const rawSummary = indexed
     ? 'Stored as project knowledge. Add a classifier key to auto-summarize and tag future uploads.'
-    : `Stored as raw project knowledge. ${runtimes.embeddingUnavailableReason ?? 'No embedding runtime is available.'}`
+    : `Stored as raw project knowledge. ${budgetSkipReason ?? runtimes.embeddingUnavailableReason ?? 'No embedding runtime is available.'}`
 
   const { data: row, error: insErr } = await supabase
     .from('project_knowledge')
@@ -631,7 +704,7 @@ async function ingestText(
             indexed,
             chunks: chunks.length,
             storage: indexed ? 'semantic' : 'raw',
-            reason: indexed ? null : runtimes.embeddingUnavailableReason,
+            reason: indexed ? null : budgetSkipReason ?? runtimes.embeddingUnavailableReason,
           } as Json,
       classified_at: classifiedAt,
     })
