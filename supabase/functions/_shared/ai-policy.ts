@@ -6,6 +6,7 @@ export type ProjectAiPolicy = {
   imagesEnabled: boolean
   standardVideoEnabled: boolean
   premiumMediaEnabled: boolean
+  platformMediaKeysEnabled: boolean
   monthlyBudgetUsd: number | null
   defaultTextModel: string | null
   defaultImageModel: string
@@ -17,6 +18,7 @@ export const DEFAULT_AI_POLICY: ProjectAiPolicy = {
   imagesEnabled: true,
   standardVideoEnabled: false,
   premiumMediaEnabled: false,
+  platformMediaKeysEnabled: false,
   monthlyBudgetUsd: null,
   defaultTextModel: null,
   defaultImageModel: "nano-banana",
@@ -44,6 +46,7 @@ export function parseProjectAiPolicy(value: Json | null | undefined): ProjectAiP
     imagesEnabled: booleanValue(policy.images_enabled, DEFAULT_AI_POLICY.imagesEnabled),
     standardVideoEnabled: booleanValue(policy.standard_video_enabled, DEFAULT_AI_POLICY.standardVideoEnabled),
     premiumMediaEnabled: booleanValue(policy.premium_media_enabled, DEFAULT_AI_POLICY.premiumMediaEnabled),
+    platformMediaKeysEnabled: booleanValue(policy.platform_media_keys_enabled, DEFAULT_AI_POLICY.platformMediaKeysEnabled),
     monthlyBudgetUsd: positiveNumberValue(policy.monthly_budget_usd),
     defaultTextModel: stringValue(policy.default_text_model, DEFAULT_AI_POLICY.defaultTextModel),
     defaultImageModel: stringValue(policy.default_image_model, DEFAULT_AI_POLICY.defaultImageModel) ?? DEFAULT_AI_POLICY.defaultImageModel,

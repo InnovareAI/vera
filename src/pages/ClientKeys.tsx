@@ -57,6 +57,7 @@ type AiPolicy = {
   images_enabled: boolean
   standard_video_enabled: boolean
   premium_media_enabled: boolean
+  platform_media_keys_enabled: boolean
   monthly_budget_usd: number | null
   default_text_model: string | null
   default_image_model: string
@@ -68,6 +69,7 @@ const DEFAULT_AI_POLICY: AiPolicy = {
   images_enabled: true,
   standard_video_enabled: false,
   premium_media_enabled: false,
+  platform_media_keys_enabled: false,
   monthly_budget_usd: null,
   default_text_model: null,
   default_image_model: 'nano-banana',
@@ -379,6 +381,14 @@ export default function ClientKeys() {
         : hasFal
           ? 'Client-owned FAL is active. Video rendering can run from this client budget.'
         : 'Locked. Real video rendering requires a client-owned FAL key. Vera will use storyboards and briefs instead.',
+    },
+    {
+      icon: ShieldCheck,
+      title: 'Platform fallback',
+      ready: aiPolicy.platform_media_keys_enabled,
+      body: aiPolicy.platform_media_keys_enabled
+        ? 'Operator-only InnovareAI media fallback is enabled for this project. Keep this limited to internal production work.'
+        : 'Locked. This client cannot use InnovareAI platform media keys, even if an operator has an entitlement.',
     },
   ]
   const spendGuard = buildSpendGuard(aiPolicy, activeProviders, usageSummary)
@@ -773,6 +783,7 @@ function buildSpendGuard(aiPolicy: AiPolicy, activeProviders: Set<string>, usage
     aiPolicy.images_enabled && !hasClientMedia ? 'image route locked' : '',
     aiPolicy.standard_video_enabled && !hasClientVideo ? 'video key missing' : '',
     premiumDefault && !aiPolicy.premium_media_enabled ? 'premium default locked' : '',
+    aiPolicy.platform_media_keys_enabled ? 'platform fallback enabled' : '',
     budgetPct !== null && budgetPct >= 90 ? 'budget near cap' : '',
     usageSummary.platformKeyEvents > 0 ? 'platform usage seen' : '',
   ].filter(Boolean)
@@ -1060,6 +1071,7 @@ function parseAiPolicy(value: unknown): AiPolicy {
     images_enabled: typeof raw.images_enabled === 'boolean' ? raw.images_enabled : DEFAULT_AI_POLICY.images_enabled,
     standard_video_enabled: typeof raw.standard_video_enabled === 'boolean' ? raw.standard_video_enabled : DEFAULT_AI_POLICY.standard_video_enabled,
     premium_media_enabled: typeof raw.premium_media_enabled === 'boolean' ? raw.premium_media_enabled : DEFAULT_AI_POLICY.premium_media_enabled,
+    platform_media_keys_enabled: typeof raw.platform_media_keys_enabled === 'boolean' ? raw.platform_media_keys_enabled : DEFAULT_AI_POLICY.platform_media_keys_enabled,
     monthly_budget_usd: typeof raw.monthly_budget_usd === 'number' && Number.isFinite(raw.monthly_budget_usd) && raw.monthly_budget_usd > 0 ? raw.monthly_budget_usd : null,
     default_text_model: typeof raw.default_text_model === 'string' && raw.default_text_model.trim() ? raw.default_text_model.trim() : null,
     default_image_model: typeof raw.default_image_model === 'string' && raw.default_image_model.trim() ? raw.default_image_model.trim() : DEFAULT_AI_POLICY.default_image_model,

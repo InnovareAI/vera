@@ -35,19 +35,16 @@ export async function isPlatformMediaProject(
   projectId: string,
   orgId: string,
 ): Promise<boolean> {
-  if (PLATFORM_MEDIA_PROJECT_IDS.has(projectId)) {
-    return await isMasterOrg(supabase, orgId)
-  }
-
   const { data, error } = await supabase
     .from("projects")
-    .select("slug, org_id")
+    .select("slug, org_id, ai_policy")
     .eq("id", projectId)
     .maybeSingle()
   if (error) throw new Error(error.message)
-  const project = data as { slug?: string | null; org_id?: string | null } | null
+  const project = data as { slug?: string | null; org_id?: string | null; ai_policy?: Record<string, unknown> | null } | null
   if (!project || project.org_id !== orgId || !project.slug) return false
-  if (!PLATFORM_MEDIA_PROJECT_SLUGS.has(project.slug)) return false
+  if (!projectAllowsPlatformMediaKeys(project.ai_policy)) return false
+  if (!PLATFORM_MEDIA_PROJECT_IDS.has(projectId.toLowerCase()) && !PLATFORM_MEDIA_PROJECT_SLUGS.has(project.slug.toLowerCase())) return false
 
   return await isMasterOrg(supabase, orgId)
 }
@@ -102,4 +99,8 @@ function parseList(value: string): Set<string> {
 
 function truthy(value: string): boolean {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase())
+}
+
+function projectAllowsPlatformMediaKeys(policy: Record<string, unknown> | null | undefined): boolean {
+  return policy?.platform_media_keys_enabled === true
 }

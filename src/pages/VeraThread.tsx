@@ -131,6 +131,7 @@ type ProviderCapabilities = {
   imagesEnabled: boolean
   standardVideoEnabled: boolean
   premiumMediaEnabled: boolean
+  platformMediaKeysEnabled: boolean
   hasPlatformImageEntitlement: boolean
   hasPlatformVideoEntitlement: boolean
   textReady: boolean
@@ -157,6 +158,7 @@ const DEFAULT_CLIENT_AI_POLICY = {
   imagesEnabled: true,
   standardVideoEnabled: false,
   premiumMediaEnabled: false,
+  platformMediaKeysEnabled: false,
   defaultTextModel: null as string | null,
   defaultImageModel: 'nano-banana',
   defaultVideoModel: 'hailuo',
@@ -174,6 +176,7 @@ const DEFAULT_PROVIDER_CAPABILITIES: ProviderCapabilities = {
   imagesEnabled: DEFAULT_CLIENT_AI_POLICY.imagesEnabled,
   standardVideoEnabled: DEFAULT_CLIENT_AI_POLICY.standardVideoEnabled,
   premiumMediaEnabled: DEFAULT_CLIENT_AI_POLICY.premiumMediaEnabled,
+  platformMediaKeysEnabled: DEFAULT_CLIENT_AI_POLICY.platformMediaKeysEnabled,
   hasPlatformImageEntitlement: false,
   hasPlatformVideoEntitlement: false,
   textReady: false,
@@ -197,6 +200,7 @@ function parseClientAiPolicy(value: unknown) {
     imagesEnabled: typeof policy.images_enabled === 'boolean' ? policy.images_enabled : true,
     standardVideoEnabled: typeof policy.standard_video_enabled === 'boolean' ? policy.standard_video_enabled : false,
     premiumMediaEnabled: typeof policy.premium_media_enabled === 'boolean' ? policy.premium_media_enabled : false,
+    platformMediaKeysEnabled: typeof policy.platform_media_keys_enabled === 'boolean' ? policy.platform_media_keys_enabled : DEFAULT_CLIENT_AI_POLICY.platformMediaKeysEnabled,
     defaultTextModel: typeof policy.default_text_model === 'string' && policy.default_text_model.trim() ? policy.default_text_model.trim() : null,
     defaultImageModel: typeof policy.default_image_model === 'string' && policy.default_image_model.trim() ? policy.default_image_model.trim() : DEFAULT_CLIENT_AI_POLICY.defaultImageModel,
     defaultVideoModel: typeof policy.default_video_model === 'string' && policy.default_video_model.trim() ? policy.default_video_model.trim() : DEFAULT_CLIENT_AI_POLICY.defaultVideoModel,
@@ -773,7 +777,7 @@ export default function VeraThread() {
       const isMaster = !!(org as { is_master?: boolean } | null)?.is_master
       const aiPolicy = parseClientAiPolicy((project as { ai_policy?: unknown } | null)?.ai_policy)
       const providers = new Set(((rows ?? []) as Array<{ provider: string | null }>).map(row => row.provider).filter(Boolean) as string[])
-      const platformMediaProject = PLATFORM_MEDIA_KEYS_ENABLED && isMaster && activeProject.slug === 'innovareai-brand'
+      const platformMediaProject = PLATFORM_MEDIA_KEYS_ENABLED && aiPolicy.platformMediaKeysEnabled && isMaster && activeProject.slug === 'innovareai-brand'
       const hasAnthropic = providers.has('anthropic')
       const hasOpenRouter = providers.has('openrouter')
       const hasOpenAI = providers.has('openai')
@@ -802,6 +806,7 @@ export default function VeraThread() {
         imagesEnabled: aiPolicy.imagesEnabled,
         standardVideoEnabled: aiPolicy.standardVideoEnabled,
         premiumMediaEnabled: aiPolicy.premiumMediaEnabled,
+        platformMediaKeysEnabled: aiPolicy.platformMediaKeysEnabled,
         hasPlatformImageEntitlement,
         hasPlatformVideoEntitlement,
         textReady: platformMediaProject || hasAnthropic || hasOpenRouter,
@@ -2163,13 +2168,13 @@ function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: Pr
   if (needsText) notes.push('Add OpenRouter or Anthropic before Vera can run client text generation in this space.')
   if (imageLocked) {
     notes.push(capabilities.imagesEnabled
-      ? 'Image and carousel rendering needs a client OpenRouter, OpenAI, or FAL key, or an operator platform image entitlement inside an approved InnovareAI media project.'
+      ? 'Image and carousel rendering needs a client OpenRouter, OpenAI, or FAL key. Platform media also requires an operator entitlement and this exact project policy to allow it.'
       : 'Image and carousel rendering is disabled in this client AI policy.')
   }
   if (videoLocked) {
     notes.push(capabilities.hasFal
       ? 'Video rendering is disabled in this client AI policy.'
-      : 'Video rendering requires a client-owned FAL key. Platform video entitlements only apply to approved platform media projects.')
+      : 'Video rendering requires a client-owned FAL key. Platform video only applies when the operator is entitled and this exact project policy allows platform media.')
   }
   const textBody = notes.join(' ')
   const rows = [
