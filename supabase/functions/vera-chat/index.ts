@@ -38,6 +38,13 @@ import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { completeText, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
 import { selectTextModel } from '../_shared/model-recommendations.ts'
 import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
+import {
+  assertVeraChatMessageWritable,
+  authorizeVeraChatMemberRequest,
+  cleanString,
+  isUuid,
+  resolveEffectiveVeraChatUserId,
+} from '../_shared/vera-chat-auth.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -4103,136 +4110,6 @@ function jsonError(message: string, status: number) {
   })
 }
 
-type MemberAccess =
-  | { ok: true; userId: string; email: string | null; service: false }
-  | { ok: false; response: Response }
-
-async function authorizeMemberRequest(
-  req: Request,
-  supabase: AdminClient,
-  orgId: string,
-  projectId: string | null,
-): Promise<MemberAccess> {
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
-  const isService = !!bearer && bearer === serviceKey
-  if (isService) return { ok: false, response: jsonError('User session required', 401) }
-  if (!bearer) return { ok: false, response: jsonError('Unauthorized', 401) }
-
-  const { data: auth, error: authError } = await supabase.auth.getUser(bearer)
-  if (authError || !auth.user) return { ok: false, response: jsonError('Unauthorized', 401) }
-  const email = auth.user.email?.trim().toLowerCase() ?? null
-
-  if (projectId) {
-    const { data: project, error: projectError } = await supabase
-      .from('projects')
-      .select('id, org_id')
-      .eq('id', projectId)
-      .maybeSingle()
-    if (projectError) return { ok: false, response: jsonError(projectError.message, 500) }
-    if (!project) return { ok: false, response: jsonError('Client not found', 404) }
-    if ((project as { org_id: string }).org_id !== orgId) return { ok: false, response: jsonError('Forbidden', 403) }
-  }
-
-  if (projectId) {
-    try {
-      const allowed = await userHasScopeAccess(supabase, auth.user.id, orgId, projectId)
-      if (allowed) return { ok: true, userId: auth.user.id, email, service: false }
-    } catch (error) {
-      return { ok: false, response: jsonError(error instanceof Error ? error.message : 'Could not verify user scope', 500) }
-    }
-    return { ok: false, response: jsonError('Forbidden', 403) }
-  }
-
-  const { data: orgMember, error: orgError } = await supabase
-    .from('org_members')
-    .select('role')
-    .eq('org_id', orgId)
-    .eq('user_id', auth.user.id)
-    .maybeSingle()
-  if (orgError) return { ok: false, response: jsonError(orgError.message, 500) }
-  if (!orgMember) return { ok: false, response: jsonError('Forbidden', 403) }
-  return { ok: true, userId: auth.user.id, email, service: false }
-}
-
-async function userHasScopeAccess(
-  supabase: AdminClient,
-  userId: string,
-  orgId: string,
-  projectId: string | null,
-): Promise<boolean> {
-  const queries = [
-    supabase.from('org_members').select('role').eq('org_id', orgId).eq('user_id', userId).maybeSingle(),
-  ]
-  if (projectId) {
-    queries.push(supabase.from('project_members').select('role').eq('project_id', projectId).eq('user_id', userId).maybeSingle())
-  }
-  const [orgMember, projectMember] = await Promise.all(queries)
-  if (orgMember.error) throw new Error(orgMember.error.message)
-  if (projectMember?.error) throw new Error(projectMember.error.message)
-  return !!orgMember.data || !!projectMember?.data
-}
-
-async function resolveEffectiveUserId(
-  access: Extract<MemberAccess, { ok: true }>,
-  requestedUserId: string | null,
-): Promise<{ ok: true; userId: string } | { ok: false; response: Response }> {
-  if (!requestedUserId || requestedUserId === access.userId) return { ok: true, userId: access.userId }
-  if (!isUuid(requestedUserId)) return { ok: false, response: jsonError('Invalid user_id', 400) }
-  return { ok: false, response: jsonError('user_id does not match authenticated user', 403) }
-}
-
-async function assertChatMessageWritable(
-  supabase: AdminClient,
-  id: string | null,
-  scope: {
-    orgId: string
-    projectId: string | null
-    sessionId: string | null
-    userId: string | null
-    role: 'user' | 'assistant'
-  },
-): Promise<{ ok: true } | { ok: false; response: Response }> {
-  if (!id) return { ok: true }
-  if (!isUuid(id)) return { ok: false, response: jsonError('Invalid chat message id', 400) }
-
-  const { data, error } = await supabase
-    .from('chat_messages')
-    .select('id, org_id, project_id, session_id, user_id, role')
-    .eq('id', id)
-    .maybeSingle()
-  if (error) return { ok: false, response: jsonError(error.message, 500) }
-  if (!data) return { ok: true }
-
-  const row = data as {
-    org_id?: string | null
-    project_id?: string | null
-    session_id?: string | null
-    user_id?: string | null
-    role?: string | null
-  }
-  const rowUserId = row.user_id ?? null
-  const sameScope =
-    row.org_id === scope.orgId &&
-    (row.project_id ?? null) === scope.projectId &&
-    (row.session_id ?? null) === scope.sessionId &&
-    row.role === scope.role
-  const compatibleUser = scope.userId
-    ? rowUserId === null || rowUserId === scope.userId
-    : rowUserId === null
-  if (sameScope && compatibleUser) return { ok: true }
-
-  return { ok: false, response: jsonError('Forbidden', 403) }
-}
-
-function cleanString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
-}
-
 const MAX_TOOL_ROUNDS = 5  // safety cap so a tool loop can't run forever
 
 // Text model used when a project runs its chat on its own OpenRouter key.
@@ -4391,9 +4268,16 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
-  const access = await authorizeMemberRequest(req, supabase, orgId, projectId)
+  const access = await authorizeVeraChatMemberRequest(
+    req,
+    supabase,
+    orgId,
+    projectId,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    corsHeaders,
+  )
   if (!access.ok) return access.response
-  const resolvedUser = await resolveEffectiveUserId(access, requestedUserId)
+  const resolvedUser = await resolveEffectiveVeraChatUserId(access, requestedUserId, corsHeaders)
   if (!resolvedUser.ok) return resolvedUser.response
   const effectiveUserId = resolvedUser.userId
 
@@ -4406,22 +4290,22 @@ Deno.serve(async (req) => {
       ? lastUserBlock.content.filter((b): b is { type: 'text'; text: string } => b.type === 'text').map(b => b.text).join(' ')
       : ''
 
-  const userMessageGuard = await assertChatMessageWritable(supabase, userMessageId, {
+  const userMessageGuard = await assertVeraChatMessageWritable(supabase, userMessageId, {
     orgId,
     projectId,
     sessionId,
     userId: effectiveUserId,
     role: 'user',
-  })
+  }, corsHeaders)
   if (!userMessageGuard.ok) return userMessageGuard.response
 
-  const assistantMessageGuard = await assertChatMessageWritable(supabase, assistantMessageId, {
+  const assistantMessageGuard = await assertVeraChatMessageWritable(supabase, assistantMessageId, {
     orgId,
     projectId,
     sessionId,
     userId: effectiveUserId,
     role: 'assistant',
-  })
+  }, corsHeaders)
   if (!assistantMessageGuard.ok) return assistantMessageGuard.response
 
   let orgIsMaster: boolean
