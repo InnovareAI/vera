@@ -4,7 +4,7 @@
 // canManageProject — the space owner / org admins); listing + revoking are
 // direct, gated by client_api_keys RLS (can_project_manage).
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Activity, AlertTriangle, BookOpen, Bot, CheckCircle2, Clapperboard, Clock3, Crown, ImagePlus, KeyRound, Lock, RefreshCw, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react'
+import { Activity, AlertTriangle, BookOpen, Bot, CheckCircle2, Clapperboard, Clock3, Crown, DollarSign, ImagePlus, KeyRound, Lock, RefreshCw, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { useProject } from '../lib/projectContext'
@@ -51,6 +51,21 @@ type GenerationUsageRow = {
   cost_usd: number | null
   usage_metadata: UsageMetadata | null
   created_at: string
+}
+
+type UsageCostDriver = {
+  key: string
+  operation: string
+  provider: string
+  model: string
+  keySource: string
+  events: number
+  tokens: number
+  images: number
+  videos: number
+  cost: number
+  knownCostEvents: number
+  latestAt: string
 }
 
 type AiPolicy = {
@@ -316,6 +331,7 @@ export default function ClientKeys() {
   }
 
   const usageSummary = useMemo(() => summarizeUsage(usageRows), [usageRows])
+  const costDrivers = useMemo(() => buildUsageCostDrivers(usageRows), [usageRows])
 
   if (!activeProject) return null
   const active = keys.filter(k => k.status === 'active')
@@ -585,6 +601,17 @@ export default function ClientKeys() {
             <UsageMetric icon={KeyRound} label="Client key" value={formatNumber(usageSummary.clientKeyEvents)} detail={`${formatNumber(usageSummary.platformKeyEvents)} platform-backed`} tone="success" />
             <UsageMetric icon={Clock3} label="Estimated spend" value={formatMoney(usageSummary.knownCost)} detail={usageSummary.hasKnownCost ? `${formatNumber(usageSummary.estimatedCostEvents)} estimated rows` : 'Provider billing pending'} tone="info" />
           </div>
+
+          {costDrivers.length > 0 && (
+            <div style={{ marginBottom: space[5] }}>
+              <SectionLabel style={{ marginBottom: space[3] }}>Cost drivers</SectionLabel>
+              <div style={{ display: 'grid', gap: space[2] }}>
+                {costDrivers.slice(0, 6).map(driver => (
+                  <CostDriverRow key={driver.key} driver={driver} />
+                ))}
+              </div>
+            </div>
+          )}
 
           {usageError ? (
             <div style={{ border: `1px solid ${color.danger}`, borderRadius: radius.md, padding: space[4], color: color.danger, fontSize: t.size.cap }}>
@@ -960,13 +987,50 @@ function UsageMetric({
   )
 }
 
+function CostDriverRow({ driver }: { driver: UsageCostDriver }) {
+  const keyTone = driver.keySource === 'client' ? color.success : driver.keySource === 'platform' ? color.warn : color.ghost
+  const meter = driver.videos > 0
+    ? `${formatNumber(driver.videos)} video${driver.videos === 1 ? '' : 's'}`
+    : driver.images > 0
+      ? `${formatNumber(driver.images)} image${driver.images === 1 ? '' : 's'}`
+      : driver.tokens > 0
+        ? `${formatNumber(driver.tokens)} tokens`
+        : `${formatNumber(driver.events)} event${driver.events === 1 ? '' : 's'}`
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '32px minmax(0, 1fr) auto', alignItems: 'center', gap: space[3], padding: space[3], borderRadius: radius.md, border: `1px solid ${color.line}`, background: color.paper2 }}>
+      <span style={{ width: 32, height: 32, borderRadius: radius.pill, background: color.surface, color: driver.cost > 0 ? color.warn : color.info, border: `1px solid ${color.line}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <DollarSign size={15} />
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: 'flex', alignItems: 'baseline', gap: space[2], minWidth: 0 }}>
+          <span style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {formatOperation(driver.operation)}
+          </span>
+          <span style={{ color: keyTone, fontSize: t.size.micro, fontWeight: t.weight.semibold, textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0 }}>
+            {formatKeySource(driver.keySource)}
+          </span>
+        </span>
+        <span style={{ display: 'block', color: color.ghost, fontSize: t.size.cap, lineHeight: 1.4, marginTop: 1 }}>
+          {providerLabel(driver.provider)} · {driver.model} · {meter} · {formatNumber(driver.events)} event{driver.events === 1 ? '' : 's'}
+        </span>
+        <span style={{ display: 'block', color: color.faint, fontSize: t.size.micro, lineHeight: 1.35, marginTop: 3 }}>
+          Latest {formatDateTime(driver.latestAt)} · {driver.knownCostEvents ? `${formatNumber(driver.knownCostEvents)} costed row${driver.knownCostEvents === 1 ? '' : 's'}` : 'cost pending'}
+        </span>
+      </span>
+      <span style={{ color: driver.cost > 0 ? color.ink : color.ghost, fontSize: t.size.body, fontWeight: t.weight.semibold, whiteSpace: 'nowrap' }}>
+        {driver.cost > 0 ? formatMoney(driver.cost) : 'Pending'}
+      </span>
+    </div>
+  )
+}
+
 function UsageTable({ rows }: { rows: GenerationUsageRow[] }) {
   return (
     <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 680 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
         <thead>
           <tr style={{ borderBottom: `1px solid ${color.line}` }}>
-            {['When', 'Operation', 'Provider', 'Model', 'Meter', 'Key'].map(label => (
+            {['When', 'Operation', 'Provider', 'Model', 'Meter', 'Cost', 'Key'].map(label => (
               <th key={label} style={{ textAlign: 'left', padding: `${space[2]} ${space[3]}`, color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: t.weight.semibold }}>
                 {label}
               </th>
@@ -988,6 +1052,7 @@ function UsageTable({ rows }: { rows: GenerationUsageRow[] }) {
                   </span>
                 </td>
                 <td style={cellStyle}>{formatMeter(row, metadata)}</td>
+                <td style={cellStyle}>{typeof row.cost_usd === 'number' ? formatMoney(row.cost_usd) : 'pending'}</td>
                 <td style={cellStyle}>
                   <span style={{ color: keySource === 'client' ? color.success : keySource === 'platform' ? color.warn : color.ghost, fontWeight: t.weight.semibold }}>
                     {formatKeySource(keySource)}
@@ -1057,6 +1122,55 @@ function summarizeUsage(rows: GenerationUsageRow[]) {
       hasKnownCost: false,
       estimatedCostEvents: 0,
     },
+  )
+}
+
+function buildUsageCostDrivers(rows: GenerationUsageRow[]): UsageCostDriver[] {
+  const map = new Map<string, UsageCostDriver>()
+
+  for (const row of rows) {
+    const metadata = safeMetadata(row.usage_metadata)
+    const operation = row.operation ?? 'unknown'
+    const provider = row.provider ?? 'unknown'
+    const model = row.model_used ?? 'unknown'
+    const keySource = typeof metadata.key_source === 'string' ? metadata.key_source : 'unknown'
+    const key = `${operation}:${provider}:${model}:${keySource}`
+    const current = map.get(key) ?? {
+      key,
+      operation,
+      provider,
+      model,
+      keySource,
+      events: 0,
+      tokens: 0,
+      images: 0,
+      videos: 0,
+      cost: 0,
+      knownCostEvents: 0,
+      latestAt: row.created_at,
+    }
+
+    current.events += 1
+    current.tokens += (row.input_tokens ?? 0) + (row.output_tokens ?? 0)
+    if (operation.startsWith('image.')) current.images += numberFromMetadata(metadata.num_images, 1)
+    if (operation.startsWith('video.')) current.videos += 1
+    if (typeof row.cost_usd === 'number') {
+      current.cost += row.cost_usd
+      current.knownCostEvents += 1
+    }
+    if (new Date(row.created_at).getTime() > new Date(current.latestAt).getTime()) {
+      current.latestAt = row.created_at
+    }
+    map.set(key, current)
+  }
+
+  return [...map.values()].sort((a, b) =>
+    b.cost - a.cost ||
+    b.videos - a.videos ||
+    b.images - a.images ||
+    b.tokens - a.tokens ||
+    b.events - a.events ||
+    new Date(b.latestAt).getTime() - new Date(a.latestAt).getTime(),
   )
 }
 
