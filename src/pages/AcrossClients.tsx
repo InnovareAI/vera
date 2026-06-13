@@ -8,6 +8,7 @@ import {
   FolderOpen,
   KeyRound,
   MailPlus,
+  Plus,
   ShieldCheck,
   Sparkles,
   Star,
@@ -505,6 +506,15 @@ export default function AcrossClients() {
         eyebrow={activeOrg?.name ?? 'Workspace'}
         title="Across clients"
         subtitle="Triage VERA's open work, then manage client spaces, access, roles, invites, and provider keys."
+        actions={
+          <Button
+            variant="primary"
+            leading={<Plus size={14} />}
+            onClick={() => navigate('/onboarding')}
+          >
+            Add client
+          </Button>
+        }
       />
 
       <AgendaPanel
