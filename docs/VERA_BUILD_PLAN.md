@@ -17,6 +17,18 @@ The core promise:
 
 The operator experience should feel close to SAM: calm, agentic, scoped, and self-improving. VERA drives the loop. The operator steers taste, risk, and commercial judgment.
 
+## Confirmed Product Direction
+
+These decisions came from the June 13, 2026 product direction pass and should guide future build choices:
+
+- VERA covers all supported organic channels, not only LinkedIn or blog.
+- YouTube, Medium, Quora, Reddit, and potentially X belong in the channel model.
+- The content scope is all content jobs that help the client create demand.
+- Speaker mode is case based: sometimes one named person, sometimes the company, sometimes multiple voices.
+- Approval routing is case based: sometimes one stakeholder, sometimes all required stakeholders.
+- Core engagement means comments and shares, but the commercial outcome is qualified traffic and demand.
+- VERA is a product InnovareAI will sell, so key isolation, provider spend, pricing controls, role boundaries, and client trust are product requirements, not internal implementation details.
+
 ## Moat
 
 Generic social and content apps are easy to build. VERA's moat needs to come from the operating loop, not from having a post composer.

@@ -2616,7 +2616,7 @@ function PlanCluster({ icon: Icon, label, items, max = 5 }: { icon: React.Elemen
 
 // Vera's face — served from /vera-avatar.png; falls back to the "V" monogram
 // if the asset is missing so the UI never shows a broken image. Drop the file
-// in content-studio/public/ to give her a face everywhere she appears.
+// in public/ to give her a face everywhere she appears.
 function VeraAvatar({ size, hero = false }: { size: number; hero?: boolean }) {
   const [broken, setBroken] = useState(false)
   const frame: React.CSSProperties = {

@@ -446,8 +446,8 @@ async function runOpenRouter(
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://content-studio-innovareai.netlify.app',
-        'X-Title': 'KAI Image Generation',
+        'HTTP-Referer': 'https://vera.innovareai.com',
+        'X-Title': 'VERA Image Generation',
       },
       body: JSON.stringify({
         model: slug,
