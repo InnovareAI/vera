@@ -107,7 +107,8 @@ export function estimateGenerationUsageCost(usage: GenerationUsageEstimateInput)
     usage.operation === "knowledge.synthesize" ||
     usage.operation === "campaign.plan" ||
     usage.operation.startsWith("chat.tool.") ||
-    usage.operation.startsWith("audit.")
+    usage.operation.startsWith("audit.") ||
+    usage.operation.startsWith("research.")
   ) return estimateTextCost(usage)
   if (usage.operation === "knowledge.embed") return estimateEmbeddingCost(usage)
   if (usage.operation === "image.generate") return estimateImageCost(usage)
@@ -259,7 +260,8 @@ function catalogOperation(operation: string): "chat.message" | "image.generate" 
     operation === "knowledge.synthesize" ||
     operation === "campaign.plan" ||
     operation.startsWith("chat.tool.") ||
-    operation.startsWith("audit.")
+    operation.startsWith("audit.") ||
+    operation.startsWith("research.")
   ) return "chat.message"
   if (operation === "image.generate") return "image.generate"
   if (operation === "video.submit") return "video.submit"

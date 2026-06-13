@@ -28,6 +28,7 @@ const MODEL = 'claude-sonnet-4-6'  // refinement deserves the heavier model
 const MIN_INVOCATIONS_DEFAULT = 10
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')
+const AUTONOMOUS_REFINEMENT_ENABLED = Deno.env.get('VERA_AUTONOMOUS_REFINEMENT_ENABLED') === 'true'
 
 const REFINE_PROMPT = (skill: SkillSnapshot) => `
 You are refining a content-generation skill module based on real-world
@@ -112,6 +113,14 @@ Deno.serve(async (req) => {
   if (!isServiceRequest(req)) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  if (!AUTONOMOUS_REFINEMENT_ENABLED) {
+    return new Response(JSON.stringify({
+      skipped: true,
+      reason: 'Autonomous skill refinement is disabled until AI billing policy is configured.',
+    }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
   if (!ANTHROPIC_API_KEY) {

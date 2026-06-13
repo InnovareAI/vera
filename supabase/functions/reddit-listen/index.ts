@@ -13,6 +13,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from 'npm:@supabase/supabase-js'
 import { requireProjectMember, type AdminClient } from '../_shared/auth.ts'
+import { checkProjectAiBudget, type ProjectAiBudgetWarning } from '../_shared/ai-policy.ts'
+import { logGenerationUsage } from '../_shared/generation-usage.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -24,6 +26,12 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const PERPLEXITY_API_KEY = Deno.env.get('PERPLEXITY_API_KEY')
 const PERPLEXITY_MODEL = Deno.env.get('PERPLEXITY_MODEL') ?? 'sonar'
+const APPROX_CHARS_PER_TOKEN = 4
+const REDDIT_LISTEN_MAX_TOKENS = 1200
+
+type BudgetCheck =
+  | { ok: true; warning: ProjectAiBudgetWarning | null }
+  | { ok: false; message: string }
 
 function jsonError(message: string, status: number): Response {
   return new Response(JSON.stringify({ error: message }), {
@@ -33,6 +41,32 @@ function jsonError(message: string, status: number): Response {
 }
 
 interface SearchResult { title?: string; url?: string; date?: string }
+
+function approxTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / APPROX_CHARS_PER_TOKEN))
+}
+
+async function checkResearchBudget(
+  supabase: AdminClient,
+  orgId: string,
+  projectId: string,
+  systemPrompt: string,
+  userPrompt: string,
+  metadata: Record<string, unknown>,
+): Promise<BudgetCheck> {
+  const budget = await checkProjectAiBudget(supabase, projectId, {
+    orgId,
+    projectId,
+    provider: 'perplexity',
+    model: PERPLEXITY_MODEL,
+    operation: 'research.reddit_listen',
+    inputTokens: approxTokens(`${systemPrompt}\n\n${userPrompt}`),
+    outputTokens: REDDIT_LISTEN_MAX_TOKENS,
+    metadata,
+  })
+  if (!budget.ok) return { ok: false, message: budget.message }
+  return { ok: true, warning: budget.warning }
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders })
@@ -62,8 +96,24 @@ Deno.serve(async (req) => {
     'Structure the answer as short markdown sections: Pain points, Objections, Desired outcomes, Notable quotes (verbatim and short), and Where to engage (the relevant subreddits).',
     'Be concise and concrete. Quote real phrasing where useful. Do not invent threads or quotes. If the evidence is thin, say so plainly.',
   ].join(' ')
+  const userPrompt = `Topic: ${topic}\n\nWhat are buyers saying about this on Reddit right now?`
+  const usageMetadata = {
+    source: 'reddit_listening',
+    search_domain_filter: ['reddit.com'],
+    topic_length: topic.length,
+  }
+  const budget = await checkResearchBudget(
+    supabase as unknown as AdminClient,
+    auth.orgId,
+    projectId,
+    system,
+    userPrompt,
+    usageMetadata,
+  )
+  if (!budget.ok) return jsonError(budget.message, 402)
 
   let pplxRes: Response
+  const startedAt = Date.now()
   try {
     pplxRes = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
@@ -75,11 +125,11 @@ Deno.serve(async (req) => {
         model: PERPLEXITY_MODEL,
         messages: [
           { role: 'system', content: system },
-          { role: 'user', content: `Topic: ${topic}\n\nWhat are buyers saying about this on Reddit right now?` },
+          { role: 'user', content: userPrompt },
         ],
         search_domain_filter: ['reddit.com'],
         temperature: 0.2,
-        max_tokens: 1200,
+        max_tokens: REDDIT_LISTEN_MAX_TOKENS,
       }),
     })
   } catch (e) {
@@ -95,6 +145,7 @@ Deno.serve(async (req) => {
     choices?: Array<{ message?: { content?: string } }>
     citations?: string[]
     search_results?: SearchResult[]
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
   } | null
   if (!data) return jsonError('Perplexity returned an unreadable response', 502)
 
@@ -122,7 +173,23 @@ Deno.serve(async (req) => {
     .single()
   if (insertErr) return jsonError(`Failed to save listen: ${insertErr.message}`, 500)
 
-  return new Response(JSON.stringify({ ok: true, listen: row }), {
+  await logGenerationUsage(supabase as unknown as AdminClient, {
+    orgId: auth.orgId,
+    projectId,
+    provider: 'perplexity',
+    model: PERPLEXITY_MODEL,
+    operation: 'research.reddit_listen',
+    inputTokens: data.usage?.prompt_tokens ?? data.usage?.total_tokens ?? approxTokens(`${system}\n\n${userPrompt}`),
+    outputTokens: data.usage?.completion_tokens ?? approxTokens(synthesis),
+    durationMs: Date.now() - startedAt,
+    metadata: {
+      ...usageMetadata,
+      result_count: sources.length,
+      ...(budget.warning ? { budget_warning: budget.warning } : {}),
+    },
+  })
+
+  return new Response(JSON.stringify({ ok: true, listen: row, ...(budget.warning ? { budget_warning: budget.warning } : {}) }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
 })
