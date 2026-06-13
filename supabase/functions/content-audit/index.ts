@@ -148,7 +148,10 @@ Deno.serve(async (req) => {
         await supabase.from('audit_runs').update({
           status: 'completed',
           channels_audited: usable.map(r => ({ channel: r.channel, url: r.url, item_count: r.items.length })) as Json,
-          raw_findings: { skipped: results.filter(r => !r.ok).map(r => ({ channel: r.channel, reason: r.reason })) } as Json,
+          raw_findings: {
+            skipped: results.filter(r => !r.ok).map(r => ({ channel: r.channel, reason: r.reason })),
+            proposed_business_context: proposal.business_context ?? {},
+          } as Json,
           proposed_brand_voice: proposal.brand_voice as Json,
           proposed_personas: proposal.personas as Json,
           proposed_skills: proposal.skills as Json,
@@ -865,6 +868,7 @@ function buildCorpus(results: FetchResult[]): string {
 
 interface Proposal {
   brand_voice: Record<string, unknown>
+  business_context: Record<string, unknown>
   personas: unknown[]
   skills: unknown[]
 }
@@ -874,15 +878,48 @@ async function synthesise(
   corpus: string,
   send: (event: string, data: unknown) => void,
 ): Promise<{ proposal: Proposal; inputTokens: number | null; outputTokens: number | null }> {
-  const sys = `You are KAI's Auditor. You read a company's existing content and extract a precise model of their voice, audience, and patterns. Output ONLY valid JSON in exactly this shape — no prose, no markdown fences:
+  const sys = `You are VERA's Demand Brain auditor. You read a company's existing content and extract a precise model of their voice, audience, channel roles, demand strategy, and repeatable content patterns. Output ONLY valid JSON in exactly this shape, no prose, no markdown fences:
 
 {
   "brand_voice": {
     "tone": ["3-5 specific tone descriptors, e.g. 'direct', 'self-deprecating', 'analytical'"],
     "writing_rules": ["3-7 concrete rules the writer follows, e.g. 'opens with a problem statement, not a hook'"],
-    "forbidden_phrases": ["actual phrases this author avoids — leave empty array if none observed"],
-    "required_phrases": ["recurring phrases/idioms — leave empty if none"],
+    "forbidden_phrases": ["actual phrases this author avoids, leave empty array if none observed"],
+    "required_phrases": ["recurring phrases/idioms, leave empty if none"],
     "system_prompt": "A 2-3 sentence Writer-agent system prompt that captures this voice precisely. Reference specifics from the content."
+  },
+  "business_context": {
+    "companyName": "",
+    "industry": "",
+    "offer": "",
+    "audience": "",
+    "customerProblems": "",
+    "differentiators": "",
+    "competitors": "",
+    "proofPoints": "",
+    "contentGoals": "",
+    "speakerStrategy": "",
+    "platformToneOfVoice": "",
+    "demandObjective": "",
+    "conversionPath": "",
+    "channelStrategy": "",
+    "contentFormats": "",
+    "approvalModel": "",
+    "approvalStakeholders": "",
+    "engagementSignals": "",
+    "samHandoffRules": "",
+    "learningCadence": "",
+    "channelOperatingPolicies": {
+      "linkedin": {
+        "speakerMode": "",
+        "approvalMode": "",
+        "publishGuard": "",
+        "measurementFocus": "",
+        "samTrigger": "",
+        "risk": "low | medium | high"
+      }
+    },
+    "constraints": ""
   },
   "personas": [
     {
@@ -905,15 +942,22 @@ async function synthesise(
 }
 
 Rules:
-- Base every claim on the content. Don't invent generic best-practices; extract patterns that are actually present.
-- If the content is sparse, say less — fewer rules, fewer skills. Quality over quantity.
+- Base every claim on the content. Do not invent generic best practices; extract patterns that are actually present.
+- If the content is sparse, say less. Fewer rules, fewer skills. Quality over quantity.
+- Do not return source URLs in business_context. The app already stores source URLs separately.
+- business_context should focus on B2B demand creation: top-of-funnel role, ICP, pain, proof, channel fit, approval, engagement signals, qualified traffic path, and SAM handoff triggers.
+- platformToneOfVoice should separate a shared brand core from platform-specific tone when the evidence supports it.
+- speakerStrategy should say when Vera should write as the company, founder, named expert, or team. If evidence is unclear, say this needs human review.
+- engagementSignals should prioritize comments, shares, qualified clicks, buyer questions, and traffic, not only likes or views.
+- channelOperatingPolicies may include only channels with evidence. Supported keys: linkedin, youtube, medium, quora, reddit, x, instagram, facebook, blog, email.
+- For every channelOperatingPolicies entry, use fields speakerMode, approvalMode, publishGuard, measurementFocus, samTrigger, risk. Risk must be low, medium, or high.
 - Personas should reflect who the author is writing FOR (their audience), not who the author IS.
 - Skills are reusable patterns: a hook style, a structural template, a recurring argument frame. 2-5 skills max.`
 
   const response = await streamText(runtime, {
     system: sys,
     user: `Analyse this content and produce the JSON proposal:\n\n${corpus}`,
-    maxTokens: 4096,
+    maxTokens: 6144,
     json: true,
     onText: text => send('synthesis_chunk', { text }),
   })
@@ -926,8 +970,16 @@ Rules:
     const match = raw.match(/\{[\s\S]*\}/)
     proposal = JSON.parse(match ? match[0] : raw) as Proposal
   } catch {
-    proposal = { brand_voice: { raw }, personas: [], skills: [] }
+    proposal = { brand_voice: { raw }, business_context: {}, personas: [], skills: [] }
   }
+  if (!proposal.business_context || typeof proposal.business_context !== 'object' || Array.isArray(proposal.business_context)) {
+    proposal.business_context = {}
+  }
+  if (!proposal.brand_voice || typeof proposal.brand_voice !== 'object' || Array.isArray(proposal.brand_voice)) {
+    proposal.brand_voice = {}
+  }
+  if (!Array.isArray(proposal.personas)) proposal.personas = []
+  if (!Array.isArray(proposal.skills)) proposal.skills = []
   return { proposal, inputTokens: response.inputTokens, outputTokens: response.outputTokens }
 }
 

@@ -211,6 +211,31 @@ function mergeExtractedContext(current: BusinessContext, extracted: Partial<Busi
   return next
 }
 
+const AUDIT_CONTEXT_KEYS: BusinessContextKey[] = [
+  'companyName',
+  'industry',
+  ...DEMAND_FACT_KEYS,
+  ...(Object.keys(DEFAULT_DEMAND_OPERATING_MODEL) as BusinessContextKey[]),
+]
+
+function normalizeAuditBusinessContext(raw: unknown): Partial<BusinessContext> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const source = raw as Record<string, unknown>
+  const out: Partial<BusinessContext> = {}
+  for (const key of AUDIT_CONTEXT_KEYS) {
+    const value = source[key]
+    if (key === 'channelOperatingPolicies' && value && typeof value === 'object' && !Array.isArray(value)) {
+      out[key] = JSON.stringify(value, null, 2)
+    } else if (Array.isArray(value)) {
+      const joined = value.map(item => String(item).trim()).filter(Boolean).join(', ')
+      if (joined) out[key] = joined
+    } else if (typeof value === 'string' && value.trim()) {
+      out[key] = value.trim()
+    }
+  }
+  return out
+}
+
 function DemandDefaultPanel({ title, items }: { title: string; items: string[] }) {
   return (
     <div style={{ padding: space[4], background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, minWidth: 0 }}>
@@ -1357,14 +1382,14 @@ export default function Brain() {
   const rmFrom = (key: keyof BrandVoice, i: number) => setBv(p => ({ ...p, [key]: ((p[key] as string[]) || []).filter((_, x) => x !== i) }))
 
   // ── agentic draft: Vera reads the client's content (content-audit) and
-  // proposes the brand voice; the operator reviews + Saves (HITL). Chat/
-  // agentic-first — the brain shouldn't start as a blank form. ──
+  // proposes Demand Brain fields plus brand voice. The operator reviews and
+  // saves. Agentic-first means the brain should not start as a blank form. ──
   const [drafting, setDrafting] = useState(false)
   const [draftStatus, setDraftStatus] = useState('')
   async function runDraft() {
     if (!activeOrg?.id || !activeProject?.id || drafting) return
     if (!session?.access_token) {
-      setDraftStatus('Sign in again before drafting the brand voice.')
+      setDraftStatus('Sign in again before drafting the Demand Brain.')
       return
     }
     setDrafting(true); setDraftStatus("Reading this client's content…")
@@ -1383,22 +1408,25 @@ export default function Brain() {
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
           const json = line.slice(6).trim(); if (!json) continue
-          let ev: { event?: string; message?: string; proposal?: { brand_voice?: Record<string, string[]>; personas?: unknown[] } }
+          let ev: { event?: string; message?: string; proposal?: { brand_voice?: Record<string, string[] | string>; business_context?: unknown; personas?: unknown[]; skills?: unknown[] } }
           try { ev = JSON.parse(json) } catch { continue }
           if (ev.event === 'started' || ev.event === 'fetching') setDraftStatus("Reading this client's content…")
-          else if (ev.event === 'synthesising') setDraftStatus('Drafting the brand voice…')
+          else if (ev.event === 'synthesising') setDraftStatus('Drafting the Demand Brain…')
           else if (ev.event === 'done') {
             const v = ev.proposal?.brand_voice ?? {}
+            const contextPatch = normalizeAuditBusinessContext(ev.proposal?.business_context)
+            const contextCount = Object.values(contextPatch).filter(value => typeof value === 'string' && value.trim()).length
             const n = ev.proposal?.personas?.length ?? 0
             setBv(prev => ({
               ...prev,
-              tone: v.tone ?? prev.tone,
-              writing_rules: v.writing_rules ?? prev.writing_rules,
-              forbidden_phrases: v.forbidden_phrases ?? prev.forbidden_phrases,
-              required_phrases: v.required_phrases ?? prev.required_phrases,
+              tone: Array.isArray(v.tone) ? v.tone : prev.tone,
+              writing_rules: Array.isArray(v.writing_rules) ? v.writing_rules : prev.writing_rules,
+              forbidden_phrases: Array.isArray(v.forbidden_phrases) ? v.forbidden_phrases : prev.forbidden_phrases,
+              required_phrases: Array.isArray(v.required_phrases) ? v.required_phrases : prev.required_phrases,
             }))
+            if (contextCount) setBusiness(prev => mergeExtractedContext(prev, contextPatch))
             setBvInherited(false)
-            setDraftStatus(`Drafted from this client's content. Review the brand voice below and Save.${n ? ` Vera also spotted ${n} audience${n === 1 ? '' : 's'}; add the ones that fit.` : ''}`)
+            setDraftStatus(`Drafted from this client's content. Review the Demand Brain and Save.${contextCount ? ` ${contextCount} demand field${contextCount === 1 ? '' : 's'} updated.` : ''}${n ? ` Vera also spotted ${n} audience${n === 1 ? '' : 's'}; add the ones that fit.` : ''}`)
           }
           else if (ev.event === 'error') throw new Error(ev.message ?? 'audit failed')
         }
@@ -1481,7 +1509,7 @@ export default function Brain() {
           {drafting ? <><Loader2 size={14} className="animate-spin" /> Drafting…</> : <><Sparkles size={14} /> Draft this brain with Vera</>}
         </Button>
         <span style={{ flex: 1, minWidth: 200, fontSize: t.size.cap, color: draftStatus ? color.ink2 : color.ghost, lineHeight: 1.5 }}>
-          {draftStatus || "Vera reads this client's content and drafts the brand voice. You review and save. Beats filling a blank form."}
+          {draftStatus || "Vera reads this client's content and drafts the Demand Brain. You review and save."}
         </span>
       </div>
 
