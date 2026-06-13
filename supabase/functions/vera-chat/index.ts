@@ -3835,6 +3835,10 @@ async function authorizeMemberRequest(
   if (isService) return { ok: false, response: jsonError('User session required', 401) }
   if (!bearer) return { ok: false, response: jsonError('Unauthorized', 401) }
 
+  const { data: auth, error: authError } = await supabase.auth.getUser(bearer)
+  if (authError || !auth.user) return { ok: false, response: jsonError('Unauthorized', 401) }
+  const email = auth.user.email?.trim().toLowerCase() ?? null
+
   if (projectId) {
     const { data: project, error: projectError } = await supabase
       .from('projects')
@@ -3845,10 +3849,6 @@ async function authorizeMemberRequest(
     if (!project) return { ok: false, response: jsonError('Client not found', 404) }
     if ((project as { org_id: string }).org_id !== orgId) return { ok: false, response: jsonError('Forbidden', 403) }
   }
-
-  const { data: auth, error: authError } = await supabase.auth.getUser(bearer)
-  if (authError || !auth.user) return { ok: false, response: jsonError('Unauthorized', 401) }
-  const email = auth.user.email?.trim().toLowerCase() ?? null
 
   if (projectId) {
     try {
