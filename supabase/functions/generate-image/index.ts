@@ -16,7 +16,7 @@ import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember } from "../_shared/auth.ts"
 import { checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError } from "../_shared/ai-policy.ts"
 import { hasAiUserEntitlement, userCanAccessProject } from "../_shared/ai-entitlements.ts"
-import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { canUsePlatformMediaKeys, isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
 import { selectImageModel } from "../_shared/model-recommendations.ts"
 
@@ -123,7 +123,7 @@ Deno.serve(async (req) => {
   if (!aiPolicy.imagesEnabled) return jsonError('Image generation is disabled for this client space.', 403)
   const mediaKeys = await resolveMediaKeys(supabase, projectId, access.orgId)
   if (!mediaKeys.ok) return mediaKeys.response
-  const platformOpenRouterAvailable = mediaKeys.isPlatformMediaProject && !!OPENROUTER_API_KEY
+  const platformOpenRouterAvailable = mediaKeys.platformMediaKeysAllowed && !!OPENROUTER_API_KEY
   const modelSelection = selectImageModel({
     requestedModel,
     defaultImageModel: aiPolicy.defaultImageModel ?? DEFAULT_IMAGE_MODEL,
@@ -185,8 +185,8 @@ Deno.serve(async (req) => {
       : 'client'
 
   if (selectedKeySource === 'platform') {
-    if (!mediaKeys.isPlatformMediaProject) {
-      return jsonError('Platform image generation is only available inside approved platform media projects.', 403)
+    if (!mediaKeys.platformMediaKeysAllowed) {
+      return jsonError('Platform image generation is disabled unless platform media keys are explicitly enabled for this approved project.', 403)
     }
     if (!operatorUserId) {
       return jsonError('Platform image generation requires an entitled operator.', 403)
@@ -520,6 +520,7 @@ function cleanString(value: unknown): string | null {
 
 type MediaKeys = {
   isPlatformMediaProject: boolean
+  platformMediaKeysAllowed: boolean
   openRouterKey: string | null
   openAIKey: string | null
   falKey: string | null
@@ -531,8 +532,9 @@ async function resolveMediaKeys(
   orgId: string,
 ): Promise<{ ok: true } & MediaKeys | { ok: false; response: Response }> {
   try {
-    const [platformMediaProject, openRouter, openAI, fal] = await Promise.all([
+    const [platformMediaProject, platformMediaKeysAllowed, openRouter, openAI, fal] = await Promise.all([
       isPlatformMediaProject(supabase, projectId, orgId),
+      canUsePlatformMediaKeys(supabase, projectId, orgId),
       loadClientApiKey(supabase, projectId, ['openrouter']),
       loadClientApiKey(supabase, projectId, ['openai']),
       loadClientApiKey(supabase, projectId, ['fal', 'fal_ai']),
@@ -540,6 +542,7 @@ async function resolveMediaKeys(
     return {
       ok: true,
       isPlatformMediaProject: platformMediaProject,
+      platformMediaKeysAllowed,
       openRouterKey: openRouter?.key ?? null,
       openAIKey: openAI?.key ?? null,
       falKey: fal?.key ?? null,

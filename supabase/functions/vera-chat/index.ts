@@ -33,7 +33,7 @@ import type { Database } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
 import { hasAiUserEntitlement } from '../_shared/ai-entitlements.ts'
 import { DEFAULT_AI_POLICY, checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError, type ProjectAiPolicy } from '../_shared/ai-policy.ts'
-import { isPlatformMediaProject } from '../_shared/client-media-keys.ts'
+import { canUsePlatformMediaKeys, isPlatformMediaProject } from '../_shared/client-media-keys.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { completeText, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
 import { selectTextModel } from '../_shared/model-recommendations.ts'
@@ -4141,19 +4141,23 @@ Deno.serve(async (req) => {
   if (!assistantMessageGuard.ok) return assistantMessageGuard.response
 
   let orgIsMaster: boolean
-  let platformKeyProject = false
+  let platformTextProject = false
+  let platformMediaKeyProject = false
   try {
     const { data: orgRow, error: orgError } = await supabase.from('organizations').select('is_master').eq('id', orgId).maybeSingle()
     if (orgError) return jsonError(orgError.message, 500)
     orgIsMaster = !!(orgRow as { is_master?: boolean } | null)?.is_master
-    if (projectId) platformKeyProject = await isPlatformMediaProject(supabase, projectId, orgId)
+    if (projectId) {
+      platformTextProject = await isPlatformMediaProject(supabase, projectId, orgId)
+      platformMediaKeyProject = await canUsePlatformMediaKeys(supabase, projectId, orgId)
+    }
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Could not verify workspace AI billing scope', 500)
   }
   if (!orgIsMaster && !projectId) {
     return jsonError('Client chat requires an active client space with its own OpenRouter or Anthropic key.', 403)
   }
-  const platformTextAllowed = orgIsMaster && (!projectId || platformKeyProject)
+  const platformTextAllowed = orgIsMaster && (!projectId || platformTextProject)
   const embeddingRuntime = await resolveEmbeddingRuntime(supabase, projectId, platformTextAllowed)
 
   // Fetch workspace context (including KB hits for this turn). Non-fatal —
@@ -4313,7 +4317,7 @@ Deno.serve(async (req) => {
   }
   let operatorHasPlatformImage = false
   let operatorHasPlatformVideo = false
-  if (projectId && platformKeyProject && effectiveUserId) {
+  if (projectId && platformMediaKeyProject && effectiveUserId) {
     try {
       const [imageEntitlement, videoEntitlement] = await Promise.all([
         hasAiUserEntitlement(supabase, {
@@ -4336,7 +4340,7 @@ Deno.serve(async (req) => {
       operatorHasPlatformVideo = false
     }
   }
-  const platformMediaProject = platformKeyProject
+  const platformMediaProject = platformMediaKeyProject
   const allowImageGeneration = !!projectId && aiPolicy.imagesEnabled && (
     (platformMediaProject && operatorHasPlatformImage) ||
     !!clientOpenRouterKey ||

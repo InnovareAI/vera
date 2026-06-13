@@ -186,6 +186,7 @@ const DEFAULT_PROVIDER_CAPABILITIES: ProviderCapabilities = {
   defaultImageVideoModel: DEFAULT_CLIENT_AI_POLICY.defaultImageVideoModel,
   monthlyBudgetUsd: DEFAULT_CLIENT_AI_POLICY.monthlyBudgetUsd,
 }
+const PLATFORM_MEDIA_KEYS_ENABLED = import.meta.env.VITE_PLATFORM_MEDIA_KEYS_ENABLED === 'true'
 
 function parseClientAiPolicy(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -772,7 +773,7 @@ export default function VeraThread() {
       const isMaster = !!(org as { is_master?: boolean } | null)?.is_master
       const aiPolicy = parseClientAiPolicy((project as { ai_policy?: unknown } | null)?.ai_policy)
       const providers = new Set(((rows ?? []) as Array<{ provider: string | null }>).map(row => row.provider).filter(Boolean) as string[])
-      const platformMediaProject = isMaster && activeProject.slug === 'innovareai-brand'
+      const platformMediaProject = PLATFORM_MEDIA_KEYS_ENABLED && isMaster && activeProject.slug === 'innovareai-brand'
       const hasAnthropic = providers.has('anthropic')
       const hasOpenRouter = providers.has('openrouter')
       const hasOpenAI = providers.has('openai')

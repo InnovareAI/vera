@@ -1819,9 +1819,9 @@ function formatKeySourceLabel(value: string) {
 }
 
 function formatCapability(value: string) {
-  if (value === 'platform_fal_video') return 'Platform FAL video'
+  if (value === 'platform_fal_video') return 'Platform standard video'
   if (value === 'platform_premium_video') return 'Platform premium video'
-  if (value === 'platform_fal_image') return 'Platform FAL image'
+  if (value === 'platform_fal_image') return 'Platform media image'
   return value.replace(/_/g, ' ')
 }
 

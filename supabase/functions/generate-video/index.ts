@@ -16,7 +16,7 @@ import type { AdminClient } from "../_shared/auth.ts"
 import { requireProjectMember, requireSignedInOrService } from "../_shared/auth.ts"
 import { hasAiUserEntitlement, userCanAccessProject } from "../_shared/ai-entitlements.ts"
 import { checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError } from "../_shared/ai-policy.ts"
-import { isPlatformMediaProject, loadClientApiKey } from "../_shared/client-media-keys.ts"
+import { canUsePlatformMediaKeys, loadClientApiKey } from "../_shared/client-media-keys.ts"
 import { logGenerationUsage } from "../_shared/generation-usage.ts"
 import { selectVideoModel } from "../_shared/model-recommendations.ts"
 
@@ -113,9 +113,9 @@ Deno.serve(async (req) => {
     const jobUsedPlatformKey = jobRow?.key_source === 'platform'
     let platformAllowed = false
     if (jobUsedPlatformKey) {
-      const platformVideoProject = await isPlatformMediaProject(supabase, jobProjectId, access.orgId)
+      const platformVideoProject = await canUsePlatformMediaKeys(supabase, jobProjectId, access.orgId)
       if (!platformVideoProject) {
-        return jsonError('Platform video jobs are only available inside approved platform media projects.', 403)
+        return jsonError('Platform video jobs are disabled unless platform media keys are explicitly enabled for this approved project.', 403)
       }
       if (!statusOperatorUserId) return jsonError('Platform video status requires the entitled operator.', 403)
       if (!access.service && jobRow?.operator_user_id && statusOperatorUserId !== jobRow.operator_user_id) {
@@ -162,7 +162,7 @@ Deno.serve(async (req) => {
   const access = await requireProjectMember(req, supabase, SERVICE_KEY, projectId, corsHeaders)
   if (!access.ok) return access.response
   const operatorUserId = access.service ? cleanString(operator_user_id) : access.userId
-  const platformVideoProject = await isPlatformMediaProject(supabase, projectId, access.orgId)
+  const platformVideoProject = await canUsePlatformMediaKeys(supabase, projectId, access.orgId)
   const aiPolicy = await loadProjectAiPolicy(supabase, projectId)
   const modelSelection = selectVideoModel({
     requestedModel: model,
@@ -513,7 +513,7 @@ async function resolveFalKey(
 ): Promise<{ ok: true; key: string; source: 'client' | 'platform' } | { ok: false; response: Response }> {
   try {
     const platformProjectAllowed = opts.allowPlatform
-      ? await isPlatformMediaProject(supabase, projectId, orgId)
+      ? await canUsePlatformMediaKeys(supabase, projectId, orgId)
       : false
 
     if (opts.preferPlatform) {
@@ -539,7 +539,7 @@ async function resolveFalKey(
       if (!platformProjectAllowed) {
         return {
           ok: false,
-          response: jsonError('Platform video rendering is only available inside approved platform media projects.', 403),
+          response: jsonError('Platform video rendering is disabled unless platform media keys are explicitly enabled for this approved project.', 403),
         }
       }
       if (!FAL_API_KEY) {

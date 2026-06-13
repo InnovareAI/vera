@@ -3,6 +3,7 @@ import type { AdminClient } from "./auth.ts"
 const CLIENT_KEY_ENC = Deno.env.get("CLIENT_API_KEY_ENCRYPTION_KEY") ?? Deno.env.get("VAULT_ENC_KEY") ?? ""
 const PLATFORM_MEDIA_PROJECT_IDS = parseList(Deno.env.get("PLATFORM_MEDIA_PROJECT_IDS") ?? "")
 const PLATFORM_MEDIA_PROJECT_SLUGS = parseList(Deno.env.get("PLATFORM_MEDIA_PROJECT_SLUGS") ?? "innovareai-brand")
+const PLATFORM_MEDIA_KEYS_ENABLED = truthy(Deno.env.get("PLATFORM_MEDIA_KEYS_ENABLED") ?? Deno.env.get("ALLOW_PLATFORM_MEDIA_KEYS") ?? "")
 
 export async function decryptClientSecret(payload: string): Promise<string | null> {
   try {
@@ -51,6 +52,19 @@ export async function isPlatformMediaProject(
   return await isMasterOrg(supabase, orgId)
 }
 
+export function platformMediaKeysEnabled(): boolean {
+  return PLATFORM_MEDIA_KEYS_ENABLED
+}
+
+export async function canUsePlatformMediaKeys(
+  supabase: AdminClient,
+  projectId: string,
+  orgId: string,
+): Promise<boolean> {
+  if (!PLATFORM_MEDIA_KEYS_ENABLED) return false
+  return await isPlatformMediaProject(supabase, projectId, orgId)
+}
+
 export async function loadClientApiKey(
   supabase: AdminClient,
   projectId: string,
@@ -84,4 +98,8 @@ export async function loadClientApiKey(
 
 function parseList(value: string): Set<string> {
   return new Set(value.split(",").map(item => item.trim().toLowerCase()).filter(Boolean))
+}
+
+function truthy(value: string): boolean {
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase())
 }
