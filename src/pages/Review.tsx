@@ -23,6 +23,7 @@ const STATUS_TABS = ['Draft', 'Pending Review', 'Changes Requested', 'Approved',
 type StatusTab = typeof STATUS_TABS[number]
 const REVIEW_VIEWS = ['list', 'board', 'calendar'] as const
 type View = typeof REVIEW_VIEWS[number]
+const DEFAULT_REVIEW_VIEW: View = 'board'
 type MediaFrame = { url: string; text?: string | null }
 type ReviewFilters = {
   search: string
@@ -211,7 +212,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
   const [activeTab, setActiveTab] = useState<StatusTab>('Pending Review')
   const [selected, setSelected] = useState<Post | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
-  const [view, setView] = useState<View>(initialView ?? 'list')
+  const [view, setView] = useState<View>(initialView ?? DEFAULT_REVIEW_VIEW)
   const [dragOverTab, setDragOverTab] = useState<StatusTab | null>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [filters, setFilters] = useState<ReviewFilters>(DEFAULT_REVIEW_FILTERS)
@@ -230,7 +231,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
   }
   const navigate = useNavigate()
   const preferenceScope = activeProject?.id ?? activeOrg?.id ?? 'global'
-  const reviewViewPreferenceKey = `vera-review-view:${preferenceScope}`
+  const reviewViewPreferenceKey = `vera-review-view:v2:${preferenceScope}`
   const reviewTabPreferenceKey = `vera-review-tab:${preferenceScope}`
   const businessContext = useMemo(
     () => parseProjectInstructions(activeProject?.instructions).businessContext,
@@ -242,7 +243,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
       setView(initialView)
       return
     }
-    setView(storedView(localStorage.getItem(reviewViewPreferenceKey), false) ?? 'list')
+    setView(storedView(localStorage.getItem(reviewViewPreferenceKey), false) ?? DEFAULT_REVIEW_VIEW)
   }, [initialView, reviewViewPreferenceKey])
 
   useEffect(() => {
