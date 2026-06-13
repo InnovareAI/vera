@@ -153,22 +153,16 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(`${ACTIVE_PROJECT_STORAGE}:${activeOrg.id}`, target.slug)
     } catch { /* ignore quota errors */ }
 
-    // Navigate to the target project's URL while preserving the current
-    // section. If we're on /p/old-slug/review → switch to /p/new-slug/review.
-    // If we're on a non-project URL (e.g. /audit, /settings, or a legacy
-    // flat route), navigate to /p/new-slug/dashboard.
+    // Navigate to the target project's URL while preserving the canonical
+    // desk section. Legacy flat routes are normalized into the current IA.
     const path = location.pathname
     if (path.startsWith('/p/')) {
-      const rest = path.split('/').slice(3).join('/') || 'dashboard'
+      const rest = canonicalProjectSection(path.split('/').slice(3).join('/') || 'vera')
       navigate(`/p/${target.slug}/${rest}`)
     } else {
-      // Don't auto-navigate from workspace-level pages (Audit, Intel, etc.)
-      // — switching projects there is informational, not a navigation event.
-      // Only redirect if the current page is one of the project-scoped ones.
-      const flatToProjectScoped = ['/dashboard', '/generate', '/review']
-      if (flatToProjectScoped.some(p => path === p || path.startsWith(`${p}/`))) {
-        const suffix = path === '/' ? 'dashboard' : path.slice(1)
-        navigate(`/p/${target.slug}/${suffix}`)
+      const section = canonicalFlatSection(path)
+      if (section) {
+        navigate(`/p/${target.slug}/${section}`)
       }
     }
   }, [projects, activeOrg?.id, location.pathname, navigate])
@@ -196,3 +190,27 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 }
 
 export const useProject = () => useContext(ProjectContext)
+
+function canonicalProjectSection(section: string): string {
+  const clean = section.replace(/^\/+/, '') || 'vera'
+  if (clean === 'dashboard' || clean === 'generate') return 'vera'
+  if (clean === 'audit' || clean === 'intel') return 'measure'
+  if (clean === 'library') return 'review'
+  if (clean === 'templates') return 'knowledge'
+  return clean
+}
+
+function canonicalFlatSection(path: string): string | null {
+  const clean = path.replace(/^\/+/, '')
+  if (!clean) return 'vera'
+  const [head, ...rest] = clean.split('/')
+  if (head === 'dashboard' || head === 'generate') return 'vera'
+  if (head === 'review') return ['review', ...rest].join('/')
+  if (head === 'knowledge') return 'knowledge'
+  if (head === 'audit' || head === 'intel') return 'measure'
+  if (head === 'library') return 'review'
+  if (head === 'calendar') return 'calendar'
+  if (head === 'templates') return 'knowledge'
+  if (head === 'learning') return 'learning'
+  return null
+}
