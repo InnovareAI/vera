@@ -765,6 +765,7 @@ interface WorkspaceContext {
   pendingCount: number
   memories: Array<{ key: string; value: string; kind: string }>
   skills: Array<{
+    id: string
     org_id?: string | null
     name: string
     type: string
@@ -892,7 +893,7 @@ async function loadContext(
   embeddingRuntime?: EmbeddingRuntime | null,
 ): Promise<WorkspaceContext> {
   const skillsQuery = supabase.from('skills')
-    .select('org_id, name, type, description, project_id, trigger_description, prompt_module, gotchas, confidence, sort_order')
+    .select('id, org_id, name, type, description, project_id, trigger_description, prompt_module, gotchas, confidence, sort_order')
     .or(`org_id.is.null,org_id.eq.${orgId}`)
     .eq('is_active', true)
     .order('type')
@@ -1408,7 +1409,7 @@ function renderContext(ctx: WorkspaceContext, route: string): string {
           : ''
         const scope = s.project_id ? 'client' : 'global/workspace'
         const confidence = s.confidence ? ` · confidence: ${s.confidence}` : ''
-        lines.push(`    - ${s.name}${perfTag} (${scope}${confidence}): ${s.description}`)
+        lines.push(`    - ${s.name}${perfTag} (${scope}${confidence}, id: ${s.id}): ${s.description}`)
         if (s.trigger_description) lines.push(`      Trigger: ${s.trigger_description}`)
         if (Array.isArray(s.gotchas) && s.gotchas.length) {
           lines.push(`      Gotchas: ${s.gotchas.slice(0, 4).join('; ')}`)
@@ -1429,6 +1430,7 @@ function renderContext(ctx: WorkspaceContext, route: string): string {
         lines.push(`  </client_skill>`)
       }
     }
+    lines.push(`When you save generated content with save_draft or plan_campaign, pass applied_skill_names with the exact skill names you actually used. If no listed skill influenced the draft, omit it.`)
   }
 
   if (ctx.kbStats.raw_count > 0 || ctx.kbStats.article_count > 0) {
@@ -1868,6 +1870,8 @@ const TOOLS = [
         format: { type: 'string', description: 'e.g. Text-only, Carousel, Thread, Article. Default Text-only.' },
         hashtags: { type: 'array', items: { type: 'string' }, description: 'Optional hashtags, without the leading #.' },
         image_prompt: { type: 'string', description: 'OMIT BY DEFAULT. Posts are text-first: only pass this when the operator EXPLICITLY asks for an image/visual. When passed, save_draft generates the image, attaches it, and persists it. Never include it just because the channel is visual.' },
+        applied_skill_names: { type: 'array', items: { type: 'string' }, description: 'Exact names of Skills from workspace_context that materially shaped this draft. Omit if none.' },
+        applied_skill_ids: { type: 'array', items: { type: 'string' }, description: 'Optional exact skill ids from workspace_context for skills that materially shaped this draft.' },
       },
       required: ['copy'],
     },
@@ -1912,6 +1916,8 @@ const TOOLS = [
         cadence: { type: 'string', description: 'How far apart to schedule: "weekly" (default), "biweekly", or "daily". One post per slot.' },
         start_date: { type: 'string', description: 'Optional ISO date (YYYY-MM-DD) for the first post. Default: the upcoming Monday.' },
         campaign_name: { type: 'string', description: 'Optional short campaign name. If omitted, VERA names it from the brief.' },
+        applied_skill_names: { type: 'array', items: { type: 'string' }, description: 'Exact names of Skills from workspace_context that shaped this campaign. Omit if none.' },
+        applied_skill_ids: { type: 'array', items: { type: 'string' }, description: 'Optional exact skill ids from workspace_context for skills that shaped this campaign.' },
       },
       required: ['brief'],
     },
@@ -1932,6 +1938,7 @@ type ToolExecutionContext = {
   embeddingRuntime?: EmbeddingRuntime | null
   textRuntime: TextRuntime
   aiPolicy: ProjectAiPolicy
+  activeSkills?: WorkspaceContext['skills']
 }
 
 function requestedModelOrDefault(value: unknown, fallback: string): string {
@@ -1954,6 +1961,76 @@ function emitBudgetWarning(ctx: ToolExecutionContext, tool: string, warning: unk
   if (!message) return
   ctx.emit({ type: 'budget_warning', tool, warning: payload })
   ctx.emit({ type: 'tool_progress', tool, status: message })
+}
+
+function cleanStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(item => typeof item === 'string' ? item.trim() : '')
+    .filter(Boolean)
+    .slice(0, 10)
+}
+
+function skillNameKey(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function resolveAppliedSkills(ctx: ToolExecutionContext, input: Record<string, unknown>) {
+  const active = ctx.activeSkills ?? []
+  if (!active.length) return []
+
+  const byId = new Map(active.map(skill => [skill.id, skill]))
+  const byName = new Map(active.map(skill => [skillNameKey(skill.name), skill]))
+  const selected = new Map<string, WorkspaceContext['skills'][number]>()
+
+  for (const id of cleanStringArray(input.applied_skill_ids)) {
+    const skill = byId.get(id)
+    if (skill) selected.set(skill.id, skill)
+  }
+  for (const name of cleanStringArray(input.applied_skill_names)) {
+    const skill = byName.get(skillNameKey(name))
+    if (skill) selected.set(skill.id, skill)
+  }
+
+  return Array.from(selected.values()).slice(0, 8)
+}
+
+async function recordSkillInvocations(
+  ctx: ToolExecutionContext,
+  postIds: string | string[],
+  input: Record<string, unknown>,
+  appliedIn: string,
+) {
+  const ids = Array.isArray(postIds) ? postIds : [postIds]
+  const postIdList = ids.filter(id => typeof id === 'string' && isUuid(id))
+  if (!postIdList.length) return []
+
+  const skills = resolveAppliedSkills(ctx, input)
+  if (!skills.length) return []
+
+  const rows = postIdList.flatMap(postId =>
+    skills.map(skill => ({
+      skill_id: skill.id,
+      org_id: ctx.orgId,
+      post_id: postId,
+      applied_in: appliedIn,
+      applied_by: ctx.userId,
+    })),
+  )
+  const { error } = await ctx.supabase
+    .from('skill_invocations')
+    .insert(rows as Database['public']['Tables']['skill_invocations']['Insert'][])
+  if (error) {
+    console.warn('skill invocation insert failed', error.message)
+    return []
+  }
+
+  ctx.emit({
+    type: 'skill_invocations',
+    post_ids: postIdList,
+    skills: skills.map(skill => ({ id: skill.id, name: skill.name })),
+  })
+  return skills
 }
 
 // Tool execution. Each tool returns { result: string for the model, image_url?: string for the UI }.
@@ -1988,7 +2065,13 @@ async function executeTool(
         // panel populates automatically. Strip any injected draft-context tail
         // (the frontend appends it on tweaks) to keep the operator's real ask.
         const originatingPrompt = (ctx.userPrompt ?? '').split('\n\n---\n[The draft currently open')[0].trim()
-        if (originatingPrompt) row.media_metadata = { prompt: originatingPrompt.slice(0, 8000) }
+        const appliedSkillNames = cleanStringArray(input.applied_skill_names)
+        const appliedSkillIds = cleanStringArray(input.applied_skill_ids)
+        const mediaMetadata: Record<string, unknown> = {}
+        if (originatingPrompt) mediaMetadata.prompt = originatingPrompt.slice(0, 8000)
+        if (appliedSkillNames.length) mediaMetadata.applied_skill_names = appliedSkillNames
+        if (appliedSkillIds.length) mediaMetadata.applied_skill_ids = appliedSkillIds
+        if (Object.keys(mediaMetadata).length) row.media_metadata = mediaMetadata
         if (Array.isArray(input.hashtags) && input.hashtags.length) {
           row.hashtags = (input.hashtags as unknown[]).map(h => String(h).replace(/^#/, ''))
         }
@@ -1998,6 +2081,7 @@ async function executeTool(
         const post = data as Record<string, unknown>
         // Emit the copy immediately so the card appears fast…
         ctx.emit({ type: 'draft', post })
+        const invokedSkills = await recordSkillInvocations(ctx, post.id as string, input, 'save_draft')
 
         // …then, if an image was requested, generate it, persist it to the
         // row, and emit an `image` event so it fills into the card. Best-effort:
@@ -2065,7 +2149,7 @@ async function executeTool(
           } catch { imageNote = ' (the image didn\'t generate — offer to retry the visual)' }
         }
         return {
-          result: `Saved "${post.title ?? 'Untitled'}" to Review as Pending${imageNote}. It's on the draft card now — reply in ONE short line telling the operator it's ready to Approve, Tweak, or Regenerate.`,
+          result: `Saved "${post.title ?? 'Untitled'}" to Review as Pending${imageNote}${invokedSkills.length ? ` and recorded ${invokedSkills.length} skill invocation${invokedSkills.length === 1 ? '' : 's'}` : ''}. It's on the draft card now — reply in ONE short line telling the operator it's ready to Approve, Tweak, or Regenerate.`,
         }
       }
 
@@ -2179,6 +2263,11 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         if (!campaignChannels.length) campaignChannels.push(...channels)
         const startISO = start.toISOString()
         const endISO = new Date(start.getTime() + (planned.length - 1) * stepDays * 86400000).toISOString()
+        const appliedSkillNames = cleanStringArray(input.applied_skill_names)
+        const appliedSkillIds = cleanStringArray(input.applied_skill_ids)
+        const mediaMetadata: Record<string, unknown> = {}
+        if (appliedSkillNames.length) mediaMetadata.applied_skill_names = appliedSkillNames
+        if (appliedSkillIds.length) mediaMetadata.applied_skill_ids = appliedSkillIds
 
         // Create the campaign, then insert all posts as Pending, dated by cadence.
         const { data: campaign, error: campErr } = await ctx.supabase.from('campaigns').insert({
@@ -2210,12 +2299,15 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
             hashtags: Array.isArray(p.hashtags) ? p.hashtags.map(h => String(h).replace(/^#/, '')) : null,
             category: (p.category ?? '').trim() || null,
             scheduled_at: new Date(start.getTime() + i * stepDays * 86400000).toISOString(),
+            media_metadata: Object.keys(mediaMetadata).length ? mediaMetadata : null,
           }
         })
         const { data: inserted, error: postErr } = await ctx.supabase
-          .from('content_posts').insert(rows)
+          .from('content_posts').insert(rows as Database['public']['Tables']['content_posts']['Insert'][])
           .select('id, title, copy, channel, status, scheduled_at, hashtags, category, campaign_id')
         if (postErr) return { result: `Drafted the plan but couldn't save the posts: ${postErr.message}` }
+        const insertedIds = (inserted ?? []).map(post => post.id).filter((id): id is string => typeof id === 'string')
+        const invokedSkills = await recordSkillInvocations(ctx, insertedIds, input, 'plan_campaign')
 
         ctx.emit({
           type: 'campaign',
@@ -2224,7 +2316,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         })
 
         return {
-          result: `Planned and drafted ${(inserted ?? []).length} ${channelLabel} posts for "${campaignName}" (${cadence}, ${startISO.slice(0, 10)} to ${endISO.slice(0, 10)}). All saved as Pending and laid out on the campaign calendar in the panel. Reply in ONE short line: it's ready to review, and you can refine any post or generate the images on approval.`,
+          result: `Planned and drafted ${(inserted ?? []).length} ${channelLabel} posts for "${campaignName}" (${cadence}, ${startISO.slice(0, 10)} to ${endISO.slice(0, 10)}). All saved as Pending and laid out on the campaign calendar in the panel${invokedSkills.length ? `, with ${invokedSkills.length} skill invocation${invokedSkills.length === 1 ? '' : 's'} recorded per post` : ''}. Reply in ONE short line: it's ready to review, and you can refine any post or generate the images on approval.`,
         }
       }
 
@@ -4307,9 +4399,10 @@ Deno.serve(async (req) => {
   // Fetch workspace context (including KB hits for this turn). Non-fatal —
   // if it fails we fall back to a minimal prompt so chat still works.
   let contextBlock: string
+  let workspaceContext: WorkspaceContext | null = null
   try {
-    const ctx = await loadContext(supabase, orgId, effectiveUserId, lastUserText, projectId, embeddingRuntime)
-    contextBlock = renderContext(ctx, route)
+    workspaceContext = await loadContext(supabase, orgId, effectiveUserId, lastUserText, projectId, embeddingRuntime)
+    contextBlock = renderContext(workspaceContext, route)
   } catch (err) {
     console.error('vera-chat: context load failed', err)
     contextBlock = `<workspace_context>\nOrg lookup failed — operating without live state.\n</workspace_context>`
@@ -4643,6 +4736,7 @@ Deno.serve(async (req) => {
               embeddingRuntime,
               textRuntime,
               aiPolicy,
+              activeSkills: workspaceContext?.skills ?? [],
             },
           })
           fullText = r.fullText
@@ -4754,6 +4848,7 @@ Deno.serve(async (req) => {
                 embeddingRuntime,
                 textRuntime,
                 aiPolicy,
+                activeSkills: workspaceContext?.skills ?? [],
               })
               if (exec.image_url) {
                 generatedImages.push(exec.image_url)
