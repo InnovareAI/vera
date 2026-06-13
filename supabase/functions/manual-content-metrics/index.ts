@@ -168,7 +168,6 @@ Deno.serve(async (req) => {
     postUpdates.posted_url = liveUrl
     postUpdates.provider_permalink = liveUrl
     if (!postRow.posted_at) postUpdates.posted_at = metricTime
-    if (!["posted", "published"].includes((postRow.status ?? "").toLowerCase())) postUpdates.status = "posted"
   }
 
   const { error: updateError } = await supabase
