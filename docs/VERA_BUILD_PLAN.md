@@ -251,6 +251,7 @@ Current state:
 - Obsolete standalone IA files have been removed for the old Dashboard, Generate page, ChatPanel dock, Intel page, Library page, Agency page, and Templates page. Legacy route shims now normalize into the current project desk sections, and project switching maps old flat routes like `/generate`, `/audit`, and `/templates` into VERA, Performance, and Knowledge.
 - Demand Brain now renders a channel operating matrix from the saved client sources and channel strategy, showing each channel's role, publishing mode, workflow, source status, and outcome signals.
 - Knowledge suggestions are now actionable: a classified brief, voice doc, audit, positioning note, case study, intel item, or reference can be applied into the active client's Demand Brain without overwriting existing Brain notes.
+- Integrations now show the LinkedIn scope boundary directly in Settings: shared workspace or InnovareAI LinkedIn profiles are research-only, while client-space LinkedIn publishing requires its own connected client integration.
 - AI Usage settings now filters current-month usage by model selection source: recommended, policy default, explicit override, fallback, or unknown historical events.
 - Image and video generation now emit structured AI budget warnings before a paid provider call when a cap is missing, the request cost is unknown, or the request moves a client space near its monthly cap.
 - Command surfaces those budget warnings as operator toasts, while usage logs keep the warning metadata for audits.

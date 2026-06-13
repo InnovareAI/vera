@@ -654,6 +654,27 @@ function configBool(row: ClientIntegration | undefined, key: string, fallback: b
   return typeof value === 'boolean' ? value : fallback
 }
 
+function firstNonEmptyString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return null
+}
+
+function integrationUnipileAccountId(row: ClientIntegration | undefined): string | null {
+  return firstNonEmptyString(
+    row?.external_ref?.unipile_account_id,
+    row?.external_ref?.account_id,
+    row?.config?.unipile_account_id,
+  )
+}
+
+function linkedInScopeHint(row: ClientIntegration | undefined, researchConnected: boolean): string | null {
+  if (row?.status === 'connected' && integrationUnipileAccountId(row)) return 'Client publishing connected'
+  if (researchConnected) return 'Research available only'
+  return null
+}
+
 function makeDraft(template: IntegrationTemplate, row?: ClientIntegration): Draft {
   return {
     displayName: row?.display_name ?? template.label,
@@ -1371,6 +1392,8 @@ export function ClientIntegrationsCard() {
         ? researchProfile?.unipile_health_status ?? 'unknown'
         : 'not connected'
   const workspaceResearchStale = workspaceResearchPresent && !workspaceResearchUsable
+  const selectedClientUnipileAccountId = selectedProvider === 'linkedin' ? integrationUnipileAccountId(selectedRow) : null
+  const selectedLinkedInPublishingConnected = selectedProvider === 'linkedin' && draft.status === 'connected' && !!selectedClientUnipileAccountId
 
   return (
     <section style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', padding: 18 }}>
@@ -1413,7 +1436,7 @@ export function ClientIntegrationsCard() {
                 Shared LinkedIn research profile
               </p>
               <p style={{ color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.45, margin: '4px 0 0', maxWidth: 760 }}>
-                Vera uses a workspace research profile first. If none is connected, InnovareAI operators can use the shared InnovareAI research profile for audits, source pulls, and content intelligence. Publishing still requires the client-space LinkedIn integration below.
+                Vera uses this only for read-only LinkedIn research: audits, source pulls, profile context, company-page context, and recent-post intelligence. It never grants client publishing, media, spend, or company-page posting rights. Publishing still requires the active client-space LinkedIn integration below.
               </p>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 <span style={{
@@ -1428,11 +1451,13 @@ export function ClientIntegrationsCard() {
                       : 'Not connected'}
                 </span>
                 {platformResearchConnected && !workspaceResearchConnected && (
-                  <span style={chipStyle}>Research only</span>
+                  <span style={chipStyle}>InnovareAI profile, research only</span>
                 )}
                 {workspaceResearchStale && platformResearchConnected && (
                   <span style={chipStyle}>Workspace profile needs reconnect</span>
                 )}
+                <span style={chipStyle}>Cannot publish</span>
+                <span style={chipStyle}>Cannot spend client credits</span>
                 <span style={chipStyle}>Health: {researchHealth}</span>
               </div>
             </div>
@@ -1503,6 +1528,7 @@ export function ClientIntegrationsCard() {
             const status = row?.status ?? 'not_connected'
             const StatusDot = STATUS_META[status].icon
             const active = selectedProvider === template.provider
+            const scopeHint = template.provider === 'linkedin' ? linkedInScopeHint(row, researchConnected) : null
             return (
               <button
                 type="button"
@@ -1556,6 +1582,11 @@ export function ClientIntegrationsCard() {
                   <span style={{ display: 'block', color: 'var(--ghost)', fontSize: 10, lineHeight: 1.25, marginTop: 4 }}>
                     {demandPlatform ? `${publishingModeLabel(demandPlatform.publishing)} · ${demandPlatform.outcomeSignals.slice(0, 2).join(', ')}` : launch.adapterState}
                   </span>
+                  {scopeHint && (
+                    <span style={{ display: 'block', color: template.accent, fontSize: 10, lineHeight: 1.25, marginTop: 4, fontWeight: 700 }}>
+                      {scopeHint}
+                    </span>
+                  )}
                 </span>
               </button>
             )
@@ -1588,6 +1619,7 @@ export function ClientIntegrationsCard() {
                 const demandPlatform = demandPlatformForProvider(template.provider)
                 const ProviderIcon = template.icon
                 const RowStatusIcon = statusMeta.icon
+                const scopeHint = template.provider === 'linkedin' ? linkedInScopeHint(row, researchConnected) : null
                 return (
                   <button
                     key={template.provider}
@@ -1639,6 +1671,11 @@ export function ClientIntegrationsCard() {
                       {demandPlatform && (
                         <span style={{ display: 'block', color: 'var(--ghost)', fontSize: 11, lineHeight: 1.35, marginTop: 3 }}>
                           {publishingModeLabel(demandPlatform.publishing)} · {demandPlatform.outcomeSignals.slice(0, 2).join(', ')}
+                        </span>
+                      )}
+                      {scopeHint && (
+                        <span style={{ display: 'block', color: template.accent, fontSize: 11, lineHeight: 1.35, marginTop: 3, fontWeight: 700 }}>
+                          {scopeHint}
                         </span>
                       )}
                     </span>
@@ -1727,6 +1764,42 @@ export function ClientIntegrationsCard() {
                 </div>
               </div>
             )}
+
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-md)', padding: 12 }}>
+              <div className="flex items-start gap-2">
+                <ShieldCheck size={15} style={{ color: selectedTemplate.accent, flexShrink: 0, marginTop: 1 }} />
+                <div className="min-w-0">
+                  <p style={{ color: 'var(--ink)', fontSize: 12, fontWeight: 750, margin: 0 }}>Connection scope guard</p>
+                  {selectedProvider === 'linkedin' ? (
+                    <>
+                      <p style={{ color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.45, margin: '4px 0 0' }}>
+                        LinkedIn research can use the shared profile. LinkedIn publishing can only use this active client-space integration.
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <span style={{ ...chipStyle, color: researchConnected ? '#059669' : '#78716c' }}>
+                          Research: {researchConnected && researchAccountId ? `${researchScope} ${maskAccountId(researchAccountId)}` : 'not connected'}
+                        </span>
+                        <span style={{ ...chipStyle, color: selectedLinkedInPublishingConnected ? '#059669' : '#78716c' }}>
+                          Publishing: {selectedClientUnipileAccountId ? `client ${maskAccountId(selectedClientUnipileAccountId)}` : 'not connected for this client'}
+                        </span>
+                        <span style={chipStyle}>Shared profile cannot publish</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p style={{ color: 'var(--ink-2)', fontSize: 12, lineHeight: 1.45, margin: '4px 0 0' }}>
+                        This integration belongs to {activeProject.name}. Other client spaces cannot use its credentials, publish rights, or spend path.
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <span style={chipStyle}>Client scoped</span>
+                        <span style={chipStyle}>No shared credentials</span>
+                        <span style={chipStyle}>Approval required: {draft.approvalRequired ? 'yes' : 'no'}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
 
             <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-md)', padding: 12 }}>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1959,7 +2032,7 @@ export function ClientIntegrationsCard() {
                     }}
                   >
                     {connectingUnipile ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
-                    {draft.status === 'connected' ? 'Reconnect LinkedIn' : 'Connect LinkedIn'}
+                    {draft.status === 'connected' ? 'Reconnect client LinkedIn publishing' : 'Connect client LinkedIn publishing'}
                   </button>
                 )}
               </div>
