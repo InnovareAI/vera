@@ -72,6 +72,13 @@ function composerForChannel(channel: string | null | undefined, copy?: string): 
   }
 }
 
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return null
+}
+
 type ActionState = 'idle' | 'saving' | 'done'
 
 export default function ReviewDetail() {
@@ -91,6 +98,8 @@ export default function ReviewDetail() {
   const [refineText, setRefineText] = useState('')
   const [refining, setRefining] = useState(false)
   const [refineStatus, setRefineStatus] = useState('')
+  const [linkedInPublishReady, setLinkedInPublishReady] = useState(false)
+  const [linkedInPublishDetail, setLinkedInPublishDetail] = useState('Connect LinkedIn publishing in client integrations first.')
   const reviewQueuePath = activeProject?.slug ? `/p/${activeProject.slug}/review` : '/review'
   const businessContext = useMemo(
     () => parseProjectInstructions(activeProject?.instructions).businessContext,
@@ -111,6 +120,58 @@ export default function ReviewDetail() {
         setLoading(false)
       })
   }, [id])
+
+  useEffect(() => {
+    let cancelled = false
+    async function checkLinkedInPublishReady() {
+      const isLinkedIn = post?.channel?.toLowerCase() === 'linkedin'
+      if (!post || !isLinkedIn) {
+        setLinkedInPublishReady(false)
+        setLinkedInPublishDetail('Connect LinkedIn publishing in client integrations first.')
+        return
+      }
+      if (!post.project_id) {
+        setLinkedInPublishReady(true)
+        setLinkedInPublishDetail('Legacy workspace LinkedIn publishing route.')
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('client_integrations')
+        .select('id, status, health_status, external_ref, config')
+        .eq('project_id', post.project_id)
+        .eq('provider', 'linkedin')
+        .eq('status', 'connected')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (cancelled) return
+      if (error) {
+        setLinkedInPublishReady(false)
+        setLinkedInPublishDetail(error.message)
+        return
+      }
+
+      const row = data as { health_status?: string | null; external_ref?: Record<string, unknown> | null; config?: Record<string, unknown> | null } | null
+      const accountId = firstString(row?.external_ref?.unipile_account_id, row?.config?.unipile_account_id, row?.external_ref?.account_id)
+      const health = row?.health_status ?? 'unknown'
+      const healthyEnough = health !== 'stale' && health !== 'error'
+      setLinkedInPublishReady(!!accountId && healthyEnough)
+      setLinkedInPublishDetail(
+        !row
+          ? 'Connect LinkedIn publishing in client integrations first.'
+          : !accountId
+            ? 'LinkedIn publishing is connected, but the Unipile account ID is missing.'
+            : !healthyEnough
+              ? `LinkedIn publishing is ${health}. Reconnect it before publishing.`
+              : 'LinkedIn publishing is connected for this client space.',
+      )
+    }
+
+    void checkLinkedInPublishReady()
+    return () => { cancelled = true }
+  }, [post?.id, post?.channel, post?.project_id])
 
   // Refine with VERA — the reviewer's feedback goes straight to VERA, who
   // edits the copy / image / video on THIS post in place (refine_post tool).
@@ -223,6 +284,10 @@ export default function ReviewDetail() {
   // mark the row posted + fire Slack notify.
   async function postToLinkedIn() {
     if (!post) return
+    if (!linkedInPublishReady) {
+      alert(linkedInPublishDetail)
+      return
+    }
     if (!confirm(`Publish this post to LinkedIn via Unipile? This action is immediate and irreversible.`)) return
     await callPublishFunction('unipile-post', 'Unipile post')
   }
@@ -252,12 +317,17 @@ export default function ReviewDetail() {
     if (!confirm(`Send via Postmark to ${recipients.length} recipient(s)?\n\n${preview}\n\nThis action is immediate and irreversible.`)) return
     setMarking(true)
     try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) throw sessionError
+      const token = session?.access_token
+      if (!token) throw new Error('Sign in again before sending this email post.')
+
       const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/email-publish`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({ post_id: post.id, recipients }),
       })
@@ -283,12 +353,17 @@ export default function ReviewDetail() {
     if (!post) return
     setMarking(true)
     try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) throw sessionError
+      const token = session?.access_token
+      if (!token) throw new Error('Sign in again before publishing this post.')
+
       const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${fn}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({ post_id: post.id }),
       })
@@ -535,9 +610,10 @@ export default function ReviewDetail() {
                     : 'Copy the bundle, open the composer, paste, and publish.'}
             </p>
             {post.channel?.toLowerCase() === 'linkedin' && (
-              <button onClick={postToLinkedIn} disabled={marking}
+              <button onClick={postToLinkedIn} disabled={marking || !linkedInPublishReady}
+                title={linkedInPublishDetail}
                 className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 px-4 mb-2 bg-gray-900 hover:bg-gray-800 disabled:opacity-40 text-white rounded-lg text-sm font-semibold">
-                {marking ? 'Publishing…' : '🚀 Publish to LinkedIn via Unipile'}
+                {marking ? 'Publishing…' : linkedInPublishReady ? '🚀 Publish to LinkedIn via Unipile' : 'Connect LinkedIn publishing first'}
               </button>
             )}
             {post.channel?.toLowerCase() === 'blog' && (

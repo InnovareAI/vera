@@ -115,6 +115,7 @@ Deno.serve(async (req) => {
   // The legacy org-level LinkedIn column is only allowed for old org-wide posts
   // that have no project_id.
   let unipileAccountId: string | null = null
+  let clientIntegration: ClientIntegrationRow | null = null
   if (post.project_id) {
     const integrationProvider = integrationProviderForChannel(channel)
     const { data: integrationData, error: integrationErr } = await supabase
@@ -129,9 +130,13 @@ Deno.serve(async (req) => {
     if (integrationErr) return jsonError(`Client integration lookup failed: ${integrationErr.message}`, 500)
 
     const integration = integrationData as ClientIntegrationRow | null
+    clientIntegration = integration
     unipileAccountId = getUnipileAccountId(integration)
     if (!unipileAccountId) {
       return jsonError(`No connected ${channel} Unipile account for this client. Connect it in client integrations first.`, 400)
+    }
+    if (integration?.health_status === "stale" || integration?.health_status === "error") {
+      return jsonError(`Connected ${channel} account is ${integration.health_status}. Reconnect it before publishing.`, 400)
     }
   }
   if (!post.project_id && !unipileAccountId && channel === "linkedin" && post.org_id) {
@@ -151,10 +156,24 @@ Deno.serve(async (req) => {
     return jsonError("Instagram posts require an image or video (media_url).", 400)
   }
 
-  // 2. Resolve company URN if needed. Explicit param wins. Automatic org-level
-  // channel profile detection is only safe for legacy org-wide posts because
-  // channel_profiles is not project-scoped.
-  let asOrganization: string | undefined = explicitOrgUrn
+  // 2. Resolve company URN if needed. Project posts can only publish as a
+  // company page that is explicitly stored on this client's integration.
+  // Legacy org-wide posts can still use channel_profiles for auto-detection.
+  let asOrganization: string | undefined
+  if (channel === "linkedin" && post.project_id) {
+    const allowedOrganization = linkedInOrganizationForIntegration(clientIntegration)
+    if (explicitOrgUrn) {
+      if (!allowedOrganization || normalizeLinkedInOrgId(explicitOrgUrn) !== normalizeLinkedInOrgId(allowedOrganization)) {
+        return jsonError("LinkedIn company page is not connected to this client space.", 403)
+      }
+      asOrganization = allowedOrganization
+    } else {
+      asOrganization = allowedOrganization ?? undefined
+    }
+  } else {
+    asOrganization = explicitOrgUrn
+  }
+
   if (channel === "linkedin" && !asOrganization && !post.project_id && post.org_id) {
     const { data: channels } = await supabase
       .from("channel_profiles")
@@ -314,6 +333,23 @@ function getUnipileAccountId(integration: ClientIntegrationRow | null): string |
     integration?.config?.unipile_account_id,
     integration?.external_ref?.account_id,
   )
+}
+
+function linkedInOrganizationForIntegration(integration: ClientIntegrationRow | null): string | null {
+  return firstString(
+    integration?.external_ref?.linkedin_organization_id,
+    integration?.external_ref?.linkedin_company_id,
+    integration?.external_ref?.as_organization,
+    integration?.external_ref?.organization_id,
+    integration?.config?.linkedin_organization_id,
+    integration?.config?.linkedin_company_id,
+    integration?.config?.as_organization,
+    integration?.config?.organization_id,
+  )
+}
+
+function normalizeLinkedInOrgId(value: string): string {
+  return value.trim().replace(/^urn:li:organization:/i, "").replace(/^urn:linkedin:organization:/i, "")
 }
 
 function firstString(...values: unknown[]): string | null {

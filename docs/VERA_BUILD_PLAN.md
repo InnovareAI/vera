@@ -219,6 +219,7 @@ Current state:
 - Server-side video defaults stay on Hailuo or Hailuo I2V unless the operator explicitly requests and approves a premium model.
 - Media usage logs now include the requested model, policy default, model selection source, and selection reason for spend audits.
 - CMS/blog publishers are now scoped to client spaces through `publishers.project_id`; the UI only lists active-client publishers and the backend blocks cross-client publish attempts before credentials are loaded.
+- Unipile publishing now requires a project-scoped client integration for project posts, blocks unapproved LinkedIn company-page overrides, and the review page sends real user JWTs to publish functions instead of the anon key.
 - Weekly learning notices now have a durable review action path. Operators can enable proposed client skills, queue SAM handoff actions, and mark a weekly review complete from the VERA launcher.
 - The weekly review action is backed by a scoped Edge Function that authorizes through `requireObservationMember` and derives org and project scope from the observation row, not from client-supplied request fields.
 - The backend now includes `sam_handoff_actions`, a tenant-scoped table for content-to-sales handoff candidates with RLS, explicit grants, duplicate protection by project and post, assignment, handoff, completion, dismissal, and status tracking.

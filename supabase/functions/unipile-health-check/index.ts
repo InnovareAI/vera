@@ -90,7 +90,6 @@ Deno.serve(async (req) => {
   const { data: integrationRows, error: integrationError } = await supabase
     .from('client_integrations')
     .select('id, org_id, project_id, provider, display_name, status, config, external_ref')
-    .eq('provider', 'linkedin')
     .in('status', ['connected', 'pending', 'error', 'revoked'])
 
   if (integrationError) {
