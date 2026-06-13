@@ -235,7 +235,7 @@ const PROVIDERS: IntegrationTemplate[] = [
     group: 'Organic social',
     label: 'YouTube',
     eyebrow: 'Video channel',
-    description: 'Connect YouTube channel discovery and analytics signals. Publishing and uploads come after the upload adapter and approval path.',
+    description: 'Connect YouTube channel discovery and posted-video performance signals. Publishing and uploads come after the upload adapter and approval path.',
     connectionKind: 'oauth',
     credentialRoute: 'Google OAuth with YouTube readonly and analytics scopes',
     primaryLabel: 'YouTube channel URL or ID',

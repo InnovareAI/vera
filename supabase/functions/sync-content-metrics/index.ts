@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js"
+import { parseYouTubeVideoId, youtubeStatisticsToMetrics } from "../_shared/youtube-metrics.ts"
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -9,6 +10,8 @@ const UNIPILE_BASE_URL = normalizeUnipileBaseUrl(
   Deno.env.get("UNIPILE_BASE_URL") ?? Deno.env.get("UNIPILE_API_URL") ?? Deno.env.get("UNIPILE_DSN") ?? "",
 )
 const META_GRAPH_API_VERSION = normalizeGraphApiVersion(Deno.env.get("META_GRAPH_API_VERSION"))
+const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_OAUTH_CLIENT_ID") ?? Deno.env.get("GOOGLE_CLIENT_ID") ?? ""
+const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_OAUTH_CLIENT_SECRET") ?? Deno.env.get("GOOGLE_CLIENT_SECRET") ?? ""
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -110,6 +113,23 @@ type MetaSecret = {
   }>
 }
 
+type GoogleSecret = {
+  access_token?: string
+  refresh_token?: string | null
+  expires_at?: string | null
+  scope?: string[] | string | null
+  token_type?: string | null
+}
+
+type GoogleTokenResponse = {
+  access_token?: string
+  expires_in?: number
+  scope?: string
+  token_type?: string
+  error?: string
+  error_description?: string
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
   if (req.method !== "POST") return jsonError("Method not allowed", 405)
@@ -202,6 +222,8 @@ Deno.serve(async (req) => {
         results.push(await syncFacebookPost(supabase, project as ProjectRow, integration, post))
       } else if (provider === "meta_instagram") {
         results.push(await syncInstagramPost(supabase, project as ProjectRow, integration, post))
+      } else if (provider === "youtube") {
+        results.push(await syncYouTubePost(supabase, project as ProjectRow, integration, post))
       } else {
         results.push({
           post_id: post.id,
@@ -404,6 +426,66 @@ async function syncInstagramPost(
   return synced(post, "meta_instagram", rows.length, "Instagram media metrics synced.")
 }
 
+async function syncYouTubePost(
+  supabase: SupabaseAdminClient,
+  project: ProjectRow,
+  integration: IntegrationRow,
+  post: ContentPostRow,
+): Promise<PostSyncResult> {
+  if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length < 32) return skipped(post, "youtube", "Secret encryption key is not configured.")
+  const secret = await loadGoogleSecret(supabase, project.id, integration.credential_ref)
+  if (!secret) return skipped(post, "youtube", "Google OAuth credential is missing.")
+
+  const accessToken = await resolveGoogleAccessToken(secret)
+  if (!accessToken) return skipped(post, "youtube", "Google access token is missing.")
+
+  const videoId = firstString(
+    post.provider_media_id,
+    post.provider_post_id,
+    parseYouTubeVideoId(post.provider_permalink),
+    parseYouTubeVideoId(post.posted_url),
+  )
+  if (!videoId) return skipped(post, "youtube", "YouTube video ID is missing.")
+
+  const videoResult = await youtubeGet("/youtube/v3/videos", {
+    part: "snippet,statistics",
+    id: videoId,
+  }, accessToken)
+  const items = Array.isArray(valueAt(videoResult, "items")) ? valueAt(videoResult, "items") as unknown[] : []
+  const video = items[0]
+  if (!video || typeof video !== "object") return skipped(post, "youtube", "YouTube returned no video for this ID.")
+
+  const snippet = recordValue(valueAt(video, "snippet"))
+  const counts = youtubeStatisticsToMetrics(valueAt(video, "statistics"))
+  const accountId = firstString(
+    post.provider_account_id,
+    snippet.channelId,
+    integration.external_ref?.primary_ref,
+    integration.config?.primary_ref,
+  )
+  const permalink = `https://www.youtube.com/watch?v=${videoId}`
+  const pulledAt = new Date().toISOString()
+  const rows = [
+    metric(project, post, "youtube", accountId, videoId, "views", counts.views, pulledAt, videoResult),
+    metric(project, post, "youtube", accountId, videoId, "likes", counts.likes, pulledAt, videoResult),
+    metric(project, post, "youtube", accountId, videoId, "comments", counts.comments, pulledAt, videoResult),
+    metric(project, post, "youtube", accountId, videoId, "favorites", counts.favorites, pulledAt, videoResult),
+  ].filter((row): row is MetricRow => !!row)
+
+  addEngagementRate(rows, project, post, "youtube", accountId, videoId, pulledAt)
+  if (!rows.length) return skipped(post, "youtube", "YouTube returned the video but no counters.")
+  await insertMetricRows(supabase, rows)
+  await updatePostMetricState(supabase, post.id, {
+    provider: "youtube",
+    provider_account_id: accountId,
+    provider_post_id: videoId,
+    provider_media_id: videoId,
+    provider_permalink: firstString(post.provider_permalink, post.posted_url, permalink),
+    last_metric_sync_at: pulledAt,
+  })
+  return synced(post, "youtube", rows.length, "YouTube video metrics synced.")
+}
+
 async function insertMetricRows(supabase: SupabaseAdminClient, rows: MetricRow[]) {
   const { error } = await supabase.from("content_metric_snapshots").insert(rows)
   if (error) throw new Error(error.message)
@@ -505,6 +587,60 @@ async function loadMetaSecret(
   return JSON.parse(plaintext) as MetaSecret
 }
 
+async function loadGoogleSecret(
+  supabase: SupabaseAdminClient,
+  projectId: string,
+  credentialRef: string | null,
+): Promise<GoogleSecret | null> {
+  let query = supabase
+    .from("client_api_keys")
+    .select("id, secret_ciphertext")
+    .eq("project_id", projectId)
+    .eq("provider", "google_oauth")
+    .eq("status", "active")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+
+  if (credentialRef) query = query.eq("id", credentialRef)
+  const { data, error } = await query.maybeSingle()
+  if (error) throw new Error(error.message)
+  const ciphertext = (data as { secret_ciphertext?: string | null } | null)?.secret_ciphertext
+  if (!ciphertext || !ENCRYPTION_KEY) return null
+  const plaintext = await decryptSecret(ciphertext, ENCRYPTION_KEY)
+  return JSON.parse(plaintext) as GoogleSecret
+}
+
+async function resolveGoogleAccessToken(secret: GoogleSecret): Promise<string | null> {
+  const accessToken = firstString(secret.access_token)
+  const expiresAt = parseDateMillis(secret.expires_at)
+  if (accessToken && (!expiresAt || expiresAt > Date.now() + 60_000)) return accessToken
+
+  const refreshToken = firstString(secret.refresh_token)
+  if (!refreshToken) return accessToken
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+    throw new Error("Google OAuth client is not configured.")
+  }
+  return refreshGoogleAccessToken(refreshToken)
+}
+
+async function refreshGoogleAccessToken(refreshToken: string): Promise<string> {
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  })
+  const token = await response.json().catch(async () => ({ error_description: await response.text() })) as GoogleTokenResponse
+  if (!response.ok || !token.access_token) {
+    throw new Error(`Google OAuth HTTP ${response.status}: ${token.error_description ?? token.error ?? "Refresh failed"}`)
+  }
+  return token.access_token
+}
+
 async function decryptSecret(ciphertext: string, keyMaterial: string) {
   const parts = ciphertext.split(":")
   if (parts.length !== 4 || parts[0] !== "aes-gcm" || parts[1] !== "v1") {
@@ -539,6 +675,20 @@ async function metaGet(path: string, query: Record<string, string>) {
   const response = await fetch(url)
   const body = await response.json().catch(async () => ({ error: await response.text() }))
   if (!response.ok) throw new Error(`Meta HTTP ${response.status}: ${compactError(body)}`)
+  return body
+}
+
+async function youtubeGet(path: string, query: Record<string, string>, accessToken: string) {
+  const url = new URL(`https://www.googleapis.com${path}`)
+  for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value)
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+  })
+  const body = await response.json().catch(async () => ({ error: await response.text() }))
+  if (!response.ok) throw new Error(`YouTube HTTP ${response.status}: ${compactError(body)}`)
   return body
 }
 
@@ -651,7 +801,7 @@ function isStaleMetricIssue(detail: string) {
 }
 
 function isPostReferenceMetricIssue(detail: string) {
-  return /(provider post id|activity url|facebook page post id|instagram media id|returned the post but no counters|returned the media but no counters|adapter is not built|provider is not connected)/i.test(detail)
+  return /(provider post id|activity url|facebook page post id|instagram media id|youtube video id|returned the post but no counters|returned the media but no counters|returned no video|returned the video but no counters|adapter is not built|provider is not connected)/i.test(detail)
 }
 
 async function syncConnectorHealthObservation(
@@ -728,6 +878,10 @@ function providerLabel(provider: string) {
     google_search_console: "Google Search Console",
     google_analytics_4: "Google Analytics 4",
     youtube: "YouTube",
+    medium: "Medium",
+    quora: "Quora",
+    reddit: "Reddit",
+    x: "X",
   } as Record<string, string>)[provider] ?? provider.replace(/_/g, " ")
 }
 
@@ -739,6 +893,9 @@ function detectProvider(post: ContentPostRow): string | null {
   if (value.includes("facebook") || value.includes("fb.watch")) return "meta_facebook_pages"
   if (value.includes("youtube") || value.includes("youtu.be")) return "youtube"
   if (value.includes("medium")) return "medium"
+  if (value.includes("quora")) return "quora"
+  if (value.includes("reddit")) return "reddit"
+  if (value.includes("twitter") || value.includes("x.com")) return "x"
   return null
 }
 
@@ -815,11 +972,23 @@ function findMetaPage(secret: MetaSecret, pageId: string | null | undefined) {
   return secret.pages.find(page => page.id === pageId) ?? secret.pages[0] ?? null
 }
 
+function parseDateMillis(value: string | null | undefined): number | null {
+  if (!value) return null
+  const parsed = new Date(value).getTime()
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 function firstString(...values: unknown[]): string | null {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) return value.trim()
   }
   return null
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
 }
 
 function valueAt(value: unknown, key: string): unknown {

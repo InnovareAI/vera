@@ -495,8 +495,8 @@ function launchForProvider(provider: GoogleProvider): Record<string, unknown> {
   return {
     launch_priority: "wave_1",
     workstream: "YouTube",
-    adapter_state: "Google OAuth connected. Build YouTube channel analytics ingestion next.",
-    next_build: "Add channel selection, video and Shorts performance pulls, metadata drafting, and upload dry runs before live publishing.",
+    adapter_state: "Google OAuth connected. Video-level performance sync is available for posted YouTube URLs.",
+    next_build: "Add channel selection, Shorts classification, traffic source analytics, metadata drafting, and upload dry runs before live publishing.",
     required_setup: ["YouTube channel access", "YouTube Analytics reporting windows", "Quota guardrails", "Upload-scope approval before publishing"],
   }
 }
