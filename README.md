@@ -99,3 +99,11 @@ deno check supabase/functions/<function>/index.ts
 ```
 
 Use focused Deno checks for touched Edge Functions. Some lint debt may exist outside the edited surface, so do not treat an unrelated lint failure as proof that the changed code is broken.
+
+Before onboarding another client workspace, changing provider key policy, or shipping publishing changes, run the production-safe saleability suite:
+
+```bash
+npm run verify:saleability
+```
+
+It verifies chat auth, client media key isolation, project-scoped Unipile publishing, shared research profile scope, publish locking, idempotent posted marking, `content_posts` schema, audience scoping, and retired platform config access.
