@@ -14,7 +14,7 @@ import type { Json } from '../_shared/database.types.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { resolveProjectTextRuntime, streamText, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
 import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
-import { resolveProjectAuditChannels, type AuditChannelProfile } from '../_shared/project-sources.ts'
+import { resolveProjectAuditChannels, type AuditChannelProfile, type SourcePullDepth } from '../_shared/project-sources.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -27,7 +27,7 @@ const UNIPILE_DSN = Deno.env.get('UNIPILE_DSN')
 const UNIPILE_API_KEY = Deno.env.get('UNIPILE_API_KEY')
 const APIFY_API_TOKEN = Deno.env.get('APIFY_API_TOKEN')
 
-const MAX_ITEMS_PER_CHANNEL = 20
+const DEFAULT_ITEMS_PER_CHANNEL = 25
 const MAX_CHARS_PER_ITEM = 4000
 
 type ChannelProfile = AuditChannelProfile
@@ -99,18 +99,25 @@ Deno.serve(async (req) => {
           resolveUnipileResearchConnection(supabase, org_id, { requesterUserId }),
         ])
         const channels = sourceResolution.channels
+        const itemsPerChannel = sourcePullItemsPerChannel(sourceResolution.sourcePullDepth)
         if (!channels?.length) {
           throw new Error('No client source URLs configured. Add the website, LinkedIn, Medium, YouTube, or X source in this client Demand Brain before running the content audit.')
         }
         const unipileAccountId = unipile.ok ? unipile.accountId : null
-        send('channels_loaded', { channels, source: sourceResolution.source, unipile_connected: !!unipileAccountId })
+        send('channels_loaded', {
+          channels,
+          source: sourceResolution.source,
+          source_pull_depth: sourceResolution.sourcePullDepth,
+          items_per_channel: itemsPerChannel,
+          unipile_connected: !!unipileAccountId,
+        })
 
         // 3. Fetch content from each channel
         const results: FetchResult[] = []
         const channelList = channels as ChannelProfile[]
         for (const c of channelList) {
           send('fetching', { channel: c.channel, url: c.url })
-          const r = await fetchChannel(c.channel, c.url, unipileAccountId, channelList)
+          const r = await fetchChannel(c.channel, c.url, unipileAccountId, channelList, itemsPerChannel)
           results.push(r)
           send('fetched', { channel: c.channel, ok: r.ok, reason: r.reason, item_count: r.items.length })
         }
@@ -176,23 +183,24 @@ async function fetchChannel(
   url: string,
   unipileAccountId: string | null,
   channels: ChannelProfile[],
+  itemsPerChannel: number,
 ): Promise<FetchResult> {
   try {
     switch (channel) {
       case 'blog':
       case 'medium':
-        return await fetchRSS(channel, url)
+        return await fetchRSS(channel, url, itemsPerChannel)
       case 'linkedin_personal':
         if (!unipileAccountId) return { channel, url, ok: false, items: [], reason: linkedInResearchReason() }
-        return await fetchLinkedInPosts(channel, url, unipileAccountId)
+        return await fetchLinkedInPosts(channel, url, unipileAccountId, itemsPerChannel)
       case 'linkedin_company':
         if (!unipileAccountId) return { channel, url, ok: false, items: [], reason: linkedInResearchReason() }
-        return await fetchLinkedInCompany(url, unipileAccountId)
+        return await fetchLinkedInCompany(url, unipileAccountId, itemsPerChannel)
       case 'linkedin_events':
         return await fetchGenericHtmlSource(channel, url, 'LinkedIn events need public page access or a connected research adapter; direct public HTML was attempted.')
       case 'linkedin_newsletter':
         if (!unipileAccountId) return { channel, url, ok: false, items: [], reason: linkedInResearchReason() }
-        return await fetchLinkedInNewsletter(url, unipileAccountId, channels)
+        return await fetchLinkedInNewsletter(url, unipileAccountId, channels, itemsPerChannel)
       case 'instagram':
         return await fetchGenericHtmlSource(channel, url, 'Instagram audit needs public page access or the Instagram research adapter; direct public HTML was attempted.')
       case 'youtube':
@@ -203,13 +211,19 @@ async function fetchChannel(
         return await fetchGenericHtmlSource(channel, url, `${labelForChannel(channel)} is manual or read-first for now; direct public HTML was attempted.`)
       case 'twitter':
         if (!APIFY_API_TOKEN) return { channel, url, ok: false, items: [], reason: 'APIFY_API_TOKEN not configured on the server.' }
-        return await fetchTwitterViaApify(url)
+        return await fetchTwitterViaApify(url, itemsPerChannel)
       default:
         return { channel, url, ok: false, items: [], reason: `Unknown channel type: ${channel}` }
     }
   } catch (e) {
     return { channel, url, ok: false, items: [], reason: e instanceof Error ? e.message : String(e) }
   }
+}
+
+function sourcePullItemsPerChannel(depth: SourcePullDepth): number {
+  if (depth === 'light') return 10
+  if (depth === 'deep') return 50
+  return DEFAULT_ITEMS_PER_CHANNEL
 }
 
 function linkedInResearchReason(): string {
@@ -237,7 +251,7 @@ function extractTwitterHandle(url: string): string | null {
 // Apify's apidojo/tweet-scraper — sync API, returns the dataset items directly.
 // 143M+ runs, well-maintained, pay-per-use. Fields: text, fullText, url,
 // createdAt, likeCount, retweetCount, replyCount, viewCount.
-async function fetchTwitterViaApify(urlIn: string): Promise<FetchResult> {
+async function fetchTwitterViaApify(urlIn: string, itemsPerChannel: number): Promise<FetchResult> {
   const handle = extractTwitterHandle(urlIn)
   if (!handle) return { channel: 'twitter', url: urlIn, ok: false, items: [], reason: `Could not parse handle from ${urlIn}` }
 
@@ -247,7 +261,7 @@ async function fetchTwitterViaApify(urlIn: string): Promise<FetchResult> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       twitterHandles: [handle],
-      maxItems: 20,
+      maxItems: itemsPerChannel,
       sort: 'Latest',
       includeReplies: false,
     }),
@@ -264,7 +278,7 @@ async function fetchTwitterViaApify(urlIn: string): Promise<FetchResult> {
 
   return {
     channel: 'twitter', url: urlIn, ok: true,
-    items: tweets.slice(0, MAX_ITEMS_PER_CHANNEL).map(t => ({
+    items: tweets.slice(0, itemsPerChannel).map(t => ({
       channel: 'twitter',
       source_url: (t.url as string) ?? (t.twitterUrl as string) ?? urlIn,
       title: undefined,
@@ -284,7 +298,7 @@ function extractLinkedInId(url: string, channel: string): string | null {
 // Per Unipile docs: GET /api/v1/users/{identifier}/posts works for both users
 // and companies, distinguished by `is_company=true`. The identifier for
 // companies is the numeric id from /api/v1/linkedin/company/{slug}.
-async function fetchLinkedInCompany(url: string, accountId: string): Promise<FetchResult> {
+async function fetchLinkedInCompany(url: string, accountId: string, itemsPerChannel: number): Promise<FetchResult> {
   if (!UNIPILE_DSN || !UNIPILE_API_KEY) {
     return { channel: 'linkedin_company', url, ok: false, items: [], reason: 'UNIPILE_DSN / UNIPILE_API_KEY not configured.' }
   }
@@ -326,12 +340,12 @@ async function fetchLinkedInCompany(url: string, accountId: string): Promise<Fet
   }
 
   // 2) Fetch company posts via the same endpoint as users, with is_company=true
-  const postsUrl = `https://${UNIPILE_DSN}/api/v1/users/${encodeURIComponent(companyId)}/posts?account_id=${encodeURIComponent(accountId)}&is_company=true&limit=20`
+  const postsUrl = `https://${UNIPILE_DSN}/api/v1/users/${encodeURIComponent(companyId)}/posts?account_id=${encodeURIComponent(accountId)}&is_company=true&limit=${itemsPerChannel}`
   const res = await fetch(postsUrl, { headers: { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' } })
   if (res.ok) {
     const data = await res.json() as { items?: Array<Record<string, unknown>>; data?: Array<Record<string, unknown>> }
     const posts = (data.items ?? data.data ?? []) as Array<Record<string, unknown>>
-    for (const p of posts.slice(0, MAX_ITEMS_PER_CHANNEL)) {
+    for (const p of posts.slice(0, itemsPerChannel)) {
       const text =
         (p.text as string) ?? (p.commentary as string) ?? (p.content as string) ??
         (p.body as string) ?? ''
@@ -354,7 +368,7 @@ async function fetchLinkedInCompany(url: string, accountId: string): Promise<Fet
   return { channel: 'linkedin_company', url, ok: true, items }
 }
 
-async function fetchLinkedInPosts(channel: string, url: string, accountId: string): Promise<FetchResult> {
+async function fetchLinkedInPosts(channel: string, url: string, accountId: string, itemsPerChannel: number): Promise<FetchResult> {
   if (!UNIPILE_DSN || !UNIPILE_API_KEY) {
     return { channel, url, ok: false, items: [], reason: 'UNIPILE_DSN / UNIPILE_API_KEY not configured on server.' }
   }
@@ -386,7 +400,7 @@ async function fetchLinkedInPosts(channel: string, url: string, accountId: strin
     providerId = pid
   }
 
-  const postsUrl = `https://${UNIPILE_DSN}/api/v1/users/${encodeURIComponent(providerId)}/posts?account_id=${encodeURIComponent(accountId)}&limit=20`
+  const postsUrl = `https://${UNIPILE_DSN}/api/v1/users/${encodeURIComponent(providerId)}/posts?account_id=${encodeURIComponent(accountId)}&limit=${itemsPerChannel}`
   const res = await fetch(postsUrl, { headers: { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' } })
   if (!res.ok) {
     const errText = await res.text()
@@ -398,7 +412,7 @@ async function fetchLinkedInPosts(channel: string, url: string, accountId: strin
 
   return {
     channel, url, ok: true,
-    items: posts.slice(0, MAX_ITEMS_PER_CHANNEL).map(p => {
+    items: posts.slice(0, itemsPerChannel).map(p => {
       const text =
         (p.text as string) ?? (p.commentary as string) ?? (p.content as string) ??
         (p.body as string) ?? (typeof p.share_commentary === 'string' ? p.share_commentary as string : '') ?? ''
@@ -433,6 +447,7 @@ async function fetchLinkedInNewsletter(
   url: string,
   accountId: string,
   channels: ChannelProfile[],
+  itemsPerChannel: number,
 ): Promise<FetchResult> {
   if (!UNIPILE_DSN || !UNIPILE_API_KEY) {
     return { channel: 'linkedin_newsletter', url, ok: false, items: [], reason: 'UNIPILE_DSN / UNIPILE_API_KEY not configured on server.' }
@@ -492,8 +507,10 @@ async function fetchLinkedInNewsletter(
     }
   }
 
-  // Fetch a wider slice than posts since articles are rare in the feed
-  const postsUrl = `https://${UNIPILE_DSN}/api/v1/users/${encodeURIComponent(providerId)}/posts?account_id=${encodeURIComponent(accountId)}&limit=50${isCompany ? '&is_company=true' : ''}`
+  // Fetch a slightly wider slice than the requested output because articles can
+  // be sparse in a normal LinkedIn feed, then cap the returned items below.
+  const newsletterFetchLimit = Math.min(50, Math.max(itemsPerChannel, 20))
+  const postsUrl = `https://${UNIPILE_DSN}/api/v1/users/${encodeURIComponent(providerId)}/posts?account_id=${encodeURIComponent(accountId)}&limit=${newsletterFetchLimit}${isCompany ? '&is_company=true' : ''}`
   const res = await fetch(postsUrl, { headers: { 'X-API-KEY': UNIPILE_API_KEY, 'Accept': 'application/json' } })
   if (!res.ok) {
     const errText = await res.text()
@@ -531,7 +548,7 @@ async function fetchLinkedInNewsletter(
   }
 
   // Build items — combine share commentary + article title + body excerpt.
-  const items: FetchedItem[] = articles.slice(0, MAX_ITEMS_PER_CHANNEL).map(p => {
+  const items: FetchedItem[] = articles.slice(0, itemsPerChannel).map(p => {
     const commentary =
       (p.text as string) ?? (p.commentary as string) ?? (p.content as string) ??
       (p.body as string) ?? (typeof p.share_commentary === 'string' ? p.share_commentary as string : '') ?? ''
@@ -567,7 +584,7 @@ async function fetchLinkedInNewsletter(
   return { channel: 'linkedin_newsletter', url, ok: true, items }
 }
 
-async function fetchRSS(channel: string, urlIn: string): Promise<FetchResult> {
+async function fetchRSS(channel: string, urlIn: string, itemsPerChannel: number): Promise<FetchResult> {
   let url = normaliseFeedUrl(channel, urlIn)
   const headers = { 'User-Agent': 'InnovareAI-Auditor/0.1 (+content-pipeline)' }
 
@@ -586,13 +603,13 @@ async function fetchRSS(channel: string, urlIn: string): Promise<FetchResult> {
     } else if (channel === 'blog') {
       // No RSS feed. Fall back to HTML index scrape for blogs (covers Next.js,
       // Webflow, and custom marketing-site blogs that don't ship a feed).
-      return await fetchBlogHtml(urlIn, body)
+      return await fetchBlogHtml(urlIn, body, itemsPerChannel)
     } else {
       return { channel, url: urlIn, ok: false, items: [], reason: 'URL returned HTML and no RSS/Atom <link rel="alternate"> found. Try pasting the feed URL directly.' }
     }
   }
 
-  const items = parseRSS(body).slice(0, MAX_ITEMS_PER_CHANNEL)
+  const items = parseRSS(body).slice(0, itemsPerChannel)
   if (!items.length) return { channel, url: urlIn, ok: false, items: [], reason: 'No items in feed' }
   return {
     channel, url: urlIn, ok: true,
@@ -609,14 +626,14 @@ async function fetchRSS(channel: string, urlIn: string): Promise<FetchResult> {
 // HTML-scrape fallback for blogs without RSS. Reads the index page, finds
 // links that look like blog posts (same origin, path heuristics, link text),
 // fetches the top N in parallel, and extracts each post's main content.
-async function fetchBlogHtml(blogUrl: string, indexHtml: string): Promise<FetchResult> {
+async function fetchBlogHtml(blogUrl: string, indexHtml: string, itemsPerChannel: number): Promise<FetchResult> {
   const base = new URL(blogUrl)
   const candidates = extractBlogPostLinks(indexHtml, base)
   if (!candidates.length) {
     return { channel: 'blog', url: blogUrl, ok: false, items: [], reason: 'No RSS feed and could not identify blog-post links on the index HTML.' }
   }
 
-  const top = candidates.slice(0, 10)
+  const top = candidates.slice(0, itemsPerChannel)
   const headers = { 'User-Agent': 'InnovareAI-Auditor/0.1 (+content-pipeline)' }
   const posts = await Promise.all(top.map(async (c) => {
     try {

@@ -15,6 +15,7 @@ export type ProjectSourceResolution = {
   }
   channels: AuditChannelProfile[]
   source: "project_brain" | "legacy_org" | "none"
+  sourcePullDepth: SourcePullDepth
 }
 
 const BUSINESS_CONTEXT_START = "[[VERA_BUSINESS_CONTEXT]]"
@@ -33,9 +34,11 @@ const LABEL_TO_KEY: Record<string, string> = {
   "reddit": "reddit",
   "facebook page": "facebook",
   "x profile": "x",
+  "source pull depth": "sourcePullDepth",
 }
 
 type ProjectBusinessContext = Record<string, string>
+export type SourcePullDepth = "light" | "standard" | "deep"
 
 export async function resolveProjectAuditChannels(
   supabase: AdminClient,
@@ -55,9 +58,10 @@ export async function resolveProjectAuditChannels(
   if (projectRow.org_id !== orgId) throw new Error("Project does not belong to this workspace")
 
   const context = parseProjectBusinessContext(projectRow.instructions)
+  const sourcePullDepth = normalizeSourcePullDepth(context.sourcePullDepth)
   const projectChannels = projectChannelsFromBusinessContext(context)
   if (projectChannels.length) {
-    return { project: projectRow, channels: projectChannels, source: "project_brain" }
+    return { project: projectRow, channels: projectChannels, source: "project_brain", sourcePullDepth }
   }
 
   // Legacy org-wide channels are only safe for the default workspace project.
@@ -65,11 +69,11 @@ export async function resolveProjectAuditChannels(
   if (projectRow.is_default) {
     const legacyChannels = await loadLegacyOrgChannels(supabase, orgId)
     if (legacyChannels.length) {
-      return { project: projectRow, channels: legacyChannels, source: "legacy_org" }
+      return { project: projectRow, channels: legacyChannels, source: "legacy_org", sourcePullDepth }
     }
   }
 
-  return { project: projectRow, channels: [], source: "none" }
+  return { project: projectRow, channels: [], source: "none", sourcePullDepth }
 }
 
 export function parseProjectBusinessContext(raw: string | null | undefined): ProjectBusinessContext {
@@ -147,6 +151,11 @@ function dedupeChannels(channels: AuditChannelProfile[]): AuditChannelProfile[] 
 
 function cleanString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined
+}
+
+function normalizeSourcePullDepth(value: string | undefined): SourcePullDepth {
+  if (value === "light" || value === "deep" || value === "standard") return value
+  return "standard"
 }
 
 function decodeBusinessContextValue(value: string): string {
