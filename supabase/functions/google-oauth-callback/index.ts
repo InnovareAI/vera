@@ -476,8 +476,8 @@ function launchForProvider(provider: GoogleProvider): Record<string, unknown> {
     return {
       launch_priority: "wave_1",
       workstream: "Search & analytics",
-      adapter_state: "Google OAuth connected. Build daily Search Console ingestion next.",
-      next_build: "Add scheduled Search Analytics pulls for queries, pages, countries, devices, and indexing checks.",
+      adapter_state: "Google OAuth connected. Search performance sync is available for the selected site property.",
+      next_build: "Add scheduled Search Analytics pulls for queries, countries, devices, indexing checks, and content opportunity mapping.",
       required_setup: ["Verified site property", "Daily ingestion schedule", "Content opportunity mapping"],
     }
   }
@@ -486,8 +486,8 @@ function launchForProvider(provider: GoogleProvider): Record<string, unknown> {
     return {
       launch_priority: "wave_1",
       workstream: "Search & analytics",
-      adapter_state: "Google OAuth connected. Build GA4 report ingestion next.",
-      next_build: "Add GA4 property selection, traffic summaries, channel grouping, and page performance pulls.",
+      adapter_state: "Google OAuth connected. GA4 traffic sync is available for the selected property.",
+      next_build: "Add GA4 property selection, landing-page breakdowns, channel grouping, assisted conversions, and traffic quality scoring.",
       required_setup: ["GA4 property selection", "Reporting date ranges", "Quota guardrails"],
     }
   }

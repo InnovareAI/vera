@@ -110,6 +110,8 @@ type SyncReport = {
   ok?: boolean
   checked_posts?: number
   synced_posts?: number
+  checked_sources?: number
+  synced_sources?: number
   metric_count?: number
   integration_health?: Array<{
     integration_id: string
@@ -142,6 +144,29 @@ type ManualMetricDraft = {
 }
 
 type ManualMetricMessage = { tone: 'danger' | 'success'; text: string } | null
+
+type SourceStats = {
+  search: {
+    clicks: number
+    impressions: number
+    ctr: number | null
+    avgPosition: number | null
+    site: string | null
+    lastSync: string | null
+  }
+  analytics: {
+    sessions: number
+    users: number
+    pageViews: number
+    engagedSessions: number
+    engagementRate: number | null
+    events: number
+    property: string | null
+    lastSync: string | null
+  }
+  hasSearch: boolean
+  hasAnalytics: boolean
+}
 
 const MANUAL_METRIC_FIELDS: Array<{ key: ManualMetricKey; label: string; helper: string }> = [
   { key: 'views', label: 'Views', helper: 'Impressions, views, or reads' },
@@ -320,7 +345,7 @@ export default function Measure() {
           : resolvedCount > 0
             ? ` ${resolvedCount} integration warning${resolvedCount === 1 ? '' : 's'} resolved.`
             : ''
-        setSyncMessage(`Synced ${report.synced_posts ?? 0} posts and ${report.metric_count ?? 0} metrics from ${report.checked_posts ?? 0} checked posts.${healthSuffix}`)
+        setSyncMessage(`Synced ${report.synced_posts ?? 0} posts, ${report.synced_sources ?? 0} source${(report.synced_sources ?? 0) === 1 ? '' : 's'}, and ${report.metric_count ?? 0} metrics from ${report.checked_posts ?? 0} checked posts.${healthSuffix}`)
         await loadData(activeProject.id)
       }
     } catch (syncError) {
@@ -364,6 +389,7 @@ export default function Measure() {
 
   const stats = useMemo(() => buildStats(filteredRows), [filteredRows])
   const previousStats = useMemo(() => buildStats(previousRows), [previousRows])
+  const sourceStats = useMemo(() => buildSourceStats(snapshots, currentWindow), [snapshots, currentWindow])
   const statusCounts = useMemo(() => buildStatusCounts(filteredRows), [filteredRows])
   const platformPerformance = useMemo(() => buildPlatformPerformance(filteredRows), [filteredRows])
   const campaignPerformance = useMemo(() => buildCampaignPerformance(campaigns, filteredRows), [campaigns, filteredRows])
@@ -545,6 +571,13 @@ export default function Measure() {
           {showIntegrations && (
             <IntegrationHealthPanel providers={providerReadiness} />
           )}
+
+          <section style={{ marginTop: space[8] }}>
+            <SectionLabel style={{ marginBottom: space[3] }} action="Client site signals">
+              Search and analytics
+            </SectionLabel>
+            <SearchAnalyticsPanel stats={sourceStats} />
+          </section>
 
           <section style={{ marginTop: space[8] }}>
             <SectionLabel style={{ marginBottom: space[3] }} action="Manual channels and API fallback">
@@ -872,6 +905,71 @@ function IntegrationHealthPanel({ providers }: { providers: ProviderReadiness[] 
           </div>
         )
       })}
+    </div>
+  )
+}
+
+function SearchAnalyticsPanel({ stats }: { stats: SourceStats }) {
+  if (!stats.hasSearch && !stats.hasAnalytics) {
+    return <EmptyPanel icon={Search} text="Connect Search Console or GA4, then run metric sync to pull owned-site traffic signals." />
+  }
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: space[3] }}>
+      <SourceMetricTile
+        icon={Search}
+        title="Search clicks"
+        value={stats.hasSearch ? formatNumber(stats.search.clicks) : 'No data'}
+        helper={stats.search.site ? `${stats.search.site} - ${stats.search.lastSync ? relativeDate(stats.search.lastSync) : 'not synced'}` : 'Search Console not synced'}
+        tone={color.info}
+      />
+      <SourceMetricTile
+        icon={Eye}
+        title="Search impressions"
+        value={stats.hasSearch ? formatNumber(stats.search.impressions) : 'No data'}
+        helper={stats.hasSearch ? `${formatPercent(stats.search.ctr)} CTR - avg position ${formatDecimal(stats.search.avgPosition, 1)}` : 'Waiting for Search Console'}
+        tone={color.accent}
+      />
+      <SourceMetricTile
+        icon={Zap}
+        title="GA4 sessions"
+        value={stats.hasAnalytics ? formatNumber(stats.analytics.sessions) : 'No data'}
+        helper={stats.analytics.property ? `${stats.analytics.property} - ${stats.analytics.lastSync ? relativeDate(stats.analytics.lastSync) : 'not synced'}` : 'GA4 not synced'}
+        tone={color.success}
+      />
+      <SourceMetricTile
+        icon={BarChart3}
+        title="Engaged traffic"
+        value={stats.hasAnalytics ? formatNumber(stats.analytics.engagedSessions) : 'No data'}
+        helper={stats.hasAnalytics ? `${formatPercent(stats.analytics.engagementRate)} engagement - ${formatNumber(stats.analytics.pageViews)} page views` : 'Waiting for GA4'}
+        tone={color.warn}
+      />
+    </div>
+  )
+}
+
+function SourceMetricTile({
+  icon: Icon,
+  title,
+  value,
+  helper,
+  tone,
+}: {
+  icon: ElementType
+  title: string
+  value: string
+  helper: string
+  tone: string
+}) {
+  return (
+    <div style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, padding: space[5], minHeight: 132 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3] }}>
+        <Icon size={16} style={{ color: tone }} />
+        <span style={{ color: color.ghost, fontSize: t.size.micro }}>last 28d</span>
+      </div>
+      <div style={{ fontSize: t.size.h2, fontWeight: t.weight.semibold, color: color.ink, lineHeight: 1.1, marginTop: space[3] }}>{value}</div>
+      <div style={{ fontSize: t.size.cap, color: color.ghost, marginTop: space[2] }}>{title}</div>
+      <p style={{ fontSize: t.size.micro, color: color.ghost, margin: `${space[4]} 0 0`, lineHeight: 1.4 }}>{helper}</p>
     </div>
   )
 }
@@ -1552,6 +1650,45 @@ function buildStats(rows: PostRowData[]) {
   }
 }
 
+function buildSourceStats(snapshots: ContentMetricSnapshot[], windowValue: ReturnType<typeof rangeWindow>): SourceStats {
+  const latest = latestSourceMetricMap(snapshots, windowValue)
+  const searchMetric = (name: string) => latest.get(`google_search_console:search_site:${name}`)
+  const analyticsMetric = (name: string) => latest.get(`google_analytics_4:analytics_property:${name}`)
+  const searchClicks = searchMetric('clicks')
+  const searchImpressions = searchMetric('impressions')
+  const analyticsSessions = analyticsMetric('sessions')
+  const analyticsUsers = analyticsMetric('users')
+
+  return {
+    search: {
+      clicks: searchClicks?.metric_value ?? 0,
+      impressions: searchImpressions?.metric_value ?? 0,
+      ctr: searchMetric('ctr')?.metric_value ?? null,
+      avgPosition: searchMetric('avg_position')?.metric_value ?? null,
+      site: searchClicks?.provider_object_id ?? searchImpressions?.provider_object_id ?? null,
+      lastSync: latestDate([searchClicks?.pulled_at, searchImpressions?.pulled_at, searchMetric('ctr')?.pulled_at, searchMetric('avg_position')?.pulled_at]),
+    },
+    analytics: {
+      sessions: analyticsSessions?.metric_value ?? 0,
+      users: analyticsUsers?.metric_value ?? 0,
+      pageViews: analyticsMetric('page_views')?.metric_value ?? 0,
+      engagedSessions: analyticsMetric('engaged_sessions')?.metric_value ?? 0,
+      engagementRate: analyticsMetric('engagement_rate')?.metric_value ?? null,
+      events: analyticsMetric('events')?.metric_value ?? 0,
+      property: analyticsSessions?.provider_object_id ?? analyticsUsers?.provider_object_id ?? null,
+      lastSync: latestDate([
+        analyticsSessions?.pulled_at,
+        analyticsUsers?.pulled_at,
+        analyticsMetric('page_views')?.pulled_at,
+        analyticsMetric('engaged_sessions')?.pulled_at,
+        analyticsMetric('engagement_rate')?.pulled_at,
+      ]),
+    },
+    hasSearch: !!(searchClicks || searchImpressions),
+    hasAnalytics: !!(analyticsSessions || analyticsUsers),
+  }
+}
+
 function buildStatusCounts(rows: PostRowData[]) {
   return {
     pending: rows.filter(row => statusKind(row.status) === 'pending').length,
@@ -1838,6 +1975,22 @@ function latestMetricMap(snapshots: ContentMetricSnapshot[]) {
   return map
 }
 
+function latestSourceMetricMap(snapshots: ContentMetricSnapshot[], windowValue: ReturnType<typeof rangeWindow>) {
+  const map = new Map<string, ContentMetricSnapshot>()
+  for (const snapshot of snapshots) {
+    if (snapshot.post_id) continue
+    const time = new Date(snapshot.pulled_at).getTime()
+    if (windowValue.start && time < windowValue.start.getTime()) continue
+    if (windowValue.end && time > windowValue.end.getTime()) continue
+    const key = `${snapshot.provider}:${snapshot.object_type}:${snapshot.metric_name}`
+    const current = map.get(key)
+    if (!current || new Date(snapshot.pulled_at).getTime() > new Date(current.pulled_at).getTime()) {
+      map.set(key, snapshot)
+    }
+  }
+  return map
+}
+
 function normalizeSnapshots(rows: ContentMetricSnapshot[]) {
   return rows.map(row => ({
     ...row,
@@ -1996,6 +2149,16 @@ function formatNumber(value: number) {
 function formatRate(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return 'No data'
   return `${(value * 100).toFixed(value < 0.1 ? 1 : 0)}%`
+}
+
+function formatPercent(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return 'No data'
+  return `${(value * 100).toFixed(value < 0.1 ? 1 : 0)}%`
+}
+
+function formatDecimal(value: number | null | undefined, digits: number) {
+  if (value == null || !Number.isFinite(value)) return 'No data'
+  return value.toFixed(digits)
 }
 
 function formatDelta(current: number | null | undefined, previous: number | null | undefined, rate?: boolean) {

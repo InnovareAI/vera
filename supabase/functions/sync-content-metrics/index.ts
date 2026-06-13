@@ -91,6 +91,17 @@ type PostSyncResult = {
   detail: string
 }
 
+type SourceSyncResult = {
+  object_id: string
+  object_type: string
+  provider: string
+  status: "synced" | "skipped" | "error"
+  metrics: number
+  detail: string
+}
+
+type MetricSyncResult = PostSyncResult | SourceSyncResult
+
 type ObservationSyncResult = "opened" | "already_open" | "resolved"
 
 type IntegrationMetricHealthResult = {
@@ -128,6 +139,30 @@ type GoogleTokenResponse = {
   token_type?: string
   error?: string
   error_description?: string
+}
+
+type SearchConsoleRow = {
+  keys?: string[]
+  clicks?: number
+  impressions?: number
+  ctr?: number
+  position?: number
+}
+
+type SearchConsoleResponse = {
+  rows?: SearchConsoleRow[]
+  responseAggregationType?: string
+  metadata?: Record<string, unknown>
+}
+
+type Ga4ReportResponse = {
+  rows?: Array<{
+    dimensionValues?: Array<{ value?: string }>
+    metricValues?: Array<{ value?: string }>
+  }>
+  metricHeaders?: Array<{ name?: string; type?: string }>
+  dimensionHeaders?: Array<{ name?: string }>
+  rowCount?: number
 }
 
 Deno.serve(async (req) => {
@@ -244,12 +279,36 @@ Deno.serve(async (req) => {
     }
   }
 
+  const sourceResults: SourceSyncResult[] = []
+  if (!body.post_id) {
+    for (const integration of integrationRows) {
+      if (integration.provider !== "google_search_console" && integration.provider !== "google_analytics_4") continue
+      try {
+        if (integration.provider === "google_search_console") {
+          sourceResults.push(await syncSearchConsoleSource(supabase, project as ProjectRow, integration))
+        } else {
+          sourceResults.push(await syncGa4Source(supabase, project as ProjectRow, integration))
+        }
+      } catch (error) {
+        sourceResults.push({
+          object_id: firstString(integration.external_ref?.primary_ref, integration.config?.primary_ref, integration.id) ?? integration.id,
+          object_type: integration.provider === "google_search_console" ? "search_site" : "analytics_property",
+          provider: integration.provider,
+          status: "error",
+          metrics: 0,
+          detail: error instanceof Error ? error.message : "Source metric sync failed",
+        })
+      }
+    }
+  }
+
   const synced = results.filter(result => result.status === "synced").length
-  const metricCount = results.reduce((sum, result) => sum + result.metrics, 0)
+  const syncedSources = sourceResults.filter(result => result.status === "synced").length
+  const metricCount = [...results, ...sourceResults].reduce((sum, result) => sum + result.metrics, 0)
   const integrationHealth = await syncIntegrationMetricHealth(
     supabase,
     integrationRows,
-    results,
+    [...results, ...sourceResults],
     new Date().toISOString(),
   )
 
@@ -258,9 +317,12 @@ Deno.serve(async (req) => {
     project_id: project.id,
     checked_posts: candidatePosts.length,
     synced_posts: synced,
+    checked_sources: sourceResults.length,
+    synced_sources: syncedSources,
     metric_count: metricCount,
     integration_health: integrationHealth,
     results,
+    source_results: sourceResults,
   })
 })
 
@@ -486,6 +548,119 @@ async function syncYouTubePost(
   return synced(post, "youtube", rows.length, "YouTube video metrics synced.")
 }
 
+async function syncSearchConsoleSource(
+  supabase: SupabaseAdminClient,
+  project: ProjectRow,
+  integration: IntegrationRow,
+): Promise<SourceSyncResult> {
+  if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length < 32) return sourceSkipped(integration, "google_search_console", "search_site", "Secret encryption key is not configured.")
+  const secret = await loadGoogleSecret(supabase, project.id, integration.credential_ref)
+  if (!secret) return sourceSkipped(integration, "google_search_console", "search_site", "Google OAuth credential is missing.")
+
+  const accessToken = await resolveGoogleAccessToken(secret)
+  if (!accessToken) return sourceSkipped(integration, "google_search_console", "search_site", "Google access token is missing.")
+
+  const siteUrl = firstString(
+    integration.external_ref?.primary_ref,
+    integration.config?.primary_ref,
+    firstConfigSiteUrl(integration.config?.sites),
+  )
+  if (!siteUrl) return sourceSkipped(integration, "google_search_console", "search_site", "Search Console site property is missing.")
+
+  const range = completedDateRange(28)
+  const [dailyResult, pageResult] = await Promise.all([
+    searchConsoleQuery(siteUrl, accessToken, {
+      startDate: range.startDate,
+      endDate: range.endDate,
+      dimensions: ["date"],
+      rowLimit: 25000,
+    }),
+    searchConsoleQuery(siteUrl, accessToken, {
+      startDate: range.startDate,
+      endDate: range.endDate,
+      dimensions: ["page"],
+      rowLimit: 10,
+    }).catch(error => ({ error: error instanceof Error ? error.message : String(error) })),
+  ])
+
+  const rows = Array.isArray(dailyResult.rows) ? dailyResult.rows : []
+  const topPages = Array.isArray(valueAt(pageResult, "rows")) ? valueAt(pageResult, "rows") as SearchConsoleRow[] : []
+  const clicks = sumRows(rows, "clicks")
+  const impressions = sumRows(rows, "impressions")
+  const ctr = impressions > 0 ? clicks / impressions : weightedAverage(rows, "ctr", "impressions")
+  const position = weightedAverage(rows, "position", "impressions")
+  const pulledAt = new Date().toISOString()
+  const metricTime = `${range.endDate}T00:00:00.000Z`
+  const raw = {
+    source: "google_search_console",
+    start_date: range.startDate,
+    end_date: range.endDate,
+    response_aggregation_type: dailyResult.responseAggregationType ?? null,
+    daily_rows: rows,
+    top_pages: topPages,
+  }
+  const metricRows = [
+    sourceMetric(project, "google_search_console", siteUrl, siteUrl, "search_site", "clicks", clicks, "last_28d", metricTime, pulledAt, raw),
+    sourceMetric(project, "google_search_console", siteUrl, siteUrl, "search_site", "impressions", impressions, "last_28d", metricTime, pulledAt, raw),
+    sourceMetric(project, "google_search_console", siteUrl, siteUrl, "search_site", "ctr", ctr, "last_28d", metricTime, pulledAt, raw),
+    sourceMetric(project, "google_search_console", siteUrl, siteUrl, "search_site", "avg_position", position, "last_28d", metricTime, pulledAt, raw),
+  ].filter((row): row is MetricRow => !!row)
+
+  if (!metricRows.length) return sourceSkipped(integration, "google_search_console", "search_site", "Search Console returned no search metrics.")
+  await insertMetricRows(supabase, metricRows)
+  return sourceSynced(siteUrl, "search_site", "google_search_console", metricRows.length, "Search Console metrics synced.")
+}
+
+async function syncGa4Source(
+  supabase: SupabaseAdminClient,
+  project: ProjectRow,
+  integration: IntegrationRow,
+): Promise<SourceSyncResult> {
+  if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length < 32) return sourceSkipped(integration, "google_analytics_4", "analytics_property", "Secret encryption key is not configured.")
+  const secret = await loadGoogleSecret(supabase, project.id, integration.credential_ref)
+  if (!secret) return sourceSkipped(integration, "google_analytics_4", "analytics_property", "Google OAuth credential is missing.")
+
+  const accessToken = await resolveGoogleAccessToken(secret)
+  if (!accessToken) return sourceSkipped(integration, "google_analytics_4", "analytics_property", "Google access token is missing.")
+
+  const property = normalizeGa4Property(firstString(
+    integration.external_ref?.primary_ref,
+    integration.config?.primary_ref,
+    firstConfigGa4Property(integration.config?.properties),
+  ))
+  if (!property) return sourceSkipped(integration, "google_analytics_4", "analytics_property", "GA4 property is missing.")
+
+  const range = completedDateRange(28)
+  const metricNames = ["sessions", "activeUsers", "screenPageViews", "engagedSessions", "engagementRate", "eventCount"]
+  const report = await ga4RunReport(property, accessToken, {
+    dateRanges: [{ startDate: range.startDate, endDate: range.endDate }],
+    metrics: metricNames.map(name => ({ name })),
+    keepEmptyRows: false,
+  })
+  const values = ga4MetricMap(report, metricNames)
+  const pulledAt = new Date().toISOString()
+  const metricTime = `${range.endDate}T00:00:00.000Z`
+  const raw = {
+    source: "google_analytics_4",
+    property,
+    start_date: range.startDate,
+    end_date: range.endDate,
+    report,
+  }
+  const metricRows = [
+    sourceMetric(project, "google_analytics_4", property, property, "analytics_property", "sessions", values.sessions, "last_28d", metricTime, pulledAt, raw),
+    sourceMetric(project, "google_analytics_4", property, property, "analytics_property", "users", values.activeUsers, "last_28d", metricTime, pulledAt, raw),
+    sourceMetric(project, "google_analytics_4", property, property, "analytics_property", "page_views", values.screenPageViews, "last_28d", metricTime, pulledAt, raw),
+    sourceMetric(project, "google_analytics_4", property, property, "analytics_property", "engaged_sessions", values.engagedSessions, "last_28d", metricTime, pulledAt, raw),
+    sourceMetric(project, "google_analytics_4", property, property, "analytics_property", "engagement_rate", values.engagementRate, "last_28d", metricTime, pulledAt, raw),
+    sourceMetric(project, "google_analytics_4", property, property, "analytics_property", "events", values.eventCount, "last_28d", metricTime, pulledAt, raw),
+  ].filter((row): row is MetricRow => !!row)
+
+  if (!metricRows.length) return sourceSkipped(integration, "google_analytics_4", "analytics_property", "GA4 returned no traffic metrics.")
+  await insertMetricRows(supabase, metricRows)
+  return sourceSynced(property, "analytics_property", "google_analytics_4", metricRows.length, "GA4 traffic metrics synced.")
+}
+
 async function insertMetricRows(supabase: SupabaseAdminClient, rows: MetricRow[]) {
   const { error } = await supabase.from("content_metric_snapshots").insert(rows)
   if (error) throw new Error(error.message)
@@ -522,6 +697,38 @@ function metric(
     metric_value: value,
     metric_period: "lifetime",
     metric_time: null,
+    pulled_at: pulledAt,
+    raw: sanitizeRaw(raw),
+  }
+}
+
+function sourceMetric(
+  project: ProjectRow,
+  provider: string,
+  accountId: string | null | undefined,
+  objectId: string | null | undefined,
+  objectType: string,
+  name: string,
+  rawValue: unknown,
+  metricPeriod: string,
+  metricTime: string | null,
+  pulledAt: string,
+  raw: unknown,
+): MetricRow | null {
+  const value = toNumber(rawValue)
+  if (value == null) return null
+  return {
+    org_id: project.org_id,
+    project_id: project.id,
+    post_id: null,
+    provider,
+    provider_account_id: accountId ?? null,
+    provider_object_id: objectId ?? null,
+    object_type: objectType,
+    metric_name: name,
+    metric_value: value,
+    metric_period: metricPeriod,
+    metric_time: metricTime,
     pulled_at: pulledAt,
     raw: sanitizeRaw(raw),
   }
@@ -692,6 +899,37 @@ async function youtubeGet(path: string, query: Record<string, string>, accessTok
   return body
 }
 
+async function searchConsoleQuery(siteUrl: string, accessToken: string, body: Record<string, unknown>): Promise<SearchConsoleResponse> {
+  const encodedSite = encodeURIComponent(siteUrl)
+  const response = await fetch(`https://www.googleapis.com/webmasters/v3/sites/${encodedSite}/searchAnalytics/query`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  })
+  const json = await response.json().catch(async () => ({ error: await response.text() }))
+  if (!response.ok) throw new Error(`Search Console HTTP ${response.status}: ${compactError(json)}`)
+  return json as SearchConsoleResponse
+}
+
+async function ga4RunReport(property: string, accessToken: string, body: Record<string, unknown>): Promise<Ga4ReportResponse> {
+  const response = await fetch(`https://analyticsdata.googleapis.com/v1beta/${property}:runReport`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  })
+  const json = await response.json().catch(async () => ({ error: await response.text() }))
+  if (!response.ok) throw new Error(`GA4 HTTP ${response.status}: ${compactError(json)}`)
+  return json as Ga4ReportResponse
+}
+
 async function canManageProject(
   supabase: SupabaseAdminClient,
   userId: string,
@@ -720,10 +958,10 @@ async function canManageProject(
 async function syncIntegrationMetricHealth(
   supabase: SupabaseAdminClient,
   integrations: IntegrationRow[],
-  results: PostSyncResult[],
+  results: MetricSyncResult[],
   syncedAt: string,
 ): Promise<IntegrationMetricHealthResult[]> {
-  const resultsByProvider = new Map<string, PostSyncResult[]>()
+  const resultsByProvider = new Map<string, MetricSyncResult[]>()
   for (const result of results) {
     const list = resultsByProvider.get(result.provider) ?? []
     list.push(result)
@@ -783,7 +1021,7 @@ async function syncIntegrationMetricHealth(
   return updates
 }
 
-function firstConnectorMetricIssue(results: PostSyncResult[]): PostSyncResult | null {
+function firstConnectorMetricIssue(results: MetricSyncResult[]): MetricSyncResult | null {
   for (const result of results) {
     if (isPostReferenceMetricIssue(result.detail)) continue
     if (result.status === "error") return result
@@ -801,7 +1039,7 @@ function isStaleMetricIssue(detail: string) {
 }
 
 function isPostReferenceMetricIssue(detail: string) {
-  return /(provider post id|activity url|facebook page post id|instagram media id|youtube video id|returned the post but no counters|returned the media but no counters|returned no video|returned the video but no counters|adapter is not built|provider is not connected)/i.test(detail)
+  return /(provider post id|activity url|facebook page post id|instagram media id|youtube video id|search console site property|ga4 property|returned the post but no counters|returned the media but no counters|returned no video|returned the video but no counters|returned no search metrics|returned no traffic metrics|adapter is not built|provider is not connected)/i.test(detail)
 }
 
 async function syncConnectorHealthObservation(
@@ -991,6 +1229,75 @@ function recordValue(value: unknown): Record<string, unknown> {
     : {}
 }
 
+function firstConfigSiteUrl(value: unknown): string | null {
+  if (!Array.isArray(value)) return null
+  for (const item of value) {
+    const siteUrl = firstString(valueAt(item, "siteUrl"), valueAt(item, "url"))
+    if (siteUrl) return siteUrl
+  }
+  return null
+}
+
+function firstConfigGa4Property(value: unknown): string | null {
+  if (!Array.isArray(value)) return null
+  for (const item of value) {
+    const property = firstString(valueAt(item, "property"), valueAt(item, "id"))
+    if (property) return property
+  }
+  return null
+}
+
+function normalizeGa4Property(value: string | null): string | null {
+  if (!value) return null
+  const trimmed = value.trim()
+  if (/^properties\/\d+$/i.test(trimmed)) return trimmed
+  if (/^\d+$/.test(trimmed)) return `properties/${trimmed}`
+  return null
+}
+
+function completedDateRange(days: number) {
+  const end = new Date()
+  end.setUTCDate(end.getUTCDate() - 1)
+  const start = new Date(end)
+  start.setUTCDate(start.getUTCDate() - Math.max(1, days) + 1)
+  return {
+    startDate: dateOnly(start),
+    endDate: dateOnly(end),
+  }
+}
+
+function dateOnly(date: Date) {
+  return date.toISOString().slice(0, 10)
+}
+
+function sumRows(rows: SearchConsoleRow[], key: "clicks" | "impressions") {
+  return rows.reduce((sum, row) => sum + (toNumber(row[key]) ?? 0), 0)
+}
+
+function weightedAverage(rows: SearchConsoleRow[], valueKey: "ctr" | "position", weightKey: "impressions") {
+  let totalWeight = 0
+  let weighted = 0
+  for (const row of rows) {
+    const value = toNumber(row[valueKey])
+    const weight = toNumber(row[weightKey]) ?? 0
+    if (value == null || weight <= 0) continue
+    weighted += value * weight
+    totalWeight += weight
+  }
+  if (totalWeight > 0) return weighted / totalWeight
+  const values = rows.map(row => toNumber(row[valueKey])).filter((value): value is number => value != null)
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null
+}
+
+function ga4MetricMap(report: Ga4ReportResponse, metricNames: string[]): Record<string, number | null> {
+  const firstRow = report.rows?.[0]
+  const values: Record<string, number | null> = {}
+  for (const [index, name] of metricNames.entries()) {
+    values[name] = toNumber(firstRow?.metricValues?.[index]?.value)
+  }
+  return values
+}
+
 function valueAt(value: unknown, key: string): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
   return (value as Record<string, unknown>)[key]
@@ -1044,6 +1351,28 @@ function skipped(post: ContentPostRow, provider: string, detail: string): PostSy
 
 function synced(post: ContentPostRow, provider: string, metrics: number, detail: string): PostSyncResult {
   return { post_id: post.id, provider, status: "synced", metrics, detail }
+}
+
+function sourceSkipped(integration: IntegrationRow, provider: string, objectType: string, detail: string): SourceSyncResult {
+  return {
+    object_id: firstString(integration.external_ref?.primary_ref, integration.config?.primary_ref, integration.id) ?? integration.id,
+    object_type: objectType,
+    provider,
+    status: "skipped",
+    metrics: 0,
+    detail,
+  }
+}
+
+function sourceSynced(objectId: string, objectType: string, provider: string, metrics: number, detail: string): SourceSyncResult {
+  return {
+    object_id: objectId,
+    object_type: objectType,
+    provider,
+    status: "synced",
+    metrics,
+    detail,
+  }
 }
 
 function json(data: unknown, status = 200) {

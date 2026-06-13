@@ -259,6 +259,7 @@ Current state:
 - Manual metrics capture views, reach, comments, shares, saves, clicks, qualified traffic, buyer questions, and meeting requests as normalized `content_metric_snapshots`.
 - Learning now turns synced and manual metrics into demand insights, next experiment prompts, SAM handoff candidates, and buyer-intent weighted demand scores.
 - YouTube posted-video metrics now sync through the active client space's encrypted Google OAuth credential, pulling views, likes, comments, favorites, and engagement rate without using any shared InnovareAI provider key.
+- Search Console and GA4 now sync first-wave owned-site performance through the active client space's encrypted Google OAuth credential. Performance shows search clicks, impressions, CTR, average position, GA4 sessions, users, page views, engaged sessions, and engagement rate as client-site signals.
 - Learning now proposes inactive, client-scoped skills from measured evidence, such as repeatable demand patterns, buyer-intent response loops, and qualified-traffic CTA tests.
 - AI Settings now supports deep links into the Skills view so Learning can send operators straight to review and enable proposed client skills.
 - The `vera-notice` worker now creates a weekly learning observation per client when there are fresh demand signals, pending learning skill proposals, approved unscheduled posts, or SAM handoff candidates.
