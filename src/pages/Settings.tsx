@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-import type { BrandVoice, PlatformConfig } from '../lib/supabase'
+import type { BrandVoice } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
 import { useAuth } from '../lib/auth'
@@ -11,7 +11,6 @@ import {
 import { PublishersCard } from '../components/PublishersCard'
 import { ClientIntegrationsCard } from '../components/ClientIntegrationsCard'
 import { useTheme, type Theme } from '../lib/themeContext'
-import { DEMAND_PLATFORM_DEFINITIONS, type DemandPlatformKey } from '../lib/demandModel'
 
 type Tab = 'workspace' | 'team' | 'brand' | 'integrations' | 'usage'
 
@@ -36,42 +35,6 @@ function initialSettingsTab(): Tab {
   }
   const value = params.get('tab')
   return TABS.some(tab => tab.id === value) ? value as Tab : 'workspace'
-}
-
-type PlatformRuleSetting = {
-  id: string
-  label: string
-  initials: string
-  swatch: string
-  aliases?: string[]
-  charPlaceholder: string
-  noteTitle: string
-  note: string
-}
-
-function demandPlatformNote(key: DemandPlatformKey, fallback: string) {
-  const platform = DEMAND_PLATFORM_DEFINITIONS.find(item => item.key === key)
-  return platform ? `${platform.role} ${platform.workflow}` : fallback
-}
-
-const PLATFORM_RULES: PlatformRuleSetting[] = [
-  { id: 'linkedin', label: 'LinkedIn', initials: 'Li', swatch: 'bg-blue-100 text-blue-700', charPlaceholder: '3000', noteTitle: 'Connected through Unipile', note: demandPlatformNote('linkedin', 'Use this section for channel-specific voice, limits, and model overrides.') },
-  { id: 'x', label: 'X', initials: 'X', swatch: 'bg-sky-100 text-sky-700', aliases: ['twitter'], charPlaceholder: '280', noteTitle: 'Manual-first channel', note: demandPlatformNote('x', 'Use these rules for drafts and manual handoff until an approved connector is enabled.') },
-  { id: 'instagram', label: 'Instagram', initials: 'IG', swatch: 'bg-pink-100 text-pink-700', charPlaceholder: '2200', noteTitle: 'Meta connector', note: demandPlatformNote('instagram', 'Use this section for caption rules and creative tone.') },
-  { id: 'facebook', label: 'Facebook', initials: 'FB', swatch: 'bg-indigo-100 text-indigo-700', charPlaceholder: '63206', noteTitle: 'Meta connector', note: demandPlatformNote('facebook', 'Use this section for Page copy rules.') },
-  { id: 'youtube', label: 'YouTube', initials: 'YT', swatch: 'bg-red-100 text-red-700', charPlaceholder: '5000', noteTitle: 'Google connector', note: demandPlatformNote('youtube', 'Use this section for video titles, descriptions, Shorts, and long-form tone.') },
-  { id: 'medium', label: 'Medium', initials: 'Me', swatch: 'bg-stone-100 text-stone-700', charPlaceholder: '10000', noteTitle: 'Manual publishing', note: demandPlatformNote('medium', 'No API token needed. Add the Medium profile or publication URL for ingestion and manual handoff.') },
-  { id: 'quora', label: 'Quora', initials: 'Qu', swatch: 'bg-red-100 text-red-700', charPlaceholder: '5000', noteTitle: 'Answer handoff', note: demandPlatformNote('quora', 'Use this section for answer style, proof rules, and CTA restraint.') },
-  { id: 'reddit', label: 'Reddit', initials: 'Rd', swatch: 'bg-orange-100 text-orange-700', charPlaceholder: '40000', noteTitle: 'Community-first channel', note: demandPlatformNote('reddit', 'Use this section for subreddit tone, rule sensitivity, and non-promotional framing.') },
-  { id: 'blog', label: 'Blog', initials: 'Bl', swatch: 'bg-amber-100 text-amber-700', charPlaceholder: '10000', noteTitle: 'CMS handoff', note: demandPlatformNote('blog', 'Publishing credentials belong in WordPress or CMS integrations above.') },
-  { id: 'email', label: 'Email', initials: 'Em', swatch: 'bg-emerald-100 text-emerald-700', charPlaceholder: '5000', noteTitle: 'Nurture channel', note: demandPlatformNote('email', 'ESP credentials and sending approvals should stay in dedicated integrations, not in channel rules.') },
-]
-function findPlatformRuleConfig(existing: Partial<PlatformConfig>[], setting: PlatformRuleSetting) {
-  const aliases = new Set([setting.id, ...(setting.aliases ?? [])])
-  const exact = existing.find(config => config.platform === setting.id)
-  const legacy = existing.find(config => config.platform && aliases.has(config.platform))
-  const found = exact ?? legacy
-  return found ? { ...found, platform: setting.id } : null
 }
 
 // ─── Workspace Tab ────────────────────────────────────────────────────────────
@@ -420,48 +383,14 @@ function BrandVoiceTab() {
 
 // ─── Integrations Tab ─────────────────────────────────────────────────────────
 function IntegrationsTab() {
-  const { activeOrg } = useOrg()
-  const activeOrgId = activeOrg?.id
-  const [configs, setConfigs] = useState<Partial<PlatformConfig>[]>([])
-  const [saving, setSaving] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!activeOrgId) return
-    supabase.from('platform_configs').select('*').eq('org_id', activeOrgId)
-      .then(({ data }) => {
-        const existing = data || []
-        const merged = PLATFORM_RULES.map(setting => {
-          const found = findPlatformRuleConfig(existing, setting)
-          return found ?? { platform: setting.id, is_active: false, hashtag_limit: 5, org_id: activeOrgId }
-        })
-        setConfigs(merged)
-      })
-  }, [activeOrgId])
-
-  function update(platform: string, patch: Partial<PlatformConfig>) {
-    setConfigs(prev => prev.map(c => c.platform === platform ? { ...c, ...patch } : c))
-  }
-
-  async function handleSave(platform: string) {
-    if (!activeOrg) return
-    setSaving(platform)
-    const config = configs.find(c => c.platform === platform)
-    if (!config) { setSaving(null); return }
-    if (config.id) {
-      await supabase.from('platform_configs').update(config).eq('id', config.id)
-    } else {
-      const { data } = await supabase.from('platform_configs')
-        .insert({ ...config, org_id: activeOrg.id }).select().single()
-      if (data) setConfigs(prev => prev.map(c => c.platform === platform ? data : c))
-    }
-    setSaving(null)
-  }
+  const { activeProject } = useProject()
+  const brainHref = activeProject?.slug ? `/p/${activeProject.slug}/brain` : '/clients'
 
   return (
     <div className="max-w-5xl space-y-5">
       <div>
         <h2 className="text-base font-semibold text-gray-900">Agentic integrations</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Connect client-owned accounts and define the channels Vera can read, analyze, draft for, or publish to.</p>
+        <p className="text-sm text-gray-500 mt-0.5">Connect client-owned accounts. Channel strategy and writing rules live inside each client Demand Brain.</p>
       </div>
 
       <ClientIntegrationsCard />
@@ -469,92 +398,24 @@ function IntegrationsTab() {
       {/* Connected blogs / CMSes / Git publishers */}
       <PublishersCard />
 
-      <div className="space-y-3">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900">Channel writing rules</h3>
-          <p className="text-xs text-gray-500 mt-0.5">Set per-channel limits, tone, and model overrides. Credentials stay in the integration cards above, not in this rules section.</p>
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <div className="text-sm font-medium text-gray-800">Client channel policy</div>
+          <div className="text-xs text-gray-400 mt-0.5">Per-client rules prevent one workspace's tone, speaker, approval path, or publishing guard from leaking into another client.</div>
         </div>
-        {PLATFORM_RULES.map(setting => {
-          const platform = setting.id
-          const config = configs.find(c => c.platform === platform) ?? {}
-
-          return (
-            <div key={platform} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-              {/* Platform header */}
-              <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${setting.swatch}`}>
-                  {setting.initials}
-                </div>
-                <span className="flex-1 text-sm font-medium text-gray-800">{setting.label}</span>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <span className="text-xs text-gray-500">{config.is_active ? 'Active' : 'Inactive'}</span>
-                  <div
-                    onClick={() => update(platform, { is_active: !config.is_active })}
-                    className={`w-9 h-5 rounded-full transition-colors cursor-pointer flex items-center px-0.5 ${config.is_active ? 'bg-emerald-500' : 'bg-gray-200'}`}>
-                    <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform ${config.is_active ? 'translate-x-4' : 'translate-x-0'}`} />
-                  </div>
-                </label>
-              </div>
-
-              {/* Config fields */}
-              <div className="px-4 py-3 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-gray-500 mb-1 block">Char Limit</label>
-                    <input
-                      type="number"
-                      value={config.char_limit ?? ''}
-                      onChange={e => update(platform, { char_limit: Number(e.target.value) || undefined })}
-                      className="input w-full"
-                      placeholder={setting.charPlaceholder}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-500 mb-1 block">Max Hashtags</label>
-                    <input
-                      type="number"
-                      value={config.hashtag_limit ?? 5}
-                      onChange={e => update(platform, { hashtag_limit: Number(e.target.value) })}
-                      className="input w-full"
-                      placeholder="5"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Model Override</label>
-                  <input
-                    value={config.model_override ?? ''}
-                    onChange={e => update(platform, { model_override: e.target.value || undefined })}
-                    className="input w-full"
-                    placeholder="e.g. claude-opus-4-6 (leave blank for default)"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Tone Override</label>
-                  <input
-                    value={config.tone_override ?? ''}
-                    onChange={e => update(platform, { tone_override: e.target.value || undefined })}
-                    className="input w-full"
-                    placeholder="e.g. professional and concise"
-                  />
-                </div>
-
-                <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
-                  <p className="text-xs font-medium text-gray-700">{setting.noteTitle}</p>
-                  <p className="text-[11px] text-gray-500 mt-0.5">{setting.note}</p>
-                </div>
-
-                <button onClick={() => handleSave(platform)} disabled={saving === platform}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 disabled:opacity-50 transition-colors">
-                  <Save size={12} />
-                  {saving === platform ? 'Saving…' : 'Save'}
-                </button>
-              </div>
-            </div>
-          )
-        })}
+        <div className="px-4 py-3 space-y-3">
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Use Demand Brain for channel tone of voice, speaker mode, approval routing, publish guards, measurement focus, and SAM handoff triggers. Settings stays focused on credentials, OAuth, publisher health, and workspace access.
+          </p>
+          <button
+            type="button"
+            onClick={() => { window.location.href = brainHref }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 transition-colors"
+          >
+            <ShieldCheck size={12} />
+            {activeProject?.slug ? 'Open Demand Brain' : 'Pick a client space'}
+          </button>
+        </div>
       </div>
 
       {/* AI Model Settings */}
