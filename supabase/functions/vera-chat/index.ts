@@ -32,7 +32,7 @@ import { createClient } from 'npm:@supabase/supabase-js'
 import type { Database } from '../_shared/database.types.ts'
 import type { AdminClient } from '../_shared/auth.ts'
 import { hasAiUserEntitlement } from '../_shared/ai-entitlements.ts'
-import { DEFAULT_AI_POLICY, checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError, type ProjectAiPolicy } from '../_shared/ai-policy.ts'
+import { DEFAULT_AI_POLICY, checkProjectAiBudget, loadProjectAiPolicy, paidMediaBudgetCapError, type ProjectAiBudgetWarning, type ProjectAiPolicy } from '../_shared/ai-policy.ts'
 import { canUsePlatformMediaKeys, isPlatformMediaProject } from '../_shared/client-media-keys.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { completeText, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
@@ -75,6 +75,8 @@ async function decryptClientSecret(payload: string): Promise<string | null> {
 // Roomy enough for a full post written into save_draft's `copy` arg plus the
 // rest of the tool call — 1024 risked truncating before the tool call landed.
 const MAX_TOKENS = 8192   // ~6k words — fits a full strategy doc/brief inline; it's a ceiling, not a target
+const APPROX_CHARS_PER_TOKEN = 4
+const IMAGE_BLOCK_TOKEN_ESTIMATE = 1500
 const STORAGE_BUCKET = 'vera-images'
 const EMBEDDING_MODEL = 'text-embedding-3-small'  // 1536 dim, $0.02/M tokens
 const EMBEDDING_DIM = 1536
@@ -83,6 +85,36 @@ const UNIPILE_BASE_URL = normalizeUnipileBaseUrl(
   Deno.env.get('UNIPILE_BASE_URL') ?? Deno.env.get('UNIPILE_API_URL') ?? Deno.env.get('UNIPILE_DSN') ?? '',
 )
 const APIFY_API_TOKEN = Deno.env.get('APIFY_API_TOKEN') ?? Deno.env.get('APIFY_TOKEN') ?? ''
+
+function estimateChatInputTokens(input: {
+  messages: Array<{ role: string; content: unknown }>
+  systemBlocks: unknown[]
+  tools: unknown[]
+}) {
+  const chars =
+    input.messages.reduce<number>((sum, message) => sum + approxPromptChars(message.content), 0) +
+    input.systemBlocks.reduce<number>((sum, block) => sum + approxPromptChars(block), 0) +
+    input.tools.reduce<number>((sum, tool) => sum + approxPromptChars(tool), 0)
+  return Math.max(1, Math.ceil(chars / APPROX_CHARS_PER_TOKEN))
+}
+
+function estimateChatOutputTokens(useThinking: boolean) {
+  return useThinking ? Math.max(MAX_TOKENS, 16384) : MAX_TOKENS
+}
+
+function approxPromptChars(value: unknown): number {
+  if (value == null) return 0
+  if (typeof value === 'string') return value.length
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value).length
+  if (Array.isArray(value)) return value.reduce<number>((sum, item) => sum + approxPromptChars(item), 0)
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    if (record.type === 'image') return IMAGE_BLOCK_TOKEN_ESTIMATE * APPROX_CHARS_PER_TOKEN
+    return Object.entries(record).reduce((sum, [key, item]) => sum + key.length + approxPromptChars(item), 0)
+  }
+  return 0
+}
+
 const CAMPAIGN_CHANNELS = [
   'LinkedIn',
   'YouTube',
@@ -4583,19 +4615,26 @@ Deno.serve(async (req) => {
   const textRuntime: TextRuntime = chatProvider === 'openrouter'
     ? { provider: 'openrouter', key: effectiveApiKey, model: chatModel, keySource: 'client', ...chatAudit }
     : { provider: 'anthropic', key: effectiveApiKey, model: chatModel, keySource: chatKeySource, ...chatAudit }
+  let chatBudgetWarning: ProjectAiBudgetWarning | null = null
   if (projectId) {
     try {
+      const estimatedInputTokens = estimateChatInputTokens({
+        messages,
+        systemBlocks,
+        tools: enabledTools,
+      })
       const budget = await checkProjectAiBudget(supabase, projectId, {
         orgId,
         projectId,
         provider: chatProvider,
         model: chatModel,
         operation: 'chat.message',
-        inputTokens: 0,
-        outputTokens: 0,
+        inputTokens: estimatedInputTokens,
+        outputTokens: estimateChatOutputTokens(useThinking),
         metadata: textRuntimeUsageMetadata(textRuntime, { route }),
       })
       if (!budget.ok) return jsonError(budget.message, 402)
+      chatBudgetWarning = budget.warning
     } catch (error) {
       return jsonError(error instanceof Error ? error.message : 'Could not check AI budget', 500)
     }
@@ -4618,6 +4657,9 @@ Deno.serve(async (req) => {
     async start(controller) {
       const send = (event: Record<string, unknown>) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
+      }
+      if (chatBudgetWarning) {
+        send({ type: 'budget_warning', tool: 'vera_chat', warning: chatBudgetWarning })
       }
 
       // Build the conversation as content-block messages so we can append
