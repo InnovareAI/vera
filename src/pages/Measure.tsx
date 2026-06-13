@@ -52,6 +52,7 @@ type PostRowData = {
   campaignId: string | null
   campaignName: string
   status: string
+  rawStatus: string
   date: string | null
   isPosted: boolean
   measured: boolean
@@ -202,7 +203,7 @@ export default function Measure() {
     const [postRes, campaignRes, integrationRes, metricRes] = await Promise.all([
       supabase
         .from('content_posts')
-        .select('id, org_id, project_id, campaign_id, title, copy, format, channel, status, scheduled_at, posted_at, posted_url, provider, provider_account_id, provider_post_id, provider_page_id, provider_media_id, provider_permalink, last_metric_sync_at, created_at, updated_at')
+        .select('id, org_id, project_id, campaign_id, title, copy, format, channel, status, publish_date, scheduled_at, published_at, posted_at, posted_url, provider, provider_account_id, provider_post_id, provider_page_id, provider_media_id, provider_permalink, last_metric_sync_at, created_at, updated_at')
         .eq('project_id', projectId)
         .order('created_at', { ascending: false })
         .limit(250),
@@ -1499,7 +1500,8 @@ function buildPostRows(posts: MeasurePost[], snapshots: ContentMetricSnapshot[],
       provider,
       campaignId: post.campaign_id ?? null,
       campaignName: campaign?.name ?? 'No campaign',
-      status: post.status ?? 'Unknown',
+      status: postLifecycleStatus(post),
+      rawStatus: post.status ?? 'Unknown',
       date: effectiveDate(post),
       isPosted: isPosted(post),
       measured,
@@ -1796,7 +1798,7 @@ function rowMatchesFilters(
   if (status !== 'all' && statusKind(row.status) !== status) return false
   const needle = query.trim().toLowerCase()
   if (needle) {
-    const haystack = `${row.title} ${row.campaignName} ${row.provider} ${row.status}`.toLowerCase()
+    const haystack = `${row.title} ${row.campaignName} ${row.provider} ${row.status} ${row.rawStatus}`.toLowerCase()
     if (!haystack.includes(needle)) return false
   }
   return true
@@ -1862,6 +1864,13 @@ function effectiveDate(post: MeasurePost) {
 function isPosted(post: MeasurePost) {
   const status = (post.status ?? '').toLowerCase()
   return !!post.posted_at || !!post.posted_url || status.includes('post') || status.includes('publish')
+}
+
+function postLifecycleStatus(post: MeasurePost) {
+  const value = statusKind(post.status ?? '')
+  if (isPosted(post)) return 'posted'
+  if ((post.scheduled_at || post.publish_date) && value === 'approved') return 'scheduled'
+  return value
 }
 
 function detectProvider(post: MeasurePost) {
