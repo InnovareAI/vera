@@ -1993,6 +1993,35 @@ function videoModelForTool(ctx: ToolExecutionContext, input: Record<string, unkn
   return requestedModelOrDefault(input.model, fallback)
 }
 
+async function completeToolTextWithBudget(
+  ctx: ToolExecutionContext,
+  operation: string,
+  params: Parameters<typeof completeText>[1],
+): Promise<Awaited<ReturnType<typeof completeText>> & { budgetWarning: ProjectAiBudgetWarning | null }> {
+  let budgetWarning: ProjectAiBudgetWarning | null = null
+  if (ctx.projectId) {
+    const budget = await checkProjectAiBudget(ctx.supabase, ctx.projectId, {
+      orgId: ctx.orgId,
+      projectId: ctx.projectId,
+      provider: ctx.textRuntime.provider,
+      model: ctx.textRuntime.model,
+      operation,
+      inputTokens: Math.max(1, Math.ceil((approxPromptChars(params.system) + approxPromptChars(params.user)) / APPROX_CHARS_PER_TOKEN)),
+      outputTokens: params.maxTokens,
+      metadata: textRuntimeUsageMetadata(ctx.textRuntime, { tool_operation: operation }),
+    })
+    if (!budget.ok) throw new Error(budget.message)
+    budgetWarning = budget.warning
+    if (budgetWarning) emitBudgetWarning(ctx, operation, budgetWarning)
+  }
+  const result = await completeText(ctx.textRuntime, params)
+  return { ...result, budgetWarning }
+}
+
+function budgetWarningMetadata(warning: ProjectAiBudgetWarning | null) {
+  return warning ? { budget_warning: warning } : {}
+}
+
 function emitBudgetWarning(ctx: ToolExecutionContext, tool: string, warning: unknown) {
   if (!warning || typeof warning !== 'object') return
   const payload = warning as Record<string, unknown>
@@ -2278,9 +2307,9 @@ async function executeTool(
         // One structured generation call for the whole arc. Use the active
         // client text runtime so campaign planning never falls back to
         // InnovareAI's platform Anthropic key for non-platform projects.
-        let planResult: { text: string; inputTokens: number | null; outputTokens: number | null }
+        let planResult: Awaited<ReturnType<typeof completeToolTextWithBudget>>
         try {
-          planResult = await completeText(ctx.textRuntime, {
+          planResult = await completeToolTextWithBudget(ctx, 'campaign.plan', {
             maxTokens: 6000,
             temperature: 0.2,
             json: true,
@@ -2315,7 +2344,11 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
             operation: 'campaign.plan',
             inputTokens: planResult.inputTokens,
             outputTokens: planResult.outputTokens,
-            metadata: textRuntimeUsageMetadata(ctx.textRuntime, { channel_count: channels.length, post_count: count }),
+            metadata: textRuntimeUsageMetadata(ctx.textRuntime, {
+              channel_count: channels.length,
+              post_count: count,
+              ...budgetWarningMetadata(planResult.budgetWarning),
+            }),
           })
         } catch (error) {
           return { result: `Campaign planning failed: ${error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180)}` }
@@ -3239,9 +3272,9 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           .limit(8)
         if (!sources?.length) return { result: 'Source items not found.' }
 
-        let synthResult: { text: string; inputTokens: number | null; outputTokens: number | null }
+        let synthResult: Awaited<ReturnType<typeof completeToolTextWithBudget>>
         try {
-          synthResult = await completeText(ctx.textRuntime, {
+          synthResult = await completeToolTextWithBudget(ctx, 'knowledge.synthesize', {
             maxTokens: 3000,
             temperature: 0.2,
             system: 'You are a research librarian synthesizing source material into a canonical wiki article. Output Markdown only.',
@@ -3269,7 +3302,11 @@ Do NOT fabricate claims. If sources contradict, surface the contradiction.`,
             operation: 'knowledge.synthesize',
             inputTokens: synthResult.inputTokens,
             outputTokens: synthResult.outputTokens,
-            metadata: textRuntimeUsageMetadata(ctx.textRuntime, { source_count: sources.length, theme_count: themes.length }),
+            metadata: textRuntimeUsageMetadata(ctx.textRuntime, {
+              source_count: sources.length,
+              theme_count: themes.length,
+              ...budgetWarningMetadata(synthResult.budgetWarning),
+            }),
           })
         } catch (error) {
           return { result: `Synthesis failed: ${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}` }
