@@ -84,6 +84,92 @@ export type Database = {
           },
         ]
       }
+      sam_handoff_actions: {
+        Row: {
+          actioned_at: string | null
+          channel: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          observation_id: string | null
+          org_id: string
+          payload: Json
+          post_id: string | null
+          priority: string
+          project_id: string
+          score: number
+          status: string
+          title: string
+          triggers: string[]
+          updated_at: string
+        }
+        Insert: {
+          actioned_at?: string | null
+          channel?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          observation_id?: string | null
+          org_id: string
+          payload?: Json
+          post_id?: string | null
+          priority?: string
+          project_id: string
+          score?: number
+          status?: string
+          title: string
+          triggers?: string[]
+          updated_at?: string
+        }
+        Update: {
+          actioned_at?: string | null
+          channel?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          observation_id?: string | null
+          org_id?: string
+          payload?: Json
+          post_id?: string | null
+          priority?: string
+          project_id?: string
+          score?: number
+          status?: string
+          title?: string
+          triggers?: string[]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sam_handoff_actions_observation_id_fkey"
+            columns: ["observation_id"]
+            isOneToOne: false
+            referencedRelation: "agent_observations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sam_handoff_actions_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sam_handoff_actions_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "content_posts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sam_handoff_actions_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audiences: {
         Row: {
           attributes: Json

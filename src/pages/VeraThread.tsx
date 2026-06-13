@@ -534,6 +534,7 @@ export default function VeraThread() {
   const [campaign, setCampaign] = useState<CampaignData | null>(null)
   const [approving, setApproving] = useState(false)
   const [observations, setObservations] = useState<ObservationNotice[]>([])
+  const [weeklyActionKey, setWeeklyActionKey] = useState<string | null>(null)
   const [stats, setStats] = useState<{ pending: number; campaigns: number }>({ pending: 0, campaigns: 0 })
   const [sessionId, setSessionId] = useState<string>('')
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
@@ -1420,6 +1421,66 @@ export default function VeraThread() {
     await q
   }
 
+  async function runWeeklyLearningAction(o: ObservationNotice, action: 'skills' | 'handoff' | 'complete') {
+    const payload = parseWeeklyLearningPayload(o.action_payload)
+    const body: Record<string, unknown> = { observation_id: o.id }
+    const actionKey = `${o.id}:${action}`
+
+    if (action === 'skills') {
+      const skillIds = (payload.skill_proposals ?? [])
+        .map(skill => skill.id)
+        .filter((id): id is string => Boolean(id))
+      if (skillIds.length === 0) {
+        push({ kind: 'warn', title: 'No skill proposals', body: 'There are no proposed learning skills on this review.' })
+        return
+      }
+      body.activate_skill_ids = skillIds
+    }
+
+    if (action === 'handoff') {
+      const handoffs = (payload.sam_handoff_candidates ?? []).filter(item => item.post_id)
+      if (handoffs.length === 0) {
+        push({ kind: 'warn', title: 'No SAM handoffs', body: 'There are no scored handoff candidates on this review.' })
+        return
+      }
+      body.queue_all_handoffs = true
+    }
+
+    if (action === 'complete') body.complete_review = true
+
+    setWeeklyActionKey(actionKey)
+    try {
+      const headers = await functionHeaders()
+      const res = await fetch(`${SUPA}/functions/v1/weekly-learning-review`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      })
+      const data = await res.json().catch(() => null) as {
+        error?: string
+        activated_skills?: Array<{ id: string; name?: string | null }>
+        queued_handoff_ids?: string[]
+        skipped_duplicate_handoff_count?: number
+      } | null
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`)
+
+      if (action === 'skills') {
+        push({ kind: 'success', title: 'Skills enabled', body: `${data?.activated_skills?.length ?? 0} learning proposal(s) are now active.` })
+      } else if (action === 'handoff') {
+        const queued = data?.queued_handoff_ids?.length ?? 0
+        const skipped = data?.skipped_duplicate_handoff_count ?? 0
+        push({ kind: 'success', title: 'SAM handoffs queued', body: skipped ? `${queued} queued, ${skipped} already existed.` : `${queued} handoff action(s) queued.` })
+      } else {
+        setObservations(prev => prev.filter(item => item.id !== o.id))
+        push({ kind: 'success', title: 'Review complete', body: 'Weekly learning was marked as reviewed.' })
+      }
+    } catch (e) {
+      push({ kind: 'danger', title: 'Review action failed', body: (e as Error).message })
+    } finally {
+      setWeeklyActionKey(null)
+    }
+  }
+
   // ─── Draft actions ──────────────────────────────────────────────
   function ensureDraftInActiveProject(post: Post) {
     if (!activeProject?.id || post.project_id !== activeProject.id) {
@@ -1664,6 +1725,8 @@ export default function VeraThread() {
           <Centered>Loading thread…</Centered>
         ) : messages.length === 0 ? (
           <Idle onRun={pr => send(pr)} observations={observations} actions={buildLaunchActions(stats)} onDismiss={dismissObservation}
+            onWeeklyReviewAction={runWeeklyLearningAction}
+            weeklyActionKey={weeklyActionKey}
             setup={setup} projectName={activeProject?.name ?? 'this client'}
             onOpenBrain={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/brain`) }}
             onOpenLearning={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/learning`) }}
@@ -2144,11 +2207,13 @@ function ModelRoutingPanel({ capabilities, onAddKey, pricingCatalog, pricingSour
   )
 }
 
-function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onOpenBrain, onOpenLearning, onOpenSkills, providerCapabilities, onAddKey, pricingCatalog, pricingSource, pricingRowCount, demandPlan, composer }: {
+function Idle({ onRun, observations, actions, onDismiss, onWeeklyReviewAction, weeklyActionKey, setup, projectName, onOpenBrain, onOpenLearning, onOpenSkills, providerCapabilities, onAddKey, pricingCatalog, pricingSource, pricingRowCount, demandPlan, composer }: {
   onRun: (prompt: string) => void
   observations: ObservationNotice[]
   actions: LaunchAction[]
   onDismiss: (o: { title: string }) => void
+  onWeeklyReviewAction: (o: ObservationNotice, action: 'skills' | 'handoff' | 'complete') => void
+  weeklyActionKey: string | null
   setup: { business: boolean; audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null
   projectName: string
   onOpenBrain: () => void
@@ -2204,6 +2269,8 @@ function Idle({ onRun, observations, actions, onDismiss, setup, projectName, onO
                 onRun={onRun}
                 onOpenLearning={onOpenLearning}
                 onOpenSkills={onOpenSkills}
+                onReviewAction={onWeeklyReviewAction}
+                busyActionKey={weeklyActionKey}
                 onDismiss={() => onDismiss(o)}
               />
             ))}
@@ -2254,6 +2321,8 @@ function WeeklyLearningNoticeCard({
   onRun,
   onOpenLearning,
   onOpenSkills,
+  onReviewAction,
+  busyActionKey,
   onDismiss,
 }: {
   observation: ObservationNotice
@@ -2261,6 +2330,8 @@ function WeeklyLearningNoticeCard({
   onRun: (prompt: string) => void
   onOpenLearning: () => void
   onOpenSkills: () => void
+  onReviewAction: (o: ObservationNotice, action: 'skills' | 'handoff' | 'complete') => void
+  busyActionKey: string | null
   onDismiss: () => void
 }) {
   const payload = parseWeeklyLearningPayload(observation.action_payload)
@@ -2271,6 +2342,8 @@ function WeeklyLearningNoticeCard({
   const topAssets = (payload.top_assets ?? []).slice(0, 2)
   const skills = payload.skill_proposals ?? []
   const handoffs = payload.sam_handoff_candidates ?? []
+  const busy = busyActionKey?.startsWith(`${observation.id}:`) ?? false
+  const busyFor = (action: 'skills' | 'handoff' | 'complete') => busyActionKey === `${observation.id}:${action}`
   const actionStyle: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
@@ -2326,12 +2399,24 @@ function WeeklyLearningNoticeCard({
           <button onClick={onOpenSkills} style={actionStyle}>
             <Zap size={13} /> Review skills
           </button>
+          <button onClick={() => onReviewAction(observation, 'skills')} disabled={busy || skills.length === 0}
+            style={{ ...actionStyle, opacity: busy || skills.length === 0 ? 0.55 : 1, cursor: busy || skills.length === 0 ? 'not-allowed' : 'pointer' }}>
+            <Check size={13} /> {busyFor('skills') ? 'Enabling...' : 'Enable proposals'}
+          </button>
           <button onClick={() => onRun(buildWeeklyNextBriefPrompt(projectName, payload, observation.detail))} style={actionStyle}>
             <Send size={13} /> Brief next move
           </button>
+          <button onClick={() => onReviewAction(observation, 'handoff')} disabled={busy || handoffs.length === 0}
+            style={{ ...actionStyle, opacity: busy || handoffs.length === 0 ? 0.55 : 1, cursor: busy || handoffs.length === 0 ? 'not-allowed' : 'pointer' }}>
+            <Sparkles size={13} /> {busyFor('handoff') ? 'Queuing...' : 'Queue SAM'}
+          </button>
           <button onClick={() => onRun(buildWeeklySamPrompt(projectName, payload, observation.detail))} disabled={handoffs.length === 0}
-            style={{ ...actionStyle, opacity: handoffs.length === 0 ? 0.5 : 1, cursor: handoffs.length === 0 ? 'not-allowed' : 'pointer' }}>
-            <Sparkles size={13} /> Queue SAM handoff
+            style={{ ...actionStyle, opacity: handoffs.length === 0 ? 0.55 : 1, cursor: handoffs.length === 0 ? 'not-allowed' : 'pointer' }}>
+            <Send size={13} /> Brief SAM
+          </button>
+          <button onClick={() => onReviewAction(observation, 'complete')} disabled={busy}
+            style={{ ...actionStyle, opacity: busy ? 0.55 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}>
+            <Check size={13} /> {busyFor('complete') ? 'Saving...' : 'Done'}
           </button>
           <button onClick={onDismiss} title="Dismiss" style={{ ...actionStyle, color: color.ghost, borderColor: color.line }}>
             <X size={13} /> Dismiss
