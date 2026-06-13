@@ -1638,7 +1638,7 @@ const TOOLS = [
   },
   {
     name: 'linkedin_research',
-    description: 'Read-only LinkedIn research through the workspace shared Unipile research profile. Use when the operator asks for LinkedIn profile analysis, company-page context, recent posts, tone of voice, content themes, founder voice, or audit inputs. This tool never publishes. If the operator gives only a name, use web_research first to find the public LinkedIn URL, then call this tool.',
+    description: 'Read-only LinkedIn research through the workspace profile or the shared InnovareAI Unipile research profile. Use when the operator asks for LinkedIn profile analysis, company-page context, recent posts, tone of voice, content themes, founder voice, or audit inputs. This tool never publishes. If the operator gives only a name, use web_research first to find the public LinkedIn URL, then call this tool.',
     input_schema: {
       type: 'object',
       properties: {
@@ -2758,7 +2758,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
 
         const unipile = await resolveUnipileResearchConnection(ctx.supabase, ctx.orgId, { requesterUserId: ctx.userId })
         if (!unipile.ok) {
-          return { result: `${unipile.error} Connect LinkedIn in Settings > Integrations > Shared LinkedIn research profile, then rerun the research. Do not ask the operator to paste posts if a profile URL is available.` }
+          return { result: `${unipile.error} Connect LinkedIn in Settings > Integrations > Shared LinkedIn research profile, or use an InnovareAI operator account with shared profile access, then rerun the research. Do not ask the operator to paste posts if a profile URL is available.` }
         }
         const accountId = unipile.accountId
 

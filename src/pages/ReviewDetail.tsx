@@ -282,10 +282,9 @@ export default function ReviewDetail() {
     setMarking(false)
   }
 
-  // Post directly to LinkedIn via Unipile. Available for the LinkedIn channel
-  // when the org has a connected unipile_account_id. Wraps unipile-post edge
-  // function which handles the API call + chains back to approval-webhook to
-  // mark the row posted + fire Slack notify.
+  // Post directly to LinkedIn via Unipile. Available for LinkedIn only when
+  // this client space has its own connected publishing integration. Shared
+  // research profiles are intentionally excluded here.
   async function postToLinkedIn() {
     if (!post) return
     if (!linkedInPublishReady) {
