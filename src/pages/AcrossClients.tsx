@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  AlertTriangle,
   ArrowRight,
   Check,
   FolderOpen,
   KeyRound,
   MailPlus,
   ShieldCheck,
+  Sparkles,
   Star,
   Trash2,
   Users,
@@ -88,6 +90,20 @@ type ClientApiKey = {
   updated_at: string
 }
 
+type ShelfObservation = {
+  id: string
+  org_id: string
+  project_id: string | null
+  kind: string
+  severity: 'low' | 'medium' | 'high' | string
+  title: string
+  detail: string | null
+  proposed_action: string | null
+  action_kind: string | null
+  action_payload: Record<string, unknown> | null
+  created_at: string
+}
+
 const roleOptions: Array<{ value: ProjectRole; label: string; help: string }> = [
   { value: 'owner', label: 'Owner', help: 'Manage people, keys, and client settings' },
   { value: 'editor', label: 'Editor', help: 'Create and edit client work' },
@@ -124,6 +140,7 @@ export default function AcrossClients() {
   const { push } = useToast()
 
   const [obsByProject, setObsByProject] = useState<Record<string, number>>({})
+  const [observations, setObservations] = useState<ShelfObservation[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [accessState, setAccessState] = useState<AccessState>('idle')
   const [accessError, setAccessError] = useState<string | null>(null)
@@ -139,27 +156,51 @@ export default function AcrossClients() {
   const [keySecret, setKeySecret] = useState('')
   const [keyConfig, setKeyConfig] = useState('')
 
-  useEffect(() => {
-    if (!activeOrg?.id) {
+  const projectById = useMemo(() => new Map(projects.map(project => [project.id, project])), [projects])
+
+  const loadObservations = useCallback(async () => {
+    if (!activeOrg?.id || projects.length === 0) {
+      setObservations([])
+      setObsByProject({})
       return
     }
-    let cancelled = false
-    supabase
+
+    const knownProjectIds = new Set(projects.map(project => project.id))
+    const { data, error } = await supabase
       .from('agent_observations')
-      .select('project_id')
+      .select('id, org_id, project_id, kind, severity, title, detail, proposed_action, action_kind, action_payload, created_at')
       .eq('org_id', activeOrg.id)
       .eq('status', 'open')
       .neq('kind', 'stale_audit')
-      .then(({ data }) => {
-        if (cancelled) return
-        const counts: Record<string, number> = {}
-        for (const row of (data ?? []) as Array<{ project_id: string | null }>) {
-          if (row.project_id) counts[row.project_id] = (counts[row.project_id] ?? 0) + 1
-        }
-        setObsByProject(counts)
+      .order('created_at', { ascending: false })
+      .limit(32)
+
+    if (error) {
+      setObservations([])
+      setObsByProject({})
+      return
+    }
+
+    const rows = ((data ?? []) as ShelfObservation[])
+      .filter(obs => Boolean(obs.project_id) && knownProjectIds.has(obs.project_id as string) && obs.action_kind !== 'run_audit')
+      .sort((a, b) => {
+        const severity = severityRank(a.severity) - severityRank(b.severity)
+        if (severity !== 0) return severity
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       })
-    return () => { cancelled = true }
-  }, [activeOrg?.id])
+
+    const counts: Record<string, number> = {}
+    for (const obs of rows) {
+      if (obs.project_id) counts[obs.project_id] = (counts[obs.project_id] ?? 0) + 1
+    }
+
+    setObservations(rows)
+    setObsByProject(counts)
+  }, [activeOrg?.id, projects])
+
+  useEffect(() => {
+    void loadObservations()
+  }, [loadObservations])
 
   const orderedProjects = useMemo(() => {
     return [...projects].sort((a, b) => {
@@ -384,6 +425,67 @@ export default function AcrossClients() {
     navigate(`/p/${project.slug}/vera`)
   }
 
+  async function openObservation(obs: ShelfObservation) {
+    const project = obs.project_id ? projectById.get(obs.project_id) ?? null : null
+    if (project) {
+      setSelectedProjectId(project.id)
+      switchProject(project.slug)
+    }
+
+    if (obs.action_kind === 'open_integrations') {
+      await markObservationActioned(obs, 'opened_integrations')
+      navigate(integrationsRoute(obs, project?.id ?? selectedProject?.id ?? null))
+      return
+    }
+
+    if (obs.action_kind === 'review_weekly_learning' || obs.kind === 'weekly_learning') {
+      navigate(weeklyLearningRoute(obs, project?.slug ?? null) ?? (project ? `/p/${project.slug}/learning` : '/learning'))
+      return
+    }
+
+    if (obs.action_kind === 'prompt_knowledge_input') {
+      navigate(project ? `/p/${project.slug}/knowledge` : '/knowledge')
+      return
+    }
+
+    if (obs.action_kind === 'draft_from_campaign') {
+      navigate(project ? `/p/${project.slug}/vera` : '/vera')
+      return
+    }
+
+    navigate(project ? `/p/${project.slug}/vera` : '/vera')
+  }
+
+  async function dismissObservation(obs: ShelfObservation) {
+    setBusyAction(`dismiss:${obs.id}`)
+    const { error } = await supabase
+      .from('agent_observations')
+      .update({ status: 'dismissed', dismissed_at: new Date().toISOString() })
+      .eq('id', obs.id)
+    setBusyAction(null)
+
+    if (error) {
+      push({ kind: 'danger', title: 'Agenda item dismiss failed', body: error.message })
+      return
+    }
+    await loadObservations()
+  }
+
+  async function markObservationActioned(obs: ShelfObservation, stage: string) {
+    setBusyAction(`obs:${obs.id}`)
+    const { error } = await supabase
+      .from('agent_observations')
+      .update({ status: 'actioned', actioned_at: new Date().toISOString(), acted_result: { stage } })
+      .eq('id', obs.id)
+    setBusyAction(null)
+
+    if (error) {
+      push({ kind: 'danger', title: 'Agenda item update failed', body: error.message })
+      return
+    }
+    await loadObservations()
+  }
+
   if (!loading && projects.length === 0) {
     return (
       <div style={{ padding: space[8], maxWidth: 940 }}>
@@ -401,13 +503,21 @@ export default function AcrossClients() {
     <div style={{ padding: space[8], maxWidth: 1220 }}>
       <PageHeader
         eyebrow={activeOrg?.name ?? 'Workspace'}
-        title="Client settings"
-        subtitle="Manage client spaces, access, invites, roles, and provider keys from one workspace view."
+        title="Across clients"
+        subtitle="Triage VERA's open work, then manage client spaces, access, roles, invites, and provider keys."
+      />
+
+      <AgendaPanel
+        observations={observations}
+        projectById={projectById}
+        busyAction={busyAction}
+        onOpen={openObservation}
+        onDismiss={dismissObservation}
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: space[4], marginBottom: space[7] }}>
         <Metric label="Clients" value={projects.length} />
-        <Metric label="Open proposals" value={Object.values(obsByProject).reduce((sum, count) => sum + count, 0)} />
+        <Metric label="Agenda items" value={observations.length} />
         <Metric label="People" value={accessState === 'ready' ? members.length + pendingInvites.length : 'Setup'} />
         <Metric label="Active keys" value={accessState === 'ready' ? activeKeys.length : 'Setup'} />
       </div>
@@ -590,6 +700,111 @@ export default function AcrossClients() {
         </main>
       </div>
     </div>
+  )
+}
+
+function AgendaPanel({
+  observations,
+  projectById,
+  busyAction,
+  onOpen,
+  onDismiss,
+}: {
+  observations: ShelfObservation[]
+  projectById: Map<string, Project>
+  busyAction: string | null
+  onOpen: (obs: ShelfObservation) => void
+  onDismiss: (obs: ShelfObservation) => void
+}) {
+  const shown = observations.slice(0, 8)
+
+  return (
+    <section style={{ ...panelStyle, marginBottom: space[7], overflow: 'hidden' }}>
+      <div style={{ padding: space[5], display: 'flex', gap: space[4], justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], marginBottom: space[2] }}>
+            <Sparkles size={15} color={color.accent} />
+            <SectionLabel count={observations.length}>VERA agenda</SectionLabel>
+          </div>
+          <p style={{ margin: 0, maxWidth: 700, color: color.ink2, fontSize: t.size.sm, lineHeight: t.lineHeight.relaxed }}>
+            Open connector issues, learning reviews, knowledge gaps, and draft opportunities across every client space.
+          </p>
+        </div>
+        {observations.length > shown.length && (
+          <StatusPill tone="muted">Showing {shown.length} of {observations.length}</StatusPill>
+        )}
+      </div>
+
+      {shown.length === 0 ? (
+        <div style={{ borderTop: `1px solid ${color.line}`, padding: space[5], color: color.ghost, fontSize: t.size.sm }}>
+          No open VERA agenda items across client spaces.
+        </div>
+      ) : (
+        <div>
+          {shown.map(obs => {
+            const project = obs.project_id ? projectById.get(obs.project_id) ?? null : null
+            const tone = severityTone(obs.severity)
+            return (
+              <div
+                key={obs.id}
+                style={{
+                  ...rowStyle,
+                  alignItems: 'flex-start',
+                  background: tone === 'danger' ? 'rgba(185,28,28,0.035)' : color.surface,
+                }}
+              >
+                <span style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: radius.sm,
+                  background: tone === 'danger' ? 'rgba(185,28,28,0.10)' : color.paper2,
+                  color: tone === 'danger' ? color.danger : severityColor(obs.severity),
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  {tone === 'danger' ? <AlertTriangle size={15} /> : <Sparkles size={14} />}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
+                    <span style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>{obs.title}</span>
+                    <StatusPill tone={tone}>{severityLabel(obs.severity)}</StatusPill>
+                    {project && <span style={{ color: color.ghost, fontSize: t.size.cap }}>{project.name}</span>}
+                    <span style={{ color: color.faint, fontSize: t.size.cap }}>{relativeDate(obs.created_at)}</span>
+                  </div>
+                  {obs.detail && (
+                    <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: t.lineHeight.relaxed }}>
+                      {obs.detail}
+                    </p>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    leading={<ArrowRight size={13} />}
+                    loading={busyAction === `obs:${obs.id}`}
+                    onClick={() => onOpen(obs)}
+                  >
+                    {agendaActionLabel(obs)}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leading={<XCircle size={13} />}
+                    loading={busyAction === `dismiss:${obs.id}`}
+                    onClick={() => onDismiss(obs)}
+                  >
+                    Dismiss
+                  </Button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -896,6 +1111,72 @@ function StatusPill({ tone, children }: { tone: 'accent' | 'success' | 'warn' | 
       {children}
     </span>
   )
+}
+
+function severityRank(severity: string) {
+  if (severity === 'high') return 0
+  if (severity === 'medium') return 1
+  if (severity === 'low') return 2
+  return 3
+}
+
+function severityTone(severity: string): 'accent' | 'success' | 'warn' | 'danger' | 'muted' {
+  if (severity === 'high') return 'danger'
+  if (severity === 'medium') return 'warn'
+  if (severity === 'low') return 'muted'
+  return 'accent'
+}
+
+function severityColor(severity: string) {
+  if (severity === 'high') return color.danger
+  if (severity === 'medium') return color.warn
+  if (severity === 'low') return color.ghost
+  return color.accent
+}
+
+function severityLabel(severity: string) {
+  if (severity === 'high') return 'Needs attention'
+  if (severity === 'medium') return 'Watch'
+  if (severity === 'low') return 'Low'
+  return severity || 'Open'
+}
+
+function agendaActionLabel(obs: ShelfObservation) {
+  if (obs.action_kind === 'open_integrations') return 'Open integration'
+  if (obs.action_kind === 'review_weekly_learning' || obs.kind === 'weekly_learning') return 'Review learning'
+  if (obs.action_kind === 'prompt_knowledge_input') return 'Open brain'
+  if (obs.action_kind === 'draft_from_campaign') return 'Open VERA'
+  return obs.proposed_action ? 'Open' : 'Open client'
+}
+
+function weeklyLearningRoute(obs: ShelfObservation, projectSlug: string | null) {
+  const payload = obs.action_payload ?? {}
+  if (typeof payload.route === 'string' && payload.route.startsWith('/')) return payload.route
+  return projectSlug ? `/p/${projectSlug}/learning` : null
+}
+
+function integrationsRoute(obs: ShelfObservation, activeProjectId: string | null) {
+  const payload = obs.action_payload ?? {}
+  const provider = typeof payload.provider === 'string' ? payload.provider : null
+  const projectId = typeof payload.project_id === 'string' ? payload.project_id : activeProjectId
+  const params = new URLSearchParams({ tab: 'integrations' })
+  if (provider) params.set('provider', provider)
+  if (projectId) params.set('project_id', projectId)
+  return `/settings?${params.toString()}`
+}
+
+function relativeDate(value: string) {
+  const time = new Date(value).getTime()
+  if (!Number.isFinite(time)) return ''
+  const diff = Date.now() - time
+  const minutes = Math.max(0, Math.floor(diff / 60000))
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d ago`
+  return formatDate(value)
 }
 
 function isMissingAccessError(message: string) {
