@@ -28,6 +28,7 @@ import {
 } from '../lib/businessContext'
 import {
   DEMAND_APPROVAL_MODES,
+  DEMAND_CHANNEL_OPERATING_POLICIES,
   DEMAND_COMMERCIAL_REQUIREMENTS,
   DEMAND_CONTENT_JOBS,
   DEMAND_GROWTH_OUTCOMES,
@@ -38,6 +39,7 @@ import {
   DEFAULT_DEMAND_OPERATING_MODEL,
   applyDemandDefaults,
   type DemandPlatformDefinition,
+  type DemandChannelRisk,
 } from '../lib/demandModel'
 
 const SUPA = import.meta.env.VITE_SUPABASE_URL as string
@@ -146,6 +148,18 @@ function publishingLabel(mode: DemandPlatformDefinition['publishing']) {
   return 'Manual-first'
 }
 
+function riskTone(risk: DemandChannelRisk) {
+  if (risk === 'high') return color.danger
+  if (risk === 'medium') return color.warn
+  return color.success
+}
+
+function riskLabel(risk: DemandChannelRisk) {
+  if (risk === 'high') return 'High approval care'
+  if (risk === 'medium') return 'Approval aware'
+  return 'Standard review'
+}
+
 function platformSourceValue(platform: DemandPlatformDefinition, context: BusinessContext) {
   if (!platform.sourceKey) return ''
   return context[platform.sourceKey].trim()
@@ -200,6 +214,7 @@ function DemandChannelMatrix({ context }: { context: BusinessContext }) {
           const source = platformSourceValue(platform, context)
           const mentioned = platformIsMentioned(platform, context)
           const active = !!source || mentioned
+          const policy = DEMAND_CHANNEL_OPERATING_POLICIES[platform.key]
           return (
             <div key={platform.key} style={{
               padding: space[4],
@@ -219,6 +234,7 @@ function DemandChannelMatrix({ context }: { context: BusinessContext }) {
               </div>
               <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', marginBottom: space[3] }}>
                 <Chip dot={publishingTone(platform.publishing)}>{publishingLabel(platform.publishing)}</Chip>
+                <Chip dot={riskTone(policy.risk)}>{riskLabel(policy.risk)}</Chip>
                 {source && <Chip dot={color.success}>Source</Chip>}
                 {!source && active && <Chip dot={color.info}>Planned</Chip>}
               </div>
@@ -229,13 +245,31 @@ function DemandChannelMatrix({ context }: { context: BusinessContext }) {
               )}
               <p style={{ margin: `0 0 ${space[3]}`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.45 }}>{platform.role}</p>
               <p style={{ margin: `0 0 ${space[3]}`, color: color.ghost, fontSize: t.size.micro, lineHeight: 1.45 }}>{platform.workflow}</p>
+              <div style={{ display: 'grid', gap: space[2], marginBottom: space[3] }}>
+                <PolicyLine label="Speaker" value={policy.speakerMode} />
+                <PolicyLine label="Approval" value={policy.approvalMode} />
+                <PolicyLine label="Guard" value={policy.publishGuard} />
+                <PolicyLine label="SAM" value={policy.samTrigger} />
+              </div>
               <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap' }}>
                 {platform.outcomeSignals.map(signal => <Chip key={signal}>{signal}</Chip>)}
               </div>
+              <p style={{ margin: `${space[3]} 0 0`, color: color.ghost, fontSize: t.size.micro, lineHeight: 1.45 }}>
+                Measures: {policy.measurementFocus}
+              </p>
             </div>
           )
         })}
       </div>
+    </div>
+  )
+}
+
+function PolicyLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '58px minmax(0, 1fr)', gap: space[2], alignItems: 'start' }}>
+      <span style={{ color: color.faint, fontSize: t.size.micro, lineHeight: 1.35 }}>{label}</span>
+      <span style={{ color: color.ink2, fontSize: t.size.micro, lineHeight: 1.35 }}>{value}</span>
     </div>
   )
 }

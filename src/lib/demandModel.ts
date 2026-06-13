@@ -23,6 +23,17 @@ export type DemandPlatformDefinition = {
   publishing: 'connected' | 'manual-first' | 'read-only' | 'cms'
 }
 
+export type DemandChannelRisk = 'low' | 'medium' | 'high'
+
+export type DemandChannelOperatingPolicy = {
+  speakerMode: string
+  approvalMode: string
+  publishGuard: string
+  measurementFocus: string
+  samTrigger: string
+  risk: DemandChannelRisk
+}
+
 export const DEMAND_PLATFORM_DEFINITIONS: DemandPlatformDefinition[] = [
   {
     key: 'linkedin',
@@ -124,6 +135,89 @@ export const DEMAND_PLATFORM_DEFINITIONS: DemandPlatformDefinition[] = [
     publishing: 'manual-first',
   },
 ]
+
+export const DEMAND_CHANNEL_OPERATING_POLICIES: Record<DemandPlatformKey, DemandChannelOperatingPolicy> = {
+  linkedin: {
+    speakerMode: 'Company, founder, or named expert, chosen per post.',
+    approvalMode: 'Named-person content goes to that person. Company posts go to the client owner.',
+    publishGuard: 'Publish only through a project-scoped Unipile profile or company page.',
+    measurementFocus: 'Comments, shares, profile visits, warm accounts, and qualified clicks.',
+    samTrigger: 'Senior ICP commenters, repeated objections, shares by target accounts, or direct buying questions.',
+    risk: 'medium',
+  },
+  youtube: {
+    speakerMode: 'Host, expert, or brand voice, chosen from the storyboard.',
+    approvalMode: 'Approve storyboard, title, description, and thumbnail before upload.',
+    publishGuard: 'Analytics first. Upload requires an approved channel connection.',
+    measurementFocus: 'Watch time, retention, subscribers, comments, traffic, and assisted conversions.',
+    samTrigger: 'High-intent comments, topic requests, demo questions, or traffic to offer pages.',
+    risk: 'medium',
+  },
+  medium: {
+    speakerMode: 'Founder, expert, or brand essay voice.',
+    approvalMode: 'One owner for POV drafts. Extra review for claims, comparisons, or customer stories.',
+    publishGuard: 'Manual-first with canonical link and tracking note.',
+    measurementFocus: 'Reads, responses, claps, referrals, and owned-site traffic.',
+    samTrigger: 'Responses with buyer questions, referral spikes, or themes that repeat in sales calls.',
+    risk: 'low',
+  },
+  quora: {
+    speakerMode: 'Helpful expert voice, not a sales account.',
+    approvalMode: 'Human approval before posting because answer quality and restraint matter.',
+    publishGuard: 'Manual-first. Draft useful answers and keep promotional CTAs restrained.',
+    measurementFocus: 'Views, upvotes, comments, shares, and click-through to owned proof.',
+    samTrigger: 'Recurring buyer questions, objections, competitor comparisons, or intent-rich topics.',
+    risk: 'medium',
+  },
+  reddit: {
+    speakerMode: 'Community-safe human voice, usually research-only.',
+    approvalMode: 'No posting without operator and client approval plus community rule check.',
+    publishGuard: 'Read-first by default. Vera listens, summarizes, and drafts only for human use.',
+    measurementFocus: 'Comments, upvotes, objections, language patterns, and traffic intent.',
+    samTrigger: 'Repeated pain language, named vendor complaints, buying research threads, or competitor mentions.',
+    risk: 'high',
+  },
+  x: {
+    speakerMode: 'Named person or concise brand POV.',
+    approvalMode: 'Manual approval for timely takes, sensitive topics, and threaded POV.',
+    publishGuard: 'Manual-first until API economics and client plan justify deeper integration.',
+    measurementFocus: 'Replies, reposts, link clicks, profile visits, and fast topic validation.',
+    samTrigger: 'ICP replies, reposts by target accounts, objection clusters, or useful conversation entry points.',
+    risk: 'medium',
+  },
+  instagram: {
+    speakerMode: 'Visual brand voice, creator, founder, or product proof.',
+    approvalMode: 'Approve caption and asset together, especially Reels, carousels, and claims.',
+    publishGuard: 'Publish only through project-scoped Meta access with approved media.',
+    measurementFocus: 'Comments, shares, saves, reach, profile actions, and link traffic.',
+    samTrigger: 'High-save proof assets, DM-style comments, repeated questions, or traffic from story links.',
+    risk: 'medium',
+  },
+  facebook: {
+    speakerMode: 'Page voice, local community voice, or founder proof.',
+    approvalMode: 'Client owner approval for Page posts and community replies.',
+    publishGuard: 'Publish only through project-scoped Meta Page access.',
+    measurementFocus: 'Comments, shares, reach, page actions, and referral traffic.',
+    samTrigger: 'Community questions, share spikes, inbound requests, or objection-heavy threads.',
+    risk: 'medium',
+  },
+  blog: {
+    speakerMode: 'Brand authority, founder POV, or expert byline.',
+    approvalMode: 'Approve outline, claims, SEO angle, and final draft before CMS publishing.',
+    publishGuard: 'Publish only through a project-scoped CMS publisher or manual handoff.',
+    measurementFocus: 'Organic traffic, assisted conversions, time on page, internal clicks, and query growth.',
+    samTrigger: 'High-intent search queries, conversion-path visits, article comments, or sales-relevant topics.',
+    risk: 'low',
+  },
+  email: {
+    speakerMode: 'Brand, founder, or campaign owner.',
+    approvalMode: 'Approve audience, offer, send segment, and final copy before any send.',
+    publishGuard: 'Draft-only in Vera until a dedicated ESP integration and sending approval exist.',
+    measurementFocus: 'Clicks, replies, traffic, meetings, and content reuse.',
+    samTrigger: 'Replies, warm clicks, meeting requests, objections, or high-fit account engagement.',
+    risk: 'medium',
+  },
+}
 
 const DEMAND_PROVIDER_PLATFORM: Record<string, DemandPlatformKey> = {
   linkedin: 'linkedin',
