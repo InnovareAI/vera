@@ -631,9 +631,17 @@ type SharedResearchProfile = {
   unipile_last_health_check: string | null
 }
 
+const UNUSABLE_UNIPILE_HEALTH_STATUSES = new Set(['stale', 'error', 'disconnected', 'revoked'])
+
 function maskAccountId(accountId: string): string {
   if (accountId.length <= 12) return accountId
   return `${accountId.slice(0, 6)}...${accountId.slice(-4)}`
+}
+
+function isUsableUnipileProfile(profile: SharedResearchProfile | null): boolean {
+  if (!profile?.unipile_account_id) return false
+  const status = (profile.unipile_health_status ?? '').trim().toLowerCase()
+  return !status || !UNUSABLE_UNIPILE_HEALTH_STATUSES.has(status)
 }
 
 function configString(row: ClientIntegration | undefined, key: string): string {
@@ -1345,10 +1353,13 @@ export function ClientIntegrationsCard() {
   const SelectedIcon = selectedTemplate.icon
   const selectedLaunch = launchMeta(selectedTemplate)
   const selectedDemandPlatform = demandPlatformForProvider(selectedTemplate.provider)
-  const workspaceResearchAccountId = researchProfile?.unipile_account_id ?? null
-  const platformResearchAccountId = platformResearchProfile?.unipile_account_id ?? null
-  const workspaceResearchConnected = !!workspaceResearchAccountId
-  const platformResearchConnected = !!platformResearchAccountId
+  const workspaceResearchPresent = !!researchProfile?.unipile_account_id
+  const workspaceResearchUsable = isUsableUnipileProfile(researchProfile)
+  const platformResearchUsable = isUsableUnipileProfile(platformResearchProfile)
+  const workspaceResearchAccountId = workspaceResearchUsable ? researchProfile?.unipile_account_id ?? null : null
+  const platformResearchAccountId = platformResearchUsable ? platformResearchProfile?.unipile_account_id ?? null : null
+  const workspaceResearchConnected = workspaceResearchUsable
+  const platformResearchConnected = platformResearchUsable
   const researchConnected = workspaceResearchConnected || platformResearchConnected
   const researchAccountId = workspaceResearchAccountId ?? platformResearchAccountId
   const researchScope = workspaceResearchConnected ? 'Workspace' : platformResearchConnected ? 'InnovareAI shared' : 'Research'
@@ -1356,7 +1367,10 @@ export function ClientIntegrationsCard() {
     ? researchProfile?.unipile_health_status ?? 'unknown'
     : platformResearchConnected
       ? platformResearchProfile?.unipile_health_status ?? 'unknown'
-      : 'not connected'
+      : workspaceResearchPresent
+        ? researchProfile?.unipile_health_status ?? 'unknown'
+        : 'not connected'
+  const workspaceResearchStale = workspaceResearchPresent && !workspaceResearchUsable
 
   return (
     <section style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', padding: 18 }}>
@@ -1416,6 +1430,9 @@ export function ClientIntegrationsCard() {
                 {platformResearchConnected && !workspaceResearchConnected && (
                   <span style={chipStyle}>Research only</span>
                 )}
+                {workspaceResearchStale && platformResearchConnected && (
+                  <span style={chipStyle}>Workspace profile needs reconnect</span>
+                )}
                 <span style={chipStyle}>Health: {researchHealth}</span>
               </div>
             </div>
@@ -1434,9 +1451,9 @@ export function ClientIntegrationsCard() {
               }}
             >
               {connectingResearchProfile ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
-              {workspaceResearchConnected ? 'Reconnect workspace profile' : 'Connect workspace profile'}
+              {workspaceResearchPresent ? 'Reconnect workspace profile' : 'Connect workspace profile'}
             </button>
-            {workspaceResearchConnected && (
+            {workspaceResearchPresent && (
               <button
                 type="button"
                 onClick={removeResearchProfile}

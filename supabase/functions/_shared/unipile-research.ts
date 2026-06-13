@@ -11,6 +11,8 @@ export type UnipileResearchConnection =
     }
   | { ok: false; accountId: null; source: null; error: string }
 
+const UNUSABLE_HEALTH_STATUSES = new Set(["stale", "error", "disconnected", "revoked"])
+
 export async function resolveUnipileResearchConnection(
   supabase: AdminClient,
   orgId: string,
@@ -27,18 +29,21 @@ export async function resolveUnipileResearchConnection(
   }
 
   const workspaceAccountId = cleanString((workspace as { unipile_account_id?: string | null } | null)?.unipile_account_id)
+  const workspaceProfile = workspace as {
+    unipile_health_status?: string | null
+    unipile_connected_at?: string | null
+  } | null
+  const workspaceHealthStatus = cleanString(workspaceProfile?.unipile_health_status)
   if (workspaceAccountId) {
-    const workspaceProfile = workspace as {
-      unipile_health_status?: string | null
-      unipile_connected_at?: string | null
-    } | null
-    return {
-      ok: true,
-      accountId: workspaceAccountId,
-      source: "workspace",
-      detail: "Workspace research profile",
-      healthStatus: cleanString(workspaceProfile?.unipile_health_status),
-      connectedAt: cleanString(workspaceProfile?.unipile_connected_at),
+    if (!isUnusableHealthStatus(workspaceHealthStatus)) {
+      return {
+        ok: true,
+        accountId: workspaceAccountId,
+        source: "workspace",
+        detail: "Workspace research profile",
+        healthStatus: workspaceHealthStatus,
+        connectedAt: cleanString(workspaceProfile?.unipile_connected_at),
+      }
     }
   }
 
@@ -48,7 +53,9 @@ export async function resolveUnipileResearchConnection(
       ok: false,
       accountId: null,
       source: null,
-      error: "No workspace LinkedIn research profile is connected.",
+      error: workspaceAccountId
+        ? `Workspace LinkedIn research profile is ${workspaceHealthStatus}; reconnect it or use an InnovareAI operator account.`
+        : "No workspace LinkedIn research profile is connected.",
     }
   }
 
@@ -72,13 +79,14 @@ export async function resolveUnipileResearchConnection(
     unipile_connected_at?: string | null
   }>)
     .filter(row => cleanString(row.id) && cleanString(row.unipile_account_id))
+    .filter(row => !isUnusableHealthStatus(cleanString(row.unipile_health_status)))
 
   if (!masterRows.length) {
     return {
       ok: false,
       accountId: null,
       source: null,
-      error: "No shared InnovareAI LinkedIn research profile is connected.",
+      error: "No usable shared InnovareAI LinkedIn research profile is connected.",
     }
   }
 
@@ -126,4 +134,8 @@ export async function resolveUnipileResearchConnection(
 
 function cleanString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
+function isUnusableHealthStatus(value: string | null): boolean {
+  return !!value && UNUSABLE_HEALTH_STATUSES.has(value.toLowerCase())
 }

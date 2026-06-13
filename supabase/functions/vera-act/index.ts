@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
   switch (kind) {
     case 'run_audit':
       // @ts-expect-error EdgeRuntime is provided by the Supabase edge runtime.
-      EdgeRuntime.waitUntil(runAudit(supabase, obs))
+      EdgeRuntime.waitUntil(runAudit(supabase, obs, auth.userId))
       return json(200, { ok: true, action: kind, status: 'started' })
 
     case 'draft_from_campaign':
@@ -94,7 +94,7 @@ Deno.serve(async (req) => {
 })
 
 // ─── runAudit ─────────────────────────────────────────────────────────
-async function runAudit(supabase: AdminClient, obs: Record<string, unknown>) {
+async function runAudit(supabase: AdminClient, obs: Record<string, unknown>, operatorUserId: string | null) {
   const orgId = (obs.action_payload as Record<string, unknown> | null)?.org_id as string
     ?? obs.org_id as string
   const projectId = (obs.action_payload as Record<string, unknown> | null)?.project_id as string
@@ -111,11 +111,11 @@ async function runAudit(supabase: AdminClient, obs: Record<string, unknown>) {
     }
     const [profileRes, brewRes] = await Promise.all([
       fetch(`${SUPABASE_URL}/functions/v1/linkedin-profile-score`, {
-        method: 'POST', headers, body: JSON.stringify({ org_id: orgId, project_id: projectId }),
+        method: 'POST', headers, body: JSON.stringify({ org_id: orgId, project_id: projectId, operator_user_id: operatorUserId }),
       }),
       // brew360-audit streams SSE — we just read it to completion
       fetch(`${SUPABASE_URL}/functions/v1/brew360-audit`, {
-        method: 'POST', headers, body: JSON.stringify({ org_id: orgId, project_id: projectId }),
+        method: 'POST', headers, body: JSON.stringify({ org_id: orgId, project_id: projectId, operator_user_id: operatorUserId }),
       }),
     ])
 
