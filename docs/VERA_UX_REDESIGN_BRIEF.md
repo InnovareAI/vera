@@ -277,6 +277,8 @@ Each mockup must show at least:
 
 ## First Build Slice After Mockups
 
+The implementation map for this slice lives in [VERA_COMMAND_REDESIGN_SLICE.md](./VERA_COMMAND_REDESIGN_SLICE.md).
+
 The first redesign implementation should not rebuild the whole app. It should prove the new product shape through one high-traffic route.
 
 Recommended first slice:
@@ -288,4 +290,3 @@ Recommended first slice:
 5. Verify desktop and mobile layouts in the in-app browser.
 
 This slice aligns the app with the new direction while preserving the working backend, client scoping, model routing, and existing review flow.
-

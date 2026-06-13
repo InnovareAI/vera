@@ -276,4 +276,4 @@ Current state:
 
 Next step:
 
-- Confirm the UX redesign brief, generate three mockup directions, then implement the first slice on Command: Brain readiness, active channels, VERA agenda, model route, spend class, and draft card actions above the composer.
+- Confirm the UX redesign brief, generate three mockup directions, then implement [VERA_COMMAND_REDESIGN_SLICE.md](./VERA_COMMAND_REDESIGN_SLICE.md): Brain readiness, active channels, VERA agenda, model route, spend class, and draft card actions above the composer.
