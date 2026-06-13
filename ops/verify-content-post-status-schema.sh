@@ -60,6 +60,25 @@ if [[ "$constraint_def" != *"draft"* || "$constraint_def" != *"pending"* || "$co
   exit 1
 fi
 
+required_columns=(
+  "org_id|uuid|uuid"
+  "project_id|uuid|uuid"
+  "scheduled_at|timestamp with time zone|timestamptz"
+  "hashtags|ARRAY|_text"
+  "posted_at|timestamp with time zone|timestamptz"
+  "posted_url|text|text"
+  "provider_post_id|text|text"
+)
+
+for expected in "${required_columns[@]}"; do
+  column_name="${expected%%|*}"
+  actual="$(psql_cmd "select column_name || '|' || data_type || '|' || udt_name from information_schema.columns where table_schema = 'public' and table_name = 'content_posts' and column_name = '$column_name';")"
+  if [[ "$actual" != "$expected" ]]; then
+    printf 'content_posts column mismatch for %s: expected %s, got %s\n' "$column_name" "$expected" "${actual:-missing}" >&2
+    exit 1
+  fi
+done
+
 post_id="$(psql_cmd "insert into public.content_posts (org_id, project_id, channel, copy, status, title)
   values ('$org_id', '$project_id', 'linkedin', 'draft status schema smoke', 'draft', 'draft status schema smoke')
   returning id;")"
