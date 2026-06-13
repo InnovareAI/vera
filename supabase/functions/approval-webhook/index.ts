@@ -83,6 +83,14 @@ Deno.serve(async (req) => {
   const updates: Record<string, unknown> = {}
   let updated: unknown
   if (action === "posted") {
+    if (post.posted_at) {
+      const alreadyPosted = await backfillPostedFields(supabase, post, { posted_url, provider_post_id })
+      if (!alreadyPosted.ok) return jsonError(alreadyPosted.message, 500)
+      return new Response(JSON.stringify({ success: true, already_posted: true, post: alreadyPosted.post }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      })
+    }
+
     updates.posted_at = now
     if (posted_url !== undefined) updates.posted_url = posted_url
     if (provider_post_id !== undefined) updates.provider_post_id = provider_post_id
@@ -96,7 +104,23 @@ Deno.serve(async (req) => {
       .maybeSingle()
 
     if (result.error) return jsonError(result.error.message, 500)
-    if (!result.data) return jsonError("Post is already marked posted.", 409)
+    if (!result.data) {
+      const refreshedResult = await supabase
+        .from("content_posts")
+        .select("*")
+        .eq("id", post.id)
+        .maybeSingle()
+      if (refreshedResult.error) return jsonError(refreshedResult.error.message, 500)
+      const refreshedPost = refreshedResult.data as PostRow | null
+      if (refreshedPost?.posted_at) {
+        const alreadyPosted = await backfillPostedFields(supabase, refreshedPost, { posted_url, provider_post_id })
+        if (!alreadyPosted.ok) return jsonError(alreadyPosted.message, 500)
+        return new Response(JSON.stringify({ success: true, already_posted: true, post: alreadyPosted.post }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        })
+      }
+      return jsonError("Post is already marked posted.", 409)
+    }
     updated = result.data
     await recordPostOutcome(supabase, post.id, action, {
       feedback,
@@ -154,10 +178,32 @@ interface PostRow {
   title?: string | null
   channel?: string | null
   copy?: string | null
+  posted_at?: string | null
   posted_url?: string | null
+  provider_post_id?: string | null
   feedback?: string | null
   review_token_expires_at?: string | null
   review_token_revoked_at?: string | null
+}
+
+async function backfillPostedFields(
+  supabase: Supabase,
+  post: PostRow,
+  fields: { posted_url?: string; provider_post_id?: string },
+): Promise<{ ok: true; post: PostRow } | { ok: false; message: string }> {
+  const updates: Record<string, unknown> = {}
+  if (fields.posted_url !== undefined && !post.posted_url) updates.posted_url = fields.posted_url
+  if (fields.provider_post_id !== undefined && !post.provider_post_id) updates.provider_post_id = fields.provider_post_id
+  if (Object.keys(updates).length === 0) return { ok: true, post }
+
+  const result = await supabase
+    .from("content_posts")
+    .update(updates)
+    .eq("id", post.id)
+    .select()
+    .maybeSingle()
+  if (result.error) return { ok: false, message: result.error.message }
+  return { ok: true, post: (result.data as PostRow | null) ?? { ...post, ...updates } }
 }
 
 function validateReviewToken(post: PostRow): Response | null {
