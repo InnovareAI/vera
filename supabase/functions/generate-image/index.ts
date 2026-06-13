@@ -162,14 +162,19 @@ Deno.serve(async (req) => {
     (!mediaKeys.falKey && platformOpenRouterAvailable && supportsOpenRouter)
   )
 
-  if (!mediaKeys.isPlatformMediaProject) {
-    const hasClientKeyForRoute =
-      (useOR && !!mediaKeys.openRouterKey) ||
-      (useOpenAI && !!mediaKeys.openAIKey) ||
-      (!useOpenAI && !useOR && !!mediaKeys.falKey)
-    if (!hasClientKeyForRoute) {
-      return jsonError('Image generation requires this client space to use its own OpenRouter, OpenAI, or FAL key for the selected model.', 403)
-    }
+  const hasClientKeyForRoute =
+    (useOR && !!mediaKeys.openRouterKey) ||
+    (useOpenAI && !!mediaKeys.openAIKey) ||
+    (!useOpenAI && !useOR && !!mediaKeys.falKey)
+  const selectedProvider = useOpenAI ? 'openai' : useOR ? 'openrouter' : 'fal'
+  const selectedKeySource = selectedProvider === 'openrouter'
+    ? (mediaKeys.openRouterKey ? 'client' : 'platform')
+    : selectedProvider === 'openai'
+      ? (mediaKeys.openAIKey ? 'client' : 'platform')
+      : 'client'
+
+  if (selectedKeySource === 'client' && !hasClientKeyForRoute) {
+    return jsonError('Image generation requires this client space to use its own OpenRouter, OpenAI, or FAL key for the selected model.', 403)
   }
 
   const slug = useOpenAI
@@ -177,12 +182,6 @@ Deno.serve(async (req) => {
     : useOR
       ? (OR_MODELS[model] ?? OR_NANO_BANANA)
       : (FAL_MODELS[model] ?? model)
-  const selectedProvider = useOpenAI ? 'openai' : useOR ? 'openrouter' : 'fal'
-  const selectedKeySource = selectedProvider === 'openrouter'
-    ? (mediaKeys.openRouterKey ? 'client' : 'platform')
-    : selectedProvider === 'openai'
-      ? (mediaKeys.openAIKey ? 'client' : 'platform')
-      : 'client'
 
   if (selectedKeySource === 'platform') {
     if (!mediaKeys.platformMediaKeysAllowed) {
