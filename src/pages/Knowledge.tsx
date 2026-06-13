@@ -21,6 +21,7 @@ import { Upload, Link2, FileText, Loader2, Trash2, ExternalLink, FileImage, File
 import { supabase } from '../lib/supabase'
 import { useProject } from '../lib/projectContext'
 import { useRightRail } from '../lib/rightRailContext'
+import { useAuth } from '../lib/auth'
 import {
   PageHeader,
   EmptyState,
@@ -126,6 +127,7 @@ function compactDate(value: string) {
 
 export default function Knowledge() {
   const { activeProject } = useProject()
+  const { session } = useAuth()
   const [mode, setMode] = useState<Mode>('paste')
   const [pasteText, setPasteText] = useState('')
   const [pasteTitle, setPasteTitle] = useState('')
@@ -171,12 +173,14 @@ export default function Knowledge() {
   }, [knowledge, load])
 
   async function callIngest(body: Record<string, unknown>): Promise<{ ok: boolean; report?: string; error?: string }> {
+    const accessToken = session?.access_token
+    if (!accessToken) return { ok: false, error: 'Sign in before adding project knowledge.' }
     const res = await fetch(INGEST_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Authorization': `Bearer ${accessToken}`,
       },
       body: JSON.stringify(body),
     })
@@ -190,6 +194,7 @@ export default function Knowledge() {
 
   async function submitPaste() {
     if (!activeProject?.id || busy) return
+    if (!session?.access_token) { setError('Sign in before adding project knowledge.'); return }
     if (pasteText.trim().length < 30) { setError('Need at least 30 characters'); return }
     setBusy(true); setError(null); setReport(null)
     const r = await callIngest({
@@ -209,6 +214,7 @@ export default function Knowledge() {
 
   async function submitUrl() {
     if (!activeProject?.id || busy) return
+    if (!session?.access_token) { setError('Sign in before adding project knowledge.'); return }
     if (!urlValue.trim().startsWith('http')) { setError('Need a full URL (https://…)'); return }
     setBusy(true); setError(null); setReport(null)
     const r = await callIngest({
@@ -228,6 +234,7 @@ export default function Knowledge() {
 
   async function uploadFiles(files: FileList | File[]) {
     if (!activeProject?.id || busy) return
+    if (!session?.access_token) { setError('Sign in before uploading project files.'); return }
     const arr = Array.from(files)
     if (arr.length === 0) return
     setBusy(true); setError(null); setReport(null)
