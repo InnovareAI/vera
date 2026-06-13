@@ -1,7 +1,14 @@
 import type { AdminClient } from "./auth.ts"
 
 export type UnipileResearchConnection =
-  | { ok: true; accountId: string; source: "workspace" | "platform"; detail: string }
+  | {
+      ok: true
+      accountId: string
+      source: "workspace" | "platform"
+      detail: string
+      healthStatus: string | null
+      connectedAt: string | null
+    }
   | { ok: false; accountId: null; source: null; error: string }
 
 export async function resolveUnipileResearchConnection(
@@ -11,7 +18,7 @@ export async function resolveUnipileResearchConnection(
 ): Promise<UnipileResearchConnection> {
   const { data: workspace, error: workspaceError } = await supabase
     .from("organizations")
-    .select("id, name, unipile_account_id")
+    .select("id, name, unipile_account_id, unipile_health_status, unipile_connected_at")
     .eq("id", orgId)
     .maybeSingle()
 
@@ -21,11 +28,17 @@ export async function resolveUnipileResearchConnection(
 
   const workspaceAccountId = cleanString((workspace as { unipile_account_id?: string | null } | null)?.unipile_account_id)
   if (workspaceAccountId) {
+    const workspaceProfile = workspace as {
+      unipile_health_status?: string | null
+      unipile_connected_at?: string | null
+    } | null
     return {
       ok: true,
       accountId: workspaceAccountId,
       source: "workspace",
       detail: "Workspace research profile",
+      healthStatus: cleanString(workspaceProfile?.unipile_health_status),
+      connectedAt: cleanString(workspaceProfile?.unipile_connected_at),
     }
   }
 
@@ -41,7 +54,7 @@ export async function resolveUnipileResearchConnection(
 
   const { data: masters, error: masterError } = await supabase
     .from("organizations")
-    .select("id, name, unipile_account_id")
+    .select("id, name, unipile_account_id, unipile_health_status, unipile_connected_at")
     .eq("is_master", true)
     .not("unipile_account_id", "is", null)
     .order("updated_at", { ascending: false })
@@ -51,7 +64,13 @@ export async function resolveUnipileResearchConnection(
     return { ok: false, accountId: null, source: null, error: `Shared research lookup failed: ${masterError.message}` }
   }
 
-  const masterRows = ((masters ?? []) as Array<{ id?: string | null; name?: string | null; unipile_account_id?: string | null }>)
+  const masterRows = ((masters ?? []) as Array<{
+    id?: string | null
+    name?: string | null
+    unipile_account_id?: string | null
+    unipile_health_status?: string | null
+    unipile_connected_at?: string | null
+  }>)
     .filter(row => cleanString(row.id) && cleanString(row.unipile_account_id))
 
   if (!masterRows.length) {
@@ -100,6 +119,8 @@ export async function resolveUnipileResearchConnection(
     accountId,
     source: "platform",
     detail: `Shared InnovareAI research profile${selected.name ? ` (${selected.name})` : ""}`,
+    healthStatus: cleanString(selected.unipile_health_status),
+    connectedAt: cleanString(selected.unipile_connected_at),
   }
 }
 

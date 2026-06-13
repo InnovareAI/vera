@@ -37,6 +37,7 @@ import { isPlatformMediaProject } from '../_shared/client-media-keys.ts'
 import { logGenerationUsage } from '../_shared/generation-usage.ts'
 import { completeText, textRuntimeUsageMetadata, type TextRuntime } from '../_shared/text-runtime.ts'
 import { selectTextModel } from '../_shared/model-recommendations.ts'
+import { resolveUnipileResearchConnection } from '../_shared/unipile-research.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -791,6 +792,8 @@ interface WorkspaceContext {
   }>
   researchProfile: {
     linkedin_connected: boolean
+    source: 'workspace' | 'platform' | null
+    detail: string | null
     linkedin_health_status: string | null
     linkedin_connected_at: string | null
   }
@@ -954,6 +957,30 @@ async function loadContext(
     }
   }
 
+  let linkedInResearchProfile: WorkspaceContext['researchProfile'] = {
+    linkedin_connected: false,
+    source: null,
+    detail: null,
+    linkedin_health_status: null,
+    linkedin_connected_at: null,
+  }
+  try {
+    const research = await resolveUnipileResearchConnection(supabase, orgId, { requesterUserId: userId })
+    if (research.ok) {
+      linkedInResearchProfile = {
+        linkedin_connected: true,
+        source: research.source,
+        detail: research.detail,
+        linkedin_health_status: research.healthStatus,
+        linkedin_connected_at: research.connectedAt,
+      }
+    } else {
+      linkedInResearchProfile.detail = research.error
+    }
+  } catch (error) {
+    linkedInResearchProfile.detail = error instanceof Error ? error.message : 'LinkedIn research profile lookup failed'
+  }
+
   return {
     orgName: (orgRes.data?.name as string) ?? 'this workspace',
     brandVoice: brandRes.data ? {
@@ -981,11 +1008,7 @@ async function loadContext(
     integrations: ((integrationsRes.data ?? []) as WorkspaceContext['integrations']).filter(row =>
       row.status !== 'revoked'
     ),
-    researchProfile: {
-      linkedin_connected: !!((orgRes.data as Record<string, unknown> | null)?.unipile_account_id),
-      linkedin_health_status: ((orgRes.data as Record<string, unknown> | null)?.unipile_health_status as string | null | undefined) ?? null,
-      linkedin_connected_at: ((orgRes.data as Record<string, unknown> | null)?.unipile_connected_at as string | null | undefined) ?? null,
-    },
+    researchProfile: linkedInResearchProfile,
     activeProject: projectId ? await loadActiveProject(supabase, orgId, projectId) : undefined,
     projectKnowledge: projectId && lastUserMessage
       ? await retrieveProjectKnowledge(supabase, projectId, lastUserMessage, embeddingRuntime)
@@ -1196,9 +1219,12 @@ function renderContext(ctx: WorkspaceContext, route: string): string {
   lines.push(`Pending review: ${ctx.pendingCount} post${ctx.pendingCount === 1 ? '' : 's'}`)
 
   if (ctx.researchProfile.linkedin_connected) {
-    lines.push(`Shared LinkedIn research profile: connected; health=${ctx.researchProfile.linkedin_health_status ?? 'unknown'}${ctx.researchProfile.linkedin_connected_at ? `; connected_at=${ctx.researchProfile.linkedin_connected_at.slice(0, 10)}` : ''}. Use linkedin_research for read-only LinkedIn profile, company, and recent-post research across client spaces. This is NOT a publishing connection.`)
+    const profileLabel = ctx.researchProfile.source === 'platform'
+      ? 'Shared InnovareAI LinkedIn research profile'
+      : 'Workspace LinkedIn research profile'
+    lines.push(`${profileLabel}: connected; health=${ctx.researchProfile.linkedin_health_status ?? 'unknown'}${ctx.researchProfile.linkedin_connected_at ? `; connected_at=${ctx.researchProfile.linkedin_connected_at.slice(0, 10)}` : ''}${ctx.researchProfile.detail ? `; detail=${ctx.researchProfile.detail}` : ''}. Use linkedin_research for read-only LinkedIn profile, company, and recent-post research across client spaces. This is NOT a publishing connection.`)
   } else {
-    lines.push(`Shared LinkedIn research profile: not connected. LinkedIn research via Unipile needs Settings > Integrations > Shared LinkedIn research profile.`)
+    lines.push(`LinkedIn research profile: not connected${ctx.researchProfile.detail ? `; ${ctx.researchProfile.detail}` : ''}. LinkedIn research via Unipile needs Settings > Integrations > Shared LinkedIn research profile.`)
   }
 
   if (ctx.integrations.length) {
@@ -2609,16 +2635,11 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
           return { result: 'LinkedIn research is unavailable because Unipile is not configured on the server.' }
         }
 
-        const { data: org, error: orgError } = await ctx.supabase
-          .from('organizations')
-          .select('unipile_account_id, unipile_health_status')
-          .eq('id', ctx.orgId)
-          .maybeSingle()
-        if (orgError) return { result: `LinkedIn research profile lookup failed: ${orgError.message}` }
-        const accountId = (org as { unipile_account_id?: string | null } | null)?.unipile_account_id ?? null
-        if (!accountId) {
-          return { result: 'No shared LinkedIn research profile is connected for this workspace. Connect it in Settings > Integrations > Shared LinkedIn research profile, then rerun the research. Do not ask the operator to paste posts if a profile URL is available.' }
+        const unipile = await resolveUnipileResearchConnection(ctx.supabase, ctx.orgId, { requesterUserId: ctx.userId })
+        if (!unipile.ok) {
+          return { result: `${unipile.error} Connect LinkedIn in Settings > Integrations > Shared LinkedIn research profile, then rerun the research. Do not ask the operator to paste posts if a profile URL is available.` }
         }
+        const accountId = unipile.accountId
 
         const requestedType = String(input.target_type ?? 'auto') as 'auto' | 'person' | 'company'
         const includeProfile = input.include_profile !== false
@@ -2641,7 +2662,7 @@ Output ONLY valid JSON — no prose, no markdown fences — in exactly this shap
         })
 
         if (!research.ok) return { result: research.error }
-        return { result: formatLinkedInResearch(research, (org as { unipile_health_status?: string | null } | null)?.unipile_health_status ?? null) }
+        return { result: formatLinkedInResearch(research, unipile.healthStatus) }
       }
 
       case 'create_skill': {
