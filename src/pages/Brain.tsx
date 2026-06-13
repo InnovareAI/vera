@@ -11,7 +11,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ElementType } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, Brain as BrainIcon, BookOpen, Check, Link2, Plus, ShieldCheck, Target, X, Loader2, Trash2, Sparkles, Upload, FileText, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Brain as BrainIcon, BookOpen, Check, Link2, Plus, ShieldCheck, Target, X, Loader2, Trash2, Sparkles, Upload, FileText, RefreshCw, ExternalLink } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { BrandVoice, Audience, ContentMetricSnapshot, Post } from '../lib/supabase'
 import { useProject } from '../lib/projectContext'
@@ -93,6 +93,18 @@ type SourceKnowledgeSummary = {
   unindexed?: number
   failed?: number
   error?: string
+}
+
+type SourceKnowledgeRow = {
+  id: string
+  title: string
+  summary: string | null
+  source_kind: string
+  source_url: string | null
+  kind: string | null
+  extracted: unknown
+  created_at: string
+  updated_at: string
 }
 
 const DEMAND_FACT_KEYS: BusinessContextKey[] = [
@@ -241,6 +253,38 @@ function sourceKnowledgeLabel(report: SourcePullReport) {
   return ''
 }
 
+function sourceKnowledgeExtracted(row: SourceKnowledgeRow) {
+  const extracted = row.extracted && typeof row.extracted === 'object' ? row.extracted as Record<string, unknown> : {}
+  return {
+    source: typeof extracted.source === 'string' ? extracted.source : undefined,
+    items: typeof extracted.items === 'number' ? extracted.items : undefined,
+    requestedItems: typeof extracted.requestedItems === 'number' ? extracted.requestedItems : undefined,
+    indexed: typeof extracted.indexed === 'boolean' ? extracted.indexed : undefined,
+    collectedAt: typeof extracted.collectedAt === 'string' ? extracted.collectedAt : undefined,
+  }
+}
+
+function sourceKnowledgeHost(url: string | null) {
+  if (!url) return 'No URL'
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname.replace(/^www\./, '')
+  } catch {
+    return url
+  }
+}
+
+function sourceKnowledgeTitle(row: SourceKnowledgeRow) {
+  return row.title.replace(/\s+source pull$/i, '').trim() || 'Source'
+}
+
+function sourceKnowledgeDate(value: string | null | undefined) {
+  if (!value) return 'Not refreshed yet'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return 'Not refreshed yet'
+  return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
 function SourcePullReportPanel({ reports }: { reports: SourcePullReport[] }) {
   if (!reports.length) return null
   const okCount = reports.filter(report => report.ok).length
@@ -294,6 +338,103 @@ function SourcePullReportPanel({ reports }: { reports: SourcePullReport[] }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function SourceKnowledgePanel({
+  rows,
+  loading,
+  error,
+  onRefresh,
+}: {
+  rows: SourceKnowledgeRow[]
+  loading: boolean
+  error: string | null
+  onRefresh: () => void
+}) {
+  const indexedCount = rows.filter(row => sourceKnowledgeExtracted(row).indexed === true).length
+  const rawCount = rows.filter(row => sourceKnowledgeExtracted(row).indexed === false).length
+  return (
+    <div style={{ borderTop: `1px solid ${color.line}`, paddingTop: space[4], display: 'grid', gap: space[3] }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3] }}>
+        <div>
+          <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>Source knowledge</div>
+          <div style={{ color: color.ghost, fontSize: t.size.micro, marginTop: 2 }}>
+            {rows.length ? `${rows.length} pulled sources · ${indexedCount} indexed${rawCount ? ` · ${rawCount} raw` : ''}` : 'No pulled sources stored yet'}
+          </div>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onRefresh} disabled={loading}>
+          {loading ? <Loader2 size={13} /> : <RefreshCw size={13} />}
+        </Button>
+      </div>
+
+      {error && (
+        <div style={{ color: color.danger, fontSize: t.size.cap, lineHeight: 1.45 }}>
+          {error}
+        </div>
+      )}
+
+      {!rows.length && !loading && !error && (
+        <div style={{ color: color.ghost, fontSize: t.size.cap, lineHeight: 1.5 }}>
+          Pull sources to store the website and social material VERA can use in chat.
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <div style={{ display: 'grid', gap: 7, maxHeight: 260, overflowY: 'auto', paddingRight: 2 }}>
+          {rows.map(row => {
+            const meta = sourceKnowledgeExtracted(row)
+            const isIndexed = meta.indexed === true
+            const isRaw = meta.indexed === false
+            const connector = sourceConnectorLabel(meta.source)
+            const items = typeof meta.items === 'number'
+              ? meta.requestedItems ? `${meta.items}/${meta.requestedItems}` : String(meta.items)
+              : '0'
+            return (
+              <div
+                key={row.id}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(0, 1fr) auto',
+                  gap: space[3],
+                  alignItems: 'center',
+                  padding: `${space[2]} 0`,
+                  borderBottom: `1px solid ${color.line}`,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 999, background: isIndexed ? color.success : isRaw ? color.warn : color.ghost, flexShrink: 0 }} />
+                    <span style={{ color: color.ink, fontSize: t.size.micro, fontWeight: t.weight.semibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {sourceKnowledgeTitle(row)}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 3, color: color.ghost, fontSize: t.size.micro, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {connector} · {items} item{items === '1' ? '' : 's'} · {isIndexed ? 'semantic indexed' : isRaw ? 'raw fallback' : 'stored'} · {sourceKnowledgeDate(meta.collectedAt ?? row.updated_at)}
+                  </div>
+                  <div style={{ marginTop: 2, color: color.ghost, fontSize: t.size.micro, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {sourceKnowledgeHost(row.source_url)}
+                  </div>
+                </div>
+                {row.source_url ? (
+                  <a
+                    href={row.source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={row.source_url}
+                    style={{ color: color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28 }}
+                  >
+                    <ExternalLink size={13} />
+                  </a>
+                ) : (
+                  <span />
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -915,11 +1056,39 @@ export default function Brain() {
   const [sourceStatus, setSourceStatus] = useState('')
   const [sourceError, setSourceError] = useState<string | null>(null)
   const [sourceReports, setSourceReports] = useState<SourcePullReport[]>([])
+  const [sourceKnowledge, setSourceKnowledge] = useState<SourceKnowledgeRow[]>([])
+  const [sourceKnowledgeLoading, setSourceKnowledgeLoading] = useState(false)
+  const [sourceKnowledgeError, setSourceKnowledgeError] = useState<string | null>(null)
   const [selectedPolicyKey, setSelectedPolicyKey] = useState<DemandPlatformKey>('linkedin')
   const [learningPosts, setLearningPosts] = useState<Post[]>([])
   const [learningSnapshots, setLearningSnapshots] = useState<ContentMetricSnapshot[]>([])
   const [learningLoading, setLearningLoading] = useState(false)
   const [learningError, setLearningError] = useState<string | null>(null)
+
+  const loadSourceKnowledge = useCallback(async () => {
+    if (!activeProject?.id) {
+      setSourceKnowledge([])
+      setSourceKnowledgeError(null)
+      setSourceKnowledgeLoading(false)
+      return
+    }
+    setSourceKnowledgeLoading(true)
+    setSourceKnowledgeError(null)
+    const { data, error } = await supabase
+      .from('project_knowledge')
+      .select('id, title, summary, source_kind, source_url, kind, extracted, created_at, updated_at')
+      .eq('project_id', activeProject.id)
+      .eq('kind', 'source_pull')
+      .order('updated_at', { ascending: false })
+      .limit(24)
+    if (error) {
+      setSourceKnowledge([])
+      setSourceKnowledgeError(error.message)
+    } else {
+      setSourceKnowledge((data ?? []) as SourceKnowledgeRow[])
+    }
+    setSourceKnowledgeLoading(false)
+  }, [activeProject?.id])
 
   useEffect(() => {
     const parsed = parseProjectInstructions(activeProject?.instructions ?? '')
@@ -934,6 +1103,10 @@ export default function Brain() {
       companyName: parsed.businessContext.companyName || activeProject?.name || '',
     })
   }, [activeProject?.id, activeProject?.instructions, activeProject?.name, activeProject?.description])
+
+  useEffect(() => {
+    void loadSourceKnowledge()
+  }, [loadSourceKnowledge])
 
   const channelPolicies = useMemo(
     () => demandChannelPoliciesFromText(business.channelOperatingPolicies),
@@ -1142,6 +1315,7 @@ export default function Brain() {
         ? ` Brain: ${Math.max(0, indexedCount)} indexed${rawCount ? `, ${rawCount} raw` : ''}${knowledge.failed ? `, ${knowledge.failed} failed` : ''}.`
         : ''
       setSourceStatus(`${depthLabel} pull: ${okCount}/${total} sources, ${itemPart}.${knowledgePart} Review and save.`)
+      void loadSourceKnowledge()
     } catch (error) {
       setSourceError(error instanceof Error ? error.message : 'Could not pull these sources.')
     } finally {
@@ -1430,6 +1604,12 @@ export default function Brain() {
               </p>
             )}
             <SourcePullReportPanel reports={sourceReports} />
+            <SourceKnowledgePanel
+              rows={sourceKnowledge}
+              loading={sourceKnowledgeLoading}
+              error={sourceKnowledgeError}
+              onRefresh={() => { void loadSourceKnowledge() }}
+            />
             <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap' }}>
               <Button variant="secondary" size="sm" onClick={() => businessFileRef.current?.click()} disabled={extractingContext}>
                 {extractingContext ? <Loader2 size={13} /> : <Upload size={13} />}
