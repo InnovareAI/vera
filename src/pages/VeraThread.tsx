@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, Copy, Pin, X, Target, Share2, Network, KeyRound, Lock, TrendingUp, BarChart3, Brain } from 'lucide-react'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, Copy, Pin, X, Target, KeyRound, Lock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -30,7 +30,6 @@ import {
   DEMAND_SOURCE_KEYS,
   demandChannelPoliciesFromText,
   demandChannelPolicyOverrideCount,
-  demandChannelMatrixPrompt,
   demandChannelsFromContext,
   demandPlatformHasStrategyEvidence,
   type DemandChannelOperatingPolicy,
@@ -38,7 +37,6 @@ import {
 import {
   buildModelRecommendations,
   imageModelProvider,
-  latestPricingReviewDate,
   type ModelPricingGuide,
   type SpendEstimate,
 } from '../lib/modelEconomics'
@@ -97,27 +95,6 @@ type ObservationNotice = {
   action_payload: Record<string, unknown> | null
 }
 
-type WeeklyLearningSummary = {
-  measuredPosts?: number
-  comments?: number
-  shares?: number
-  clicks?: number
-  qualifiedTraffic?: number
-  buyerQuestions?: number
-  meetingRequests?: number
-  demandSignals?: number
-  buyerIntent?: number
-}
-
-type WeeklyLearningPayload = {
-  route?: string
-  week_key?: string
-  current?: WeeklyLearningSummary
-  previous?: WeeklyLearningSummary
-  top_assets?: Array<{ post_id?: string; title?: string; channel?: string; score?: number; evidence?: string }>
-  skill_proposals?: Array<{ id?: string; name?: string; confidence?: string | null; created_at?: string }>
-  sam_handoff_candidates?: Array<{ post_id?: string; title?: string; channel?: string; score?: number; triggers?: string[] }>
-}
 type CommandStats = {
   draft: number
   pending: number
@@ -616,7 +593,6 @@ export default function VeraThread() {
   const [campaign, setCampaign] = useState<CampaignData | null>(null)
   const [approving, setApproving] = useState(false)
   const [observations, setObservations] = useState<ObservationNotice[]>([])
-  const [weeklyActionKey, setWeeklyActionKey] = useState<string | null>(null)
   const [stats, setStats] = useState<CommandStats>(EMPTY_COMMAND_STATS)
   const [sessionId, setSessionId] = useState<string>('')
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
@@ -1520,66 +1496,6 @@ export default function VeraThread() {
     navigate(integrationsRouteFromNotice(o, activeProject?.id ?? null))
   }
 
-  async function runWeeklyLearningAction(o: ObservationNotice, action: 'skills' | 'handoff' | 'complete') {
-    const payload = parseWeeklyLearningPayload(o.action_payload)
-    const body: Record<string, unknown> = { observation_id: o.id }
-    const actionKey = `${o.id}:${action}`
-
-    if (action === 'skills') {
-      const skillIds = (payload.skill_proposals ?? [])
-        .map(skill => skill.id)
-        .filter((id): id is string => Boolean(id))
-      if (skillIds.length === 0) {
-        push({ kind: 'warn', title: 'No skill proposals', body: 'There are no proposed learning skills on this review.' })
-        return
-      }
-      body.activate_skill_ids = skillIds
-    }
-
-    if (action === 'handoff') {
-      const handoffs = (payload.sam_handoff_candidates ?? []).filter(item => item.post_id)
-      if (handoffs.length === 0) {
-        push({ kind: 'warn', title: 'No follow-ups', body: 'There are no scored follow-up candidates on this review.' })
-        return
-      }
-      body.queue_all_handoffs = true
-    }
-
-    if (action === 'complete') body.complete_review = true
-
-    setWeeklyActionKey(actionKey)
-    try {
-      const headers = await functionHeaders()
-      const res = await fetch(`${SUPA}/functions/v1/weekly-learning-review`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      })
-      const data = await res.json().catch(() => null) as {
-        error?: string
-        activated_skills?: Array<{ id: string; name?: string | null }>
-        queued_handoff_ids?: string[]
-        skipped_duplicate_handoff_count?: number
-      } | null
-      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`)
-
-      if (action === 'skills') {
-        push({ kind: 'success', title: 'Skills enabled', body: `${data?.activated_skills?.length ?? 0} learning proposal(s) are now active.` })
-      } else if (action === 'handoff') {
-        const queued = data?.queued_handoff_ids?.length ?? 0
-        const skipped = data?.skipped_duplicate_handoff_count ?? 0
-        push({ kind: 'success', title: 'Follow-ups queued', body: skipped ? `${queued} queued, ${skipped} already existed.` : `${queued} follow-up action(s) queued.` })
-      } else {
-        setObservations(prev => prev.filter(item => item.id !== o.id))
-        push({ kind: 'success', title: 'Review complete', body: 'Weekly learning was marked as reviewed.' })
-      }
-    } catch (e) {
-      push({ kind: 'danger', title: 'Review action failed', body: (e as Error).message })
-    } finally {
-      setWeeklyActionKey(null)
-    }
-  }
-
   // ─── Draft actions ──────────────────────────────────────────────
   function ensureDraftInActiveProject(post: Post) {
     if (!activeProject?.id || post.project_id !== activeProject.id) {
@@ -1834,20 +1750,13 @@ export default function VeraThread() {
         ) : messages.length === 0 ? (
           <Idle onRun={pr => send(pr)} observations={observations} actions={buildLaunchActions(stats)} onDismiss={dismissObservation}
             onOpenIntegrations={openIntegrationObservation}
-            onWeeklyReviewAction={runWeeklyLearningAction}
-            weeklyActionKey={weeklyActionKey}
             setup={setup} projectName={activeProject?.name ?? 'this space'}
             onOpenBrain={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/brain`) }}
             onOpenLearning={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/learning`) }}
             onOpenReview={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/review`) }}
             onOpenCalendar={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/calendar`) }}
-            onOpenPerformance={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/measure`) }}
-            onOpenSkills={() => navigate('/skills?view=skills&scope=client&q=learning-proposal')}
             providerCapabilities={providerCapabilities}
             onAddKey={openProviderKeys}
-            pricingCatalog={pricingCatalog}
-            pricingSource={pricingSource}
-            pricingRowCount={pricingRowCount}
             stats={stats}
             demandPlan={demandPlan}
             composer={renderComposer('idle')} />
@@ -2470,162 +2379,48 @@ function routeToneStyle(tone: ModelRouteRecommendation['tone']) {
   return { border: color.line, bg: color.surface, fg: color.info }
 }
 
-function ProviderCapabilityNotice({ capabilities, onAddKey }: { capabilities: ProviderCapabilities; onAddKey?: () => void }) {
-  const needsText = capabilities.needsTextKey
-  const imageLocked = !capabilities.imageReady
-  const videoLocked = !capabilities.videoReady
-  const title = needsText ? 'Provider key needed' : imageLocked ? 'Media rendering locked' : 'Video rendering locked'
-  const notes: string[] = []
-  if (needsText) notes.push('Add OpenRouter or Anthropic before Vera can run text generation in this space.')
-  if (imageLocked) {
-    notes.push(capabilities.imagesEnabled
-      ? 'Image and carousel rendering needs a space OpenRouter, OpenAI, or FAL key. Platform media also requires an operator entitlement and this exact project policy to allow it.'
-      : 'Image and carousel rendering is disabled in this space AI policy.')
-  }
-  if (videoLocked) {
-    notes.push(capabilities.hasFal
-      ? 'Video rendering is disabled in this space AI policy.'
-      : 'Video rendering requires a space-owned FAL key. Platform video only applies when the operator is entitled and this exact project policy allows platform media.')
-  }
-  const textBody = notes.join(' ')
-  const rows = [
-    { icon: KeyRound, label: 'Text', ready: capabilities.textReady },
-    { icon: ImagePlus, label: 'Images', ready: capabilities.imageReady },
-    { icon: Clapperboard, label: 'Video', ready: capabilities.videoReady },
-  ]
-
-  return (
-    <div style={{ width: '100%', maxWidth: 680, marginBottom: space[5], padding: space[5], background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.lg, textAlign: 'left' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: space[3], justifyContent: 'space-between' }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink, marginBottom: 5 }}>
-            <Lock size={15} />
-            {title}
-          </div>
-          <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.6, margin: 0 }}>
-            {textBody} If the operator asks for locked media now, Vera will create a storyboard, production brief, or reusable prompt instead of rendering a paid asset.
-          </p>
-        </div>
-        {onAddKey && (
-          <button onClick={onAddKey} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: radius.pill, border: 'none', background: color.accent, color: '#fff', fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
-            <KeyRound size={13} />
-            Provider keys
-          </button>
-        )}
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: space[4] }}>
-        {rows.map(row => {
-          const Icon = row.icon
-          return (
-            <span key={row.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: radius.pill, border: `1px solid ${row.ready ? color.success : color.accentLine}`, background: color.surface, color: row.ready ? color.success : color.ink2, fontSize: t.size.micro, fontWeight: t.weight.semibold }}>
-              <Icon size={12} />
-              {row.label}: {row.ready ? 'ready' : 'locked'}
-            </span>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
 function pricingCatalogBadge(source: ModelPricingCatalogSource = 'loading', rowCount = 0) {
   if (source === 'catalog') return { label: `Live catalog, ${rowCount} rows`, color: color.success, border: color.success }
   if (source === 'fallback') return { label: 'Fallback guide', color: color.warn, border: color.warn }
   return { label: 'Loading guide', color: color.ghost, border: color.line }
 }
 
-function Idle({ onRun, observations, actions, onDismiss, onOpenIntegrations, onWeeklyReviewAction, weeklyActionKey, setup, projectName, onOpenBrain, onOpenLearning, onOpenReview, onOpenCalendar, onOpenPerformance, onOpenSkills, providerCapabilities, onAddKey, pricingCatalog, pricingSource, pricingRowCount, stats, demandPlan, composer }: {
+function Idle({ onRun, observations, actions, onDismiss, onOpenIntegrations, setup, projectName, onOpenBrain, onOpenLearning, onOpenReview, onOpenCalendar, providerCapabilities, onAddKey, stats, demandPlan, composer }: {
   onRun: (prompt: string) => void
   observations: ObservationNotice[]
   actions: LaunchAction[]
   onDismiss: (o: { title: string }) => void
   onOpenIntegrations: (o: ObservationNotice) => void
-  onWeeklyReviewAction: (o: ObservationNotice, action: 'skills' | 'handoff' | 'complete') => void
-  weeklyActionKey: string | null
   setup: { business: boolean; audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null
   projectName: string
   onOpenBrain: () => void
   onOpenLearning: () => void
   onOpenReview: () => void
   onOpenCalendar: () => void
-  onOpenPerformance: () => void
-  onOpenSkills: () => void
   providerCapabilities: ProviderCapabilities
   onAddKey?: () => void
-  pricingCatalog?: ModelPricingGuide[]
-  pricingSource?: ModelPricingCatalogSource
-  pricingRowCount?: number
   stats: CommandStats
   demandPlan: DemandPlanSnapshot
   composer: ReactNode
 }) {
   const setupDone = !!setup && setup.business && setup.audience && setup.voice && setup.categories && setup.knowledge
   const setupCard: LaunchAction = { icon: Sparkles, title: `Set up ${projectName}`, sub: 'URL, audience, offer, proof', prompt: '', action: 'brain' }
-  const grid = (setup && !setupDone ? [setupCard, ...actions] : actions).slice(0, 6)
-  const weeklyObservations = observations.filter(o => o.kind === 'weekly_learning')
-  const otherObservations = observations.filter(o => o.kind !== 'weekly_learning')
-  const primaryObservation = otherObservations[0]
+  const quickActions = (setup && !setupDone ? [setupCard, ...actions] : actions).slice(0, 4)
+  const primaryObservation = observations[0]
   const ready = demandPlan.completeness >= 70
-  const channels = demandPlan.channels.slice(0, 6)
-  const firstAction = grid.find(action => action.action !== 'brain') ?? actions[0]
-  const recommendation = !setupDone
-    ? {
-      label: 'Setup needed',
-      title: `Complete the Strategy Brain for ${projectName}.`,
-      body: demandPlan.missing.length
-        ? `Missing: ${demandPlan.missing.join(', ')}. Add these before scaling content production.`
-        : 'Add the company URL, audience, offer, proof, tone, and source material before scaling content production.',
-      primary: 'Open Strategy Brain',
-      secondary: firstAction?.title ?? 'Plan campaign',
-    }
-    : primaryObservation
-      ? {
-        label: 'VERA recommends',
-        title: primaryObservation.title,
-        body: primaryObservation.detail || primaryObservation.proposed_action || 'This space has an operating signal ready for review.',
-        primary: primaryObservation.action_kind === 'open_integrations' ? 'Open integrations' : 'Handle this',
-        secondary: firstAction?.title ?? 'Plan campaign',
-      }
-      : {
-        label: 'VERA recommends',
-        title: ready ? 'Turn the saved strategy into the next content move.' : 'Strengthen the strategy model before scaling output.',
-        body: ready
-          ? 'Use the active channels, approval model, and learning signals to brief the next campaign or draft.'
-          : 'The baseline model is usable, but VERA will produce stronger work once the missing context is saved in Brain.',
-        primary: firstAction?.title ?? 'Plan campaign',
-        secondary: ready ? 'Open Brain' : 'Complete Brain',
-      }
-  const runPrimaryRecommendation = () => {
-    if (!setupDone) {
-      onOpenBrain()
-      return
-    }
-    if (primaryObservation) {
-      if (primaryObservation.action_kind === 'open_integrations') onOpenIntegrations(primaryObservation)
-      else onRun(primaryObservation.proposed_action || primaryObservation.title)
-      return
-    }
-    if (firstAction?.action === 'brain') onOpenBrain()
-    else if (firstAction?.prompt) onRun(firstAction.prompt)
-  }
-  const runSecondaryRecommendation = () => {
-    if (!setupDone || recommendation.secondary.includes('Brain')) onOpenBrain()
-    else if (firstAction?.prompt) onRun(firstAction.prompt)
-  }
+  const channels = demandPlan.channels.slice(0, 5)
+  const firstAction = quickActions.find(action => action.action !== 'brain') ?? actions[0]
   const modelWarning = providerCapabilities.loaded && (providerCapabilities.needsTextKey || !providerCapabilities.imageReady || !providerCapabilities.videoReady)
   const reviewQueue = stats.pending + stats.rejected
   const readyToSchedule = stats.approved
   const productionTotal = stats.draft + stats.pending + stats.approved + stats.scheduled + stats.posted + stats.rejected
-  const spendState = !providerCapabilities.loaded
-    ? 'Checking keys'
-    : providerCapabilities.monthlyBudgetUsd
-      ? `$${providerCapabilities.monthlyBudgetUsd.toFixed(0)} ${providerCapabilities.budgetGuardEnabled ? providerCapabilities.budgetGuardMode : 'guard off'}`
-      : providerCapabilities.budgetGuardEnabled ? 'Guard on, no cap' : 'Guard off'
-  const commandFocus = !setupDone
+  const nextMove = !setupDone
     ? {
-      label: 'Build the Brain',
-      title: 'Save the company context before scaling output.',
-      detail: 'Start with the website, sources, audience, proof, and channel assumptions.',
+      label: 'Strategy context',
+      title: 'Add the missing business context.',
+      detail: demandPlan.missing.length
+        ? `Missing: ${demandPlan.missing.join(', ')}.`
+        : 'Start with website, audience, offer, proof, voice, and useful source material.',
       action: onOpenBrain,
       actionLabel: 'Open Brain',
     }
@@ -2633,479 +2428,134 @@ function Idle({ onRun, observations, actions, onDismiss, onOpenIntegrations, onW
       ? {
         label: 'Review queue',
         title: `${reviewQueue} item${reviewQueue === 1 ? '' : 's'} need a decision.`,
-        detail: 'Clear pending or rejected content before Vera schedules more work.',
+        detail: 'Clear pending or rejected work before adding more production load.',
         action: onOpenReview,
         actionLabel: 'Open Review',
       }
       : readyToSchedule > 0
         ? {
-          label: 'Schedule next',
-          title: `${readyToSchedule} approved item${readyToSchedule === 1 ? '' : 's'} can move to the calendar.`,
-          detail: 'Put approved content into the right day, channel, and publishing cadence.',
+          label: 'Schedule',
+          title: `${readyToSchedule} approved item${readyToSchedule === 1 ? '' : 's'} can move to the planner.`,
+          detail: 'Place approved content into the right day, channel, and cadence.',
           action: onOpenCalendar,
           actionLabel: 'Open Planner',
         }
         : primaryObservation
           ? {
-            label: 'Learning signal',
+            label: primaryObservation.kind === 'weekly_learning' ? 'Learning' : 'Signal',
             title: primaryObservation.title,
             detail: primaryObservation.detail || primaryObservation.proposed_action || 'A saved signal is ready for action.',
             action: () => {
+              if (primaryObservation.kind === 'weekly_learning') {
+                onOpenLearning()
+                return
+              }
               if (primaryObservation.action_kind === 'open_integrations') onOpenIntegrations(primaryObservation)
               else onRun(primaryObservation.proposed_action || primaryObservation.title)
             },
-            actionLabel: primaryObservation.action_kind === 'open_integrations' ? 'Open Integrations' : 'Act on Signal',
+            actionLabel: primaryObservation.kind === 'weekly_learning' ? 'Open Learning' : primaryObservation.action_kind === 'open_integrations' ? 'Open Integrations' : 'Act on Signal',
           }
           : {
-            label: 'Create next',
-            title: productionTotal ? 'Plan the next useful content move.' : 'Start with one concrete content brief.',
-            detail: 'Use Brain context and current channels to generate a useful draft, not generic output.',
+            label: 'Next move',
+            title: productionTotal ? 'Create the next useful content move.' : 'Start with one concrete brief.',
+            detail: 'Use the saved context and valid channels to create a specific draft, plan, or storyboard.',
             action: () => firstAction?.prompt ? onRun(firstAction.prompt) : onOpenBrain(),
             actionLabel: firstAction?.title ?? 'Plan Content',
           }
+
   return (
     <div style={{ minHeight: '100%', padding: `clamp(${space[6]}, 3vw, ${space[8]})`, paddingBottom: space[10], display: 'flex', justifyContent: 'center' }}>
-      <div style={{ width: '100%', maxWidth: 1180, display: 'grid', gap: space[5], alignContent: 'start' }}>
-        <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: space[5], alignItems: 'center' }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: space[3], marginBottom: space[2] }}>
-              <VeraAvatar size={38} hero />
-              <div style={{ minWidth: 0 }}>
-                <div style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>VERA Command</div>
-                <h1 style={{ margin: 0, color: color.ink, fontSize: t.size.h3, fontWeight: t.weight.semibold, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{projectName}</h1>
-              </div>
+      <div style={{ width: '100%', maxWidth: 980, display: 'grid', gap: space[5], alignContent: 'start' }}>
+        <section style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[4], flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[3], minWidth: 0 }}>
+            <VeraAvatar size={38} hero />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>Ask Vera</div>
+              <h1 style={{ margin: 0, color: color.ink, fontSize: t.size.h3, fontWeight: t.weight.semibold, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{projectName}</h1>
             </div>
-            <p style={{ margin: 0, color: color.ink2, fontSize: t.size.sm, lineHeight: 1.5, maxWidth: 680 }}>
-              Operating desk for strategy, production, approvals, publishing, and learning.
-            </p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <CommandStatusPill tone={ready ? 'success' : 'warn'} label={`${demandPlan.completeness}% Brain ready`} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
+            <CommandStatusPill tone={ready ? 'success' : 'warn'} label={`${demandPlan.completeness}% Brain`} />
+            {reviewQueue > 0 && <CommandStatusPill tone="warn" label={`${reviewQueue} review`} />}
+            {readyToSchedule > 0 && <CommandStatusPill tone="success" label={`${readyToSchedule} approved`} />}
             <CommandStatusPill tone={providerCapabilities.loaded && providerCapabilities.textReady ? 'success' : 'warn'} label={providerCapabilities.loaded && providerCapabilities.textReady ? 'Text ready' : 'Text setup'} />
-            <CommandStatusPill tone={modelWarning ? 'warn' : 'success'} label={modelWarning ? 'Media guarded' : 'Models guarded'} />
           </div>
         </section>
 
-        <CommandDailyBrief
-          focus={commandFocus}
-          brainReadiness={demandPlan.completeness}
-          reviewQueue={reviewQueue}
-          readyToSchedule={readyToSchedule}
-          scheduled={stats.scheduled}
-          posted={stats.posted}
-          productionTotal={productionTotal}
-          spendState={spendState}
-          guardTone={modelWarning ? 'warn' : 'success'}
-          onOpenBrain={onOpenBrain}
-          onOpenReview={onOpenReview}
-          onOpenCalendar={onOpenCalendar}
-          onOpenPerformance={onOpenPerformance}
-          onOpenLearning={onOpenLearning}
-        />
-
-        <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: space[5], alignItems: 'stretch' }}>
-          <article style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[6], boxShadow: 'var(--shadow-pop)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold, marginBottom: space[4] }}>
-              <Sparkles size={13} />
-              {recommendation.label}
+        <section style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5], boxShadow: 'var(--shadow-pop)', display: 'grid', gap: space[4] }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
+            {channels.map(channel => <ChannelPill key={channel} label={channel} />)}
+            {demandPlan.channels.length > channels.length && <ChannelPill label={`+${demandPlan.channels.length - channels.length}`} muted />}
+            {channels.length === 0 && <ChannelPill label="Channels not set" muted />}
+          </div>
+          {composer}
+          {quickActions.length > 0 && (
+            <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap' }}>
+              {quickActions.map(action => {
+                const Icon = action.icon
+                return (
+                  <button key={action.title} onClick={() => action.action === 'brain' ? onOpenBrain() : onRun(action.prompt)} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minHeight: 34, padding: '8px 11px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.paper2, color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
+                    <Icon size={13} />
+                    {action.title}
+                  </button>
+                )
+              })}
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: space[5], alignItems: 'stretch' }}>
-              <div style={{ minWidth: 0 }}>
-                <h2 style={{ margin: 0, color: color.ink, fontSize: t.size.h2, fontWeight: t.weight.semibold, lineHeight: 1.2 }}>{recommendation.title}</h2>
-                <p style={{ margin: `${space[3]} 0 0`, color: color.ink2, fontSize: t.size.body, lineHeight: 1.6, maxWidth: '60ch' }}>{recommendation.body}</p>
-                <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', marginTop: space[5] }}>
-                  <button onClick={runPrimaryRecommendation} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: radius.pill, border: 'none', background: color.accent, color: '#fff', fontSize: t.size.sm, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
-                    <ArrowUp size={14} style={{ transform: 'rotate(45deg)' }} />
-                    {recommendation.primary}
-                  </button>
-                  <button onClick={runSecondaryRecommendation} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.paper2, color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.medium, cursor: 'pointer' }}>
-                    <Target size={14} />
-                    {recommendation.secondary}
-                  </button>
-                </div>
-              </div>
-              <div style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2, padding: space[4], minWidth: 0 }}>
-                <div style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium, marginBottom: space[2] }}>Learning signal</div>
-                <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.4 }}>
-                  {weeklyObservations[0]?.detail || demandPlan.learning[0] || 'Weekly performance review is active.'}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: color.success, fontSize: t.size.micro, fontWeight: t.weight.semibold, marginTop: space[3] }}>
-                  <TrendingUp size={12} />
-                  Self-learning loop
-                </div>
-              </div>
+          )}
+        </section>
+
+        <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: space[3] }}>
+          <article style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5], display: 'grid', gap: space[3] }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], flexWrap: 'wrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>
+                <Target size={13} />
+                {nextMove.label}
+              </span>
+              <button onClick={nextMove.action} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minHeight: 32, padding: '7px 12px', borderRadius: radius.pill, border: 'none', background: color.accent, color: '#fff', fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
+                <ArrowUp size={13} style={{ transform: 'rotate(45deg)' }} />
+                {nextMove.actionLabel}
+              </button>
+            </div>
+            <div>
+              <h2 style={{ margin: 0, color: color.ink, fontSize: t.size.h4, fontWeight: t.weight.semibold, lineHeight: 1.25 }}>{nextMove.title}</h2>
+              <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>{nextMove.detail}</p>
             </div>
           </article>
 
-          <aside style={{ display: 'grid', gap: space[3] }}>
-            <CommandMetric icon={Target} label="Objective" value={demandPlan.objective} detail={demandPlan.conversionPath} />
-            <CommandMetric icon={Network} label="Active channels" value={channels.length ? channels.join(', ') : 'Set in Brain'} detail={`${demandPlan.sourceCount}/${demandPlan.sourceTotal} sources connected`} />
-          </aside>
-        </section>
-
-        <section style={{ display: 'grid', gap: space[3] }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
-            <span style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>Active channels</span>
-            {channels.map(channel => <ChannelPill key={channel} label={channel} />)}
-            {demandPlan.channels.length > channels.length && <ChannelPill label={`+${demandPlan.channels.length - channels.length}`} muted />}
-          </div>
-          {composer}
-        </section>
-
-        {providerCapabilities.loaded && modelWarning && (
-        <ProviderCapabilityNotice capabilities={providerCapabilities} onAddKey={onAddKey} />
-      )}
-
-      {providerCapabilities.loaded && (
-        <ModelSpendStrip capabilities={providerCapabilities} onAddKey={onAddKey} pricingCatalog={pricingCatalog} pricingSource={pricingSource} pricingRowCount={pricingRowCount} />
-      )}
-
-        <CommandOperatingLanes
-          stats={stats}
-          plan={demandPlan}
-          setupDone={setupDone}
-          modelWarning={modelWarning}
-          learningSignal={weeklyObservations[0]?.detail || demandPlan.learning[0] || 'Learning starts once published content returns engagement, traffic, and follow-up signals.'}
-          onOpenBrain={onOpenBrain}
-          onOpenReview={onOpenReview}
-          onOpenCalendar={onOpenCalendar}
-          onOpenLearning={onOpenLearning}
-          onRun={onRun}
-        />
-
-        <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: space[5], alignItems: 'start' }}>
-          <DemandPlanPanel plan={demandPlan} projectName={projectName} onRun={onRun} onOpenBrain={onOpenBrain} />
-
-          <aside style={{ display: 'grid', gap: space[4] }}>
-            <div style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5] }}>
-              <div style={{ color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold, marginBottom: space[3] }}>Quick actions</div>
-              <div style={{ display: 'grid', gap: space[2] }}>
-                {grid.map(c => {
-                  const Icn = c.icon
-                  return (
-                    <button key={c.title} onClick={() => c.action === 'brain' ? onOpenBrain() : onRun(c.prompt)}
-                      style={{ width: '100%', minHeight: 48, display: 'flex', alignItems: 'center', gap: space[3], textAlign: 'left', padding: `${space[3]} ${space[4]}`, background: color.paper2, border: `1px solid ${color.line}`, borderRadius: radius.md, cursor: 'pointer', fontFamily: t.family.sans, transition: 'border-color 120ms, box-shadow 120ms' }}
-                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-line)'; e.currentTarget.style.boxShadow = 'var(--shadow-pop)' }}
-                      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--line)'; e.currentTarget.style.boxShadow = 'none' }}>
-                      <span style={{ width: 30, height: 30, borderRadius: radius.pill, background: 'var(--accent-tint)', color: color.accent, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        <Icn size={16} strokeWidth={1.9} />
-                      </span>
-                      <span style={{ minWidth: 0 }}>
-                        <span style={{ display: 'block', fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink }}>{c.title}</span>
-                        <span style={{ display: 'block', fontSize: t.size.cap, color: color.ghost, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.sub}</span>
-                      </span>
-                    </button>
-                  )
-                })}
+          {modelWarning && (
+            <article style={{ background: 'var(--accent-tint)', border: '1px solid var(--accent-line)', borderRadius: radius.lg, padding: space[4], display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: space[3], minWidth: 0 }}>
+                <Lock size={15} style={{ color: color.accent, flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold }}>Space-owned provider keys required for generation.</div>
+                  <div style={{ color: color.ink2, fontSize: t.size.micro, marginTop: 2 }}>Vera can still plan, draft prompts, and storyboard without rendering paid media.</div>
+                </div>
               </div>
-            </div>
-
-            {observations.length > 0 && (
-              <div style={{ display: 'grid', gap: space[3] }}>
-                <div style={{ color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>VERA wants to</div>
-                {weeklyObservations.map(o => (
-                  <WeeklyLearningNoticeCard
-                    key={o.id}
-                    observation={o}
-                    projectName={projectName}
-                    onRun={onRun}
-                    onOpenLearning={onOpenLearning}
-                    onOpenSkills={onOpenSkills}
-                    onReviewAction={onWeeklyReviewAction}
-                    busyActionKey={weeklyActionKey}
-                    onDismiss={() => onDismiss(o)}
-                  />
-                ))}
-                {otherObservations.map(o => (
-                  <div key={o.id} style={{ display: 'flex', alignItems: 'stretch', background: 'var(--accent-tint)', border: `1px solid var(--accent-line)`, borderRadius: radius.md, overflow: 'hidden' }}>
-                    <button onClick={() => o.action_kind === 'open_integrations' ? onOpenIntegrations(o) : onRun(o.proposed_action || o.title)} title={o.action_kind === 'open_integrations' ? 'Open integrations' : 'Ask VERA to handle this'}
-                      style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: space[3], textAlign: 'left', padding: `${space[3]} ${space[4]}`, background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: t.family.sans, color: color.ink, fontSize: t.size.sm }}>
-                      <Sparkles size={15} style={{ color: color.accent, flexShrink: 0 }} />
-                      <span style={{ flex: 1, minWidth: 0 }}>{o.title}</span>
-                      <ArrowUp size={13} style={{ color: color.accent, transform: 'rotate(45deg)', flexShrink: 0 }} />
-                    </button>
-                    <button onClick={() => onDismiss(o)} title="Dismiss"
-                      style={{ flexShrink: 0, padding: `0 ${space[3]}`, background: 'transparent', border: 'none', borderLeft: `1px solid var(--accent-line)`, cursor: 'pointer', color: color.ghost, display: 'flex', alignItems: 'center' }}>
-                      <X size={14} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </aside>
-        </section>
-      </div>
-    </div>
-  )
-}
-
-function CommandDailyBrief({
-  focus,
-  brainReadiness,
-  reviewQueue,
-  readyToSchedule,
-  scheduled,
-  posted,
-  productionTotal,
-  spendState,
-  guardTone,
-  onOpenBrain,
-  onOpenReview,
-  onOpenCalendar,
-  onOpenPerformance,
-  onOpenLearning,
-}: {
-  focus: { label: string; title: string; detail: string; action: () => void; actionLabel: string }
-  brainReadiness: number
-  reviewQueue: number
-  readyToSchedule: number
-  scheduled: number
-  posted: number
-  productionTotal: number
-  spendState: string
-  guardTone: 'success' | 'warn'
-  onOpenBrain: () => void
-  onOpenReview: () => void
-  onOpenCalendar: () => void
-  onOpenPerformance: () => void
-  onOpenLearning: () => void
-}) {
-  const stats = [
-    { label: 'Brain', value: `${brainReadiness}%`, detail: 'context ready', tone: brainReadiness >= 70 ? 'success' : 'warn' },
-    { label: 'Review', value: String(reviewQueue), detail: 'needs decision', tone: reviewQueue ? 'warn' : 'success' },
-    { label: 'Schedule', value: String(readyToSchedule), detail: 'approved items', tone: readyToSchedule ? 'info' : 'neutral' },
-    { label: 'Live', value: String(posted), detail: `${scheduled} scheduled`, tone: posted || scheduled ? 'success' : 'neutral' },
-    { label: 'Spend', value: spendState, detail: 'generation only', tone: guardTone },
-  ] as const
-  const actions = [
-    { label: 'Brain', icon: Brain, onClick: onOpenBrain },
-    { label: 'Review', icon: Check, onClick: onOpenReview },
-    { label: 'Planner', icon: CalendarDays, onClick: onOpenCalendar },
-    { label: 'Performance', icon: BarChart3, onClick: onOpenPerformance },
-    { label: 'Learning', icon: TrendingUp, onClick: onOpenLearning },
-  ]
-
-  return (
-    <section style={{ background: `linear-gradient(135deg, ${color.surface} 0%, ${color.paper2} 100%)`, border: `1px solid ${color.line}`, borderRadius: radius.lg, boxShadow: 'var(--shadow-pop)', overflow: 'hidden' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 0 }}>
-        <div style={{ padding: space[6], minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap', marginBottom: space[3] }}>
-            <span style={{ color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>{focus.label}</span>
-            <span style={{ color: color.ghost, fontSize: t.size.micro }}>{productionTotal} items in loop</span>
-          </div>
-          <h2 style={{ margin: 0, color: color.ink, fontSize: t.size.h2, fontWeight: t.weight.semibold, lineHeight: 1.16 }}>{focus.title}</h2>
-          <p style={{ margin: `${space[3]} 0 0`, color: color.ink2, fontSize: t.size.body, lineHeight: 1.55, maxWidth: 720 }}>{focus.detail}</p>
-          <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', marginTop: space[5] }}>
-            <button onClick={focus.action} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minHeight: 34, padding: '8px 13px', borderRadius: radius.pill, border: 'none', background: color.accent, color: '#fff', fontSize: t.size.sm, fontWeight: t.weight.semibold, cursor: 'pointer', boxShadow: 'var(--shadow-glow)' }}>
-              <ArrowUp size={14} style={{ transform: 'rotate(45deg)' }} />
-              {focus.actionLabel}
-            </button>
-            {actions.map(action => {
-              const Icon = action.icon
-              return (
-                <button key={action.label} onClick={action.onClick} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 34, padding: '8px 11px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: color.ink2, fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
-                  <Icon size={13} />
-                  {action.label}
+              {onAddKey && (
+                <button onClick={onAddKey} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 30, padding: '6px 10px', borderRadius: radius.pill, border: 'none', background: color.accent, color: '#fff', fontSize: t.size.micro, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
+                  <KeyRound size={12} />
+                  Keys
                 </button>
-              )
-            })}
-          </div>
-        </div>
-        <div style={{ padding: space[5], display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: space[3], alignContent: 'center', minWidth: 0 }}>
-          {stats.map(stat => (
-            <CommandBriefStat key={stat.label} label={stat.label} value={stat.value} detail={stat.detail} tone={stat.tone} />
-          ))}
-        </div>
-      </div>
-    </section>
-  )
-}
+              )}
+            </article>
+          )}
 
-function CommandBriefStat({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: 'success' | 'warn' | 'info' | 'neutral' }) {
-  const toneColor = tone === 'success' ? color.success : tone === 'warn' ? color.warn : tone === 'info' ? color.info : color.ghost
-  return (
-    <div style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.surface, padding: space[3], minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium, marginBottom: 5 }}>
-        <span style={{ width: 7, height: 7, borderRadius: '50%', background: toneColor, flexShrink: 0 }} />
-        {label}
+          {primaryObservation && (
+            <article style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[4], display: 'flex', alignItems: 'center', gap: space[3], flexWrap: 'wrap' }}>
+              <Sparkles size={14} style={{ color: color.accent, flexShrink: 0 }} />
+              <span style={{ flex: 1, minWidth: 220, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.45, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{primaryObservation.title}</span>
+              <button onClick={() => primaryObservation.kind === 'weekly_learning' ? onOpenLearning() : primaryObservation.action_kind === 'open_integrations' ? onOpenIntegrations(primaryObservation) : onRun(primaryObservation.proposed_action || primaryObservation.title)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 28, padding: '5px 9px', borderRadius: radius.pill, border: `1px solid var(--accent-line)`, background: 'var(--accent-tint)', color: color.accent, fontSize: t.size.micro, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
+                Act
+              </button>
+              <button onClick={() => onDismiss(primaryObservation)} title="Dismiss" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.paper2, color: color.ghost, cursor: 'pointer' }}>
+                <X size={13} />
+              </button>
+            </article>
+          )}
+        </section>
       </div>
-      <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</div>
-      <div style={{ color: color.ghost, fontSize: t.size.micro, lineHeight: 1.35, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</div>
     </div>
   )
-}
-
-function CommandOperatingLanes({
-  stats,
-  plan,
-  setupDone,
-  modelWarning,
-  learningSignal,
-  onOpenBrain,
-  onOpenReview,
-  onOpenCalendar,
-  onOpenLearning,
-  onRun,
-}: {
-  stats: CommandStats
-  plan: DemandPlanSnapshot
-  setupDone: boolean
-  modelWarning: boolean
-  learningSignal: string
-  onOpenBrain: () => void
-  onOpenReview: () => void
-  onOpenCalendar: () => void
-  onOpenLearning: () => void
-  onRun: (prompt: string) => void
-}) {
-  const productionTotal = stats.draft + stats.pending + stats.approved + stats.scheduled + stats.posted + stats.rejected
-  const needsAttention = stats.pending + stats.rejected
-  const planPrompt = `Use the current Strategy Brain to recommend the next best content move. Return the channel, format, audience, core angle, approval path, expected signal, and whether any paid media generation should be avoided.`
-  const learningPrompt = `Review what VERA should learn next from the current content queue. Focus on comments, shares, traffic, objections, qualified follow-up signals, and what should become a reusable skill.`
-  return (
-    <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: space[4] }}>
-      <CommandLane
-        icon={Brain}
-        label="Brain"
-        title={setupDone ? 'Strategy model is ready to guide production.' : 'Strategy Brain needs more context.'}
-        body={setupDone
-          ? `${plan.sourceCount}/${plan.sourceTotal} source groups connected. ${plan.customPolicyCount} channel policies are active.`
-          : (plan.missing.length ? `Missing ${plan.missing.join(', ')} before scaling output.` : 'Add company URL, offer, audience, proof, and channel strategy before scaling output.')}
-        actionLabel={setupDone ? 'Review Brain' : 'Complete Brain'}
-        onAction={onOpenBrain}
-      >
-        <CommandLaneRow label="Objective" value={plan.objective} />
-        <CommandLaneRow label="Channels" value={plan.channels.slice(0, 4).join(', ') || 'Set in Brain'} />
-        <CommandLaneRow label="Approval care" value={plan.highCareCount ? `${plan.highCareCount} high-care channels` : 'Standard review'} />
-      </CommandLane>
-
-      <CommandLane
-        icon={CalendarDays}
-        label="Production"
-        title={productionTotal ? `${productionTotal} content items in the operating loop.` : 'No content in production yet.'}
-        body={needsAttention
-          ? `${needsAttention} item${needsAttention === 1 ? '' : 's'} need review or correction before publishing.`
-          : 'Use the queue and calendar to keep approvals, schedules, and platform previews separate.'}
-        actionLabel={stats.pending ? 'Open Review' : 'Open Calendar'}
-        onAction={stats.pending ? onOpenReview : onOpenCalendar}
-      >
-        <CommandStatusBars stats={stats} />
-      </CommandLane>
-
-      <CommandLane
-        icon={TrendingUp}
-        label="Learning"
-        title="Signals should improve the next brief."
-        body={learningSignal}
-        actionLabel="Open Learning"
-        onAction={onOpenLearning}
-      >
-        <CommandLaneRow label="Guardrail" value={modelWarning ? 'Media spend needs review' : 'Model routes are controlled'} />
-        <CommandLaneRow label="Budget scope" value="Generation and paid social only" />
-        <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', marginTop: space[2] }}>
-          <button onClick={() => onRun(planPrompt)} style={commandLaneButtonStyle('secondary')}>
-            <Target size={12} />
-            Next move
-          </button>
-          <button onClick={() => onRun(learningPrompt)} style={commandLaneButtonStyle('secondary')}>
-            <Sparkles size={12} />
-            Learn
-          </button>
-        </div>
-      </CommandLane>
-    </section>
-  )
-}
-
-function CommandLane({
-  icon: Icon,
-  label,
-  title,
-  body,
-  actionLabel,
-  onAction,
-  children,
-}: {
-  icon: React.ElementType
-  label: string
-  title: string
-  body: string
-  actionLabel: string
-  onAction: () => void
-  children: ReactNode
-}) {
-  return (
-    <article style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5], display: 'grid', gap: space[4], minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3] }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>
-          <Icon size={13} />
-          {label}
-        </span>
-        <button onClick={onAction} style={commandLaneButtonStyle('primary')}>
-          {actionLabel}
-        </button>
-      </div>
-      <div style={{ minWidth: 0 }}>
-        <h3 style={{ margin: 0, color: color.ink, fontSize: t.size.h4, fontWeight: t.weight.semibold, lineHeight: 1.25 }}>{title}</h3>
-        <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>{body}</p>
-      </div>
-      <div style={{ display: 'grid', gap: space[2] }}>
-        {children}
-      </div>
-    </article>
-  )
-}
-
-function CommandLaneRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(86px, auto) minmax(0, 1fr)', gap: space[3], alignItems: 'baseline', minWidth: 0 }}>
-      <span style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium }}>{label}</span>
-      <span style={{ color: color.ink, fontSize: t.size.cap, lineHeight: 1.35, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
-    </div>
-  )
-}
-
-function CommandStatusBars({ stats }: { stats: CommandStats }) {
-  const rows = [
-    { label: 'Draft', value: stats.draft, dot: color.ghost },
-    { label: 'Review', value: stats.pending, dot: color.warn },
-    { label: 'Approved', value: stats.approved, dot: color.success },
-    { label: 'Scheduled', value: stats.scheduled, dot: color.info },
-    { label: 'Posted', value: stats.posted, dot: color.success },
-    { label: 'Rejected', value: stats.rejected, dot: color.danger },
-  ]
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: space[2] }}>
-      {rows.map(row => (
-        <div key={row.label} style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2, padding: space[3], minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: color.ghost, fontSize: t.size.micro, marginBottom: 5 }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: row.dot, flexShrink: 0 }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</span>
-          </div>
-          <div style={{ color: color.ink, fontSize: t.size.h4, fontWeight: t.weight.semibold, lineHeight: 1 }}>{row.value}</div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function commandLaneButtonStyle(tone: 'primary' | 'secondary'): React.CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    minHeight: 28,
-    padding: '5px 9px',
-    borderRadius: radius.pill,
-    border: `1px solid ${tone === 'primary' ? 'var(--accent-line)' : color.line}`,
-    background: tone === 'primary' ? 'var(--accent-tint)' : color.paper2,
-    color: tone === 'primary' ? color.accent : color.ink2,
-    fontSize: t.size.micro,
-    fontWeight: t.weight.semibold,
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-  }
 }
 
 function CommandStatusPill({ label, tone }: { label: string; tone: 'success' | 'warn' }) {
@@ -3126,202 +2576,6 @@ function ChannelPill({ label, muted = false }: { label: string; muted?: boolean 
   )
 }
 
-function CommandMetric({ icon: Icon, label, value, detail }: { icon: React.ElementType; label: string; value: string; detail: string }) {
-  return (
-    <div style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5], minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium, marginBottom: space[3] }}>
-        <Icon size={13} />
-        {label}
-      </div>
-      <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{value}</div>
-      <div style={{ color: color.ghost, fontSize: t.size.cap, lineHeight: 1.45, marginTop: space[2], display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{detail}</div>
-    </div>
-  )
-}
-
-function ModelSpendStrip({ capabilities, onAddKey, pricingCatalog, pricingSource, pricingRowCount }: {
-  capabilities: ProviderCapabilities
-  onAddKey?: () => void
-  pricingCatalog?: ModelPricingGuide[]
-  pricingSource?: ModelPricingCatalogSource
-  pricingRowCount?: number
-}) {
-  const routes = modelRouteRecommendations(capabilities, pricingCatalog)
-  const reviewedOn = latestPricingReviewDate(pricingCatalog)
-  const pricingStatus = pricingCatalogBadge(pricingSource, pricingRowCount)
-  const budget = capabilities.monthlyBudgetUsd
-    ? `$${capabilities.monthlyBudgetUsd.toFixed(0)} ${capabilities.budgetGuardEnabled ? capabilities.budgetGuardMode : 'guard off'}`
-    : capabilities.budgetGuardEnabled ? 'No cap set' : 'Guard off'
-  return (
-    <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))', gap: space[3], padding: space[4], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg }}>
-      {routes.map(route => {
-        const Icon = route.icon
-        const tone = routeToneStyle(route.tone)
-        return (
-          <div key={route.label} style={{ minWidth: 0, display: 'grid', gap: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium }}>
-              <Icon size={12} style={{ color: tone.fg }} />
-              {route.label}
-            </div>
-            <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{route.status}</div>
-            <div style={{ color: color.ghost, fontSize: t.size.micro, lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{route.cost}</div>
-          </div>
-        )
-      })}
-      <div style={{ minWidth: 0, display: 'grid', gap: 4 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium }}>
-          <Lock size={12} style={{ color: capabilities.budgetGuardEnabled ? color.warn : color.ghost }} />
-          Generation guard
-        </div>
-        <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>{budget}</div>
-        <div style={{ color: color.ghost, fontSize: t.size.micro, lineHeight: 1.35 }}>Premium media never defaults.</div>
-      </div>
-      <div style={{ minWidth: 0, display: 'grid', gap: 4 }}>
-        <div style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium }}>Pricing guide</div>
-        <div style={{ color: pricingStatus.color, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>{pricingStatus.label}</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ color: color.ghost, fontSize: t.size.micro }}>Reviewed {reviewedOn}</span>
-          {onAddKey && (
-            <button onClick={onAddKey} style={{ marginLeft: 'auto', padding: '4px 8px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.paper2, color: color.ink2, fontSize: t.size.micro, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
-              Keys
-            </button>
-          )}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function WeeklyLearningNoticeCard({
-  observation,
-  projectName,
-  onRun,
-  onOpenLearning,
-  onOpenSkills,
-  onReviewAction,
-  busyActionKey,
-  onDismiss,
-}: {
-  observation: ObservationNotice
-  projectName: string
-  onRun: (prompt: string) => void
-  onOpenLearning: () => void
-  onOpenSkills: () => void
-  onReviewAction: (o: ObservationNotice, action: 'skills' | 'handoff' | 'complete') => void
-  busyActionKey: string | null
-  onDismiss: () => void
-}) {
-  const payload = parseWeeklyLearningPayload(observation.action_payload)
-  const current = payload.current ?? {}
-  const previousSignals = payload.previous?.demandSignals ?? 0
-  const currentSignals = current.demandSignals ?? 0
-  const delta = currentSignals - previousSignals
-  const topAssets = (payload.top_assets ?? []).slice(0, 2)
-  const skills = payload.skill_proposals ?? []
-  const handoffs = payload.sam_handoff_candidates ?? []
-  const busy = busyActionKey?.startsWith(`${observation.id}:`) ?? false
-  const busyFor = (action: 'skills' | 'handoff' | 'complete') => busyActionKey === `${observation.id}:${action}`
-  const actionStyle: React.CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '7px 10px',
-    borderRadius: radius.pill,
-    border: `1px solid var(--accent-line)`,
-    background: color.surface,
-    color: color.ink,
-    fontSize: t.size.cap,
-    fontWeight: t.weight.medium,
-    cursor: 'pointer',
-  }
-
-  return (
-    <article style={{ background: color.surface, border: `1px solid var(--accent-line)`, borderRadius: radius.lg, overflow: 'hidden', boxShadow: 'var(--shadow-pop)' }}>
-      <div style={{ padding: space[4], borderBottom: `1px solid ${color.line}` }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap', marginBottom: space[2] }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>
-            <TrendingUp size={13} />
-            Weekly Learning
-          </span>
-          {payload.week_key && <span style={{ color: color.ghost, fontSize: t.size.micro }}>{payload.week_key}</span>}
-        </div>
-        <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, lineHeight: 1.35 }}>{observation.title}</div>
-        {observation.detail && (
-          <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.45 }}>{observation.detail}</p>
-        )}
-      </div>
-
-      <div style={{ padding: space[4], display: 'grid', gap: space[3] }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(116px, 1fr))', gap: space[2] }}>
-          <WeeklyLearningStat icon={BarChart3} label="Measured" value={current.measuredPosts ?? 0} detail="assets" />
-          <WeeklyLearningStat icon={Sparkles} label="Signals" value={currentSignals} detail={formatLearningDelta(delta)} />
-          <WeeklyLearningStat icon={Lightbulb} label="Intent signals" value={current.buyerIntent ?? 0} detail={`${current.buyerQuestions ?? 0} q, ${current.meetingRequests ?? 0} inquiries`} />
-          <WeeklyLearningStat icon={Zap} label="Skills" value={skills.length} detail="proposals" />
-        </div>
-
-        {topAssets.length > 0 && (
-          <div style={{ display: 'grid', gap: 5 }}>
-            {topAssets.map(asset => (
-              <div key={asset.post_id ?? asset.title ?? 'asset'} style={{ color: color.ghost, fontSize: t.size.micro, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                <b style={{ color: color.ink2 }}>{asset.title ?? 'Untitled asset'}</b> · {asset.channel ?? 'Unassigned'} · score {asset.score ?? 0}
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap' }}>
-          <button onClick={onOpenLearning} style={{ ...actionStyle, background: color.accent, color: '#fff', borderColor: color.accent }}>
-            <TrendingUp size={13} /> Review Learning
-          </button>
-          <button onClick={onOpenSkills} style={actionStyle}>
-            <Zap size={13} /> Review skills
-          </button>
-          <button onClick={() => onReviewAction(observation, 'skills')} disabled={busy || skills.length === 0}
-            style={{ ...actionStyle, opacity: busy || skills.length === 0 ? 0.55 : 1, cursor: busy || skills.length === 0 ? 'not-allowed' : 'pointer' }}>
-            <Check size={13} /> {busyFor('skills') ? 'Enabling...' : 'Enable proposals'}
-          </button>
-          <button onClick={() => onRun(buildWeeklyNextBriefPrompt(projectName, payload, observation.detail))} style={actionStyle}>
-            <Send size={13} /> Brief next move
-          </button>
-          <button onClick={() => onReviewAction(observation, 'handoff')} disabled={busy || handoffs.length === 0}
-            style={{ ...actionStyle, opacity: busy || handoffs.length === 0 ? 0.55 : 1, cursor: busy || handoffs.length === 0 ? 'not-allowed' : 'pointer' }}>
-            <Sparkles size={13} /> {busyFor('handoff') ? 'Queuing...' : 'Queue follow-up'}
-          </button>
-          <button onClick={() => onRun(buildWeeklySamPrompt(projectName, payload, observation.detail))} disabled={handoffs.length === 0}
-            style={{ ...actionStyle, opacity: handoffs.length === 0 ? 0.55 : 1, cursor: handoffs.length === 0 ? 'not-allowed' : 'pointer' }}>
-            <Send size={13} /> Brief follow-up
-          </button>
-          <button onClick={() => onReviewAction(observation, 'complete')} disabled={busy}
-            style={{ ...actionStyle, opacity: busy ? 0.55 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}>
-            <Check size={13} /> {busyFor('complete') ? 'Saving...' : 'Done'}
-          </button>
-          <button onClick={onDismiss} title="Dismiss" style={{ ...actionStyle, color: color.ghost, borderColor: color.line }}>
-            <X size={13} /> Dismiss
-          </button>
-        </div>
-      </div>
-    </article>
-  )
-}
-
-function WeeklyLearningStat({ icon: Icon, label, value, detail }: { icon: typeof BarChart3; label: string; value: number; detail: string }) {
-  return (
-    <div style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.paper2, padding: space[3] }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-        <span style={{ color: color.ghost, fontSize: t.size.micro }}>{label}</span>
-        <Icon size={12} style={{ color: color.accent }} />
-      </div>
-      <div style={{ marginTop: 5, color: color.ink, fontSize: t.size.h4, fontWeight: t.weight.semibold, lineHeight: 1 }}>{value}</div>
-      <div style={{ marginTop: 2, color: color.ghost, fontSize: t.size.micro }}>{detail}</div>
-    </div>
-  )
-}
-
-function parseWeeklyLearningPayload(value: Record<string, unknown> | null): WeeklyLearningPayload {
-  if (!value || typeof value !== 'object') return {}
-  return value as WeeklyLearningPayload
-}
-
 function integrationsRouteFromNotice(observation: ObservationNotice, activeProjectId: string | null) {
   const payload = observation.action_payload ?? {}
   const provider = typeof payload.provider === 'string' ? payload.provider : null
@@ -3332,186 +2586,6 @@ function integrationsRouteFromNotice(observation: ObservationNotice, activeProje
   return `/settings?${params.toString()}`
 }
 
-function formatLearningDelta(value: number) {
-  if (value > 0) return `+${value} vs last week`
-  if (value < 0) return `${value} vs last week`
-  return 'flat vs last week'
-}
-
-function buildWeeklyNextBriefPrompt(projectName: string, payload: WeeklyLearningPayload, detail: string | null) {
-  const topAssets = (payload.top_assets ?? [])
-    .slice(0, 3)
-    .map(asset => `- ${asset.title ?? 'Untitled'} (${asset.channel ?? 'unassigned'}, score ${asset.score ?? 0}): ${asset.evidence ?? 'measured signal'}`)
-    .join('\n')
-  const skills = (payload.skill_proposals ?? [])
-    .slice(0, 5)
-    .map(skill => `- ${skill.name ?? 'Learning proposal'} (${skill.confidence ?? 'medium'})`)
-    .join('\n')
-  return [
-    `Use the weekly VERA learning review to brief the next content move for ${projectName}.`,
-    ``,
-    detail ? `Weekly summary: ${detail}` : '',
-    payload.week_key ? `Week: ${payload.week_key}` : '',
-    ``,
-    topAssets ? `Top assets:\n${topAssets}` : '',
-    skills ? `Pending learning skill proposals:\n${skills}` : '',
-    ``,
-    `Return:`,
-    `1. what changed`,
-    `2. the next content brief`,
-    `3. the platform mix`,
-    `4. the approval route`,
-    `5. what VERA should measure next`,
-  ].filter(Boolean).join('\n')
-}
-
-function buildWeeklySamPrompt(projectName: string, payload: WeeklyLearningPayload, detail: string | null) {
-  const handoffs = (payload.sam_handoff_candidates ?? [])
-    .slice(0, 6)
-    .map(item => `- ${item.title ?? 'Untitled'} (${item.channel ?? 'unassigned'}, score ${item.score ?? 0}): ${(item.triggers ?? []).join(', ')}`)
-    .join('\n')
-  return [
-    `Create follow-up actions from the weekly VERA learning review for ${projectName}.`,
-    ``,
-    detail ? `Weekly summary: ${detail}` : '',
-    payload.week_key ? `Week: ${payload.week_key}` : '',
-    ``,
-    handoffs ? `Follow-up candidates:\n${handoffs}` : 'No follow-up candidates are listed yet. Explain what signal is missing before action.',
-    ``,
-    `Return:`,
-    `1. the best follow-up candidate`,
-    `2. likely audience pain or intent`,
-    `3. people, accounts, or segments to research`,
-    `4. outreach angle and objection to prepare for`,
-    `5. the next VERA content asset to create more of this signal`,
-  ].filter(Boolean).join('\n')
-}
-
-function DemandPlanPanel({ plan, projectName, onRun, onOpenBrain }: {
-  plan: DemandPlanSnapshot
-  projectName: string
-  onRun: (prompt: string) => void
-  onOpenBrain: () => void
-}) {
-  const ready = plan.completeness >= 70
-  const actionStyle: React.CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 7,
-    padding: '7px 11px',
-    borderRadius: radius.pill,
-    border: `1px solid ${color.line}`,
-    background: color.surface,
-    color: color.ink,
-    fontSize: t.size.cap,
-    fontWeight: t.weight.medium,
-    cursor: 'pointer',
-  }
-  const policyContext = [
-    `Channel policy summary: ${plan.policySummary.join('; ')}`,
-    `Publishing guards: ${plan.publishGuards.slice(0, 8).join('; ')}`,
-    `Follow-up triggers: ${plan.samTriggers.slice(0, 8).join('; ')}`,
-  ].join('\n')
-  const planCampaignPrompt = `Use the saved Strategy Brain and operating model for ${projectName} to plan the next content campaign. Include audience, problem, offer, conversion path, approval model, channel roles, content formats, success signals, follow-up rules, and the first content batch. Respect these saved channel policies:\n${policyContext}`
-  const channelMatrixPrompt = `${demandChannelMatrixPrompt(projectName)} Respect these saved channel policies:\n${policyContext}`
-  const handoffPrompt = `Create a follow-up plan for ${projectName}. Define which comments, shares, clicks, objections, questions, accounts, and traffic signals should become research or action, and how VERA should label them. Use these saved follow-up triggers:\n${plan.samTriggers.join('; ')}`
-  return (
-    <section style={{ width: '100%', maxWidth: 760, marginTop: space[5], padding: space[5], background: color.surface, border: `1px solid ${ready ? 'var(--accent-line)' : color.line}`, borderRadius: radius.lg, textAlign: 'left', boxShadow: ready ? 'var(--shadow-pop)' : 'none' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: space[4], justifyContent: 'space-between', marginBottom: space[4] }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>
-            <Target size={13} />
-            Strategy plan
-          </div>
-          <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, marginTop: space[2], lineHeight: 1.4 }}>{plan.objective}</div>
-          <div style={{ color: color.ghost, fontSize: t.size.cap, lineHeight: 1.5, marginTop: 3 }}>{plan.conversionPath}</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: space[3] }}>
-            <PlanPill tone={ready ? 'accent' : 'neutral'}>{ready ? 'Strategy model active' : 'Demand baseline active'}</PlanPill>
-            <PlanPill>{plan.sourceCount}/{plan.sourceTotal} sources connected</PlanPill>
-            <PlanPill>{plan.customPolicyCount} custom channel policies</PlanPill>
-            {plan.highCareCount > 0 && <PlanPill tone="accent">{plan.highCareCount} high-care channels</PlanPill>}
-            <PlanPill>Workspace model</PlanPill>
-          </div>
-        </div>
-        <button onClick={onOpenBrain} title="Open Strategy Brain" style={{ flexShrink: 0, padding: '6px 10px', borderRadius: radius.pill, border: `1px solid ${ready ? 'var(--accent-line)' : color.line}`, background: ready ? 'var(--accent-tint)' : color.paper2, color: ready ? color.accent : color.ink2, fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
-          {plan.completeness}% ready
-        </button>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: space[3], marginBottom: space[4] }}>
-        <PlanCluster icon={Network} label="Channels" items={plan.channels.length ? plan.channels : ['Add channels in Brain']} max={8} />
-        <PlanCluster icon={PenLine} label="Speakers" items={plan.speakers} />
-        <PlanCluster icon={Sparkles} label="Tone by medium" items={plan.tone} />
-        <PlanCluster icon={FileText} label="Formats" items={plan.formats} />
-        <PlanCluster icon={Share2} label="Signals" items={splitList(plan.signals, 4)} />
-        <PlanCluster icon={Check} label="Approvals" items={plan.approvals} />
-        <PlanCluster icon={Lock} label="Channel policy" items={plan.policySummary} />
-        <PlanCluster icon={RefreshCw} label="Learning" items={plan.learning} />
-      </div>
-
-      {plan.missing.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap', marginBottom: space[4] }}>
-          <span style={{ color: color.ghost, fontSize: t.size.cap }}>Missing:</span>
-          {plan.missing.map(item => (
-            <button key={item} onClick={onOpenBrain} style={{ padding: '4px 9px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.paper2, color: color.ink2, fontSize: t.size.micro, cursor: 'pointer' }}>{item}</button>
-          ))}
-        </div>
-      )}
-
-      <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap' }}>
-        <button onClick={() => onRun(planCampaignPrompt)} style={actionStyle}><Megaphone size={13} /> Plan campaign</button>
-        <button onClick={() => onRun(channelMatrixPrompt)} style={actionStyle}><Zap size={13} /> Channel matrix</button>
-        <button onClick={() => onRun(handoffPrompt)} style={actionStyle}><Share2 size={13} /> Follow-up plan</button>
-      </div>
-    </section>
-  )
-}
-
-function PlanPill({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'accent' }) {
-  return (
-    <span style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      minHeight: 22,
-      padding: '3px 8px',
-      borderRadius: radius.pill,
-      border: `1px solid ${tone === 'accent' ? 'var(--accent-line)' : color.line}`,
-      background: tone === 'accent' ? 'var(--accent-tint)' : color.paper2,
-      color: tone === 'accent' ? color.accent : color.ghost,
-      fontSize: t.size.micro,
-      fontWeight: t.weight.medium,
-      whiteSpace: 'nowrap',
-    }}>
-      {children}
-    </span>
-  )
-}
-
-function PlanCluster({ icon: Icon, label, items, max = 5 }: { icon: React.ElementType; label: string; items: string[]; max?: number }) {
-  const visibleItems = items.slice(0, max)
-  const overflow = Math.max(0, items.length - visibleItems.length)
-  return (
-    <div style={{ minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.medium, marginBottom: space[2] }}>
-        <Icon size={12} />
-        {label}
-      </div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {visibleItems.map(item => (
-          <span key={item} style={{ maxWidth: '100%', padding: '4px 8px', borderRadius: radius.pill, background: color.paper2, border: `1px solid ${color.line}`, color: color.ink2, fontSize: t.size.micro, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item}</span>
-        ))}
-        {overflow > 0 && (
-          <span style={{ padding: '4px 8px', borderRadius: radius.pill, background: color.paper2, border: `1px solid ${color.line}`, color: color.ghost, fontSize: t.size.micro }}>+{overflow}</span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-
-// Vera's face — served from /vera-avatar.png; falls back to the "V" monogram
-// if the asset is missing so the UI never shows a broken image. Drop the file
-// in public/ to give her a face everywhere she appears.
 function VeraAvatar({ size, hero = false }: { size: number; hero?: boolean }) {
   const [broken, setBroken] = useState(false)
   const frame: React.CSSProperties = {
