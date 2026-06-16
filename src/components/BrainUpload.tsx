@@ -12,7 +12,7 @@
 // The text/URL/file lanes go through the project-ingest function (service role, auth-checked).
 // The draft lane inserts content_posts directly (RLS allows org members / project reviewers).
 import { useRef, useState } from 'react'
-import { Upload, Link2, FileText, Image as ImageIcon, Loader2, Check, Sparkles, Send, BookOpen } from 'lucide-react'
+import { Upload, Link2, FileText, Image as ImageIcon, Film, Loader2, Check, Sparkles, Send, BookOpen } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useProject } from '../lib/projectContext'
 import { useAuth } from '../lib/auth'
@@ -21,7 +21,7 @@ import { SectionLabel, Field, Input, Textarea, Button, color, space, type as t, 
 const INGEST_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-ingest`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-type Tab = 'content' | 'posts' | 'images'
+type Tab = 'content' | 'posts' | 'images' | 'videos'
 type ContentMode = 'paste' | 'link' | 'file'
 type PostDest = 'reference' | 'draft'
 
@@ -61,10 +61,12 @@ export function BrainUpload({ onUploaded }: { onUploaded?: () => void }) {
   const [postDest, setPostDest] = useState<PostDest>('reference')
 
   const [recentImages, setRecentImages] = useState<{ name: string; url: string }[]>([])
+  const [recentVideos, setRecentVideos] = useState<{ name: string; url: string }[]>([])
   const [dragOver, setDragOver] = useState(false)
 
   const docInputRef = useRef<HTMLInputElement>(null)
   const imgInputRef = useRef<HTMLInputElement>(null)
+  const videoInputRef = useRef<HTMLInputElement>(null)
 
   const projectId = activeProject?.id
   const orgId = activeProject?.org_id ?? null
@@ -166,6 +168,29 @@ export function BrainUpload({ onUploaded }: { onUploaded?: () => void }) {
     reset(`${results.join(' · ')} · available in Brain and Studio`)
   }
 
+  async function uploadVideos(files: FileList | File[]) {
+    if (!projectId || busy) return
+    const arr = Array.from(files).filter(f => f.type.startsWith('video/'))
+    if (!arr.length) { setError('Drop video files (MP4, MOV, WEBM…).'); return }
+    setBusy(true); setError(null); setReport(null)
+    const added: { name: string; url: string }[] = []
+    const results: string[] = []
+    for (const file of arr) {
+      try {
+        const storagePath = await uploadToStorage(projectId, file)
+        const r = await callIngest({ kind: 'file', project_id: projectId, storage_path: storagePath, file_name: file.name, mime_type: file.type, file_size: file.size, asset_kind: 'video' })
+        if (r.ok) {
+          results.push(`✓ ${file.name}`)
+          const { data: signed } = await supabase.storage.from('project-assets').createSignedUrl(storagePath, 3600)
+          if (signed?.signedUrl) added.push({ name: file.name, url: signed.signedUrl })
+        } else results.push(`✗ ${file.name}: ${r.error}`)
+      } catch (e) { results.push(`✗ ${file.name}: ${e instanceof Error ? e.message : String(e)}`) }
+    }
+    setBusy(false)
+    if (added.length) setRecentVideos(prev => [...added, ...prev].slice(0, 8))
+    reset(`${results.join(' · ')} · available in Brain and Studio`)
+  }
+
   if (!projectId) return null
 
   const card: React.CSSProperties = { background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5] }
@@ -173,6 +198,7 @@ export function BrainUpload({ onUploaded }: { onUploaded?: () => void }) {
     { id: 'content', label: 'Content', icon: FileText },
     { id: 'posts', label: 'Posts', icon: Send },
     { id: 'images', label: 'Images', icon: ImageIcon },
+    { id: 'videos', label: 'Videos', icon: Film },
   ]
 
   return (
@@ -261,6 +287,23 @@ export function BrainUpload({ onUploaded }: { onUploaded?: () => void }) {
                 {recentImages.map((img, i) => (
                   <div key={i} title={img.name} style={{ aspectRatio: '1', borderRadius: radius.md, overflow: 'hidden', border: `1px solid ${color.line}`, background: color.paper2 }}>
                     <img src={img.url} alt={img.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'videos' && (
+          <div>
+            <input ref={videoInputRef} type="file" multiple accept="video/*" style={{ display: 'none' }} onChange={e => { if (e.target.files) uploadVideos(e.target.files); e.target.value = '' }} />
+            <Dropzone dragOver={dragOver} setDragOver={setDragOver} onFiles={uploadVideos} onClick={() => videoInputRef.current?.click()}
+              icon={Film} title="Drop videos or click to choose" hint="MP4, MOV, WEBM. Available as Brain reference and reusable post media in Studio. Large files can take a moment." busy={busy} />
+            {recentVideos.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: space[2], marginTop: space[4] }}>
+                {recentVideos.map((vid, i) => (
+                  <div key={i} title={vid.name} style={{ aspectRatio: '16 / 9', borderRadius: radius.md, overflow: 'hidden', border: `1px solid ${color.line}`, background: color.paper2 }}>
+                    <video src={vid.url} controls muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                   </div>
                 ))}
               </div>
