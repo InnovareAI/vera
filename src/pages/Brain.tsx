@@ -19,6 +19,7 @@ import { useOrg } from '../lib/orgContext'
 import { useAuth } from '../lib/auth'
 import { useRightRail } from '../lib/rightRailContext'
 import { SectionLabel, Field, Input, Textarea, Select, Button, EmptyState, Chip, color, space, type as t, radius } from '../design'
+import { BrainUpload } from '../components/BrainUpload'
 import {
   EMPTY_BUSINESS_CONTEXT,
   compactProjectDescription,
@@ -2026,6 +2027,8 @@ export default function Brain() {
         categoryCount={categories.length}
         voiceReady={voiceReady}
       />
+
+      <BrainUpload onUploaded={() => { void loadSourceKnowledge() }} />
 
       {(draftAudienceProposals.length > 0 || draftSkillProposals.length > 0 || proposalStatus || proposalError) && (
         <AuditProposalPanel
