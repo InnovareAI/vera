@@ -436,6 +436,75 @@ export default function ClientKeys() {
         subtitle="Connect this space to its own AI provider keys. Keys are stored encrypted and used only for this space. OpenRouter covers text and supported image models. OpenAI covers searchable knowledge embeddings. FAL is required for space-owned video generation."
       />
 
+      <section style={{ marginBottom: space[8] }}>
+        <SectionLabel style={{ marginBottom: space[3] }}>Add a key</SectionLabel>
+        <div style={card}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[4] }}>
+            <Field label="Provider">
+              <Select value={provider} onChange={e => setProvider(e.target.value)}>
+                {PROVIDERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </Select>
+            </Field>
+            <Field label="Label">
+              <Input value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Production key" />
+            </Field>
+          </div>
+          <div style={{ marginTop: space[4] }}>
+            <Field label="API key">
+              <Input type="password" value={secret} onChange={e => setSecret(e.target.value)} placeholder="Paste the provider API key" autoComplete="off" />
+            </Field>
+          </div>
+          <div style={{ marginTop: space[4] }}>
+            <Field label="Provider config (JSON)" optional helper="Only for provider-specific options. Do not put secondary secrets here.">
+              <Textarea value={config} onChange={e => setConfig(e.target.value)} rows={2} placeholder='{"endpoint":"..."}' />
+            </Field>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: space[4] }}>
+            <Button variant="primary" leading={<KeyRound size={14} />} onClick={saveKey} disabled={saving || !label.trim() || !secret.trim()}>
+              {saving ? 'Saving' : 'Save key'}
+            </Button>
+          </div>
+          <p style={{ fontSize: t.size.micro, color: color.faint, margin: `${space[3]} 0 0`, lineHeight: 1.5 }}>
+            The key is validated with the provider and stored encrypted. Only the space owner can add or revoke keys.
+          </p>
+        </div>
+      </section>
+
+      <section style={{ marginBottom: space[8] }}>
+        <SectionLabel style={{ marginBottom: space[3] }} action={`${active.length} active`}>Saved keys</SectionLabel>
+        {loading ? (
+          <p style={{ fontSize: t.size.cap, color: color.ghost }}>Loading…</p>
+        ) : keys.length === 0 ? (
+          <div style={{ ...card, textAlign: 'center' }}>
+            <p style={{ fontSize: t.size.cap, color: color.ghost, margin: 0 }}>No keys yet. Add one above to run this space on its own provider key.</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
+            {keys.map(k => (
+              <div key={k.id} style={{ ...card, padding: space[4], display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], opacity: k.status === 'revoked' ? 0.55 : 1 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: space[2] }}>
+                    <span style={{ fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink }}>{k.label}</span>
+                    <span style={{ fontSize: t.size.micro, color: color.ghost }}>{providerLabel(k.provider)}</span>
+                  </div>
+                  <div style={{ fontSize: t.size.micro, color: color.faint, marginTop: 2 }}>
+                    <span style={{ color: statusColor(k.status), textTransform: 'uppercase', letterSpacing: '0.05em' }}>{k.status}</span>
+                    {k.secret_preview ? ` · ${k.secret_preview}` : ''}
+                    {k.last_used_at ? ` · last used ${new Date(k.last_used_at).toLocaleDateString()}` : ''}
+                  </div>
+                </div>
+                {k.status === 'active' && (
+                  <button onClick={() => revokeKey(k.id)} title="Revoke this key"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: radius.md, border: `1px solid ${color.line}`, background: color.surface, color: color.ink2, fontSize: t.size.micro, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    <Trash2 size={13} /> Revoke
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
       <GenerationControlScopePanel
         aiPolicy={aiPolicy}
         hasTextKey={hasOpenRouter || hasAnthropic}
@@ -675,74 +744,6 @@ export default function ClientKeys() {
         </div>
       </section>
 
-      <section style={{ marginBottom: space[8] }}>
-        <SectionLabel style={{ marginBottom: space[3] }}>Add a key</SectionLabel>
-        <div style={card}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[4] }}>
-            <Field label="Provider">
-              <Select value={provider} onChange={e => setProvider(e.target.value)}>
-                {PROVIDERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-              </Select>
-            </Field>
-            <Field label="Label">
-              <Input value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Production key" />
-            </Field>
-          </div>
-          <div style={{ marginTop: space[4] }}>
-            <Field label="API key">
-              <Input type="password" value={secret} onChange={e => setSecret(e.target.value)} placeholder="Paste the provider API key" autoComplete="off" />
-            </Field>
-          </div>
-          <div style={{ marginTop: space[4] }}>
-            <Field label="Provider config (JSON)" optional helper="Only for provider-specific options. Do not put secondary secrets here.">
-              <Textarea value={config} onChange={e => setConfig(e.target.value)} rows={2} placeholder='{"endpoint":"..."}' />
-            </Field>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: space[4] }}>
-            <Button variant="primary" leading={<KeyRound size={14} />} onClick={saveKey} disabled={saving || !label.trim() || !secret.trim()}>
-              {saving ? 'Saving' : 'Save key'}
-            </Button>
-          </div>
-          <p style={{ fontSize: t.size.micro, color: color.faint, margin: `${space[3]} 0 0`, lineHeight: 1.5 }}>
-            The key is validated with the provider and stored encrypted. Only the space owner can add or revoke keys.
-          </p>
-        </div>
-      </section>
-
-      <section>
-        <SectionLabel style={{ marginBottom: space[3] }} action={`${active.length} active`}>Saved keys</SectionLabel>
-        {loading ? (
-          <p style={{ fontSize: t.size.cap, color: color.ghost }}>Loading…</p>
-        ) : keys.length === 0 ? (
-          <div style={{ ...card, textAlign: 'center' }}>
-            <p style={{ fontSize: t.size.cap, color: color.ghost, margin: 0 }}>No keys yet. Add one above to run this space on its own provider key.</p>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
-            {keys.map(k => (
-              <div key={k.id} style={{ ...card, padding: space[4], display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], opacity: k.status === 'revoked' ? 0.55 : 1 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: space[2] }}>
-                    <span style={{ fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink }}>{k.label}</span>
-                    <span style={{ fontSize: t.size.micro, color: color.ghost }}>{providerLabel(k.provider)}</span>
-                  </div>
-                  <div style={{ fontSize: t.size.micro, color: color.faint, marginTop: 2 }}>
-                    <span style={{ color: statusColor(k.status), textTransform: 'uppercase', letterSpacing: '0.05em' }}>{k.status}</span>
-                    {k.secret_preview ? ` · ${k.secret_preview}` : ''}
-                    {k.last_used_at ? ` · last used ${new Date(k.last_used_at).toLocaleDateString()}` : ''}
-                  </div>
-                </div>
-                {k.status === 'active' && (
-                  <button onClick={() => revokeKey(k.id)} title="Revoke this key"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: radius.md, border: `1px solid ${color.line}`, background: color.surface, color: color.ink2, fontSize: t.size.micro, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                    <Trash2 size={13} /> Revoke
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
     </div>
   )
 }
