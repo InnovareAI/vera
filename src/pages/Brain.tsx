@@ -883,9 +883,6 @@ function BrainReadinessPanel({
             <h1 style={{ margin: 0, color: color.ink, fontSize: t.size.h2, fontWeight: t.weight.semibold, lineHeight: 1.18 }}>
               {projectName}
             </h1>
-            <p style={{ margin: `${space[3]} 0 0`, maxWidth: 720, color: color.ink2, fontSize: t.size.body, lineHeight: 1.58 }}>
-              This is the strategy model VERA uses to choose channels, adapt tone by medium, route approvals, measure traction, and decide which assumptions deserve follow-up.
-            </p>
             <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap', marginTop: space[4] }}>
               <Chip tone={readiness >= 70 ? 'accent' : 'default'} size="md">{readiness}% ready</Chip>
               <Chip dot={sourceKnowledgeCount ? color.success : color.warn}>{sourceKnowledgeCount} indexed sources</Chip>
@@ -2046,9 +2043,6 @@ export default function Brain() {
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: space[4], flexWrap: 'wrap', marginBottom: space[3] }}>
           <div>
             <SectionLabel>Demand context</SectionLabel>
-            <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `${space[2]} 0 0` }}>
-              Start with the company URL, then add the social sources and facts VERA should use for strategy and content creation.
-            </p>
           </div>
           <span style={{ fontSize: t.size.cap, color: color.ghost }}>
             {sourceCount}/{DEMAND_SOURCE_KEYS.length} sources · {factCount}/11 context fields · {operatingCount}/{operatingKeys.length} operating fields
@@ -2116,18 +2110,12 @@ export default function Brain() {
                 <FileText size={15} />
                 Extract from document
               </div>
-              <p style={{ margin: 0, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>
-                Upload a PDF, DOCX, brief, proposal, or brand deck. VERA extracts the fields, then you review and save.
-              </p>
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: space[2], color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold, marginBottom: space[2] }}>
                 <RefreshCw size={15} />
                 Pull website and socials
               </div>
-              <p style={{ margin: 0, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>
-                Pull the website, LinkedIn, Instagram, YouTube, Medium, Quora, Reddit, Facebook, X, events, and newsletters. Innovare handles public scraping; connected LinkedIn and Instagram use Unipile.
-              </p>
             </div>
             <Field
               label="Source pull depth"
@@ -2198,7 +2186,6 @@ export default function Brain() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], marginBottom: space[4] }}>
             <div>
               <div style={{ fontSize: t.size.sm, color: color.ink, fontWeight: t.weight.semibold }}>Business facts</div>
-              <div style={{ fontSize: t.size.cap, color: color.ghost, marginTop: 2 }}>The strategy layer VERA uses for content, campaigns, and answers.</div>
             </div>
             {instrSaved && <span style={{ fontSize: t.size.cap, color: color.success }}>Saved.</span>}
           </div>
@@ -2249,7 +2236,6 @@ export default function Brain() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], marginBottom: space[4] }}>
             <div>
               <div style={{ fontSize: t.size.sm, color: color.ink, fontWeight: t.weight.semibold }}>Strategy assumptions</div>
-              <div style={{ fontSize: t.size.cap, color: color.ghost, marginTop: 2 }}>The rules for what VERA creates, who approves it, what counts as traction, and which signals need follow-up.</div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
               <Button variant="secondary" size="sm" onClick={applyStrategyDefaults}>Use neutral defaults</Button>
@@ -2310,7 +2296,7 @@ export default function Brain() {
       <section id="brain-instructions" style={{ marginBottom: space[9], scrollMarginTop: space[12] }}>
         <SectionLabel style={{ marginBottom: space[2] }}>Custom instructions</SectionLabel>
         <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `0 0 ${space[3]}` }}>
-          The standing brief VERA reads <strong style={{ color: color.ink }}>every turn</strong> for {activeProject.name}: tone, do/don't, positioning, recurring CTAs, in plain language.
+          The standing brief VERA reads <strong style={{ color: color.ink }}>every turn</strong>.
         </p>
         <Textarea value={instr} onChange={e => setInstr(e.target.value)} rows={7}
           placeholder={`e.g. Write in a confident, practical voice for experienced operators. Lead with a concrete observation or real failure mode, never a hypothetical. Avoid "leverage", "synergy", "game-changer". Close with one sharp question when the channel supports it.`} />
@@ -2326,7 +2312,6 @@ export default function Brain() {
       <section id="brain-voice" style={{ marginBottom: space[9], scrollMarginTop: space[12] }}>
         <SectionLabel style={{ marginBottom: space[2] }}>Brand voice</SectionLabel>
         <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `0 0 ${space[4]}` }}>
-          The persona, tone, and rules VERA writes by for {activeProject.name}.{' '}
           {bvInherited
             ? <span style={{ color: color.ghost }}>Showing the workspace default. Saving creates a voice specific to this space.</span>
             : <span style={{ color: color.ghost }}>Specific to this space.</span>}
@@ -2357,9 +2342,6 @@ export default function Brain() {
             <Button variant="secondary" size="sm" onClick={() => setAddingAudience(true)}><Plus size={13} /> Add audience</Button>
           )}
         </div>
-        <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `0 0 ${space[3]}` }}>
-          Who VERA writes toward, driving register, proof points, and which pains to hit.
-        </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: space[3] }}>
           {addingAudience && activeOrg?.id && activeProject?.id && (
             <AudienceEditor initial={{}} orgId={activeOrg.id} projectId={activeProject.id} onSaved={() => { setAddingAudience(false); reloadAudiences() }} onCancel={() => setAddingAudience(false)} />
@@ -2374,9 +2356,6 @@ export default function Brain() {
       {/* Content categories */}
       <section id="brain-categories" style={{ marginBottom: space[9], scrollMarginTop: space[12] }}>
         <SectionLabel style={{ marginBottom: space[2] }}>Content categories</SectionLabel>
-        <p style={{ fontSize: t.size.cap, color: color.ink2, lineHeight: 1.5, margin: `0 0 ${space[3]}` }}>
-          Reusable buckets for this space's content. Vera tags every post with one; Calendar &amp; Artifacts filter by them.
-        </p>
         {categories.length === 0 ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: space[3], marginBottom: space[3] }}>
             <span style={{ fontSize: t.size.cap, color: color.ghost }}>No categories yet.</span>
@@ -2407,7 +2386,7 @@ export default function Brain() {
           <BookOpen size={18} style={{ color: color.accent, flexShrink: 0 }} />
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: t.size.cap, fontWeight: t.weight.medium, color: color.ink }}>Manage knowledge sources →</div>
-            <div style={{ fontSize: t.size.micro, color: color.ghost }}>Paste, URLs, and docs VERA can search and cite. Brand-kit files, logos, guidelines, now live in Artifacts.</div>
+            <div style={{ fontSize: t.size.micro, color: color.ghost }}>Paste, URLs, and docs VERA can search and cite.</div>
           </div>
         </Link>
       </section>

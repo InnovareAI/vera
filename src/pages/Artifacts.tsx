@@ -420,15 +420,8 @@ export default function Artifacts() {
       <PageHeader
         eyebrow={activeProject.name}
         title="Studio"
-        subtitle="Everything VERA produces or reuses for this space: campaigns, posts, media, logos, guidelines, briefs, and content assets."
+        subtitle="Campaigns, posts, media, and brand kit for this space."
       />
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: space[3], marginBottom: space[5] }}>
-        <MetricCard icon={Megaphone} label="Campaigns" value={campaigns.length} tone={color.dotBlue} />
-        <MetricCard icon={FileText} label="Posts" value={posts.length} tone={color.dotGreen} />
-        <MetricCard icon={ImageIcon} label="Media" value={rawImages.length + rawVideos.length} tone={color.dotPink} />
-        <MetricCard icon={BookMarked} label="Brand kit" value={brandAssetCount} tone={color.dotAmber} />
-      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) 170px auto', alignItems: 'center', gap: space[3], marginBottom: space[4] }}>
         <Input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search artifacts" leading={<Search size={15} />} />
@@ -586,20 +579,6 @@ function SectionTitle({ icon: Icon, label, count }: { icon: ElementType; label: 
       <Icon size={15} style={{ color: color.ink2 }} />
       <span style={{ fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink }}>{label}</span>
       <span style={{ fontSize: t.size.micro, color: color.ghost, fontWeight: t.weight.medium }}>{count}</span>
-    </div>
-  )
-}
-
-function MetricCard({ icon: Icon, label, value, tone }: { icon: ElementType; label: string; value: number; tone: string }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: space[3], padding: space[4], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md }}>
-      <span style={{ width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, color: tone, background: color.paper2 }}>
-        <Icon size={15} />
-      </span>
-      <div>
-        <div style={{ fontSize: t.size.h4, fontWeight: t.weight.semibold, color: color.ink, lineHeight: 1 }}>{value}</div>
-        <div style={{ fontSize: t.size.micro, color: color.ghost, marginTop: 3 }}>{label}</div>
-      </div>
     </div>
   )
 }

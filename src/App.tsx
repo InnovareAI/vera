@@ -24,7 +24,6 @@ import ResetPassword from './pages/ResetPassword'
 // ── Phase 0 surfaces (UX_BLUEPRINT.md): the two-altitude IA ──────────
 import AcrossClients from './pages/AcrossClients'   // "/" - the shelf
 import VeraThread from './pages/VeraThread'          // /p/:slug/vera
-import VeraBlueprint from './pages/VeraBlueprint'
 import Brain from './pages/Brain'                    // /p/:slug/brain
 // Performance (./pages/Measure) and Learning (./pages/Learning) are parked behind
 // a coming-soon screen. Restore by re-importing them and swapping the routes below.
@@ -52,7 +51,6 @@ export default function App() {
             <Routes>
               {import.meta.env.DEV && (
                 <Route path="/dev" element={<Layout />}>
-                  <Route path="blueprint" element={<VeraBlueprint />} />
                   <Route path="calendar" element={<Calendar />} />
                 </Route>
               )}
@@ -73,10 +71,10 @@ export default function App() {
 
                 {/* ── The DESK ── one client, the demand-content loop. */}
                 <Route path="p/:projectSlug">
-                  <Route index element={<Navigate to="vera" replace />} />{/* Chat is home-base; Desk is hidden from the rail. */}
-                  <Route path="dashboard"  element={<RedirectFlatToProject section="blueprint" />} />{/* Home removed → Desk */}
+                  <Route index element={<Navigate to="vera" replace />} />{/* Chat is home-base. */}
+                  <Route path="dashboard"  element={<Navigate to="../vera" replace />} />{/* legacy → chat */}
                   <Route path="vera"       element={<VeraThread />} />
-                  <Route path="blueprint"  element={<VeraBlueprint />} />
+                  <Route path="blueprint"  element={<Navigate to="../vera" replace />} />{/* Desk removed → chat */}
                   <Route path="review"     element={<Review />} />
                   <Route path="review/:id" element={<ReviewDetail />} />
                   <Route path="calendar"   element={<Calendar />} />{/* scheduled posts on a month grid */}
@@ -92,8 +90,8 @@ export default function App() {
                 {/* The rail no longer links to these, but bookmarks + deep    */}
                 {/* links must not 404. Each rewrites into the project frame   */}
                 {/* (or the shelf) per the blueprint's surface-fate table.     */}
-                <Route path="dashboard"  element={<RedirectFlatToProject section="blueprint" />} />{/* Home removed → Desk */}
-                <Route path="blueprint"  element={<RedirectFlatToProject section="blueprint" />} />
+                <Route path="dashboard"  element={<RedirectFlatToProject section="vera" />} />{/* legacy → chat */}
+                <Route path="blueprint"  element={<RedirectFlatToProject section="vera" />} />{/* Desk removed → chat */}
                 <Route path="generate"   element={<RedirectFlatToProject section="vera" />} />{/* Generate folds into VERA */}
                 <Route path="review"     element={<RedirectFlatToProject section="review" />} />
                 <Route path="review/:id" element={<RedirectReviewDetailToProject />} />
@@ -148,10 +146,9 @@ function RootIndex() {
   const { loading: orgLoading, isOrgMember } = useOrg()
   const { activeProject, projects, loading } = useProject()
   if (orgLoading || loading) return null   // wait for both to settle before routing to /spaces
-  // Agency staff (org members) land on the operating desk. Chat remains a
-  // command layer, but the product should not open as a blank assistant.
-  // Client collaborators land on Review, where the content decisions live.
-  const home = isOrgMember ? 'blueprint' : 'review'
+  // Agency staff (org members) land on chat — the command surface. Client
+  // collaborators land on Review, where the content decisions live.
+  const home = isOrgMember ? 'vera' : 'review'
   if (activeProject) return <Navigate to={`/p/${activeProject.slug}/${home}`} replace />
   if (projects.length > 0) return <Navigate to={`/p/${projects[0].slug}/${home}`} replace />
   return <Navigate to="/spaces" replace />

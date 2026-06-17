@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AlertTriangle, Calendar as CalendarIcon, CalendarPlus, Check, ExternalLink, MessageSquare, Plus, Send, X } from 'lucide-react'
+import { AlertTriangle, Calendar as CalendarIcon, CalendarPlus, Check, ExternalLink, MessageSquare, Send, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
 import { useProject } from '../lib/projectContext'
@@ -849,17 +849,6 @@ function BoardView({
                     no drop
                   </span>
                 )}
-                {!isForbidden && (
-                  <button
-                    type="button"
-                    title={`Add to ${tab}`}
-                    aria-label={`Add to ${tab}`}
-                    className="inline-flex items-center justify-center"
-                    style={{ width: 26, height: 26, color: '#25302c', background: 'transparent', border: 'none', cursor: 'pointer' }}
-                  >
-                    <Plus size={20} />
-                  </button>
-                )}
               </div>
 
               {/* Cards */}
@@ -1209,7 +1198,6 @@ function ReviewRightRail({
           className="p-5"
           style={{ background: 'var(--paper-warm)', border: '1px solid var(--paper-edge)', borderRadius: 'var(--radius-lg)' }}
         >
-          <div className="text-[11px] uppercase font-semibold mb-2" style={{ color: 'var(--ghost)' }}>Approval workspace</div>
           <h2 className="text-[17px] leading-snug font-semibold" style={{ color: 'var(--ink)' }}>Select a message</h2>
         </section>
         <section
@@ -1220,7 +1208,6 @@ function ReviewRightRail({
           <div className="flex flex-col gap-3">
             <RailStat label="Pending review" value={pendingCount} tone="warning" />
             <RailStat label="Changes requested" value={changesCount} tone="warning" />
-            <RailStat label="External reviewers" value="Ready" tone="neutral" />
           </div>
         </section>
       </div>

@@ -514,7 +514,7 @@ export default function Knowledge() {
       <PageHeader
         eyebrow={activeProject.name}
         title="Knowledge"
-        subtitle="Everything in here is in VERA's working memory for this project — pasted text, URLs she should fetch, files you upload. Text is embedded and pulled into chat by relevance; raw assets are referenced by name."
+        subtitle="Sources VERA can search and cite for this space."
         size="md"
         style={{ marginBottom: space[7] }}
       />
@@ -909,20 +909,6 @@ function KnowledgeRightRail({
             <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{assetCount}</b>
           </div>
         </div>
-      </section>
-
-      <section>
-        <p className="text-[10px] font-medium uppercase mb-2.5" style={{ color: 'var(--ghost)', letterSpacing: '0.06em' }}>
-          What VERA absorbs
-        </p>
-        <ul className="text-[12px] space-y-1.5" style={{ color: 'var(--ink-quiet)' }}>
-          <li>· Pasted text — briefs, voice docs, positioning</li>
-          <li>· URLs — public web pages (we strip HTML)</li>
-          <li>· Text files (.md, .txt, .csv, .json)</li>
-          <li>· PDFs — text extracted server-side, embedded</li>
-          <li>· Word (.docx) — text extracted server-side, embedded</li>
-          <li>· Logos / images / fonts (stored, referenced by name)</li>
-        </ul>
       </section>
     </div>
   )

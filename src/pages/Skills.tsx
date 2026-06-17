@@ -548,7 +548,7 @@ export default function Skills() {
       <PageHeader
         eyebrow="AI Settings"
         title="Vera Intelligence"
-        subtitle="The operating system behind Vera: constitutional principles, reusable skills, and repeatable evaluation scenarios."
+        subtitle="Principles, skills, and evaluation scenarios."
         actions={
           <div style={{ display: 'flex', gap: space[2] }}>
             <Button variant="secondary" leading={<Plus size={14} />} onClick={() => openNew('workspace')} disabled={!activeOrg}>

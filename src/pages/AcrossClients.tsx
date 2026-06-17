@@ -570,7 +570,7 @@ export default function AcrossClients() {
       <PageHeader
         eyebrow={activeOrg?.name ?? 'Workspace'}
         title="Spaces"
-        subtitle="Triage VERA's open work, then manage spaces, access, roles, invites, and provider keys."
+        subtitle="Triage VERA's open work, then switch between spaces."
         actions={
           <Button
             variant="primary"
