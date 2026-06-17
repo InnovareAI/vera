@@ -9,8 +9,8 @@
 // to the artifact. This matches SAM's chat+artifact model.
 
 import { useState, useRef, useEffect, useCallback, useMemo, type ReactNode } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Plus, Link2, Copy, Pin, X, Target, KeyRound, Lock } from 'lucide-react'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { ArrowUp, Square, Sparkles, Check, RefreshCw, Pencil, Send, PenLine, Megaphone, Lightbulb, ImagePlus, Clapperboard, Zap, CalendarDays, Paperclip, FileText, Link2, Copy, Pin, X, Target, KeyRound, Lock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Post } from '../lib/supabase'
 import { useOrg } from '../lib/orgContext'
@@ -583,6 +583,7 @@ export default function VeraThread() {
   const { push } = useToast()
   const location = useLocation()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -1358,6 +1359,15 @@ export default function VeraThread() {
     setTimeout(() => taRef.current?.focus(), 0)
   }
 
+  // The rail "New session" button navigates here with ?new=<ts>. Start a fresh
+  // session, then drop the param so a later refresh doesn't wipe the thread.
+  useEffect(() => {
+    if (!searchParams.get('new')) return
+    newChat()
+    setSearchParams(prev => { const next = new URLSearchParams(prev); next.delete('new'); return next }, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
   // "Pin to new chat" — start a fresh conversation carrying this result in as
   // context. We persist the pinned text as the new session's first message so
   // the session-load effect (which would otherwise wipe in-memory messages on
@@ -1781,10 +1791,6 @@ export default function VeraThread() {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: color.paper, position: 'relative' }}>
-      <button onClick={newChat} disabled={!activeProject} title="Start a new session"
-        style={{ position: 'absolute', top: space[5], right: space[6], zIndex: 3, display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 13px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: activeProject ? color.ink2 : color.ghost, boxShadow: 'var(--shadow-pop)', cursor: activeProject ? 'pointer' : 'default', fontSize: t.size.cap, fontWeight: t.weight.medium }}>
-        <Plus size={14} /> New session
-      </button>
       {/* thread (no header bar — SAM-clean; rail identifies "Vera", Recents
           lists past chats, the Vera rail item starts a new chat) */}
       <div ref={scrollerRef} style={{ flex: 1, overflowY: 'auto', padding: `${space[6]} 0 ${space[7]}` }}>

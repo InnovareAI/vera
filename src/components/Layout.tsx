@@ -475,6 +475,18 @@ export default function Layout() {
         {/* Active client — top-of-rail switcher (always-visible context). */}
         <ClientSwitcher />
 
+        {/* Start a fresh chat — top-of-rail, the Claude/ChatGPT pattern. The
+            ?new=<ts> param is read by VeraThread, which opens a new session. */}
+        <button
+          onClick={() => navigate(`${p('vera')}?new=${Date.now()}`)}
+          title="Start a new chat session"
+          className="flex items-center gap-2 px-2.5 py-1.5 mx-2 mt-2 transition-colors"
+          style={{ background: 'var(--accent-tint)', color: 'var(--accent)', fontWeight: 600, fontSize: 13, borderRadius: 'var(--radius-md)', width: 'calc(100% - 1rem)', border: 'none', cursor: 'pointer' }}
+        >
+          <Plus size={16} strokeWidth={2.1} style={{ flexShrink: 0 }} />
+          <span className="flex-1 truncate text-left">New session</span>
+        </button>
+
         {/* Primary nav grouped around the content strategy loop. */}
         <nav className="pt-1 space-y-0.5">
           {/* Desk (p('blueprint')) hidden from the rail; still reachable by URL. */}
