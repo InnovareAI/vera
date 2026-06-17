@@ -575,10 +575,13 @@ export default function Artifacts() {
 
 function SectionTitle({ icon: Icon, label, count }: { icon: ElementType; label: string; count: number }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: space[3] }}>
-      <Icon size={15} style={{ color: color.ink2 }} />
-      <span style={{ fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink }}>{label}</span>
-      <span style={{ fontSize: t.size.micro, color: color.ghost, fontWeight: t.weight.medium }}>{count}</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: space[3], marginBottom: space[4] }}>
+      <Icon size={13} style={{ color: color.ghost, flexShrink: 0 }} />
+      <span style={{ fontSize: t.size.micro, fontWeight: t.weight.semibold, color: color.ghost, textTransform: 'uppercase', letterSpacing: t.letterSpacing.wide, whiteSpace: 'nowrap' }}>
+        {label}
+      </span>
+      <span style={{ fontSize: t.size.micro, color: color.faint }}>{count}</span>
+      <div style={{ flex: 1, height: 1, background: color.line }} />
     </div>
   )
 }
@@ -660,56 +663,68 @@ function CampaignCard({ campaign }: { campaign: Campaign }) {
 }
 
 function PostRow({ post, categoryColor, onOpen }: { post: Post; categoryColor?: string; onOpen: () => void }) {
+  const [hov, setHov] = useState(false)
   return (
     <button
       type="button"
       onClick={onOpen}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
       style={{
         textAlign: 'left',
         display: 'grid',
-        gridTemplateColumns: '56px minmax(0, 1fr) auto',
-        gap: space[3],
+        gridTemplateColumns: '64px minmax(0, 1fr)',
+        gap: space[4],
         alignItems: 'start',
         width: '100%',
-        padding: space[3],
-        background: color.surface,
-        border: `1px solid ${color.line}`,
+        padding: space[4],
+        background: hov ? color.paper2 : color.surface,
+        border: `1px solid ${hov ? color.line2 : color.line}`,
         borderRadius: radius.md,
         cursor: 'pointer',
+        transition: 'background 120ms ease, border-color 120ms ease',
       }}
     >
       <PostThumb post={post} />
       <div style={{ minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: space[2], marginBottom: 4, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: t.size.sm, fontWeight: t.weight.semibold, color: color.ink, minWidth: 0, overflowWrap: 'anywhere' }}>{post.title || 'Untitled'}</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: t.size.micro, color: color.ghost }}>
-            <Globe size={10} />
-            {post.channel}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: space[3], marginBottom: 5 }}>
+          <span style={{ fontSize: t.size.body, fontWeight: t.weight.semibold, color: color.ink, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {post.title || 'Untitled'}
           </span>
+          <span style={{ fontSize: t.size.micro, color: color.faint, flexShrink: 0, whiteSpace: 'nowrap' }}>
+            {fmtDate(postDate(post))}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: space[2], marginBottom: 7, flexWrap: 'wrap' }}>
+          {post.channel && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: t.size.micro, color: color.ghost }}>
+              <Globe size={10} />
+              {post.channel}
+            </span>
+          )}
           <StatusBadge label={post.status} />
           {post.category && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: t.size.micro, color: color.ink2 }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: categoryColor ?? color.ghost, flexShrink: 0 }} />
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: t.size.micro, color: color.ghost }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: categoryColor ?? color.ghost, flexShrink: 0 }} />
               {post.category}
             </span>
           )}
         </div>
-        <div style={{ fontSize: t.size.sm, color: color.ink2, lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+        <div style={{ fontSize: t.size.sm, color: color.ink2, lineHeight: 1.55, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
           {post.copy}
         </div>
       </div>
-      <span style={{ fontSize: t.size.micro, color: color.faint, flexShrink: 0, whiteSpace: 'nowrap' }}>{fmtDate(postDate(post))}</span>
     </button>
   )
 }
 
 function PostThumb({ post }: { post: Post }) {
-  const common: CSSProperties = { width: 56, height: 56, objectFit: 'cover', borderRadius: radius.sm, display: 'block', background: color.paper2 }
+  const common: CSSProperties = { width: 64, height: 64, objectFit: 'cover', borderRadius: radius.sm, display: 'block', background: color.paper2, flexShrink: 0 }
   if (post.media_url && post.media_type === 'video') return <video src={post.media_url} muted playsInline style={common} />
   if (post.media_url) return <img src={post.media_url} alt="" style={common} />
   return (
-    <span style={{ ...common, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: color.faint, border: `1px solid ${color.line}` }}>
-      <FileText size={17} />
+    <span style={{ ...common, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: color.ghost, border: `1px solid ${color.line}` }}>
+      <FileText size={20} strokeWidth={1.5} />
     </span>
   )
 }
@@ -875,7 +890,8 @@ function Badge({ icon: Icon, label, tone }: { icon: ElementType; label: string; 
 function StatusBadge({ label }: { label?: string }) {
   const tone = statusColor(label)
   return (
-    <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: t.weight.semibold, color: tone, border: `1px solid ${tone}`, borderRadius: radius.pill, padding: '1px 7px', whiteSpace: 'nowrap' }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: t.size.micro, color: color.ghost, whiteSpace: 'nowrap' }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: tone, flexShrink: 0 }} />
       {statusLabel(label)}
     </span>
   )
