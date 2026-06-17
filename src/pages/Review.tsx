@@ -12,6 +12,7 @@ import { PlatformChip, StatusChip } from '../components/Chip'
 import { PlatformPostPreview } from '../components/PlatformPostPreview'
 import { ApprovalRouteChip, ApprovalRouteSection } from '../components/ApprovalRoute'
 import { useRightRail } from '../lib/rightRailContext'
+import { color, radius } from '../design'
 
 const APPROVAL_WEBHOOK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approval-webhook`
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -423,7 +424,7 @@ export default function Review({ initialView }: { initialView?: 'list' | 'board'
   }
 
   return (
-    <div className="h-full min-h-0 min-w-0 overflow-hidden flex flex-col" style={{ background: '#f5f6f5' }}>
+    <div className="h-full min-h-0 min-w-0 overflow-hidden flex flex-col" style={{ background: color.paper }}>
       <BulkActionBar
         selectedCount={selectedCount}
         bulkSaving={bulkSaving}
@@ -749,7 +750,7 @@ function PostMediaThumb({ post, className = '' }: { post: Post; className?: stri
   return (
     <div
       className={`relative overflow-hidden ${className}`}
-      style={{ borderRadius: 8, border: '1px solid #dfe4e1', background: '#eef1ef' }}
+      style={{ borderRadius: radius.md, border: `1px solid ${color.line}`, background: color.paper2 }}
     >
       {post.media_type === 'video' && post.media_url ? (
         <video src={post.media_url} muted playsInline preload="metadata" className="w-full h-full object-cover block" />
@@ -802,7 +803,7 @@ function BoardView({
     <div className="flex-1 min-h-0 min-w-0 overflow-x-auto overflow-y-hidden">
       <div
         className="grid grid-cols-7 h-full min-w-[1540px]"
-        style={{ background: '#fff', borderTop: '1px solid #dfe4e1' }}
+        style={{ background: color.surface, borderTop: `1px solid ${color.line}` }}
       >
         {STATUS_TABS.map(tab => {
           const columnPosts = posts.filter(p => tabFor(p) === tab)
@@ -820,32 +821,32 @@ function BoardView({
               onDrop={(e) => handleDrop(e, tab)}
               className="flex flex-col min-w-0 min-h-0"
               style={{
-                background: isDragTarget ? '#f3f0ff' : '#fff',
-                borderRight: '1px solid #dfe4e1',
-                boxShadow: isDragTarget ? 'inset 0 0 0 2px #2864d8' : 'none',
+                background: isDragTarget ? 'var(--accent-tint)' : color.surface,
+                borderRight: `1px solid ${color.line}`,
+                boxShadow: isDragTarget ? `inset 0 0 0 2px ${color.accent}` : 'none',
                 transition: 'background 0.15s, border-color 0.15s',
               }}
             >
               {/* Column header */}
               <div className="px-4 h-14 flex items-center justify-between"
-                style={{ borderBottom: '1px solid #dfe4e1', background: '#f7f8f7' }}>
+                style={{ borderBottom: `1px solid ${color.line}`, background: color.paper2 }}>
                 <div className="flex items-center gap-2">
-                  <span className="font-display text-[15px] font-semibold" style={{ color: '#25302c', fontVariationSettings: '"opsz" 24, "wght" 620' }}>
+                  <span className="text-[15px] font-semibold" style={{ color: color.ink }}>
                     {tab}
                   </span>
                   <span className="text-[11px] font-semibold"
                     style={{
-                      background: '#fff',
-                      color: '#66706b',
+                      background: color.surface,
+                      color: color.ghost,
                       padding: '2px 7px',
                       borderRadius: 999,
-                      border: '1px solid #dfe4e1',
+                      border: `1px solid ${color.line}`,
                     }}>
                     {tabCounts[tab]}
                   </span>
                 </div>
                 {isForbidden && (
-                  <span className="text-[10px] uppercase font-semibold" style={{ color: '#8b9690', letterSpacing: 0 }}>
+                  <span className="text-[10px] uppercase font-semibold" style={{ color: color.ghost, letterSpacing: 0 }}>
                     no drop
                   </span>
                 )}
@@ -920,19 +921,19 @@ function BoardCard({
       onClick={onOpen}
       className="p-3 cursor-pointer group transition-all relative overflow-hidden"
       style={{
-        background: '#fff',
-        border: `1px solid ${selected ? '#2864d8' : '#dfe4e1'}`,
-        borderRadius: 9,
+        background: color.surface,
+        border: `1px solid ${selected ? color.accent : color.line}`,
+        borderRadius: radius.md,
         opacity: isDragging ? 0.4 : 1,
         cursor: draggable ? 'grab' : 'pointer',
-        boxShadow: selected ? '0 0 0 2px rgba(40,100,216,0.12)' : '0 1px 2px rgba(17,24,20,0.04)',
+        boxShadow: selected ? 'var(--shadow-glow)' : '0 1px 2px rgba(17,24,20,0.04)',
       }}
     >
       {/* Campaign tint, left edge bar */}
       {campaign && (
         <span
           className="absolute left-0 top-3 bottom-3 w-[3px]"
-          style={{ background: campaign.color?.startsWith('#') ? campaign.color : '#8b5cf6', opacity: 0.85, borderRadius: '0 2px 2px 0' }}
+          style={{ background: campaign.color?.startsWith('#') ? campaign.color : color.accent, opacity: 0.85, borderRadius: '0 2px 2px 0' }}
           title={`Campaign: ${campaign.name}`}
         />
       )}
@@ -944,28 +945,28 @@ function BoardCard({
           onClick={e => e.stopPropagation()}
           onChange={onToggleSelected}
           className="h-3.5 w-3.5 flex-shrink-0"
-          style={{ accentColor: '#2864d8' }}
+          style={{ accentColor: color.accent }}
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 min-w-0">
             <PlatformChip channel={post.channel} size="sm" />
             {campaign && (
-              <span className="text-[11px] truncate max-w-[110px]" style={{ color: '#66706b' }} title={campaign.name}>
+              <span className="text-[11px] truncate max-w-[110px]" style={{ color: color.ghost }} title={campaign.name}>
                 {campaign.name.replace(/^[A-Z][a-z]+ \d+ - /, '')}
               </span>
             )}
-            <span className="text-[11px] ml-auto font-semibold" style={{ color: '#4c5a55' }}>{relativeTime(post.created_at)}</span>
+            <span className="text-[11px] ml-auto font-semibold" style={{ color: color.ghost }}>{relativeTime(post.created_at)}</span>
           </div>
         </div>
       </div>
-      <p className="text-[14px] leading-snug line-clamp-2 mb-2" style={{ color: '#4c5a55' }}>
+      <p className="text-[14px] leading-snug line-clamp-2 mb-2" style={{ color: color.ink2 }}>
         {post.copy?.replace(/^Subject:.+\n+/, '')}
       </p>
       <PostMediaThumb post={post} className="w-full h-36 mb-2" />
-      <p className="text-[13px] font-semibold leading-snug line-clamp-2 mb-1" style={{ color: '#17201c' }}>
+      <p className="text-[13px] font-semibold leading-snug line-clamp-2 mb-1" style={{ color: color.ink }}>
         {post.title || 'Untitled post'}
       </p>
-      <div className="mt-2 flex items-center gap-1.5 text-[11px]" style={{ color: '#66706b' }}>
+      <div className="mt-2 flex items-center gap-1.5 text-[11px]" style={{ color: color.ghost }}>
         {currentTab === 'Approved' && !targetDate(post) && <AlertTriangle size={12} style={{ color: 'var(--danger)' }} />}
         <span className="line-clamp-2">{postMeta(post, campaign)}</span>
       </div>
@@ -1509,11 +1510,11 @@ function CalendarView({
 function CalendarEvent({ post, onOpen }: { post: Post; onOpen: () => void }) {
   const tab = tabFor(post)
   const border =
-    tab === 'Posted'        ? '#3B82F6'
-    : tab === 'Approved'    ? '#10B981'
-    : tab === 'Scheduled'   ? '#10B981'
-    : tab === 'Rejected'    ? '#EF4444'
-    : '#F59E0B'  // pending review
+    tab === 'Posted'        ? color.dotBlue
+    : tab === 'Approved'    ? color.success
+    : tab === 'Scheduled'   ? color.success
+    : tab === 'Rejected'    ? color.danger
+    : color.warn  // pending review
   const isPosted = tab === 'Posted'
   const timeIso = post.posted_at || post.scheduled_at || post.publish_date
   const time = timeIso ? new Date(timeIso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : null
