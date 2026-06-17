@@ -481,7 +481,7 @@ export default function Layout() {
           onClick={() => navigate(`${p('vera')}?new=${Date.now()}`)}
           title="Start a new chat session"
           className="flex items-center gap-2 px-2.5 py-1.5 mx-2 mt-2 transition-colors"
-          style={{ background: 'var(--accent-tint)', color: 'var(--accent)', fontWeight: 600, fontSize: 13, borderRadius: 'var(--radius-md)', width: 'calc(100% - 1rem)', border: 'none', cursor: 'pointer' }}
+          style={{ background: 'var(--accent)', color: '#fff', fontWeight: 600, fontSize: 13, borderRadius: 'var(--radius-md)', width: 'calc(100% - 1rem)', border: 'none', cursor: 'pointer' }}
         >
           <Plus size={16} strokeWidth={2.1} style={{ flexShrink: 0 }} />
           <span className="flex-1 truncate text-left">New session</span>

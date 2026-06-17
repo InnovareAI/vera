@@ -1726,6 +1726,11 @@ export default function VeraThread() {
     'clamp(420px, 42vw, 660px)',
   )
 
+  const sessionTitle = useMemo(() => {
+    if (!messages.length) return null
+    return titleFromMessages(messages)
+  }, [messages])
+
   const hasThread = messages.length > 0
   const renderComposer = (placement: 'idle' | 'thread') => {
     const idle = placement === 'idle'
@@ -1765,13 +1770,13 @@ export default function VeraThread() {
             disabled={!activeProject}
             style={{ width: '100%', resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontFamily: t.family.sans, fontSize: idle ? t.size.h4 : t.size.lg, lineHeight: 1.5, color: color.ink, minHeight: idle ? 118 : 100, maxHeight: 240, paddingTop: 2 }}
           />
-          <div style={{ display: 'flex', alignItems: 'center', gap: space[2] }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: space[3] }}>
             <input ref={fileRef} type="file" accept={ACCEPTED_ATTACHMENT_TYPES} multiple style={{ display: 'none' }} onChange={e => handleFiles(e.target.files)} />
             <button onClick={() => fileRef.current?.click()} disabled={uploading || !activeProject} title="Attach images or documents"
-              style={{ width: 32, height: 32, borderRadius: '50%', border: `1px solid ${color.line}`, background: color.surface, color: color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'default' : 'pointer', flexShrink: 0 }}>
-              <Paperclip size={15} />
+              style={{ width: 30, height: 30, borderRadius: '50%', border: `0.5px solid ${color.line}`, background: 'transparent', color: color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'default' : 'pointer', flexShrink: 0 }}>
+              <Paperclip size={14} />
             </button>
-            <div style={{ flex: 1 }} />
+            <span style={{ flex: 1, fontSize: t.size.cap, color: color.faint, letterSpacing: '0.01em', userSelect: 'none' }}>Vera drafts, you approve</span>
             {streaming ? (
               <button onClick={() => abortRef.current?.abort()} title="Stop"
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: radius.pill, border: 'none', cursor: 'pointer', background: color.ink, color: '#fff', fontSize: t.size.sm, fontWeight: t.weight.medium }}>
@@ -1779,8 +1784,8 @@ export default function VeraThread() {
               </button>
             ) : (
               <button onClick={() => send()} disabled={(!input.trim() && attachments.length === 0) || !activeProject} title="Send"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: idle ? '8px 16px' : '7px 14px', borderRadius: radius.pill, border: 'none', cursor: (input.trim() || attachments.length) ? 'pointer' : 'not-allowed', background: (input.trim() || attachments.length) ? color.accent : color.paper2, color: (input.trim() || attachments.length) ? '#fff' : color.ghost, fontSize: t.size.sm, fontWeight: t.weight.medium, boxShadow: (input.trim() || attachments.length) ? 'var(--shadow-glow)' : 'none', transition: 'background 120ms, box-shadow 120ms' }}>
-                <Send size={14} /> Send
+                style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', cursor: (input.trim() || attachments.length) ? 'pointer' : 'not-allowed', background: (input.trim() || attachments.length) ? color.accent : color.paper2, color: (input.trim() || attachments.length) ? '#fff' : color.ghost, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: (input.trim() || attachments.length) ? 'var(--shadow-glow)' : 'none', transition: 'background 120ms, box-shadow 120ms' }}>
+                <ArrowUp size={16} />
               </button>
             )}
           </div>
@@ -1791,8 +1796,18 @@ export default function VeraThread() {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: color.paper, position: 'relative' }}>
-      {/* thread (no header bar — SAM-clean; rail identifies "Vera", Recents
-          lists past chats, the Vera rail item starts a new chat) */}
+      {hasThread && sessionTitle && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: `9px 24px`, borderBottom: `0.5px solid ${color.line}`, background: color.paper, flexShrink: 0 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: color.success, flexShrink: 0 }} />
+          <span style={{ flex: 1, fontSize: t.size.sm, fontWeight: t.weight.medium, color: color.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {sessionTitle}
+          </span>
+          {activeProject?.name && (
+            <span style={{ fontSize: t.size.cap, color: color.ghost, flexShrink: 0 }}>{activeProject.name}</span>
+          )}
+          <span style={{ fontSize: t.size.cap, color: color.faint, flexShrink: 0 }}>Saved</span>
+        </div>
+      )}
       <div ref={scrollerRef} style={{ flex: 1, overflowY: 'auto', padding: `${space[6]} 0 ${space[7]}` }}>
         {!historyLoaded ? (
           <Centered>Loading thread…</Centered>
@@ -1852,7 +1867,7 @@ function Bubble({ m, onPin }: { m: Message; onPin?: (content: string) => void })
           </div>
         )}
         {m.content && (
-          <div style={{ maxWidth: '78%', padding: `10px 15px`, background: color.paper2, borderRadius: 14, borderTopRightRadius: radius.sm, fontSize: t.size.lg, lineHeight: 1.5, color: color.ink, whiteSpace: 'pre-wrap' }}>
+          <div style={{ maxWidth: '78%', padding: `10px 15px`, background: 'var(--accent-tint)', borderRadius: 14, borderTopRightRadius: radius.sm, fontSize: t.size.lg, lineHeight: 1.5, color: color.ink, whiteSpace: 'pre-wrap' }}>
             {m.content}
           </div>
         )}
@@ -2335,10 +2350,13 @@ function CampaignArtifact({ campaign, onOpenPost }: {
 function ArtifactEmpty() {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: space[7], gap: space[3] }}>
-      <Sparkles size={20} strokeWidth={1.5} style={{ color: color.faint }} />
-      <p style={{ fontSize: t.size.cap, color: color.ghost, lineHeight: 1.5, maxWidth: '26ch' }}>
-        Brief a post in the thread. A draft with copy, image, or video opens here, ready to approve.
-      </p>
+      <Sparkles size={22} strokeWidth={1.25} style={{ color: color.ghost }} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
+        <p style={{ margin: 0, fontSize: t.size.cap, fontWeight: t.weight.semibold, color: color.ink2 }}>No draft yet</p>
+        <p style={{ margin: 0, fontSize: t.size.cap, color: color.ghost, lineHeight: 1.5, maxWidth: '28ch' }}>
+          Drafts Vera creates will appear here for a quick look before they go to review.
+        </p>
+      </div>
     </div>
   )
 }
@@ -2643,11 +2661,11 @@ function VeraAvatar({ size, hero = false }: { size: number; hero?: boolean }) {
   }
   if (broken) {
     return (
-      <span style={{ ...frame, background: hero ? 'var(--accent-tint)' : color.ink, color: hero ? color.accent : color.surface, fontSize: hero ? 24 : 11, fontWeight: hero ? 700 : 600 }}>V</span>
+      <span style={{ ...frame, background: color.accent, color: '#fff', fontSize: hero ? 24 : 11, fontWeight: 700 }}>V</span>
     )
   }
   return (
-    <span style={{ ...frame, background: hero ? 'var(--accent-tint)' : color.paper2 }}>
+    <span style={{ ...frame, background: hero ? 'var(--accent-tint)' : color.accent }}>
       <img src="/vera-avatar.png" alt="Vera" onError={() => setBroken(true)}
         style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', display: 'block' }} />
     </span>
