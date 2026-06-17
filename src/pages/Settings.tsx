@@ -5,11 +5,12 @@ import { useProject } from '../lib/projectContext'
 import { useAuth } from '../lib/auth'
 import {
   Settings2, Users, Plug, Building2, Save,
-  CheckCircle2, AlertCircle, Sun, Moon, Monitor, BarChart3, ShieldCheck, RefreshCw, KeyRound, Database, ExternalLink,
-  Brain, Image, Video, MessageSquareText, Link2
+  CheckCircle2, AlertCircle, Sun, Moon, Monitor, BarChart3, ShieldCheck, RefreshCw, Database, ExternalLink,
+  Brain
 } from 'lucide-react'
 import { PublishersCard } from '../components/PublishersCard'
 import { ClientIntegrationsCard } from '../components/ClientIntegrationsCard'
+import GenerationSettings from '../components/GenerationSettings'
 import { useTheme, type Theme } from '../lib/themeContext'
 
 type Tab = 'workspace' | 'team' | 'integrations' | 'brain' | 'usage'
@@ -312,31 +313,6 @@ function IntegrationsTab() {
           </button>
         </div>
       </div>
-
-      {/* AI Model Settings */}
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100">
-          <div className="text-sm font-medium text-gray-800">AI model defaults</div>
-          <div className="text-xs text-gray-400 mt-0.5">Model defaults are managed per space so spend and quality stay tied to the right provider keys.</div>
-        </div>
-        <div className="px-4 py-3 space-y-3">
-          <p className="text-xs text-gray-500 leading-relaxed">
-            Open a space, then go to API keys to set text, image, and video defaults. Premium image and video models require an explicit generation cap before they can run.
-          </p>
-          <button
-            type="button"
-            onClick={() => { window.location.href = '/spaces' }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 transition-colors"
-          >
-            <KeyRound size={12} />
-            Open spaces
-          </button>
-          <p className="text-[10px] text-gray-400">
-            <AlertCircle size={10} className="inline mr-0.5" />
-            Model defaults apply to new generations only. Existing drafts and jobs keep the model they already used.
-          </p>
-        </div>
-      </div>
     </div>
   )
 }
@@ -344,7 +320,6 @@ function IntegrationsTab() {
 // ─── Brain & Models Tab ──────────────────────────────────────────────────────
 function BrainModelsTab() {
   const { activeProject } = useProject()
-  const keysHref = activeProject?.slug ? `/p/${activeProject.slug}/keys` : '/spaces'
   const brainHref = activeProject?.slug ? `/p/${activeProject.slug}/brain` : '/spaces'
 
   return (
@@ -354,166 +329,25 @@ function BrainModelsTab() {
         <p className="text-sm text-gray-500 mt-0.5">Setup lives here so Command, Planner, Review, and Performance stay focused on daily work.</p>
       </div>
 
-      <div className="grid lg:grid-cols-[1.05fr_0.95fr] gap-4">
-        <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-gray-800">Brain source setup</p>
-              <p className="text-xs text-gray-500 mt-0.5">VERA learns from owned sources first, then optional channel evidence.</p>
-            </div>
-            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">82% ready</span>
-          </div>
-          <div className="grid md:grid-cols-2 gap-3 p-4">
-            <SetupStatusCard icon={Link2} label="Company URL" status="Required first" detail="Website is the first source for context, offer, SEO headers, and product pages." tone="ok" />
-            <SetupStatusCard icon={Database} label="Documents" status="Upload ready" detail="Briefs, decks, compliance notes, and PDFs can enrich the Brain." tone="neutral" />
-            <SetupStatusCard icon={Brain} label="Assumptions" status="Tracked" detail="Channel fit, tone, ICP, offers, and proof points should carry confidence." tone="ok" />
-            <SetupStatusCard icon={RefreshCw} label="Freshness" status="Needs schedule" detail="Sources need recurring refresh so VERA does not learn from stale content." tone="warn" />
-          </div>
-          <div className="px-4 pb-4">
-            <button
-              type="button"
-              onClick={() => { window.location.href = brainHref }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 transition-colors"
-            >
-              <Brain size={12} />
-              Open Strategy Brain
-            </button>
-          </div>
-        </section>
-
-        <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100">
-            <p className="text-sm font-medium text-gray-800">Model setup</p>
-            <p className="text-xs text-gray-500 mt-0.5">Defaults are selected for quality, speed, and cost. Premium media stays explicit.</p>
-          </div>
-          <div className="divide-y divide-gray-100">
-            <ModelDefaultRow icon={MessageSquareText} kind="Copy and strategy" model="Gemini via OpenRouter" detail="Low-cost default for content, planning, and iteration." />
-            <ModelDefaultRow icon={Image} kind="Image prototyping" model="Nano Banana" detail="Default for fast visual drafts and text-heavy images." />
-            <ModelDefaultRow icon={Image} kind="Premium images" model="OpenAI Image Gen 2" detail="Premium only, never the default." />
-            <ModelDefaultRow icon={Video} kind="Video" model="Storyboard first" detail="Render controls stay gated because video is a cost sink." />
-          </div>
-          <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => { window.location.href = keysHref }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 transition-colors"
-            >
-              <KeyRound size={12} />
-              Open API keys
-            </button>
-            <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700">
-              <AlertCircle size={12} />
-              Video locked by default
-            </span>
-          </div>
-        </section>
-      </div>
-
       <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100">
-          <p className="text-sm font-medium text-gray-800">Channel assumptions</p>
-          <p className="text-xs text-gray-500 mt-0.5">Channels are strategy options, not mandatory steps. The Brain should justify each one before production starts.</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] border-collapse">
-            <thead>
-              <tr className="border-b border-gray-100">
-                {['Channel', 'Default role', 'When valid', 'Current stance'].map(label => (
-                  <th key={label} className="px-4 py-2 text-left text-[10px] uppercase tracking-[0.05em] font-semibold text-gray-400">{label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <ChannelAssumptionRow channel="LinkedIn" role="Authority and demand creation" valid="Buying audience, founder expertise, B2B proof" stance="Optional" tone="neutral" />
-              <ChannelAssumptionRow channel="Instagram" role="Visual proof and trust" valid="Product, lifestyle, culture, founder stories" stance="Active" tone="ok" />
-              <ChannelAssumptionRow channel="YouTube" role="Depth and evergreen search" valid="Demos, explainers, tutorials, search demand" stance="Planned" tone="warn" />
-              <ChannelAssumptionRow channel="Reddit and Quora" role="Market questions and objections" valid="Research-first, non-promotional answers" stance="Research" tone="neutral" />
-            </tbody>
-          </table>
+        <div className="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-gray-800">Strategy Brain</p>
+            <p className="text-xs text-gray-500 mt-0.5">Brand voice, audiences, channel strategy, and knowledge sources live inside the Brain.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => { window.location.href = brainHref }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 transition-colors"
+          >
+            <Brain size={12} />
+            {activeProject?.slug ? 'Open Strategy Brain' : 'Pick a space'}
+          </button>
         </div>
       </section>
-    </div>
-  )
-}
 
-function SetupStatusCard({
-  icon: Icon,
-  label,
-  status,
-  detail,
-  tone,
-}: {
-  icon: React.ElementType
-  label: string
-  status: string
-  detail: string
-  tone: 'ok' | 'warn' | 'neutral'
-}) {
-  const toneClass = tone === 'ok'
-    ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-    : tone === 'warn'
-      ? 'bg-amber-50 text-amber-700 border-amber-100'
-      : 'bg-gray-50 text-gray-500 border-gray-100'
-  return (
-    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-      <div className="flex items-start gap-3">
-        <span className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border ${toneClass}`}>
-          <Icon size={15} />
-        </span>
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-semibold text-gray-900">{label}</p>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone === 'ok' ? 'bg-emerald-50 text-emerald-700' : tone === 'warn' ? 'bg-amber-50 text-amber-700' : 'bg-white text-gray-500'}`}>{status}</span>
-          </div>
-          <p className="text-xs text-gray-500 leading-relaxed mt-1">{detail}</p>
-        </div>
-      </div>
+      <GenerationSettings />
     </div>
-  )
-}
-
-function ModelDefaultRow({ icon: Icon, kind, model, detail }: { icon: React.ElementType; kind: string; model: string; detail: string }) {
-  return (
-    <div className="px-4 py-3 flex items-start gap-3">
-      <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-600">
-        <Icon size={15} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm font-medium text-gray-900">{kind}</p>
-          <p className="text-xs font-semibold text-gray-700">{model}</p>
-        </div>
-        <p className="text-xs text-gray-500 leading-relaxed mt-1">{detail}</p>
-      </div>
-    </div>
-  )
-}
-
-function ChannelAssumptionRow({
-  channel,
-  role,
-  valid,
-  stance,
-  tone,
-}: {
-  channel: string
-  role: string
-  valid: string
-  stance: string
-  tone: 'ok' | 'warn' | 'neutral'
-}) {
-  const stanceClass = tone === 'ok'
-    ? 'bg-emerald-50 text-emerald-700'
-    : tone === 'warn'
-      ? 'bg-amber-50 text-amber-700'
-      : 'bg-gray-100 text-gray-600'
-  return (
-    <tr className="border-b border-gray-100">
-      <td className="px-4 py-3 text-sm font-medium text-gray-900">{channel}</td>
-      <td className="px-4 py-3 text-xs text-gray-700">{role}</td>
-      <td className="px-4 py-3 text-xs text-gray-500">{valid}</td>
-      <td className="px-4 py-3"><span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${stanceClass}`}>{stance}</span></td>
-    </tr>
   )
 }
 
