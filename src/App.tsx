@@ -26,8 +26,9 @@ import AcrossClients from './pages/AcrossClients'   // "/" - the shelf
 import VeraThread from './pages/VeraThread'          // /p/:slug/vera
 import VeraBlueprint from './pages/VeraBlueprint'
 import Brain from './pages/Brain'                    // /p/:slug/brain
-import Measure from './pages/Measure'                // /p/:slug/measure, visible label: Performance
-import Learning from './pages/Learning'              // /p/:slug/learning
+// Performance (./pages/Measure) and Learning (./pages/Learning) are parked behind
+// a coming-soon screen. Restore by re-importing them and swapping the routes below.
+import { ComingSoon } from './components/ComingSoon'
 import ReviewLink from './pages/ReviewLink'          // /r/:reviewToken — public, tokened review link
 import ApprovalIndex from './pages/ApprovalIndex'
 import AcceptInvite from './pages/AcceptInvite'
@@ -82,8 +83,8 @@ export default function App() {
                   <Route path="artifacts"  element={<Artifacts />} />{/* the client's content library */}
                   <Route path="knowledge"  element={<Knowledge />} />{/* legacy KB — folds into Brain next */}
                   <Route path="brain"      element={<Brain />} />
-                  <Route path="measure"    element={<Measure />} />
-                  <Route path="learning"   element={<Learning />} />
+                  <Route path="measure"    element={<ComingSoon feature="Performance" />} />
+                  <Route path="learning"   element={<ComingSoon feature="Learning" />} />
                   <Route path="keys"       element={<ClientKeys />} />{/* the client's own provider keys */}
                 </Route>
 

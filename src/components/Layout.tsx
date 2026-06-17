@@ -32,8 +32,8 @@ import {
 // SAM treatment: icon + label, generous padding. Active = solid coral fill
 // with white text/icon (the screenshot's "Sam" item). Inactive = quiet gray.
 function RailItem({
-  to, icon: Icon, label, badge, onClick,
-}: { to: string; icon: React.ElementType; label: string; badge?: number; onClick?: () => void }) {
+  to, icon: Icon, label, badge, onClick, soon,
+}: { to: string; icon: React.ElementType; label: string; badge?: number; onClick?: () => void; soon?: boolean }) {
   return (
     <NavLink
       to={to}
@@ -53,7 +53,20 @@ function RailItem({
           <Icon size={16} strokeWidth={isActive ? 2.1 : 1.75}
             style={{ color: isActive ? '#fff' : 'var(--ghost)', flexShrink: 0 }} />
           <span className="flex-1 truncate">{label}</span>
-          {typeof badge === 'number' && badge > 0 && (
+          {soon ? (
+            <span
+              className="text-[10px] px-1.5 leading-tight py-px uppercase"
+              style={{
+                background: isActive ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.06)',
+                color: isActive ? '#fff' : 'var(--ghost)',
+                borderRadius: 'var(--radius-sm)',
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+              }}
+            >
+              Soon
+            </span>
+          ) : typeof badge === 'number' && badge > 0 ? (
             <span
               className="text-[11px] px-1.5 leading-tight py-px"
               style={{
@@ -65,7 +78,7 @@ function RailItem({
             >
               {badge}
             </span>
-          )}
+          ) : null}
         </>
       )}
     </NavLink>
@@ -494,8 +507,8 @@ export default function Layout() {
 
           <RailLabel>Demand</RailLabel>
           <RailItem to={p('brain')}     icon={Brain}           label="Strategy Brain" />
-          <RailItem to={p('measure')}   icon={BarChart3}       label="Performance" />
-          <RailItem to={p('learning')}  icon={TrendingUp}      label="Learning" />
+          <RailItem to={p('measure')}   icon={BarChart3}       label="Performance" soon />
+          <RailItem to={p('learning')}  icon={TrendingUp}      label="Learning" soon />
           <RailItem to={p('keys')}      icon={KeyRound}        label="Integrations" />
         </nav>
 
