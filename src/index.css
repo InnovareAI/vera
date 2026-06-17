@@ -18,24 +18,23 @@
   --font-scale:   1;
 
   /* Surfaces */
-  --paper:        #FAFAF9;        /* page background */
-  --paper-warm:   #FFFFFF;        /* cards, sidebar */
-  --paper-edge:   #ECECEA;        /* near-invisible borders */
-  --fog:          #F4F4F2;        /* hover surface */
+  --paper:        #F4F1EA;        /* page background — warm ivory */
+  --paper-warm:   #FCFBF8;        /* cards, sidebar */
+  --paper-edge:   #D9D3C7;        /* near-invisible borders */
+  --fog:          #ECE7DD;        /* hover surface, rail fill */
 
   /* Ink (text + primary actions) */
-  --ink:          #171717;        /* primary text + CTA fills */
-  --ink-quiet:    #525252;
-  --ghost:        #737373;
-  --mist:         #C4C4C2;
+  --ink:          #1A1813;        /* primary text + CTA fills — warm near-black */
+  --ink-quiet:    #4A4540;
+  --ghost:        #7A736A;
+  --mist:         #C4BDB5;
 
-  /* Brand accent — Vera blue (distinct from SAM's coral).                */
-  /* The solid --accent carries white CTA text on a light base;           */
-  /* --accent-soft is the brighter brand blue for icons/dots.             */
-  --accent:       #2563EB;            /* solid CTA fill (white text ~5:1) */
-  --accent-soft:  #3B82F6;            /* brand blue — softer accents, icons */
-  --accent-tint:  rgba(59, 130, 246, 0.08);  /* pale blue wash */
-  --accent-rule:  rgba(59, 130, 246, 0.20);   /* blue hairline */
+  /* Brand accent — Pine #2F6E5B (distinct from SAM's coral and VERA's old blue). */
+  /* The solid --accent carries white CTA text on a light base.           */
+  --accent:       #2F6E5B;            /* solid CTA fill (white text) */
+  --accent-soft:  #3E8A72;            /* pine mid-tone — softer accents, icons */
+  --accent-tint:  rgba(47, 110, 91, 0.08);   /* pale pine wash */
+  --accent-rule:  rgba(47, 110, 91, 0.20);    /* pine hairline */
 
   /* Legacy oxblood aliases — still exported so old usages don't break,   */
   /* but the practical visual contract is "rare brand accent" now.        */
@@ -47,24 +46,24 @@
 
   /* SAM-compatible semantic tokens. Vera keeps --accent as a HEX token, so
      brand actions continue using the established Vera variable contract. */
-  --background:    44 14% 98%;
-  --foreground:    0 0% 9%;
-  --card:          0 0% 100%;
-  --card-foreground: 0 0% 9%;
-  --popover:       0 0% 100%;
-  --popover-foreground: 0 0% 9%;
-  --primary:       221 83% 53%;
+  --background:    42 31% 94%;
+  --foreground:    43 16% 9%;
+  --card:          42 15% 98%;
+  --card-foreground: 43 16% 9%;
+  --popover:       42 15% 98%;
+  --popover-foreground: 43 16% 9%;
+  --primary:       162 40% 31%;
   --primary-foreground: 0 0% 100%;
-  --secondary:     60 5% 96%;
-  --secondary-foreground: 0 0% 9%;
-  --muted:         60 5% 96%;
-  --muted-foreground: 0 0% 38%;
-  --accent-foreground: 0 0% 9%;
+  --secondary:     40 20% 90%;
+  --secondary-foreground: 43 16% 9%;
+  --muted:         40 20% 90%;
+  --muted-foreground: 43 10% 38%;
+  --accent-foreground: 43 16% 9%;
   --destructive:   0 84% 60%;
   --destructive-foreground: 0 0% 100%;
-  --border:        30 9% 90%;
-  --input:         30 9% 90%;
-  --ring:          221 83% 53%;
+  --border:        40 20% 88%;
+  --input:         40 20% 88%;
+  --ring:          162 40% 31%;
   --radius:        0.5rem;
 
   --conv-background: 0 0% 4%;
@@ -122,16 +121,16 @@
   /* ════════════════════════════════════════════════════════════════════ */
 
   /* — Color · paper & ink ──────────────────────────────────────────── */
-  --paper-2:      #F5F5F4;            /* subtle fill on paper (rails, hover) */
-  --surface:      #FFFFFF;            /* raised over paper (cards, dropdowns) */
-  --ink-2:        #404040;            /* secondary text */
-  --faint:        #737373;            /* tertiary text, placeholders */
-  --line:         #EAE7E2;            /* hairline rule */
-  --line-2:       #D9D5CE;            /* stronger hairline */
+  --paper-2:      #ECE7DD;            /* subtle fill on paper (rails, hover) */
+  --surface:      #FCFBF8;            /* raised over paper (cards, dropdowns) */
+  --ink-2:        #403C37;            /* secondary text */
+  --faint:        #7A736A;            /* tertiary text, placeholders */
+  --line:         #E5E0D6;            /* hairline rule */
+  --line-2:       #CEC7BA;            /* stronger hairline */
 
   /* — Color · accent (use sparingly, max 4 per surface) ────────────── */
-  --accent-ink:   #1E40AF;            /* deep blue — text/hover on light */
-  --accent-line:  rgba(59,130,246,0.22); /* accent hairline */
+  --accent-ink:   #245546;            /* deep pine — text/hover on light */
+  --accent-line:  rgba(47,110,91,0.22); /* accent hairline */
 
   /* — Color · status (dots only, never fills) ──────────────────────── */
   --success:      #2D7A3B;
@@ -193,8 +192,8 @@
   /* — Shadow · only on floating overlays ───────────────────────────── */
   --shadow-pop:   0 1px 2px rgba(23,23,23,0.04), 0 8px 24px rgba(23,23,23,0.08);
   --shadow-modal: 0 2px 4px rgba(23,23,23,0.05), 0 24px 64px rgba(23,23,23,0.16);
-  /* Blue glow — brand-moment shadow */
-  --shadow-glow:  0 18px 48px rgba(37, 99, 235, 0.18);
+  /* Pine glow — brand-moment shadow */
+  --shadow-glow:  0 18px 48px rgba(47, 110, 91, 0.18);
 }
 
 html {
@@ -203,20 +202,20 @@ html {
 
 html.dark,
 body[data-theme="dark"] {
-  --paper:        #0A0A0A;
-  --paper-warm:   #171717;
-  --paper-edge:   #262626;
-  --fog:          #1F1F1F;
+  --paper:        #0D0C0B;
+  --paper-warm:   #1C1916;
+  --paper-edge:   #2A2520;
+  --fog:          #201D1A;
 
-  --ink:          #FAFAFA;
-  --ink-quiet:    #D4D4D4;
-  --ghost:        #A3A3A3;
-  --mist:         #737373;
+  --ink:          #F5F2ED;
+  --ink-quiet:    #CFC8BF;
+  --ghost:        #A09890;
+  --mist:         #6E685F;
 
-  --accent:       #60A5FA;            /* brand blue, lifted for dark surfaces */
-  --accent-soft:  #93C5FD;
-  --accent-tint:  rgba(96, 165, 250, 0.14);
-  --accent-rule:  rgba(96, 165, 250, 0.26);
+  --accent:       #5BAE93;            /* pine lifted for dark surfaces */
+  --accent-soft:  #7CC5AB;
+  --accent-tint:  rgba(91, 174, 147, 0.14);
+  --accent-rule:  rgba(91, 174, 147, 0.26);
 
   --oxblood:      var(--accent);
   --oxblood-deep: var(--accent);
@@ -224,39 +223,39 @@ body[data-theme="dark"] {
   --oxblood-tint: var(--accent-tint);
   --oxblood-rule: var(--accent-rule);
 
-  --background:    0 0% 4%;
-  --foreground:    0 0% 96%;
-  --card:          0 0% 9%;
-  --card-foreground: 0 0% 96%;
-  --popover:       0 0% 9%;
-  --popover-foreground: 0 0% 96%;
-  --primary:       213 94% 68%;
+  --background:    30 8% 5%;
+  --foreground:    40 10% 96%;
+  --card:          30 8% 9%;
+  --card-foreground: 40 10% 96%;
+  --popover:       30 8% 9%;
+  --popover-foreground: 40 10% 96%;
+  --primary:       161 34% 52%;
   --primary-foreground: 0 0% 5%;
-  --secondary:     0 0% 13%;
-  --secondary-foreground: 0 0% 96%;
-  --muted:         0 0% 13%;
-  --muted-foreground: 0 0% 64%;
-  --accent-foreground: 0 0% 96%;
+  --secondary:     30 8% 13%;
+  --secondary-foreground: 40 10% 96%;
+  --muted:         30 8% 13%;
+  --muted-foreground: 40 6% 64%;
+  --accent-foreground: 40 10% 96%;
   --destructive:   0 91% 71%;
   --destructive-foreground: 0 0% 5%;
-  --border:        0 0% 16%;
-  --input:         0 0% 16%;
-  --ring:          213 94% 68%;
+  --border:        30 8% 16%;
+  --input:         30 8% 16%;
+  --ring:          161 34% 52%;
 
-  --paper-2:      #141414;
-  --surface:      #171717;
-  --ink-2:        #D4D4D4;
-  --faint:        #A3A3A3;
+  --paper-2:      #1A1714;
+  --surface:      #201D1A;
+  --ink-2:        #CFC8BF;
+  --faint:        #A09890;
   --line:         rgba(255,255,255,0.10);
   --line-2:       rgba(255,255,255,0.16);
 
-  --accent-ink:   #BFDBFE;
-  --accent-line:  rgba(96,165,250,0.32);
+  --accent-ink:   #B8E0CF;
+  --accent-line:  rgba(91,174,147,0.32);
 
   --success:      #86EFAC;
   --warn:         #FBBF24;
   --danger:       #FCA5A5;
-  --info:         #93C5FD;
+  --info:         #7CC5AB;
 
   --shadow-pop:   0 1px 2px rgba(0,0,0,0.28), 0 10px 28px rgba(0,0,0,0.36);
   --shadow-modal: 0 2px 4px rgba(0,0,0,0.28), 0 24px 64px rgba(0,0,0,0.46);
@@ -274,8 +273,8 @@ body {
   /* top; the glow reads through the rails + margins.                        */
   background-color: var(--paper);
   background-image:
-    radial-gradient(62% 48% at 16% -4%, rgba(59, 130, 246, 0.07), transparent 72%),
-    radial-gradient(48% 38% at 102% -2%, rgba(59, 130, 246, 0.045), transparent 70%);
+    radial-gradient(62% 48% at 16% -4%, rgba(47, 110, 91, 0.06), transparent 72%),
+    radial-gradient(48% 38% at 102% -2%, rgba(47, 110, 91, 0.04), transparent 70%);
   background-attachment: fixed;
   color: var(--ink);
   transition: background 0.2s, color 0.2s;

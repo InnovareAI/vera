@@ -62,8 +62,8 @@ export const type = {
     semibold: 600,
   },
   family: {
-    sans:     "var(--font-body)",   // Geist
-    mono:     "var(--font-mono)",   // Geist Mono
+    sans:     "var(--font-body)",   // Inter
+    mono:     "var(--font-mono)",   // SF Mono
   },
   letterSpacing: {
     tight:    '-0.025em',           // display
