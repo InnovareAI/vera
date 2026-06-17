@@ -23,17 +23,7 @@ import { PlatformPostPreview } from '../components/PlatformPostPreview'
 import Markdown from '../components/Markdown'
 import { downloadMarkdown } from '../lib/exportDoc'
 import { markdownToText } from '../lib/mdToText'
-import { hasBusinessContext, parseProjectInstructions, type BusinessContext, type BusinessContextKey } from '../lib/businessContext'
-import {
-  DEFAULT_DEMAND_OPERATING_MODEL,
-  DEMAND_PLATFORM_DEFINITIONS,
-  DEMAND_SOURCE_KEYS,
-  demandChannelPoliciesFromText,
-  demandChannelPolicyOverrideCount,
-  demandChannelsFromContext,
-  demandPlatformHasStrategyEvidence,
-  type DemandChannelOperatingPolicy,
-} from '../lib/demandModel'
+import { hasBusinessContext, parseProjectInstructions } from '../lib/businessContext'
 import {
   buildModelRecommendations,
   imageModelProvider,
@@ -84,16 +74,6 @@ type DocumentBlock = {
   context?: string
 }
 
-type ObservationNotice = {
-  id: string
-  title: string
-  proposed_action: string | null
-  kind: string
-  severity: 'low' | 'medium' | 'high'
-  detail: string | null
-  action_kind: string | null
-  action_payload: Record<string, unknown> | null
-}
 
 type CommandStats = {
   draft: number
@@ -441,129 +421,8 @@ interface CampaignData {
   posts: CampaignPost[]
 }
 
-type DemandPlanSnapshot = {
-  completeness: number
-  sourceCount: number
-  sourceTotal: number
-  objective: string
-  conversionPath: string
-  channels: string[]
-  formats: string[]
-  signals: string
-  handoff: string
-  speakers: string[]
-  tone: string[]
-  approvals: string[]
-  learning: string[]
-  policySummary: string[]
-  publishGuards: string[]
-  samTriggers: string[]
-  customPolicyCount: number
-  highCareCount: number
-  missing: string[]
-}
 
-const DEMAND_PLAN_FIELDS: Array<{ key: BusinessContextKey; label: string }> = [
-  { key: 'demandObjective', label: 'Content objective' },
-  { key: 'offer', label: 'Offer' },
-  { key: 'audience', label: 'Audience' },
-  { key: 'speakerStrategy', label: 'Speaker strategy' },
-  { key: 'platformToneOfVoice', label: 'Platform TOV' },
-  { key: 'channelStrategy', label: 'Channel strategy' },
-  { key: 'contentFormats', label: 'Content formats' },
-  { key: 'approvalModel', label: 'Approval model' },
-  { key: 'approvalStakeholders', label: 'Approval stakeholders' },
-  { key: 'engagementSignals', label: 'Engagement signals' },
-  { key: 'samHandoffRules', label: 'Follow-up rules' },
-]
 
-function splitList(value: string, max = 5) {
-  return value
-    .split(/[\n,;]+/)
-    .map(item => item.trim())
-    .filter(Boolean)
-    .slice(0, max)
-}
-
-const DEFAULT_FIRST_WAVE_CHANNELS = DEMAND_PLATFORM_DEFINITIONS.map(platform => platform.label)
-const DEFAULT_SPEAKER_ITEMS = ['Brand account', 'Named founder or expert', 'Team voice when sourced']
-const DEFAULT_TONE_ITEMS = ['Shared brand core', 'Channel-native TOV', 'Medium-specific structure']
-const DEFAULT_APPROVAL_ITEMS = ['Case based', 'One named owner', 'All stakeholders for high-risk work']
-const DEFAULT_LEARNING_ITEMS = ['Weekly performance review', 'Refresh platform best practices', 'Turn wins into reusable skills']
-
-function demandPolicyRiskLabel(risk: DemandChannelOperatingPolicy['risk']) {
-  if (risk === 'high') return 'high approval care'
-  if (risk === 'medium') return 'approval aware'
-  return 'standard review'
-}
-
-function activeDemandPolicyPlatforms(context: BusinessContext) {
-  const active = DEMAND_PLATFORM_DEFINITIONS.filter(platform => (
-    demandPlatformHasStrategyEvidence(platform, context)
-  ))
-  return active.length ? active : DEMAND_PLATFORM_DEFINITIONS
-}
-
-function buildDemandPolicySummary(context: BusinessContext) {
-  const policies = demandChannelPoliciesFromText(context.channelOperatingPolicies)
-  const platforms = activeDemandPolicyPlatforms(context)
-  const ordered = [...platforms].sort((a, b) => {
-    const aPolicy = policies[a.key]
-    const bPolicy = policies[b.key]
-    const riskRank = { high: 3, medium: 2, low: 1 }
-    const riskDelta = riskRank[bPolicy.risk] - riskRank[aPolicy.risk]
-    if (riskDelta !== 0) return riskDelta
-    return a.label.localeCompare(b.label)
-  })
-  const policySummary = ordered.map(platform => `${platform.label}: ${demandPolicyRiskLabel(policies[platform.key].risk)}`)
-  const publishGuards = ordered.map(platform => `${platform.label}: ${policies[platform.key].publishGuard}`)
-  const samTriggers = ordered.map(platform => `${platform.label}: ${policies[platform.key].samTrigger}`)
-  return {
-    policySummary,
-    publishGuards,
-    samTriggers,
-    customPolicyCount: demandChannelPolicyOverrideCount(policies),
-    highCareCount: ordered.filter(platform => policies[platform.key].risk === 'high').length,
-  }
-}
-
-function buildDemandPlanSnapshot(context: BusinessContext): DemandPlanSnapshot {
-  const filled = DEMAND_PLAN_FIELDS.filter(field => context[field.key].trim()).length
-  const sourceCount = DEMAND_SOURCE_KEYS.filter(key => context[key].trim()).length
-  const missing = DEMAND_PLAN_FIELDS
-    .filter(field => !context[field.key].trim())
-    .map(field => field.label)
-    .slice(0, 4)
-  const sourceChannels = demandChannelsFromContext(context, 8)
-  const strategyChannels = splitList(context.channelStrategy, 6)
-  const formats = splitList(context.contentFormats, 5)
-  const speakerItems = splitList(context.speakerStrategy, 3)
-  const toneItems = splitList(context.platformToneOfVoice, 3)
-  const approvalItems = splitList(context.approvalStakeholders || context.approvalModel, 3)
-  const learningItems = splitList(context.learningCadence, 3)
-  const policy = buildDemandPolicySummary(context)
-  return {
-    completeness: Math.round((filled / DEMAND_PLAN_FIELDS.length) * 100),
-    sourceCount,
-    sourceTotal: DEMAND_SOURCE_KEYS.length,
-    objective: context.demandObjective.trim() || context.contentGoals.trim() || DEFAULT_DEMAND_OPERATING_MODEL.demandObjective,
-    conversionPath: context.conversionPath.trim() || DEFAULT_DEMAND_OPERATING_MODEL.conversionPath,
-    channels: sourceChannels.length ? sourceChannels.slice(0, 8) : (strategyChannels.length ? strategyChannels.slice(0, 8) : DEFAULT_FIRST_WAVE_CHANNELS),
-    formats: formats.length ? formats : ['Posts', 'Carousels', 'Video storyboards', 'Long form'],
-    signals: context.engagementSignals.trim() || DEFAULT_DEMAND_OPERATING_MODEL.engagementSignals,
-    handoff: context.samHandoffRules.trim() || DEFAULT_DEMAND_OPERATING_MODEL.samHandoffRules,
-    speakers: speakerItems.length ? speakerItems : DEFAULT_SPEAKER_ITEMS,
-    tone: toneItems.length ? toneItems : DEFAULT_TONE_ITEMS,
-    approvals: approvalItems.length ? approvalItems : DEFAULT_APPROVAL_ITEMS,
-    learning: learningItems.length ? learningItems : DEFAULT_LEARNING_ITEMS,
-    policySummary: policy.policySummary,
-    publishGuards: policy.publishGuards,
-    samTriggers: policy.samTriggers,
-    customPolicyCount: policy.customPolicyCount,
-    highCareCount: policy.highCareCount,
-    missing,
-  }
-}
 
 const TOOL_LABEL: Record<string, string> = {
   run_pipeline: 'Drafting with the team',
@@ -593,7 +452,6 @@ export default function VeraThread() {
   const [draftHistory, setDraftHistory] = useState<Post[]>([])
   const [campaign, setCampaign] = useState<CampaignData | null>(null)
   const [approving, setApproving] = useState(false)
-  const [observations, setObservations] = useState<ObservationNotice[]>([])
   const [stats, setStats] = useState<CommandStats>(EMPTY_COMMAND_STATS)
   const [sessionId, setSessionId] = useState<string>('')
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
@@ -735,10 +593,6 @@ export default function VeraThread() {
 
   const [providerCapabilities, setProviderCapabilities] = useState<ProviderCapabilities>(DEFAULT_PROVIDER_CAPABILITIES)
   const { catalog: pricingCatalog, source: pricingSource, rowCount: pricingRowCount } = useModelPricingCatalog()
-  const demandPlan = useMemo(() => {
-    const parsed = parseProjectInstructions(activeProject?.instructions ?? '')
-    return buildDemandPlanSnapshot(parsed.businessContext)
-  }, [activeProject?.instructions])
 
   useEffect(() => {
     if (!activeOrg?.id || !activeProject?.id) {
@@ -865,27 +719,6 @@ export default function VeraThread() {
     return () => { cancelled = true }
   }, [activeProject?.id])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // "VERA wants to" — open observations, surfaced in the launcher (moved here
-  // from the old Home/Dashboard so nothing is lost when Home goes away).
-  useEffect(() => {
-    if (!activeOrg?.id) { setObservations([]); return }
-    let q = supabase.from('agent_observations')
-      .select('id, title, proposed_action, kind, severity, detail, action_kind, action_payload')
-      .eq('org_id', activeOrg.id)
-      .eq('status', 'open')
-      .neq('kind', 'stale_audit')
-      .order('created_at', { ascending: false })
-      .limit(4)
-    if (activeProject?.id) q = q.eq('project_id', activeProject.id)
-    q.then(({ data }) => {
-      // Dedupe by title — duplicate/same-named campaigns can fire the same
-      // nudge more than once; show each only once.
-      const seen = new Set<string>()
-      const deduped = ((data ?? []) as ObservationNotice[])
-        .filter(o => (seen.has(o.title) ? false : (seen.add(o.title), true)))
-      setObservations(deduped)
-    })
-  }, [activeOrg?.id, activeProject?.id])
 
   // Live counts for the command desk and launcher quick-action descriptions.
   useEffect(() => {
@@ -1527,27 +1360,6 @@ export default function VeraThread() {
     if (e.dataTransfer.types.includes('Files')) e.preventDefault()
   }
 
-  // Dismiss a "VERA wants to" nudge — clears every dupe of it (by title).
-  async function dismissObservation(o: { title: string }) {
-    setObservations(prev => prev.filter(x => x.title !== o.title))
-    if (!activeOrg?.id) return
-    let q = supabase.from('agent_observations').update({ status: 'dismissed' })
-      .eq('org_id', activeOrg.id).eq('title', o.title)
-    if (activeProject?.id) q = q.eq('project_id', activeProject.id)
-    await q
-  }
-
-  async function openIntegrationObservation(o: ObservationNotice) {
-    setObservations(prev => prev.filter(x => x.id !== o.id))
-    await supabase.from('agent_observations')
-      .update({
-        status: 'actioned',
-        actioned_at: new Date().toISOString(),
-        acted_result: { stage: 'opened_integrations' },
-      })
-      .eq('id', o.id)
-    navigate(integrationsRouteFromNotice(o, activeProject?.id ?? null))
-  }
 
   // ─── Draft actions ──────────────────────────────────────────────
   function ensureDraftInActiveProject(post: Post) {
@@ -1812,17 +1624,9 @@ export default function VeraThread() {
         {!historyLoaded ? (
           <Centered>Loading thread…</Centered>
         ) : messages.length === 0 ? (
-          <Idle onRun={pr => send(pr)} observations={observations} actions={buildLaunchActions(stats)} onDismiss={dismissObservation}
-            onOpenIntegrations={openIntegrationObservation}
+          <Idle onRun={pr => send(pr)} actions={buildLaunchActions(stats)}
             setup={setup} projectName={activeProject?.name ?? 'this space'}
             onOpenBrain={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/brain`) }}
-            onOpenLearning={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/learning`) }}
-            onOpenReview={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/review`) }}
-            onOpenCalendar={() => { if (activeProject?.slug) navigate(`/p/${activeProject.slug}/calendar`) }}
-            providerCapabilities={providerCapabilities}
-            onAddKey={openProviderKeys}
-            stats={stats}
-            demandPlan={demandPlan}
             composer={renderComposer('idle')} />
         ) : (
           <div style={{ maxWidth: 680, margin: '0 auto', padding: `0 ${space[8]}`, display: 'flex', flexDirection: 'column', gap: space[7] }}>
@@ -2452,109 +2256,30 @@ function pricingCatalogBadge(source: ModelPricingCatalogSource = 'loading', rowC
   return { label: 'Loading guide', color: color.ghost, border: color.line }
 }
 
-function Idle({ onRun, observations, actions, onDismiss, onOpenIntegrations, setup, projectName, onOpenBrain, onOpenLearning, onOpenReview, onOpenCalendar, providerCapabilities, onAddKey, stats, demandPlan, composer }: {
+function Idle({ onRun, actions, setup, projectName, onOpenBrain, composer }: {
   onRun: (prompt: string) => void
-  observations: ObservationNotice[]
   actions: LaunchAction[]
-  onDismiss: (o: { title: string }) => void
-  onOpenIntegrations: (o: ObservationNotice) => void
   setup: { business: boolean; audience: boolean; voice: boolean; categories: boolean; knowledge: boolean } | null
   projectName: string
   onOpenBrain: () => void
-  onOpenLearning: () => void
-  onOpenReview: () => void
-  onOpenCalendar: () => void
-  providerCapabilities: ProviderCapabilities
-  onAddKey?: () => void
-  stats: CommandStats
-  demandPlan: DemandPlanSnapshot
   composer: ReactNode
 }) {
   const setupDone = !!setup && setup.business && setup.audience && setup.voice && setup.categories && setup.knowledge
   const setupCard: LaunchAction = { icon: Sparkles, title: `Set up ${projectName}`, sub: 'URL, audience, offer, proof', prompt: '', action: 'brain' }
   const quickActions = (setup && !setupDone ? [setupCard, ...actions] : actions).slice(0, 4)
-  const primaryObservation = observations[0]
-  const ready = demandPlan.completeness >= 70
-  const channels = demandPlan.channels.slice(0, 5)
-  const firstAction = quickActions.find(action => action.action !== 'brain') ?? actions[0]
-  const modelWarning = providerCapabilities.loaded && (providerCapabilities.needsTextKey || !providerCapabilities.imageReady || !providerCapabilities.videoReady)
-  const reviewQueue = stats.pending + stats.rejected
-  const readyToSchedule = stats.approved
-  const productionTotal = stats.draft + stats.pending + stats.approved + stats.scheduled + stats.posted + stats.rejected
-  const nextMove = !setupDone
-    ? {
-      label: 'Strategy context',
-      title: 'Add the missing business context.',
-      detail: demandPlan.missing.length
-        ? `Missing: ${demandPlan.missing.join(', ')}.`
-        : 'Start with website, audience, offer, proof, voice, and useful source material.',
-      action: onOpenBrain,
-      actionLabel: 'Open Brain',
-    }
-    : reviewQueue > 0
-      ? {
-        label: 'Review queue',
-        title: `${reviewQueue} item${reviewQueue === 1 ? '' : 's'} need a decision.`,
-        detail: 'Clear pending or rejected work before adding more production load.',
-        action: onOpenReview,
-        actionLabel: 'Open Review',
-      }
-      : readyToSchedule > 0
-        ? {
-          label: 'Schedule',
-          title: `${readyToSchedule} approved item${readyToSchedule === 1 ? '' : 's'} can move to the planner.`,
-          detail: 'Place approved content into the right day, channel, and cadence.',
-          action: onOpenCalendar,
-          actionLabel: 'Open Planner',
-        }
-        : primaryObservation
-          ? {
-            label: primaryObservation.kind === 'weekly_learning' ? 'Learning' : 'Signal',
-            title: primaryObservation.title,
-            detail: primaryObservation.detail || primaryObservation.proposed_action || 'A saved signal is ready for action.',
-            action: () => {
-              if (primaryObservation.kind === 'weekly_learning') {
-                onOpenLearning()
-                return
-              }
-              if (primaryObservation.action_kind === 'open_integrations') onOpenIntegrations(primaryObservation)
-              else onRun(primaryObservation.proposed_action || primaryObservation.title)
-            },
-            actionLabel: primaryObservation.kind === 'weekly_learning' ? 'Open Learning' : primaryObservation.action_kind === 'open_integrations' ? 'Open Integrations' : 'Act on Signal',
-          }
-          : {
-            label: 'Next move',
-            title: productionTotal ? 'Create the next useful content move.' : 'Start with one concrete brief.',
-            detail: 'Use the saved context and valid channels to create a specific draft, plan, or storyboard.',
-            action: () => firstAction?.prompt ? onRun(firstAction.prompt) : onOpenBrain(),
-            actionLabel: firstAction?.title ?? 'Plan Content',
-          }
 
   return (
     <div style={{ minHeight: '100%', padding: `clamp(${space[6]}, 3vw, ${space[8]})`, paddingBottom: space[10], display: 'flex', justifyContent: 'center' }}>
       <div style={{ width: '100%', maxWidth: 980, display: 'grid', gap: space[5], alignContent: 'start' }}>
-        <section style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[4], flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: space[3], minWidth: 0 }}>
-            <VeraAvatar size={38} hero />
-            <div style={{ minWidth: 0 }}>
-              <div style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>Agent</div>
-              <h1 style={{ margin: 0, color: color.ink, fontSize: t.size.h3, fontWeight: t.weight.semibold, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{projectName}</h1>
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
-            <CommandStatusPill tone={ready ? 'success' : 'warn'} label={`${demandPlan.completeness}% Brain`} />
-            {reviewQueue > 0 && <CommandStatusPill tone="warn" label={`${reviewQueue} review`} />}
-            {readyToSchedule > 0 && <CommandStatusPill tone="success" label={`${readyToSchedule} approved`} />}
-            <CommandStatusPill tone={providerCapabilities.loaded && providerCapabilities.textReady ? 'success' : 'warn'} label={providerCapabilities.loaded && providerCapabilities.textReady ? 'Text ready' : 'Text setup'} />
+        <section style={{ display: 'flex', alignItems: 'center', gap: space[3] }}>
+          <VeraAvatar size={38} hero />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>Agent</div>
+            <h1 style={{ margin: 0, color: color.ink, fontSize: t.size.h3, fontWeight: t.weight.semibold, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{projectName}</h1>
           </div>
         </section>
 
         <section style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5], boxShadow: 'var(--shadow-pop)', display: 'grid', gap: space[4] }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
-            {channels.map(channel => <ChannelPill key={channel} label={channel} />)}
-            {demandPlan.channels.length > channels.length && <ChannelPill label={`+${demandPlan.channels.length - channels.length}`} muted />}
-            {channels.length === 0 && <ChannelPill label="Channels not set" muted />}
-          </div>
           {composer}
           {quickActions.length > 0 && (
             <div style={{ display: 'flex', gap: space[2], flexWrap: 'wrap' }}>
@@ -2571,87 +2296,12 @@ function Idle({ onRun, observations, actions, onDismiss, onOpenIntegrations, set
           )}
         </section>
 
-        <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: space[3] }}>
-          <article style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[5], display: 'grid', gap: space[3] }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], flexWrap: 'wrap' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: color.accent, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>
-                <Target size={13} />
-                {nextMove.label}
-              </span>
-              <button onClick={nextMove.action} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minHeight: 32, padding: '7px 12px', borderRadius: radius.pill, border: 'none', background: color.accent, color: '#fff', fontSize: t.size.cap, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
-                <ArrowUp size={13} style={{ transform: 'rotate(45deg)' }} />
-                {nextMove.actionLabel}
-              </button>
-            </div>
-            <div>
-              <h2 style={{ margin: 0, color: color.ink, fontSize: t.size.h4, fontWeight: t.weight.semibold, lineHeight: 1.25 }}>{nextMove.title}</h2>
-              <p style={{ margin: `${space[2]} 0 0`, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.5 }}>{nextMove.detail}</p>
-            </div>
-          </article>
-
-          {modelWarning && (
-            <article style={{ background: 'var(--accent-tint)', border: '1px solid var(--accent-line)', borderRadius: radius.lg, padding: space[4], display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: space[3], minWidth: 0 }}>
-                <Lock size={15} style={{ color: color.accent, flexShrink: 0 }} />
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold }}>Space-owned provider keys required for generation.</div>
-                  <div style={{ color: color.ink2, fontSize: t.size.micro, marginTop: 2 }}>Vera can still plan, draft prompts, and storyboard without rendering paid media.</div>
-                </div>
-              </div>
-              {onAddKey && (
-                <button onClick={onAddKey} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 30, padding: '6px 10px', borderRadius: radius.pill, border: 'none', background: color.accent, color: '#fff', fontSize: t.size.micro, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
-                  <KeyRound size={12} />
-                  Keys
-                </button>
-              )}
-            </article>
-          )}
-
-          {primaryObservation && (
-            <article style={{ background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: space[4], display: 'flex', alignItems: 'center', gap: space[3], flexWrap: 'wrap' }}>
-              <Sparkles size={14} style={{ color: color.accent, flexShrink: 0 }} />
-              <span style={{ flex: 1, minWidth: 220, color: color.ink2, fontSize: t.size.cap, lineHeight: 1.45, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{primaryObservation.title}</span>
-              <button onClick={() => primaryObservation.kind === 'weekly_learning' ? onOpenLearning() : primaryObservation.action_kind === 'open_integrations' ? onOpenIntegrations(primaryObservation) : onRun(primaryObservation.proposed_action || primaryObservation.title)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 28, padding: '5px 9px', borderRadius: radius.pill, border: `1px solid var(--accent-line)`, background: 'var(--accent-tint)', color: color.accent, fontSize: t.size.micro, fontWeight: t.weight.semibold, cursor: 'pointer' }}>
-                Act
-              </button>
-              <button onClick={() => onDismiss(primaryObservation)} title="Dismiss" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.paper2, color: color.ghost, cursor: 'pointer' }}>
-                <X size={13} />
-              </button>
-            </article>
-          )}
-        </section>
       </div>
     </div>
   )
 }
 
-function CommandStatusPill({ label, tone }: { label: string; tone: 'success' | 'warn' }) {
-  const fg = tone === 'success' ? color.success : color.warn
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 28, padding: '4px 9px', borderRadius: radius.pill, border: `1px solid ${color.line}`, background: color.surface, color: color.ink2, fontSize: t.size.micro, fontWeight: t.weight.semibold, whiteSpace: 'nowrap' }}>
-      <span style={{ width: 7, height: 7, borderRadius: '50%', background: fg, flexShrink: 0 }} />
-      {label}
-    </span>
-  )
-}
 
-function ChannelPill({ label, muted = false }: { label: string; muted?: boolean }) {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', minHeight: 28, padding: '4px 10px', borderRadius: radius.pill, border: `1px solid ${muted ? color.line : 'var(--accent-line)'}`, background: muted ? color.paper2 : 'var(--accent-tint)', color: muted ? color.ghost : color.ink, fontSize: t.size.cap, fontWeight: t.weight.medium, maxWidth: 170, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-      {label}
-    </span>
-  )
-}
-
-function integrationsRouteFromNotice(observation: ObservationNotice, activeProjectId: string | null) {
-  const payload = observation.action_payload ?? {}
-  const provider = typeof payload.provider === 'string' ? payload.provider : null
-  const projectId = typeof payload.project_id === 'string' ? payload.project_id : activeProjectId
-  const params = new URLSearchParams({ tab: 'integrations' })
-  if (provider) params.set('provider', provider)
-  if (projectId) params.set('project_id', projectId)
-  return `/settings?${params.toString()}`
-}
 
 function VeraAvatar({ size, hero = false }: { size: number; hero?: boolean }) {
   const [broken, setBroken] = useState(false)
