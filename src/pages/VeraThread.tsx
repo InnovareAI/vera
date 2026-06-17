@@ -1032,6 +1032,7 @@ export default function VeraThread() {
     setAttachments([])
     setStreaming(true)
     void persistChatMessage(userMsg)
+    if (atts.length) void persistAttachmentsToStudio(atts)
 
     const wire: Array<{ role: string; content: unknown }> = next.map(m => ({ role: m.role, content: m.content }))
     // Compose the outgoing user turn: typed text + the open draft as context
@@ -1461,6 +1462,48 @@ export default function VeraThread() {
     if (skippedUnreadable) issues.push(`${skippedUnreadable} unreadable`)
     if (skippedLimit) issues.push(`${skippedLimit} over the ${MAX_ATTACHMENTS} file limit`)
     if (issues.length) push({ kind: 'warn', title: 'Some files were skipped', body: issues.join(', ') })
+  }
+
+  // Persist chat attachments into Studio (the space's media/asset library) and,
+  // for documents, into searchable knowledge. Uploading a file in the chat then
+  // actually lands somewhere reusable, not just in this one turn. Reuses the
+  // same project-ingest path as the rest of the app.
+  async function studioBlobFromAttachment(a: ComposerAttachment): Promise<Blob | null> {
+    try {
+      if (a.kind === 'image') return await (await fetch(a.dataUrl)).blob()
+      const src = a.document.source as { type: string; data: string }
+      if (src.type === 'base64') {
+        const bin = atob(src.data)
+        const bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+        return new Blob([bytes], { type: a.mime })
+      }
+      if (src.type === 'text') return new Blob([src.data], { type: 'text/plain' })
+    } catch { /* ignore */ }
+    return null
+  }
+  async function persistAttachmentsToStudio(atts: ComposerAttachment[]) {
+    const pid = activeProject?.id
+    if (!pid || !atts.length) return
+    let saved = 0
+    for (const a of atts) {
+      const blob = await studioBlobFromAttachment(a)
+      if (!blob) continue
+      try {
+        const ext = a.name.includes('.') ? a.name.slice(a.name.lastIndexOf('.')) : ''
+        const storagePath = `${pid}/${crypto.randomUUID()}${ext}`
+        const { error: upErr } = await supabase.storage.from('project-assets').upload(storagePath, blob, { cacheControl: '3600', upsert: false, contentType: a.mime })
+        if (upErr) continue
+        const assetKind = a.kind === 'image' ? 'image' : (a.mime === 'application/pdf' ? 'pdf' : 'other')
+        const res = await fetch(`${SUPA}/functions/v1/project-ingest`, {
+          method: 'POST',
+          headers: await functionHeaders(),
+          body: JSON.stringify({ kind: 'file', project_id: pid, storage_path: storagePath, file_name: a.name, mime_type: a.mime, file_size: a.size, asset_kind: assetKind }),
+        })
+        if (res.ok) saved++
+      } catch { /* ignore individual failures */ }
+    }
+    if (saved) push({ kind: 'success', title: `Saved ${saved} file${saved === 1 ? '' : 's'} to Studio` })
   }
   function removeAttachment(i: number) { setAttachments(prev => prev.filter((_, idx) => idx !== i)) }
 
