@@ -505,7 +505,7 @@ export default function Layout() {
           <RailItem to={p('calendar')}  icon={CalendarDays}    label="Planner" />
           <RailItem to={p('artifacts')} icon={Library}         label="Studio" />
 
-          <RailLabel>Demand</RailLabel>
+          <RailLabel>Analytics</RailLabel>
           <RailItem to={p('brain')}     icon={Brain}           label="Strategy Brain" />
           <RailItem to={p('measure')}   icon={BarChart3}       label="Performance" soon />
           <RailItem to={p('learning')}  icon={TrendingUp}      label="Learning" soon />
