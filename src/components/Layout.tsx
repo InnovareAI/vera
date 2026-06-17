@@ -181,28 +181,8 @@ function RailRecents() {
     window.dispatchEvent(new CustomEvent('vera:session', { detail: { sid } }))
   }
 
-  // Start a fresh conversation. On the Vera page, fire vera:home so the open
-  // thread resets in place; from elsewhere, seed a new session id and navigate
-  // in (VeraThread reads this key on mount) so we land on an empty thread.
-  const startNew = () => {
-    const target = `/p/${activeProject.slug}/vera`
-    if (location.pathname === target) {
-      window.dispatchEvent(new CustomEvent('vera:home'))
-    } else {
-      const sid = crypto.randomUUID()
-      try { localStorage.setItem(`vera-session:${activeProject.id}`, sid) } catch { /* ignore */ }
-      navigate(target)
-    }
-  }
-
   return (
     <nav className="space-y-0.5 mt-1">
-      <button onClick={startNew} title="Start a new conversation"
-        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 mx-2 transition-colors hover:bg-[var(--fog)]"
-        style={{ background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 'var(--radius-md)', width: 'calc(100% - 1rem)' }}>
-        <Plus size={15} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-        <span className="flex-1 truncate text-left" style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>New chat</span>
-      </button>
       {sessions.length > 0 && <RailLabel>Recents</RailLabel>}
       {sessions.map(s => {
         const title = compactRecentTitle(s.title)
