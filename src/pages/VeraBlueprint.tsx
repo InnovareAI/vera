@@ -523,9 +523,9 @@ function DraftPreview() {
       <div style={{ padding: space[5] }}>
         <div style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, overflow: 'hidden', background: color.surface }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: space[3], padding: space[4], borderBottom: `1px solid ${color.line}` }}>
-            <span style={{ width: 34, height: 34, borderRadius: '50%', background: color.accent, color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 700 }}>J</span>
+            <img src="/vera-avatar.png" alt="Vera" style={{ width: 34, height: 34, borderRadius: '50%', objectFit: 'cover' }} />
             <div style={{ minWidth: 0 }}>
-              <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>Jennifer Fleming</div>
+              <div style={{ color: color.ink, fontSize: t.size.sm, fontWeight: t.weight.semibold }}>Vera</div>
               <div style={{ color: color.ghost, fontSize: t.size.cap }}>Instagram preview</div>
             </div>
           </div>

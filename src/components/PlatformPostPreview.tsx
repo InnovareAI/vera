@@ -541,13 +541,13 @@ type Profile = {
 }
 
 function previewProfile(): Profile {
-  const name = 'Jennifer Fleming'
+  const name = 'Vera'
   return {
     name,
     subtitle: 'Content Generator',
-    handle: '@jenniferfleming',
-    initials: 'JF',
-    avatarUrl: '/jennifer-fleming-avatar.png',
+    handle: '@vera',
+    initials: 'V',
+    avatarUrl: '/vera-avatar.png',
   }
 }
 

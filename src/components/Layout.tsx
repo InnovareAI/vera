@@ -498,7 +498,7 @@ export default function Layout() {
         {/* Primary nav grouped around the content strategy loop. */}
         <nav className="pt-1 space-y-0.5">
           {/* Desk (p('blueprint')) hidden from the rail; still reachable by URL. */}
-          <RailItem to={p('vera')}      icon={MessageSquare}   label="Ask VERA" onClick={() => window.dispatchEvent(new CustomEvent('vera:home'))} />
+          <RailItem to={p('vera')}      icon={MessageSquare}   label="Agent" onClick={() => window.dispatchEvent(new CustomEvent('vera:home'))} />
 
           <RailLabel>Production</RailLabel>
           <RailItem to={p('review')}    icon={CheckSquare}     label="Review" badge={pendingCount} />

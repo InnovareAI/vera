@@ -2470,7 +2470,7 @@ function Idle({ onRun, observations, actions, onDismiss, onOpenIntegrations, set
           <div style={{ display: 'flex', alignItems: 'center', gap: space[3], minWidth: 0 }}>
             <VeraAvatar size={38} hero />
             <div style={{ minWidth: 0 }}>
-              <div style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>Ask Vera</div>
+              <div style={{ color: color.ghost, fontSize: t.size.micro, textTransform: 'uppercase', letterSpacing: 0, fontWeight: t.weight.semibold }}>Agent</div>
               <h1 style={{ margin: 0, color: color.ink, fontSize: t.size.h3, fontWeight: t.weight.semibold, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{projectName}</h1>
             </div>
           </div>
