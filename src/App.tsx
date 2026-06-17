@@ -73,7 +73,7 @@ export default function App() {
 
                 {/* ── The DESK ── one client, the demand-content loop. */}
                 <Route path="p/:projectSlug">
-                  <Route index element={<Navigate to="blueprint" replace />} />{/* Operating desk is home-base; chat is a command layer. */}
+                  <Route index element={<Navigate to="vera" replace />} />{/* Chat is home-base; Desk is hidden from the rail. */}
                   <Route path="dashboard"  element={<RedirectFlatToProject section="blueprint" />} />{/* Home removed → Desk */}
                   <Route path="vera"       element={<VeraThread />} />
                   <Route path="blueprint"  element={<VeraBlueprint />} />
