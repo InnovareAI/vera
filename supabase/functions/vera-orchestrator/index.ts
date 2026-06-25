@@ -1,4 +1,3 @@
-import Anthropic from 'npm:@anthropic-ai/sdk'
 import { createClient } from 'npm:@supabase/supabase-js'
 import type { AdminClient } from '../_shared/auth.ts'
 import type { Json } from '../_shared/database.types.ts'
@@ -120,37 +119,95 @@ async function perplexityResearch(query: string, apiKey: string | null): Promise
   return { findings: content, citations: data.citations ?? [] }
 }
 
+// The writing pipeline runs on GLM-5.2 via OpenRouter. Override with the
+// GLM_TEXT_MODEL env var if a different OpenRouter slug is ever needed.
+const GLM_MODEL = Deno.env.get('GLM_TEXT_MODEL') ?? 'z-ai/glm-5.2'
+
 async function resolvePipelineRuntime(
   supabase: AdminClient,
   orgId: string,
   projectId: string,
-): Promise<{ ok: true; anthropicKey: string; openRouterKey: string | null } | { ok: false; response: Response }> {
+): Promise<{ ok: true; openRouterKey: string } | { ok: false; response: Response }> {
   try {
     const platformProject = await isPlatformMediaProject(supabase, projectId, orgId)
     if (platformProject) {
-      const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
-      if (!anthropicKey) return { ok: false, response: jsonError('ANTHROPIC_API_KEY is not configured', 500) }
-      return {
-        ok: true,
-        anthropicKey,
-        openRouterKey: Deno.env.get('OPENROUTER_API_KEY') ?? null,
-      }
+      const openRouterKey = Deno.env.get('OPENROUTER_API_KEY')
+      if (!openRouterKey) return { ok: false, response: jsonError('OPENROUTER_API_KEY is not configured', 500) }
+      return { ok: true, openRouterKey }
     }
 
-    const [anthropic, openRouter] = await Promise.all([
-      loadClientApiKey(supabase, projectId, ['anthropic']),
-      loadClientApiKey(supabase, projectId, ['openrouter']),
-    ])
-    if (!anthropic?.key) {
+    const openRouter = await loadClientApiKey(supabase, projectId, ['openrouter'])
+    if (!openRouter?.key) {
       return {
         ok: false,
-        response: jsonError('Full team generation requires this space to use its own Anthropic key. Use Vera chat for OpenRouter-only drafting, or add a space Anthropic key before running the legacy team pipeline.', 403),
+        response: jsonError('Full team generation requires this space to use its own OpenRouter key — the writing pipeline now runs on GLM-5.2 via OpenRouter.', 403),
       }
     }
-    return { ok: true, anthropicKey: anthropic.key, openRouterKey: openRouter?.key ?? null }
+    return { ok: true, openRouterKey: openRouter.key }
   } catch (error) {
     return { ok: false, response: jsonError(error instanceof Error ? error.message : 'Could not resolve pipeline provider keys.', 500) }
   }
+}
+
+// Stream a GLM completion through OpenRouter's OpenAI-compatible SSE endpoint.
+// Mirrors the old anthropic.messages.stream() loop: onText receives the full
+// accumulated text on every delta so callers can push incremental SSE frames.
+async function streamGlm(opts: {
+  key: string
+  maxTokens: number
+  temperature: number
+  system: string
+  user: string
+  onText: (full: string) => void
+}): Promise<string> {
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${opts.key}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://vera.innovareai.com',
+      'X-Title': 'VERA Orchestrator',
+    },
+    body: JSON.stringify({
+      model: GLM_MODEL,
+      max_tokens: opts.maxTokens,
+      temperature: opts.temperature,
+      stream: true,
+      messages: [
+        { role: 'system', content: opts.system },
+        { role: 'user', content: opts.user },
+      ],
+    }),
+    signal: AbortSignal.timeout(240_000),
+  })
+  if (!res.ok || !res.body) {
+    const err = await res.text().catch(() => '')
+    throw new Error(`OpenRouter (GLM) failed with HTTP ${res.status}: ${err.slice(0, 240)}`)
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let text = ''
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed.startsWith('data:')) continue   // skip ': OPENROUTER PROCESSING' keepalives
+      const payload = trimmed.slice(5).trim()
+      if (payload === '[DONE]') continue
+      try {
+        const json = JSON.parse(payload) as { choices?: Array<{ delta?: { content?: string } }> }
+        const delta = json.choices?.[0]?.delta?.content
+        if (delta) { text += delta; opts.onText(text) }
+      } catch { /* partial frame or keepalive — ignore */ }
+    }
+  }
+  return text
 }
 
 function jsonError(message: string, status: number): Response {
@@ -204,7 +261,7 @@ Deno.serve(async (req) => {
   } catch {
     aiPolicy = DEFAULT_AI_POLICY
   }
-  const anthropic = new Anthropic({ apiKey: runtime.anthropicKey })
+  const glmKey = runtime.openRouterKey
   const researchOpenRouterKey = runtime.openRouterKey
 
   const encoder = new TextEncoder()
@@ -307,10 +364,7 @@ ${audience.notes ? `- Operator notes: ${audience.notes}` : ''}
 
 This is not "a VP of Sales" — it is THIS VP of Sales with THESE pains. Reference one specific pain or goal in the post.` : ''
 
-        const strategistStream = anthropic.messages.stream({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 1600,
-          system: `You are VERA's Strategist. Analyse the content brief and output a strategy as valid JSON only — no prose, no markdown fences.
+        const strategistSystem = `You are VERA's Strategist. Analyse the content brief and output a strategy as valid JSON only — no prose, no markdown fences.
 ${campaignContext}${audienceContext}
 
 ${VERA_MARKETING_EXPERTISE}
@@ -347,16 +401,16 @@ Set run_researcher to true when data, stats, recent news, or supporting evidence
 Set run_seo to true only for blog posts or long-form content where SEO matters.
 Set run_persona_adapter to true when the brief specifies a very specific persona (e.g. a named job title, industry, or company type).
 Set run_image_designer to true when an image, illustration, or visual would meaningfully add to the post (default true for: Instagram, Image post, Carousel, blog hero; default false for: text-only LinkedIn, tweets, emails).
-When run_image_designer is true, populate image_prompt with a concrete 1-2 sentence visual brief (composition, style, mood, palette). NEVER include text or wordmarks in the image.`,
-          messages: [{ role: 'user', content: prompt }],
-        })
+When run_image_designer is true, populate image_prompt with a concrete 1-2 sentence visual brief (composition, style, mood, palette). NEVER include text or wordmarks in the image.`
 
-        for await (const event of strategistStream) {
-          if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-            strategyRaw += event.delta.text
-            send('Strategist', strategyRaw, false)
-          }
-        }
+        strategyRaw = await streamGlm({
+          key: glmKey,
+          maxTokens: 1600,
+          temperature: 0.3,
+          system: strategistSystem,
+          user: prompt,
+          onText: (full) => send('Strategist', full, false),
+        })
         send('Strategist', strategyRaw, true)
 
         // Parse strategy
@@ -412,10 +466,7 @@ When run_image_designer is true, populate image_prompt with a concrete 1-2 sente
         // ── STEP 5: WRITER ────────────────────────────────────────────────────
         let writerText = ''
 
-        const writerStream = anthropic.messages.stream({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 2048,
-          system: `You are VERA's Writer. Write the content based on the strategy brief below.
+        const writerSystem = `You are VERA's Writer. Write the content based on the strategy brief below.
 
 ${VERA_MARKETING_EXPERTISE}
 
@@ -434,19 +485,16 @@ ${platformGuide(platform)}
 ${skillBlocks ? `Apply these platform and content guidelines:\n\n${skillBlocks}\n\n---` : ''}
 ${researchFindings ? `\nSupporting research to weave in naturally:\n${researchFindings}\n\n---` : ''}
 
-Write only the final content — no preamble, no explanation, no labels, no markdown fences. Just the ${platformLabel} ${formatLabel.toLowerCase()}.`,
-          messages: [{
-            role: 'user',
-            content: (strategy.brief_for_writer as string) || prompt,
-          }],
-        })
+Write only the final content — no preamble, no explanation, no labels, no markdown fences. Just the ${platformLabel} ${formatLabel.toLowerCase()}.`
 
-        for await (const event of writerStream) {
-          if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-            writerText += event.delta.text
-            send('Writer', writerText, false)
-          }
-        }
+        writerText = await streamGlm({
+          key: glmKey,
+          maxTokens: 2048,
+          temperature: 0.7,
+          system: writerSystem,
+          user: (strategy.brief_for_writer as string) || prompt,
+          onText: (full) => send('Writer', full, false),
+        })
         send('Writer', writerText, true)
         await delay(300)
 
@@ -455,10 +503,10 @@ Write only the final content — no preamble, no explanation, no labels, no mark
         // ── STEP 6: SEO AGENT (conditional) ──────────────────────────────────
         let seoNotes = ''
         if (strategy.run_seo && strategy.target_keywords) {
-          let seoText = ''
-          const seoStream = anthropic.messages.stream({
-            model: 'claude-haiku-4-5',
-            max_tokens: 1024,
+          const seoText = await streamGlm({
+            key: glmKey,
+            maxTokens: 1024,
+            temperature: 0.4,
             system: `You are VERA's SEO Agent. Optimise the given content for search engines while preserving its voice and quality.
 
 Target keywords: ${(strategy.target_keywords as string[]).join(', ')}
@@ -469,15 +517,9 @@ OPTIMISED COPY:
 
 SEO NOTES:
 [2-3 bullet points explaining the optimisation changes made]`,
-            messages: [{ role: 'user', content: currentCopy }],
+            user: currentCopy,
+            onText: (full) => send('SEO Agent', full, false),
           })
-
-          for await (const event of seoStream) {
-            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-              seoText += event.delta.text
-              send('SEO Agent', seoText, false)
-            }
-          }
           send('SEO Agent', seoText, true)
 
           // Extract optimised copy
@@ -492,24 +534,18 @@ SEO NOTES:
         // ── STEP 7: PERSONA ADAPTER (conditional) ─────────────────────────────
         let personaAdapterNotes = ''
         if (strategy.run_persona_adapter && strategy.persona_detail) {
-          let personaText = ''
-          const personaStream = anthropic.messages.stream({
-            model: 'claude-haiku-4-5',
-            max_tokens: 1024,
+          const personaText = await streamGlm({
+            key: glmKey,
+            maxTokens: 1024,
+            temperature: 0.7,
             system: `You are VERA's Persona Adapter. Rewrite the given content to resonate specifically with the target persona described below. Adjust language, examples, pain points, and benefits to match their world — while keeping the core message and length.
 
 Target persona: ${strategy.persona_detail}
 
 Output the rewritten content only — no labels, no explanation.`,
-            messages: [{ role: 'user', content: currentCopy }],
+            user: currentCopy,
+            onText: (full) => send('Persona Adapter', full, false),
           })
-
-          for await (const event of personaStream) {
-            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-              personaText += event.delta.text
-              send('Persona Adapter', personaText, false)
-            }
-          }
           send('Persona Adapter', personaText, true)
           if (personaText.trim()) currentCopy = personaText.trim()
           personaAdapterNotes = `Adapted for: ${strategy.persona_detail}`
@@ -589,10 +625,10 @@ Output the rewritten content only — no labels, no explanation.`,
         const brandSkills = skills?.filter(s => s.type === 'brand' && s.injected_into === 'brand_guard') ?? []
         if (brandSkills.length) brandRules += '\n\n' + brandSkills.map(s => s.prompt_module).join('\n\n')
 
-        let brandText = ''
-        const brandStream = anthropic.messages.stream({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 512,
+        const brandText = await streamGlm({
+          key: glmKey,
+          maxTokens: 512,
+          temperature: 0.3,
           system: `You are VERA's Brand Guard. Review the content against brand guidelines.
 
 ${brandRules || 'No specific brand rules configured. Check for general quality, clarity, and professionalism.'}
@@ -601,27 +637,14 @@ Respond concisely:
 - First line: "Brand check ✓" (approved) or "Brand check ✗" (needs changes)
 - Bullet list: what's correct, what needs adjustment
 - One suggestion if applicable`,
-          messages: [{
-            role: 'user',
-            content: `Review this content for platform: ${platformLabel}\n\n${currentCopy}`,
-          }],
+          user: `Review this content for platform: ${platformLabel}\n\n${currentCopy}`,
+          onText: (full) => send('Brand Guard', full, false),
         })
-
-        for await (const event of brandStream) {
-          if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-            brandText += event.delta.text
-            send('Brand Guard', brandText, false)
-          }
-        }
         send('Brand Guard', brandText, true)
         await delay(300)
 
         // ── STEP 9: COMPLIANCE CHECKER (always) ───────────────────────────────
-        let complianceText = ''
-        const complianceStream = anthropic.messages.stream({
-          model: 'claude-haiku-4-5',
-          max_tokens: 512,
-          system: `You are VERA's Compliance Checker. Review the content for the following compliance issues:
+        const complianceSystem = `You are VERA's Compliance Checker. Review the content for the following compliance issues:
 
 1. FALSE CLAIMS — any unverified statistics, guarantees, or factual claims that could mislead
 2. COMPETITOR ATTACKS — negative comparisons, disparaging language, or unfair competitor references
@@ -635,19 +658,16 @@ End with either:
 COMPLIANCE: APPROVED
 or
 COMPLIANCE: CHANGES REQUESTED
-followed by a summary of what must be fixed.`,
-          messages: [{
-            role: 'user',
-            content: `Platform: ${platformLabel}\nContent type: ${formatLabel}\n\n${currentCopy}`,
-          }],
-        })
+followed by a summary of what must be fixed.`
 
-        for await (const event of complianceStream) {
-          if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-            complianceText += event.delta.text
-            send('Compliance', complianceText, false)
-          }
-        }
+        const complianceText = await streamGlm({
+          key: glmKey,
+          maxTokens: 512,
+          temperature: 0.2,
+          system: complianceSystem,
+          user: `Platform: ${platformLabel}\nContent type: ${formatLabel}\n\n${currentCopy}`,
+          onText: (full) => send('Compliance', full, false),
+        })
         send('Compliance', complianceText, true)
         await delay(300)
 
