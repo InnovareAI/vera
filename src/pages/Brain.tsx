@@ -943,61 +943,64 @@ function BrainReadinessPanel({
   )
 }
 
-function BrainStudioNav({
+type BrainSectionId = 'context' | 'voice' | 'audiences' | 'categories' | 'knowledge'
+
+function BrainSubMenu({
+  active,
+  onSelect,
   sourceCount,
   indexedCount,
   audienceCount,
   categoryCount,
   voiceReady,
 }: {
+  active: BrainSectionId
+  onSelect: (id: BrainSectionId) => void
   sourceCount: number
   indexedCount: number
   audienceCount: number
   categoryCount: number
   voiceReady: boolean
 }) {
-  const items = [
-    { id: 'brain-context', icon: Target, label: 'Context', meta: 'Business facts' },
-    { id: 'brain-sources', icon: Link2, label: 'Sources', meta: `${sourceCount} URLs` },
-    { id: 'brain-voice', icon: BrainIcon, label: 'Voice', meta: voiceReady ? 'Ready' : 'Needs tone' },
-    { id: 'brain-audiences', icon: Target, label: 'Audiences', meta: `${audienceCount}` },
-    { id: 'brain-categories', icon: FileText, label: 'Taxonomy', meta: `${categoryCount} categories` },
-    { id: 'brain-knowledge', icon: BookOpen, label: 'Knowledge', meta: `${indexedCount} indexed` },
+  const items: { id: BrainSectionId; icon: ElementType; label: string; meta: string }[] = [
+    { id: 'context', icon: Target, label: 'Context', meta: `${sourceCount} sources` },
+    { id: 'voice', icon: BrainIcon, label: 'Voice', meta: voiceReady ? 'Ready' : 'Needs tone' },
+    { id: 'audiences', icon: Target, label: 'Audiences', meta: `${audienceCount}` },
+    { id: 'categories', icon: FileText, label: 'Taxonomy', meta: `${categoryCount} categories` },
+    { id: 'knowledge', icon: BookOpen, label: 'Knowledge', meta: `${indexedCount} indexed` },
   ]
   return (
-    <nav aria-label="Brain sections" style={{ position: 'sticky', top: 0, zIndex: 6, margin: `-${space[2]} 0 ${space[5]}`, padding: `${space[2]} 0`, background: color.paper }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: space[2], overflowX: 'auto', padding: `${space[2]} ${space[1]}`, border: `1px solid ${color.line}`, borderRadius: radius.lg, background: color.surface }}>
-        {items.map(item => {
-          const Icon = item.icon
-          return (
-            <a
-              key={item.id}
-              href={`#${item.id}`}
-              style={{
-                minWidth: 132,
-                minHeight: 44,
-                display: 'grid',
-                gridTemplateColumns: '18px minmax(0, 1fr)',
-                gap: space[2],
-                alignItems: 'center',
-                padding: `${space[2]} ${space[3]}`,
-                borderRadius: radius.md,
-                color: color.ink,
-                textDecoration: 'none',
-                background: color.paper2,
-                border: `1px solid ${color.line}`,
-                flexShrink: 0,
-              }}
-            >
-              <Icon size={15} style={{ color: color.accent }} />
-              <span style={{ minWidth: 0 }}>
-                <span style={{ display: 'block', color: color.ink, fontSize: t.size.cap, fontWeight: t.weight.semibold, lineHeight: 1.2, whiteSpace: 'nowrap' }}>{item.label}</span>
-                <span style={{ display: 'block', color: color.ghost, fontSize: t.size.micro, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.meta}</span>
-              </span>
-            </a>
-          )
-        })}
-      </div>
+    <nav aria-label="Brain sections" style={{ position: 'sticky', top: space[4], display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {items.map(item => {
+        const Icon = item.icon
+        const on = active === item.id
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => onSelect(item.id)}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '18px minmax(0, 1fr)',
+              gap: space[2],
+              alignItems: 'center',
+              padding: `${space[2]} ${space[3]}`,
+              borderRadius: radius.md,
+              textAlign: 'left',
+              cursor: 'pointer',
+              background: on ? color.surface : 'transparent',
+              border: `1px solid ${on ? color.line : 'transparent'}`,
+              boxShadow: on ? 'inset 2px 0 0 var(--accent)' : 'none',
+            }}
+          >
+            <Icon size={15} style={{ color: on ? color.accent : color.ghost }} />
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: 'block', color: on ? color.ink : color.ink2, fontSize: t.size.cap, fontWeight: on ? t.weight.semibold : t.weight.medium, lineHeight: 1.2, whiteSpace: 'nowrap' }}>{item.label}</span>
+              <span style={{ display: 'block', color: color.ghost, fontSize: t.size.micro, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.meta}</span>
+            </span>
+          </button>
+        )
+      })}
     </nav>
   )
 }
@@ -1177,6 +1180,7 @@ export default function Brain() {
   const [instr, setInstr] = useState('')
   const [instrSaving, setInstrSaving] = useState(false)
   const [instrSaved, setInstrSaved] = useState(false)
+  const [brainSection, setBrainSection] = useState<BrainSectionId>('context')
   const [extractingContext, setExtractingContext] = useState(false)
   const [extractStatus, setExtractStatus] = useState('')
   const [extractError, setExtractError] = useState<string | null>(null)
@@ -1679,14 +1683,6 @@ export default function Brain() {
         saved={instrSaved}
       />
 
-      <BrainStudioNav
-        sourceCount={sourceCount}
-        indexedCount={sourceKnowledge.length}
-        audienceCount={audiences.length}
-        categoryCount={categories.length}
-        voiceReady={voiceReady}
-      />
-
       {(draftAudienceProposals.length > 0 || draftSkillProposals.length > 0 || proposalStatus || proposalError) && (
         <AuditProposalPanel
           audiences={draftAudienceProposals}
@@ -1701,7 +1697,20 @@ export default function Brain() {
         />
       )}
 
+      <div style={{ display: 'grid', gridTemplateColumns: '190px minmax(0, 1fr)', gap: space[6], alignItems: 'start' }}>
+        <BrainSubMenu
+          active={brainSection}
+          onSelect={setBrainSection}
+          sourceCount={sourceCount}
+          indexedCount={sourceKnowledge.length}
+          audienceCount={audiences.length}
+          categoryCount={categories.length}
+          voiceReady={voiceReady}
+        />
+        <div style={{ minWidth: 0 }}>
+
       {/* Business context */}
+      {brainSection === 'context' && (
       <section id="brain-context" style={{ marginBottom: space[9], scrollMarginTop: space[12] }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: space[4], flexWrap: 'wrap', marginBottom: space[3] }}>
           <div>
@@ -1876,7 +1885,9 @@ export default function Brain() {
         </div>
 
       </section>
+      )}
 
+      {brainSection === 'voice' && (<>
       {/* Custom instructions */}
       <section id="brain-instructions" style={{ marginBottom: space[9], scrollMarginTop: space[12] }}>
         <SectionLabel style={{ marginBottom: space[2] }}>Custom instructions</SectionLabel>
@@ -1918,8 +1929,10 @@ export default function Brain() {
           {bvSaved && <span style={{ fontSize: t.size.cap, color: color.success }}>Saved</span>}
         </div>
       </section>
+      </>)}
 
       {/* Audiences (editable) */}
+      {brainSection === 'audiences' && (
       <section id="brain-audiences" style={{ marginBottom: space[9], scrollMarginTop: space[12] }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: space[2] }}>
           <SectionLabel>Audiences</SectionLabel>
@@ -1937,8 +1950,10 @@ export default function Brain() {
           )}
         </div>
       </section>
+      )}
 
       {/* Content categories */}
+      {brainSection === 'categories' && (
       <section id="brain-categories" style={{ marginBottom: space[9], scrollMarginTop: space[12] }}>
         <SectionLabel style={{ marginBottom: space[2] }}>Content categories</SectionLabel>
         {categories.length === 0 ? (
@@ -1963,8 +1978,10 @@ export default function Brain() {
           <Button variant="secondary" size="md" onClick={() => addCategory(catName)}><Plus size={14} /></Button>
         </div>
       </section>
+      )}
 
       {/* Knowledge link */}
+      {brainSection === 'knowledge' && (
       <section id="brain-knowledge" style={{ marginBottom: space[8], scrollMarginTop: space[12] }}>
         <SectionLabel style={{ marginBottom: space[3] }}>Knowledge sources</SectionLabel>
         <Link to={`/p/${activeProject.slug}/knowledge`} style={{ display: 'flex', alignItems: 'center', gap: space[3], padding: space[4], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, textDecoration: 'none' }}>
@@ -1975,6 +1992,10 @@ export default function Brain() {
           </div>
         </Link>
       </section>
+      )}
+
+        </div>
+      </div>
 
       <div style={{ height: space[8] }} />
     </div>
