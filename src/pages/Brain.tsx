@@ -943,7 +943,7 @@ function BrainReadinessPanel({
   )
 }
 
-type BrainSectionId = 'context' | 'voice' | 'audiences' | 'categories' | 'knowledge'
+type BrainSectionId = 'sources' | 'facts' | 'voice' | 'audiences' | 'categories' | 'knowledge'
 
 function BrainSubMenu({
   active,
@@ -963,7 +963,8 @@ function BrainSubMenu({
   voiceReady: boolean
 }) {
   const items: { id: BrainSectionId; icon: ElementType; label: string; meta: string }[] = [
-    { id: 'context', icon: Target, label: 'Context', meta: `${sourceCount} sources` },
+    { id: 'sources', icon: Link2, label: 'Sources', meta: `${sourceCount} URLs` },
+    { id: 'facts', icon: Target, label: 'Facts', meta: 'Business facts' },
     { id: 'voice', icon: BrainIcon, label: 'Voice', meta: voiceReady ? 'Ready' : 'Needs tone' },
     { id: 'audiences', icon: Target, label: 'Audiences', meta: `${audienceCount}` },
     { id: 'categories', icon: FileText, label: 'Taxonomy', meta: `${categoryCount} categories` },
@@ -1180,7 +1181,7 @@ export default function Brain() {
   const [instr, setInstr] = useState('')
   const [instrSaving, setInstrSaving] = useState(false)
   const [instrSaved, setInstrSaved] = useState(false)
-  const [brainSection, setBrainSection] = useState<BrainSectionId>('context')
+  const [brainSection, setBrainSection] = useState<BrainSectionId>('sources')
   const [extractingContext, setExtractingContext] = useState(false)
   const [extractStatus, setExtractStatus] = useState('')
   const [extractError, setExtractError] = useState<string | null>(null)
@@ -1709,8 +1710,8 @@ export default function Brain() {
         />
         <div style={{ minWidth: 0 }}>
 
-      {/* Business context */}
-      {brainSection === 'context' && (
+      {/* Sources */}
+      {brainSection === 'sources' && (
       <section id="brain-context" style={{ marginBottom: space[9], scrollMarginTop: space[12] }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: space[4], flexWrap: 'wrap', marginBottom: space[3] }}>
           <div>
@@ -1833,8 +1834,13 @@ export default function Brain() {
             </div>
           </div>
         </div>
+      </section>
+      )}
 
-        <div id="brain-facts" style={{ marginTop: space[4], padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, scrollMarginTop: space[12] }}>
+      {/* Business facts */}
+      {brainSection === 'facts' && (
+      <section id="brain-facts-sec" style={{ marginBottom: space[9], scrollMarginTop: space[12] }}>
+        <div id="brain-facts" style={{ padding: space[5], background: color.surface, border: `1px solid ${color.line}`, borderRadius: radius.md, scrollMarginTop: space[12] }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3], marginBottom: space[4] }}>
             <div>
               <div style={{ fontSize: t.size.sm, color: color.ink, fontWeight: t.weight.semibold }}>Business facts</div>
