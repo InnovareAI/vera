@@ -22,7 +22,6 @@ export type TextModelProvider = "openrouter" | "anthropic"
 const OPENROUTER_IMAGE_ALIASES = new Set([
   "nano-banana",
   "nano-banana-2",
-  "nano-banana-pro",
 ])
 
 const OPENAI_IMAGE_ALIASES = new Set([
@@ -52,6 +51,8 @@ const FAL_IMAGE_ALIASES = new Set([
   "recraft-v3",
   "imagen",
   "imagen-4",
+  "nano-banana-pro",
+  "gemini-3-pro-image",
 ])
 
 const PREMIUM_IMAGE_ALIASES = new Set([

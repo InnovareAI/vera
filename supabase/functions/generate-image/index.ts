@@ -30,7 +30,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
-const DEFAULT_IMAGE_MODEL = Deno.env.get('DEFAULT_IMAGE_MODEL') ?? 'nano-banana'
+const DEFAULT_IMAGE_MODEL = Deno.env.get('DEFAULT_IMAGE_MODEL') ?? 'nano-banana-pro'
 
 // FAL-routed models. Nano Banana is the default safe Google standard option
 // because it can also route through a client's OpenRouter key when no FAL key
@@ -58,6 +58,11 @@ const FAL_MODELS: Record<string, string> = {
   'qwen-image-2':    'fal-ai/qwen-image-2/text-to-image',
   'qwen-image-2-pro':'fal-ai/qwen-image-2/pro/text-to-image',
   'z-image-turbo':   'fal-ai/z-image/turbo',
+  // Nano Banana Pro (Gemini 3 Pro Image) — premium Google image tier, routed
+  // through FAL. ~$0.15/image vs ~$0.039 for standard nano-banana. Set as the
+  // default image model, so every generation uses the premium Google model.
+  'nano-banana-pro': 'fal-ai/gemini-3-pro-image-preview',
+  'gemini-3-pro-image': 'fal-ai/gemini-3-pro-image-preview',
   // FAL-routed GPT Image 2 (escape hatch — typically more expensive than the OR route below)
   'gpt-image-2-fal': 'fal-ai/gpt-image-2',
   // Ideogram 3 — best-in-class English text rendering. Built for
@@ -90,7 +95,6 @@ const OPENAI_MODELS: Record<string, string> = {
 // must route through FAL only.
 const OR_MODELS: Record<string, string> = {
   'nano-banana-2':     'google/gemini-3.1-flash-image-preview',
-  'nano-banana-pro':   'google/gemini-3-pro-image-preview',
 }
 // Nano Banana (Gemini 2.5 Flash Image) on OpenRouter. Kept out of OR_MODELS so
 // the plain "nano-banana" alias still routes to FAL when a FAL key is present.
