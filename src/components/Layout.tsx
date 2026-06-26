@@ -32,8 +32,8 @@ import {
 // SAM treatment: icon + label, generous padding. Active = solid coral fill
 // with white text/icon (the screenshot's "Sam" item). Inactive = quiet gray.
 function RailItem({
-  to, icon: Icon, label, badge, onClick, soon,
-}: { to: string; icon: React.ElementType; label: string; badge?: number; onClick?: () => void; soon?: boolean }) {
+  to, icon: Icon, label, badge, onClick, soon, tag,
+}: { to: string; icon: React.ElementType; label: string; badge?: number; onClick?: () => void; soon?: boolean; tag?: string }) {
   return (
     <NavLink
       to={to}
@@ -41,24 +41,26 @@ function RailItem({
       onClick={onClick}
       className="flex items-center gap-2 px-2.5 py-1.5 mx-2 transition-colors"
       style={({ isActive }) => ({
-        background: isActive ? 'var(--accent)' : 'transparent',
-        color: isActive ? '#fff' : 'var(--ink-quiet)',
+        background: isActive ? 'var(--surface)' : 'transparent',
+        color: isActive ? 'var(--ink)' : 'var(--ink-quiet)',
         fontWeight: isActive ? 600 : 450,
         fontSize: 13,
         borderRadius: 'var(--radius-md)',
+        border: isActive ? '0.5px solid var(--line)' : '0.5px solid transparent',
+        boxShadow: isActive ? 'inset 2px 0 0 var(--accent)' : 'none',
       })}
     >
       {({ isActive }) => (
         <>
           <Icon size={16} strokeWidth={isActive ? 2.1 : 1.75}
-            style={{ color: isActive ? '#fff' : 'var(--ghost)', flexShrink: 0 }} />
+            style={{ color: isActive ? 'var(--accent)' : 'var(--ghost)', flexShrink: 0 }} />
           <span className="flex-1 truncate">{label}</span>
           {soon ? (
             <span
               className="text-[10px] px-1.5 leading-tight py-px uppercase"
               style={{
-                background: isActive ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.06)',
-                color: isActive ? '#fff' : 'var(--ghost)',
+                background: 'rgba(0,0,0,0.06)',
+                color: 'var(--ghost)',
                 borderRadius: 'var(--radius-sm)',
                 fontWeight: 600,
                 letterSpacing: '0.04em',
@@ -70,13 +72,20 @@ function RailItem({
             <span
               className="text-[11px] px-1.5 leading-tight py-px"
               style={{
-                background: isActive ? 'rgba(255,255,255,0.22)' : 'var(--accent-tint)',
-                color: isActive ? '#fff' : 'var(--accent)',
+                background: 'var(--accent-tint)',
+                color: 'var(--accent)',
                 borderRadius: 'var(--radius-sm)',
                 fontWeight: 600,
               }}
             >
               {badge}
+            </span>
+          ) : tag ? (
+            <span
+              className="text-[10px]"
+              style={{ color: isActive ? 'var(--accent)' : 'var(--ghost)', fontWeight: isActive ? 600 : 500 }}
+            >
+              {tag}
             </span>
           ) : null}
         </>
@@ -487,18 +496,19 @@ export default function Layout() {
           <span className="flex-1 truncate text-left">New session</span>
         </button>
 
-        {/* Primary nav grouped around the content strategy loop. */}
+        {/* Primary nav ordered by the content loop so the rail teaches the
+            sequence: set up the brain, create with the agent, review, schedule,
+            organize. Stage tags give a felt order instead of flat peers. */}
         <nav className="pt-1 space-y-0.5">
+          <RailLabel>Workflow</RailLabel>
           {/* Desk (p('blueprint')) hidden from the rail; still reachable by URL. */}
-          <RailItem to={p('vera')}      icon={MessageSquare}   label="Agent" onClick={() => window.dispatchEvent(new CustomEvent('vera:home'))} />
+          <RailItem to={p('brain')}     icon={Brain}           label="Brain"   tag="set up" />
+          <RailItem to={p('vera')}      icon={MessageSquare}   label="Agent"   tag="create" onClick={() => window.dispatchEvent(new CustomEvent('vera:home'))} />
+          <RailItem to={p('review')}    icon={CheckSquare}     label="Review"  badge={pendingCount} />
+          <RailItem to={p('calendar')}  icon={CalendarDays}    label="Planner" tag="schedule" />
+          <RailItem to={p('artifacts')} icon={Library}         label="Studio"  tag="organize" />
 
-          <RailLabel>Production</RailLabel>
-          <RailItem to={p('review')}    icon={CheckSquare}     label="Review" badge={pendingCount} />
-          <RailItem to={p('calendar')}  icon={CalendarDays}    label="Planner" />
-          <RailItem to={p('artifacts')} icon={Library}         label="Studio" />
-
-          <RailLabel>Analytics</RailLabel>
-          <RailItem to={p('brain')}     icon={Brain}           label="Strategy Brain" />
+          <RailLabel>More</RailLabel>
           <RailItem to={p('measure')}   icon={BarChart3}       label="Performance" soon />
           <RailItem to={p('learning')}  icon={TrendingUp}      label="Learning" soon />
           <RailItem to={p('keys')}      icon={KeyRound}        label="Integrations" />
